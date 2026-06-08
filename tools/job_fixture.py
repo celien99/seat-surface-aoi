@@ -19,10 +19,13 @@ def make_simulated_job(sequence_id: int = 1) -> SeatInspectionJob:
 
 
 def _frames(camera_id: str) -> dict[str, LightFrame]:
-    return {light_id: _frame(camera_id, light_id) for light_id in ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")}
+    return {
+        light_id: _frame(camera_id, light_id, index + 1)
+        for index, light_id in enumerate(("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"))
+    }
 
 
-def _frame(camera_id: str, light_id: str) -> LightFrame:
+def _frame(camera_id: str, light_id: str, frame_index: int) -> LightFrame:
     data = bytearray(
         80 + (((x // 4 + y // 4) % 2) * 20) + ((x + 3 * y) % 32)
         for y in range(48)
@@ -31,8 +34,8 @@ def _frame(camera_id: str, light_id: str) -> LightFrame:
     return LightFrame(
         camera_id=camera_id,
         light_id=light_id,
-        frame_index=1,
-        light_seq_index=1,
+        frame_index=frame_index,
+        light_seq_index=frame_index - 1,
         width=64,
         height=48,
         channels=1,
@@ -41,11 +44,10 @@ def _frame(camera_id: str, light_id: str) -> LightFrame:
         bit_depth=8,
         color_order="MONO",
         dtype="UINT8",
-        timestamp_us=1,
+        timestamp_us=1_000 + (frame_index - 1) * 100,
         exposure_us=800,
         gain=1.0,
         calibration_id="calib/simulated_v1",
         image_crc32=0,
         image=memoryview(data),
     )
-

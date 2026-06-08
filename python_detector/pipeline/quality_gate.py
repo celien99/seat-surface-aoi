@@ -55,6 +55,7 @@ class ImageQualityGate:
         for light_id in recipe.quality.required_lights:
             if light_id not in bundle.light_frames:
                 messages.append(f"{bundle.camera_id}: missing required light {light_id}")
+        self._check_capture_consistency(bundle, recipe, messages)
         for light_id, frame in bundle.light_frames.items():
             if frame.camera_id != bundle.camera_id:
                 messages.append(f"{bundle.camera_id}/{light_id}: frame camera_id mismatch {frame.camera_id}")
@@ -62,6 +63,49 @@ class ImageQualityGate:
                 messages.append(f"{bundle.camera_id}/{light_id}: frame light_id mismatch {frame.light_id}")
             reports.append(self._check_frame(frame, recipe))
         return reports
+
+    def _check_capture_consistency(self, bundle: CameraBundle, recipe: Recipe, messages: list[str]) -> None:
+        frames = [
+            bundle.light_frames[light_id]
+            for light_id in recipe.quality.required_lights
+            if light_id in bundle.light_frames
+        ]
+        if len(frames) < 2:
+            return
+
+        timestamps = [frame.timestamp_us for frame in frames]
+        if any(timestamp <= 0 for timestamp in timestamps):
+            messages.append(f"{bundle.camera_id}: invalid frame timestamp")
+        capture_span_us = max(timestamps) - min(timestamps)
+        if capture_span_us > recipe.quality.max_capture_span_us:
+            messages.append(
+                f"{bundle.camera_id}: capture timestamp span {capture_span_us}us exceeds {recipe.quality.max_capture_span_us}us"
+            )
+        if recipe.quality.require_monotonic_timestamps:
+            for earlier, later in zip(timestamps, timestamps[1:]):
+                if later < earlier:
+                    messages.append(f"{bundle.camera_id}: timestamps are not monotonic by required light order")
+                    break
+
+        frame_indices = [frame.frame_index for frame in frames]
+        if recipe.quality.require_unique_frame_indices and len(set(frame_indices)) != len(frame_indices):
+            messages.append(f"{bundle.camera_id}: duplicate frame_index in required lights")
+
+        exposures = [frame.exposure_us for frame in frames]
+        if any(exposure <= 0 for exposure in exposures):
+            messages.append(f"{bundle.camera_id}: invalid exposure_us")
+        exposure_delta_us = max(exposures) - min(exposures)
+        if exposure_delta_us > recipe.quality.max_exposure_delta_us:
+            messages.append(
+                f"{bundle.camera_id}: exposure delta {exposure_delta_us}us exceeds {recipe.quality.max_exposure_delta_us}us"
+            )
+
+        gains = [frame.gain for frame in frames]
+        if any(gain <= 0 for gain in gains):
+            messages.append(f"{bundle.camera_id}: invalid gain")
+        gain_delta = max(gains) - min(gains)
+        if gain_delta > recipe.quality.max_gain_delta:
+            messages.append(f"{bundle.camera_id}: gain delta {gain_delta:.3f} exceeds {recipe.quality.max_gain_delta:.3f}")
 
     def _check_frame(self, frame: LightFrame, recipe: Recipe) -> FrameQuality:
         values = frame.image

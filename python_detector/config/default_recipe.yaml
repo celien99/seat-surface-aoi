@@ -51,6 +51,11 @@ quality:
   max_mean_gray: 235
   min_sharpness: 1.0
   max_registration_error_px: 1.5
+  max_capture_span_us: 500000
+  max_exposure_delta_us: 200
+  max_gain_delta: 0.2
+  require_monotonic_timestamps: true
+  require_unique_frame_indices: true
 registration:
   base_light_id: POLAR_DIFFUSE
   base_light_fallback: DIFFUSE

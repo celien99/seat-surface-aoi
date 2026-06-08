@@ -19,6 +19,11 @@ class QualityConfig:
     max_mean_gray: float = 235.0
     min_sharpness: float = 1.0
     max_registration_error_px: float = 1.5
+    max_capture_span_us: int = 500_000
+    max_exposure_delta_us: int = 200
+    max_gain_delta: float = 0.2
+    require_monotonic_timestamps: bool = True
+    require_unique_frame_indices: bool = True
 
 
 @dataclass(frozen=True)
@@ -187,6 +192,11 @@ def _quality_from_dict(data: dict[str, Any]) -> QualityConfig:
         max_mean_gray=_float(data.get("max_mean_gray", 235.0), "quality.max_mean_gray"),
         min_sharpness=_float(data.get("min_sharpness", 1.0), "quality.min_sharpness"),
         max_registration_error_px=_float(data.get("max_registration_error_px", 1.5), "quality.max_registration_error_px"),
+        max_capture_span_us=_non_negative_int(data.get("max_capture_span_us", 500_000), "quality.max_capture_span_us"),
+        max_exposure_delta_us=_non_negative_int(data.get("max_exposure_delta_us", 200), "quality.max_exposure_delta_us"),
+        max_gain_delta=_non_negative_float(data.get("max_gain_delta", 0.2), "quality.max_gain_delta"),
+        require_monotonic_timestamps=bool(data.get("require_monotonic_timestamps", True)),
+        require_unique_frame_indices=bool(data.get("require_unique_frame_indices", True)),
     )
 
 
@@ -408,6 +418,13 @@ def _positive_float(value: Any, name: str) -> float:
     return result
 
 
+def _non_negative_float(value: Any, name: str) -> float:
+    result = _float(value, name)
+    if result < 0:
+        raise RecipeValidationError(f"{name} 必须大于等于 0")
+    return result
+
+
 def _ratio(value: Any, name: str) -> float:
     result = _float(value, name)
     if result < 0 or result > 1:
@@ -431,4 +448,11 @@ def _positive_int(value: Any, name: str) -> int:
     result = _int(value, name)
     if result <= 0:
         raise RecipeValidationError(f"{name} 必须大于 0")
+    return result
+
+
+def _non_negative_int(value: Any, name: str) -> int:
+    result = _int(value, name)
+    if result < 0:
+        raise RecipeValidationError(f"{name} 必须大于等于 0")
     return result

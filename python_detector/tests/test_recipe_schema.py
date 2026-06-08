@@ -110,6 +110,15 @@ def test_recipe_parses_fusion_config() -> None:
     assert recipe.fusion.max_candidates_per_roi == 16
 
 
+def test_recipe_parses_capture_quality_config() -> None:
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    assert recipe.quality.max_capture_span_us == 500_000
+    assert recipe.quality.max_exposure_delta_us == 200
+    assert recipe.quality.max_gain_delta == 0.2
+    assert recipe.quality.require_monotonic_timestamps is True
+    assert recipe.quality.require_unique_frame_indices is True
+
+
 def test_recipe_rejects_invalid_fusion_threshold() -> None:
     with pytest.raises(RecipeValidationError):
         recipe_from_dict(
@@ -118,6 +127,20 @@ def test_recipe_rejects_invalid_fusion_threshold() -> None:
                 "sku": "sku",
                 "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
                 "fusion": {"iou_threshold": 1.5},
+                "cameras": {"TOP": {"model_key": "default"}},
+                "models": {"default": {"backend": "fake", "role": "primary"}},
+            }
+        )
+
+
+def test_recipe_rejects_invalid_capture_quality_config() -> None:
+    with pytest.raises(RecipeValidationError):
+        recipe_from_dict(
+            {
+                "recipe_id": "bad_quality",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                "quality": {"max_capture_span_us": -1},
                 "cameras": {"TOP": {"model_key": "default"}},
                 "models": {"default": {"backend": "fake", "role": "primary"}},
             }

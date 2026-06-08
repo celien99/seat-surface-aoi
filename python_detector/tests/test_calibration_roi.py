@@ -10,7 +10,11 @@ from python_detector.pipeline.preprocessor import Preprocessor
 from python_detector.pipeline.reflectance_cube import ReflectanceCubeBuilder
 
 
+LIGHT_ORDER = ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")
+
+
 def _frame(light_id: str, calibration_id: str = "calib/simulated_v1", camera_id: str = "TOP_BACK") -> LightFrame:
+    frame_index = LIGHT_ORDER.index(light_id) + 1 if light_id in LIGHT_ORDER else 1
     data = bytearray(
         80 + (((x // 2 + y // 2) % 2) * 20) + ((x + 3 * y) % 12)
         for y in range(48)
@@ -19,8 +23,8 @@ def _frame(light_id: str, calibration_id: str = "calib/simulated_v1", camera_id:
     return LightFrame(
         camera_id=camera_id,
         light_id=light_id,
-        frame_index=1,
-        light_seq_index=1,
+        frame_index=frame_index,
+        light_seq_index=frame_index - 1,
         width=64,
         height=48,
         channels=1,
@@ -29,7 +33,7 @@ def _frame(light_id: str, calibration_id: str = "calib/simulated_v1", camera_id:
         bit_depth=8,
         color_order="MONO",
         dtype="UINT8",
-        timestamp_us=1,
+        timestamp_us=1_000 + (frame_index - 1) * 100,
         exposure_us=800,
         gain=1.0,
         calibration_id=calibration_id,
@@ -52,11 +56,11 @@ def test_calibration_mismatch_returns_error_not_ok() -> None:
     recipe = RecipeManager().load("seat_a_black_leather_v1")
     frames = {
         light: _frame(light, calibration_id="calib/wrong")
-        for light in ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")
+        for light in LIGHT_ORDER
     }
     cushion_frames = {
         light: _frame(light, calibration_id="calib/wrong", camera_id="TOP_CUSHION")
-        for light in ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")
+        for light in LIGHT_ORDER
     }
     job = SeatInspectionJob(
         sequence_id=1,
@@ -94,7 +98,7 @@ roi_templates:
     recipe = replace(recipe, cameras=(camera,))
     frames = {
         light: _frame(light)
-        for light in ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")
+        for light in LIGHT_ORDER
     }
     job = SeatInspectionJob(
         sequence_id=1,
@@ -153,7 +157,7 @@ roi_templates:
     recipe = replace(recipe, cameras=(camera,))
     frames = {
         light: _frame(light, calibration_id="calib/shifted")
-        for light in ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")
+        for light in LIGHT_ORDER
     }
     job = SeatInspectionJob(
         sequence_id=1,

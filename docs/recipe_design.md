@@ -31,6 +31,26 @@ quality:
 
 `LOW_LEFT`、`LOW_RIGHT`、`LOW_FRONT`、`LOW_REAR`、`HIGH_FRONT`、`HIGH_REAR`、`NIR` 只能作为 ROI 增强光源。未声明依赖这些增强光源的 ROI，不能因为增强光源不存在而中断主流程。
 
+## 质量门禁字段
+
+`quality` 除了曝光、饱和、清晰度和配准阈值，还应配置采集一致性阈值：
+
+```yaml
+quality:
+  max_capture_span_us: 500000
+  max_exposure_delta_us: 200
+  max_gain_delta: 0.2
+  require_monotonic_timestamps: true
+  require_unique_frame_indices: true
+```
+
+- `max_capture_span_us`：同一机位必需光源包的最大时间戳跨度。
+- `max_exposure_delta_us` / `max_gain_delta`：必需光源之间曝光和增益允许差值。
+- `require_monotonic_timestamps`：要求必需光源按配方顺序时间戳单调。
+- `require_unique_frame_indices`：要求必需光源帧号不重复。
+
+这些检查失败时返回 `RECHECK`，不能输出 `OK`。
+
 ROI 模型使用两个层次：
 
 - `model_key` / `roi_models`：主检测模型，必须引用 `role: primary` 的模型。

@@ -14,6 +14,7 @@
 - Result ring 对协议、payload 和 CRC 错误会立即返回真实错误码，不再等待到 detector timeout。
 - Python 检测进程：共享内存读取、质量门禁、预处理、ReflectanceCube、特征构建、fake 推理、融合和规则判定。
 - Python 质量门禁会校验配方启用机位完整性、SKU 一致性和必需光源；缺机位、重复机位、未知机位或缺关键光源都会返回 `RECHECK`，不会输出 `OK`。
+- Python 质量门禁会校验必需光源的采集一致性，包括时间戳跨度、时间戳单调性、帧序号重复、曝光差和增益差；异常采集包会返回 `RECHECK`。
 - Python 检测进程读取坏 frame slot 时会释放输入 slot；检测、配方或模型异常会回写 `ERROR`/`RECHECK`，不会让共享内存 slot 长期停留在 `READING`。
 - V2 生产标准默认使用 `DIFFUSE`、`POLAR_DIFFUSE`、`HIGH_LEFT`、`HIGH_RIGHT` 四个必需光源，生成 `ch0_diffuse` 到 `ch4_high_max_min` 的 5 通道标准特征。
 - 规则判定使用配方中的类别阈值 `ng_score`、`recheck_score` 和 `min_area_px`；机位级 `light_order` 会进入 ReflectanceCube 和特征构建。

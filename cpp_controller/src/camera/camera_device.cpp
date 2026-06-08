@@ -77,7 +77,7 @@ bool CameraDevice::capture(std::uint64_t trigger_id,
   LightFrameMeta meta{};
   meta.camera_index = config_.camera_index;
   meta.light_index = light_param.light_index;
-  meta.frame_index = static_cast<std::uint32_t>(trigger_id % 100000);
+  meta.frame_index = static_cast<std::uint32_t>((trigger_id % 100000U) * 100U + light_seq_index);
   meta.light_seq_index = light_seq_index;
   meta.width = config_.width;
   meta.height = config_.height;
