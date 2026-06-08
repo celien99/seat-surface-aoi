@@ -100,7 +100,7 @@ models:
 - `class_id` 必须落在 `class_names` 范围内，否则返回保守错误。
 - `bbox_format: xyxy_pixel` 表示 bbox 是 ROI 输出图内像素坐标，结果会通过 `roi_to_source_matrix` 映射回原图 `bbox_xyxy_pixel`。
 - `bbox_format: xyxy_normalized` 表示 bbox 是 ROI 输出图内归一化坐标，先按 `feature_shape_hw` 还原为 ROI 像素坐标，再通过 `roi_to_source_matrix` 映射回原图 `bbox_xyxy_pixel`。
-- bbox 无效、输出为空、形状不是 `[N, >=6]` 时返回保守错误。
+- bbox 越界、反向、包含 NaN/Inf、输出为空或形状不是 `[N, >=6]` 时返回保守错误，不会对模型输出做静默 clamp。
 
 ## 候选融合
 

@@ -141,21 +141,25 @@ class OnnxModel:
         feature_height, feature_width = feature_group.feature_shape_hw
         width = max(feature_width, 1)
         height = max(feature_height, 1)
+        if not all(math.isfinite(value) for value in (x0, y0, x1, y1)):
+            raise RuntimeError(f"ONNX 输出 bbox 包含非有限值: {(x0, y0, x1, y1)}")
         if self.config.bbox_format == "xyxy_normalized":
+            if not all(0.0 <= value <= 1.0 for value in (x0, y0, x1, y1)):
+                raise RuntimeError(f"ONNX 归一化 bbox 越界: {(x0, y0, x1, y1)}")
             x0 = x0 * width
             x1 = x1 * width
             y0 = y0 * height
             y1 = y1 * height
         elif self.config.bbox_format == "xyxy_pixel":
-            pass
+            if not (0.0 <= x0 <= float(width - 1) and 0.0 <= x1 <= float(width - 1)):
+                raise RuntimeError(f"ONNX 像素 bbox x 越界: {(x0, y0, x1, y1)}")
+            if not (0.0 <= y0 <= float(height - 1) and 0.0 <= y1 <= float(height - 1)):
+                raise RuntimeError(f"ONNX 像素 bbox y 越界: {(x0, y0, x1, y1)}")
         else:
             raise RuntimeError(f"不支持的 bbox_format: {self.config.bbox_format}")
-        roi_bbox = (
-            max(min(x0, float(width - 1)), 0.0),
-            max(min(y0, float(height - 1)), 0.0),
-            max(min(x1, float(width - 1)), 0.0),
-            max(min(y1, float(height - 1)), 0.0),
-        )
+        if x1 < x0 or y1 < y0:
+            raise RuntimeError(f"ONNX 输出 bbox 坐标反向: {(x0, y0, x1, y1)}")
+        roi_bbox = (x0, y0, x1, y1)
         mapped = _map_roi_bbox_to_source(roi_bbox, feature_group)
         if mapped[2] < mapped[0] or mapped[3] < mapped[1]:
             raise RuntimeError(f"ONNX 输出 bbox 无效: {mapped}")

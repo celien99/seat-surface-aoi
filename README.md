@@ -22,7 +22,7 @@
 - ROI 预处理支持轴对齐矩形快速裁剪和四点多边形透视展开，可将倾斜 ROI 规整到 `output_size` 后进入特征和模型链路；预处理会保留 ROI 到原图、原图到 ROI 的双向矩阵，用于模型 bbox 和追溯 overlay 坐标映射。
 - ReflectanceCube 会使用标定文件中的 `light_alignment.matrix_3x3` 计算 ROI 角点配准误差，超过 `quality.max_registration_error_px` 时返回 `RECHECK`。
 - FeatureBuilder 会为每个 ROI 模型构建 NCHW float 输入张量，通道顺序、输入缩放和模型输出解码方式由配方 `models.*` 字段声明。
-- ONNX 后端支持可配置 `detection_rows` 输出解码，模型输出 bbox 先按 ROI 局部坐标解释，再通过 ROI 坐标矩阵映射为原图 `bbox_xyxy_pixel`；输入/输出缺失、类别越界、bbox 无效或未配置输出解码时会保守失败，不会静默输出 `OK`。
+- ONNX 后端支持可配置 `detection_rows` 输出解码，模型输出 bbox 先按 ROI 局部坐标解释，再通过 ROI 坐标矩阵映射为原图 `bbox_xyxy_pixel`；输入/输出缺失、类别越界、bbox 越界/反向/非有限值或未配置输出解码时会保守失败，不会静默 clamp 后输出 `OK`。
 - FusionEngine 会按 `fusion.iou_threshold`、`class_aware` 和 `max_candidates_per_roi` 对同机位同 ROI 候选做 IoU NMS，合并重叠候选的证据光源并在 trace 中记录输入、输出和压制数量。
 - Python 回写缺陷结果时会把 `camera_id` 和由特征通道反查得到的真实 `evidence_lights` 映射为共享内存协议中的机位/光源索引，便于 C++ 侧追溯缺陷来源。
 - 低角度暗场、前后高角度和 NIR 作为可选增强光源，不作为主链路输出 `OK` 的默认前置依赖。

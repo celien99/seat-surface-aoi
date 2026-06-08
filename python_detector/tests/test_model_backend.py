@@ -127,6 +127,36 @@ def test_onnx_detection_rows_maps_perspective_roi_bbox_to_source() -> None:
     assert candidates[0].bbox_xyxy_pixel != (9, 7, 13, 10)
 
 
+@pytest.mark.parametrize(
+    ("bbox_format", "row", "message"),
+    [
+        ("xyxy_normalized", [-0.1, 0.1, 0.5, 0.5, 0.91, 0], "归一化 bbox 越界"),
+        ("xyxy_pixel", [0.0, 0.0, 64.0, 10.0, 0.91, 0], "像素 bbox x 越界"),
+        ("xyxy_pixel", [0.0, 0.0, 10.0, 48.0, 0.91, 0], "像素 bbox y 越界"),
+        ("xyxy_pixel", [10.0, 0.0, 5.0, 10.0, 0.91, 0], "bbox 坐标反向"),
+        ("xyxy_pixel", [float("nan"), 0.0, 5.0, 10.0, 0.91, 0], "非有限值"),
+    ],
+)
+def test_onnx_detection_rows_rejects_invalid_bbox_without_clamping(
+    bbox_format: str,
+    row: list[float],
+    message: str,
+) -> None:
+    model = object.__new__(OnnxModel)
+    model.config = ModelConfig(
+        backend="onnx",
+        model_path="unused.onnx",
+        output_decode="detection_rows",
+        bbox_format=bbox_format,
+        class_names=("scratch",),
+        score_threshold=0.3,
+    )
+    model.session = _Session([row])
+
+    with pytest.raises(RuntimeError, match=message):
+        model.run(_feature_group())
+
+
 def test_onnx_decode_none_fails_conservatively() -> None:
     model = object.__new__(OnnxModel)
     model.config = ModelConfig(backend="onnx", model_path="unused.onnx", output_decode="none")
