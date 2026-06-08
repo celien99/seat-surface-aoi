@@ -58,6 +58,7 @@ class InspectionPipeline:
                     elapsed_ms = (time.perf_counter() - started) * 1000.0
                     self.last_context = {
                         "quality_report": quality_report,
+                        "prepared_bundles": prepared,
                         "registration_reports": [cube.registration for cube in cubes],
                         "timings": timings,
                     }
@@ -75,6 +76,7 @@ class InspectionPipeline:
             timings["total_ms"] = elapsed_ms
             self.last_context = {
                 "quality_report": quality_report,
+                "prepared_bundles": prepared,
                 "registration_reports": [cube.registration for cube in cubes],
                 "feature_summary": [
                     {

@@ -36,6 +36,7 @@
 - 模型推理支持 fake 默认后端和 ONNX 可选后端；ONNX 依赖、模型缺失、输入配置或输出解码异常时保守失败，不会静默输出 `OK`。
 - PatchCore 只能配置为 unknown defect safety net，不能作为全座椅或 ROI 主检测模型。
 - 支持本地追溯落盘，`RECHECK`、`ERROR`、`NG` 默认保存 result、quality、registration、feature summary 和 timings。
+- 追溯会保存 ROI 单光源灰度图 `.pgm`；存在缺陷时会生成带红色 bbox 的 `.ppm` overlay，bbox 使用原图 `bbox_xyxy_pixel` 映射回 ROI 坐标。
 - 提供模拟回放与 benchmark 工具：`tools/replay_dataset.py`、`tools/benchmark_pipeline.py`。
 
 ## 项目规则
