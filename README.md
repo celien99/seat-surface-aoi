@@ -16,6 +16,7 @@
 - 配方已覆盖机位、光源顺序、质量阈值、注册策略、模型后端和追溯配置。
 - C++ 主控已具备相机、光源、PLC 的可替换接口和模拟驱动，支持光源故障、缺帧、PLC 输出失败等故障注入。
 - C++ 运行配置示例位于 `cpp_controller/config/station_runtime.example.conf`。
+- Python 检测侧已支持标定文件和 ROI 模板加载，默认 identity 标定位于 `python_detector/config/calibration/`，默认 ROI 位于 `python_detector/config/roi/default_roi.yaml`。
 
 ## 项目规则
 

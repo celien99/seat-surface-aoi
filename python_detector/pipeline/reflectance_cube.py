@@ -43,17 +43,18 @@ class ReflectanceCubeBuilder:
         cubes: list[ReflectanceCube] = []
         for bundle in prepared_bundles:
             for roi_name, frames in bundle.rois.items():
-                cubes.append(self._build_roi_cube(job, bundle.camera_id, roi_name, frames, recipe))
+                cubes.append(self._build_roi_cube(job, bundle, roi_name, frames, recipe))
         return cubes
 
     def _build_roi_cube(
         self,
         job: SeatInspectionJob,
-        camera_id: str,
+        bundle: PreparedBundle,
         roi_name: str,
         frames: dict[str, LightFrame],
         recipe: Recipe,
     ) -> ReflectanceCube:
+        camera_id = bundle.camera_id
         base_light_id = recipe.registration.base_light_id
         if base_light_id not in frames:
             base_light_id = recipe.registration.base_light_fallback
@@ -79,7 +80,6 @@ class ReflectanceCubeBuilder:
             light_order=recipe.light_order,
             frames={light_id: frames[light_id] for light_id in recipe.light_order if light_id in frames},
             registration=registration,
-            pixel_size_mm=None,
-            calibration_id=registration.calibration_id,
+            pixel_size_mm=bundle.calibration.pixel_size_mm,
+            calibration_id=bundle.calibration.calibration_id,
         )
-

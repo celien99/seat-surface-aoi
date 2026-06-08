@@ -1,4 +1,4 @@
-from python_detector.config.recipe_schema import Recipe
+from python_detector.config.recipe_schema import RecipeManager
 from python_detector.ipc.data_types import CameraBundle, LightFrame, SeatInspectionJob
 from python_detector.pipeline.pipeline import InspectionPipeline
 
@@ -6,18 +6,18 @@ from python_detector.pipeline.pipeline import InspectionPipeline
 def _frame(light_id: str, value: int = 80) -> LightFrame:
     data = bytearray(
         value + (((x // 2 + y // 2) % 2) * 20) + ((x + 3 * y) % 12)
-        for y in range(8)
-        for x in range(8)
+        for y in range(48)
+        for x in range(64)
     )
     return LightFrame(
         camera_id="TOP_BACK",
         light_id=light_id,
         frame_index=1,
         light_seq_index=1,
-        width=8,
-        height=8,
+        width=64,
+        height=48,
         channels=1,
-        stride_bytes=8,
+        stride_bytes=64,
         pixel_format="MONO8",
         bit_depth=8,
         color_order="MONO",
@@ -45,13 +45,15 @@ def _job(lights: tuple[str, ...]) -> SeatInspectionJob:
 
 def test_pipeline_returns_ok_for_complete_simulated_bundle() -> None:
     pipeline = InspectionPipeline()
-    result = pipeline.process(_job(("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")), Recipe("r", "sku"))
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    result = pipeline.process(_job(("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")), recipe)
     assert result.decision == "OK"
     assert result.quality_pass is True
 
 
 def test_missing_required_light_returns_recheck() -> None:
     pipeline = InspectionPipeline()
-    result = pipeline.process(_job(("DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")), Recipe("r", "sku"))
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    result = pipeline.process(_job(("DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")), recipe)
     assert result.decision == "RECHECK"
     assert result.quality_pass is False

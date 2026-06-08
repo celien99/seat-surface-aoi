@@ -56,4 +56,3 @@ class InspectionPipeline:
         except Exception:
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             return self.rule_engine.make_error_result(job, ErrorCode.INTERNAL_ERROR, elapsed_ms)
-
