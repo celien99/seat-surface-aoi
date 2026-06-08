@@ -55,6 +55,10 @@ registration:
   base_light_id: POLAR_DIFFUSE
   base_light_fallback: DIFFUSE
   fail_policy: RECHECK
+fusion:
+  iou_threshold: 0.5
+  class_aware: true
+  max_candidates_per_roi: 16
 thresholds:
   scratch:
     ng_score: 0.35

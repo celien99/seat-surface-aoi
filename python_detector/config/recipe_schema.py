@@ -51,6 +51,13 @@ class ThresholdConfig:
 
 
 @dataclass(frozen=True)
+class FusionConfig:
+    iou_threshold: float = 0.5
+    class_aware: bool = True
+    max_candidates_per_roi: int = 16
+
+
+@dataclass(frozen=True)
 class ModelConfig:
     backend: str = "fake"
     model_path: str | None = None
@@ -88,6 +95,7 @@ class Recipe:
     cameras: tuple[CameraRecipe, ...] = field(default_factory=tuple)
     quality: QualityConfig = field(default_factory=QualityConfig)
     registration: RegistrationConfig = field(default_factory=RegistrationConfig)
+    fusion: FusionConfig = field(default_factory=FusionConfig)
     thresholds: dict[str, ThresholdConfig] = field(default_factory=dict)
     models: dict[str, ModelConfig] = field(default_factory=lambda: {"default": ModelConfig()})
     trace: TraceConfig = field(default_factory=TraceConfig)
@@ -147,6 +155,7 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
     light_order = _str_tuple(data.get("light_order", ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")), "light_order")
     quality = _quality_from_dict(_dict(data.get("quality", {}), "quality"))
     registration = _registration_from_dict(_dict(data.get("registration", {}), "registration"))
+    fusion = _fusion_from_dict(_dict(data.get("fusion", {}), "fusion"))
     cameras = _cameras_from_dict(data.get("cameras", {}), light_order, registration.base_light_id)
     thresholds = _thresholds_from_dict(_dict(data.get("thresholds", {}), "thresholds"))
     models = _models_from_dict(_dict(data.get("models", {"default": {"backend": "fake"}}), "models"))
@@ -163,6 +172,7 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
         cameras=cameras,
         quality=quality,
         registration=registration,
+        fusion=fusion,
         thresholds=thresholds,
         models=models,
         trace=trace,
@@ -185,6 +195,14 @@ def _registration_from_dict(data: dict[str, Any]) -> RegistrationConfig:
         base_light_id=_str(data.get("base_light_id", "POLAR_DIFFUSE"), "registration.base_light_id"),
         base_light_fallback=_str(data.get("base_light_fallback", "DIFFUSE"), "registration.base_light_fallback"),
         fail_policy=_decision(data.get("fail_policy", "RECHECK"), "registration.fail_policy"),
+    )
+
+
+def _fusion_from_dict(data: dict[str, Any]) -> FusionConfig:
+    return FusionConfig(
+        iou_threshold=_ratio(data.get("iou_threshold", 0.5), "fusion.iou_threshold"),
+        class_aware=bool(data.get("class_aware", True)),
+        max_candidates_per_roi=_positive_int(data.get("max_candidates_per_roi", 16), "fusion.max_candidates_per_roi"),
     )
 
 
@@ -390,6 +408,13 @@ def _positive_float(value: Any, name: str) -> float:
     return result
 
 
+def _ratio(value: Any, name: str) -> float:
+    result = _float(value, name)
+    if result < 0 or result > 1:
+        raise RecipeValidationError(f"{name} 必须在 [0, 1] 范围内")
+    return result
+
+
 def _optional_float(value: Any, name: str) -> float | None:
     if value is None:
         return None
@@ -400,3 +425,10 @@ def _int(value: Any, name: str) -> int:
     if not isinstance(value, int):
         raise RecipeValidationError(f"{name} 必须是整数")
     return value
+
+
+def _positive_int(value: Any, name: str) -> int:
+    result = _int(value, name)
+    if result <= 0:
+        raise RecipeValidationError(f"{name} 必须大于 0")
+    return result

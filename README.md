@@ -21,6 +21,7 @@
 - ReflectanceCube 会使用标定文件中的 `light_alignment.matrix_3x3` 计算 ROI 角点配准误差，超过 `quality.max_registration_error_px` 时返回 `RECHECK`。
 - FeatureBuilder 会为每个 ROI 模型构建 NCHW float 输入张量，通道顺序、输入缩放和模型输出解码方式由配方 `models.*` 字段声明。
 - ONNX 后端支持可配置 `detection_rows` 输出解码，输入/输出缺失、类别越界、bbox 无效或未配置输出解码时会保守失败，不会静默输出 `OK`。
+- FusionEngine 会按 `fusion.iou_threshold`、`class_aware` 和 `max_candidates_per_roi` 对同机位同 ROI 候选做 IoU NMS，合并重叠候选的证据光源并在 trace 中记录输入、输出和压制数量。
 - Python 回写缺陷结果时会把 `camera_id` 和 `evidence_lights` 映射为共享内存协议中的机位/光源索引，便于 C++ 侧追溯缺陷来源。
 - 低角度暗场、前后高角度和 NIR 作为可选增强光源，不作为主链路输出 `OK` 的默认前置依赖。
 - 正常模拟图像包返回 `OK`。

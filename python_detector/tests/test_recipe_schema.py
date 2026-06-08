@@ -101,3 +101,24 @@ def test_recipe_parses_onnx_model_io_contract() -> None:
     assert model.output_decode == "detection_rows"
     assert model.bbox_format == "xyxy_normalized"
     assert model.score_threshold == 0.25
+
+
+def test_recipe_parses_fusion_config() -> None:
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    assert recipe.fusion.iou_threshold == 0.5
+    assert recipe.fusion.class_aware is True
+    assert recipe.fusion.max_candidates_per_roi == 16
+
+
+def test_recipe_rejects_invalid_fusion_threshold() -> None:
+    with pytest.raises(RecipeValidationError):
+        recipe_from_dict(
+            {
+                "recipe_id": "bad_fusion",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                "fusion": {"iou_threshold": 1.5},
+                "cameras": {"TOP": {"model_key": "default"}},
+                "models": {"default": {"backend": "fake", "role": "primary"}},
+            }
+        )

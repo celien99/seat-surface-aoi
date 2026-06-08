@@ -89,3 +89,20 @@ models:
 - `bbox_format: xyxy_pixel` 表示 bbox 是 ROI 内像素坐标，结果会映射回原图 ROI 坐标。
 - `bbox_format: xyxy_normalized` 表示 bbox 是 ROI 内归一化坐标，范围按 ROI 宽高映射回原图坐标。
 - bbox 无效、输出为空、形状不是 `[N, >=6]` 时返回保守错误。
+
+## 候选融合
+
+模型候选进入规则引擎前会先经过 `FusionEngine`：
+
+```yaml
+fusion:
+  iou_threshold: 0.5
+  class_aware: true
+  max_candidates_per_roi: 16
+```
+
+- 默认按 `(camera_id, roi_name, class_name)` 分组做 IoU NMS。
+- `class_aware: false` 时，同一机位同一 ROI 的不同类别候选也会互相压制。
+- 重叠候选会保留最高分 bbox 和分数，并合并 `evidence_lights`。
+- 每个 ROI 最多保留 `max_candidates_per_roi` 个候选，超出的低分候选会被压制。
+- trace 的 `fusion_summary` 会记录输入候选数、输出候选数和压制数量。

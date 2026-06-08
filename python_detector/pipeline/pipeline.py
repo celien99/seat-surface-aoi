@@ -69,7 +69,7 @@ class InspectionPipeline:
             candidates = self.inference_engine.infer(features, recipe)
             timings["inference_ms"] = (time.perf_counter() - step_started) * 1000.0
             step_started = time.perf_counter()
-            fused = self.fusion_engine.fuse(candidates)
+            fused = self.fusion_engine.fuse(candidates, recipe.fusion)
             timings["fusion_ms"] = (time.perf_counter() - step_started) * 1000.0
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             timings["total_ms"] = elapsed_ms
@@ -92,6 +92,11 @@ class InspectionPipeline:
                     }
                     for group in features
                 ],
+                "fusion_summary": {
+                    "input_count": len(candidates),
+                    "output_count": len(fused.candidates),
+                    "suppressed_count": fused.suppressed_count,
+                },
                 "timings": timings,
             }
             return self.rule_engine.decide(job, fused, quality_report, recipe, elapsed_ms)
