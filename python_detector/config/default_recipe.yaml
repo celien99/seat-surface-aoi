@@ -1,0 +1,17 @@
+recipe_id: seat_a_black_leather_v1
+sku: seat_a_black_leather
+light_order:
+  - DIFFUSE
+  - POLAR_DIFFUSE
+  - HIGH_LEFT
+  - HIGH_RIGHT
+quality:
+  max_saturation_ratio: 0.01
+  min_mean_gray: 20
+  max_mean_gray: 235
+  min_sharpness: 1.0
+registration:
+  base_light_id: POLAR_DIFFUSE
+  base_light_fallback: DIFFUSE
+  fail_policy: RECHECK
+
