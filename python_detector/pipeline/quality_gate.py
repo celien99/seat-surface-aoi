@@ -125,7 +125,7 @@ class ImageQualityGate:
         if len(values) < expected_min:
             return FrameQuality(frame.camera_id, frame.light_id, 0.0, 0.0, 0.0, False, ["image shorter than stride"])
 
-        sample = bytes(values[:expected_min])
+        sample = self._active_pixel_bytes(frame)
         mean_gray = sum(sample) / len(sample)
         saturation_ratio = sum(1 for value in sample if value >= 250) / len(sample)
         sharpness = self._sharpness(sample, frame.width, frame.height, frame.stride_bytes)
@@ -148,9 +148,21 @@ class ImageQualityGate:
             messages=messages,
         )
 
+    def _active_pixel_bytes(self, frame: LightFrame) -> bytes:
+        if frame.stride_bytes == frame.width * frame.channels:
+            return bytes(frame.image[: frame.width * frame.height * frame.channels])
+        rows = bytearray()
+        row_width = frame.width * frame.channels
+        for row in range(frame.height):
+            start = row * frame.stride_bytes
+            rows.extend(frame.image[start : start + row_width])
+        return bytes(rows)
+
     def _sharpness(self, data: bytes, width: int, height: int, stride: int) -> float:
         if width < 3 or height < 3:
             return 0.0
+        if stride != width:
+            stride = width
         total = 0
         count = 0
         for y in range(1, height - 1):

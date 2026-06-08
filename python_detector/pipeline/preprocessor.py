@@ -100,15 +100,37 @@ class Preprocessor:
 
         bbox_width = x1 - x0 + 1
         bbox_height = y1 - y0 + 1
+        origin_x, origin_y = frame.origin_xy
         if self._is_axis_aligned_rectangle(roi) and roi.output_size == (bbox_width, bbox_height):
             cropped = self._crop_bbox(frame, x0, y0, bbox_width, bbox_height)
+            roi_to_source_matrix = (
+                1.0,
+                0.0,
+                float(origin_x + x0),
+                0.0,
+                1.0,
+                float(origin_y + y0),
+                0.0,
+                0.0,
+                1.0,
+            )
+            source_to_roi_matrix = (
+                1.0,
+                0.0,
+                -float(origin_x + x0),
+                0.0,
+                1.0,
+                -float(origin_y + y0),
+                0.0,
+                0.0,
+                1.0,
+            )
         elif len(roi.polygon_xy) == 4:
-            cropped = self._warp_quad(frame, roi, output_width, output_height)
+            cropped, roi_to_source_matrix, source_to_roi_matrix = self._warp_quad(frame, roi, output_width, output_height)
         else:
             raise ValueError(
                 f"{frame.camera_id}/{frame.light_id}/{roi.roi_name}: 非矩形 ROI 必须提供 4 个点用于透视展开"
             )
-        origin_x, origin_y = frame.origin_xy
         return LightFrame(
             camera_id=frame.camera_id,
             light_id=frame.light_id,
@@ -131,6 +153,8 @@ class Preprocessor:
             origin_xy=(origin_x + x0, origin_y + y0),
             source_width=frame.source_width or frame.width,
             source_height=frame.source_height or frame.height,
+            roi_to_source_matrix=roi_to_source_matrix,
+            source_to_roi_matrix=source_to_roi_matrix,
         )
 
     def _crop_bbox(self, frame: LightFrame, x0: int, y0: int, width: int, height: int) -> bytearray:
@@ -142,7 +166,13 @@ class Preprocessor:
             cropped[target_start : target_start + width] = frame.image[source_start:source_end]
         return cropped
 
-    def _warp_quad(self, frame: LightFrame, roi: RoiTemplate, output_width: int, output_height: int) -> bytearray:
+    def _warp_quad(
+        self,
+        frame: LightFrame,
+        roi: RoiTemplate,
+        output_width: int,
+        output_height: int,
+    ) -> tuple[bytearray, tuple[float, ...], tuple[float, ...]]:
         source_points = self._ordered_quad(roi.polygon_xy)
         destination_points = (
             (0.0, 0.0),
@@ -151,6 +181,10 @@ class Preprocessor:
             (0.0, float(output_height - 1)),
         )
         transform = self._homography(destination_points, source_points)
+        origin_x, origin_y = frame.origin_xy
+        source_points_global = tuple((x + origin_x, y + origin_y) for x, y in source_points)
+        roi_to_source_matrix = self._translate_homography(transform, float(origin_x), float(origin_y))
+        source_to_roi_matrix = self._homography(source_points_global, destination_points)
         warped = bytearray(output_width * output_height)
         for y in range(output_height):
             for x in range(output_width):
@@ -159,7 +193,7 @@ class Preprocessor:
                     raise ValueError(f"{frame.camera_id}/{frame.light_id}/{roi.roi_name}: ROI 透视变换无效")
                 sx, sy = source
                 warped[y * output_width + x] = self._sample_bilinear(frame, sx, sy)
-        return warped
+        return warped, roi_to_source_matrix, source_to_roi_matrix
 
     def _is_axis_aligned_rectangle(self, roi: RoiTemplate) -> bool:
         if len(roi.polygon_xy) != 4:
@@ -198,6 +232,19 @@ class Preprocessor:
             values.append(v)
         solved = self._solve_linear(rows, values)
         return (solved[0], solved[1], solved[2], solved[3], solved[4], solved[5], solved[6], solved[7], 1.0)
+
+    def _translate_homography(self, transform: tuple[float, ...], dx: float, dy: float) -> tuple[float, ...]:
+        return (
+            transform[0] + dx * transform[6],
+            transform[1] + dx * transform[7],
+            transform[2] + dx * transform[8],
+            transform[3] + dy * transform[6],
+            transform[4] + dy * transform[7],
+            transform[5] + dy * transform[8],
+            transform[6],
+            transform[7],
+            transform[8],
+        )
 
     def _solve_linear(self, matrix: list[list[float]], values: list[float]) -> list[float]:
         size = len(values)

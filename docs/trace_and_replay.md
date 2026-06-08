@@ -14,13 +14,15 @@
 - `feature_summary.json`
 - `fusion_summary.json`
 - `timings.json`
+- `error.json`
 - `images/<camera_id>/<roi_name>/<light_id>.pgm`
 - `overlays/*.ppm`（存在缺陷时生成）
 
 图像追溯使用无依赖的 Netpbm 格式：
 
 - `.pgm` 保存 ROI 单光源灰度图，像素来自预处理后的 MONO8 ROI。
-- `.ppm` 保存缺陷 overlay，在 ROI 图上以红色框绘制 `bbox_xyxy_pixel` 映射后的缺陷框。
+- `.ppm` 保存缺陷 overlay，在 ROI 图上以红色框绘制 `bbox_xyxy_pixel` 通过 `source_to_roi_matrix` 映射后的缺陷框；轴对齐 ROI 会退化为普通平移映射。
+- `error.json` 保存检测流水线或模型异常的类型和消息；无异常时为空对象。
 - 如果配方默认不保存 OK，OK 样本不会落盘图像；`NG`、`RECHECK`、`ERROR` 按默认策略保存。
 
 ## 回放工具

@@ -2,7 +2,7 @@
 
 汽车座椅表面缺陷检测系统参考实现。
 
-当前实现根据 [seat-defect-inspection-architecture.md](seat-defect-inspection-architecture.md) 搭建，第一阶段重点是共享内存协议、C++/Python 独立进程边界和模拟端到端链路。
+当前实现根据 [seat-defect-inspection-architecture.md](docs/seat-defect-inspection-architecture.md) 搭建，第一阶段重点是共享内存协议、C++/Python 独立进程边界和模拟端到端链路。
 
 ## 当前能力
 
@@ -14,15 +14,15 @@
 - Result ring 对协议、payload 和 CRC 错误会立即返回真实错误码，不再等待到 detector timeout。
 - Python 检测进程：共享内存读取、质量门禁、预处理、ReflectanceCube、特征构建、fake 推理、融合和规则判定。
 - Python 质量门禁会校验配方启用机位完整性、SKU 一致性和必需光源；缺机位、重复机位、未知机位或缺关键光源都会返回 `RECHECK`，不会输出 `OK`。
-- Python 质量门禁会校验必需光源的采集一致性，包括时间戳跨度、时间戳单调性、帧序号重复、曝光差和增益差；异常采集包会返回 `RECHECK`。
+- Python 质量门禁会校验必需光源的采集一致性，包括时间戳跨度、时间戳单调性、帧序号重复、曝光差和增益差；灰度、饱和和清晰度统计只使用有效像素宽度，不把 stride padding 当成图像内容；异常采集包会返回 `RECHECK`。
 - Python 检测进程读取坏 frame slot 时会释放输入 slot；检测、配方或模型异常会回写 `ERROR`/`RECHECK`，不会让共享内存 slot 长期停留在 `READING`。
 - V2 生产标准默认使用 `DIFFUSE`、`POLAR_DIFFUSE`、`HIGH_LEFT`、`HIGH_RIGHT` 四个必需光源，生成 `ch0_diffuse` 到 `ch4_high_max_min` 的 5 通道标准特征。
 - 规则判定使用配方中的类别阈值 `ng_score`、`recheck_score` 和 `min_area_px`；机位级 `light_order` 会进入 ReflectanceCube 和特征构建。
 - Python 预处理会按 ROI 模板裁剪 MONO8 图像并保留 `bbox_xyxy_pixel` 原图坐标；ROI 越界、ROI 输出尺寸不一致、标定尺寸不一致会保守失败。
-- ROI 预处理支持轴对齐矩形快速裁剪和四点多边形透视展开，可将倾斜 ROI 规整到 `output_size` 后进入特征和模型链路。
+- ROI 预处理支持轴对齐矩形快速裁剪和四点多边形透视展开，可将倾斜 ROI 规整到 `output_size` 后进入特征和模型链路；预处理会保留 ROI 到原图、原图到 ROI 的双向矩阵，用于模型 bbox 和追溯 overlay 坐标映射。
 - ReflectanceCube 会使用标定文件中的 `light_alignment.matrix_3x3` 计算 ROI 角点配准误差，超过 `quality.max_registration_error_px` 时返回 `RECHECK`。
 - FeatureBuilder 会为每个 ROI 模型构建 NCHW float 输入张量，通道顺序、输入缩放和模型输出解码方式由配方 `models.*` 字段声明。
-- ONNX 后端支持可配置 `detection_rows` 输出解码，输入/输出缺失、类别越界、bbox 无效或未配置输出解码时会保守失败，不会静默输出 `OK`。
+- ONNX 后端支持可配置 `detection_rows` 输出解码，模型输出 bbox 先按 ROI 局部坐标解释，再通过 ROI 坐标矩阵映射为原图 `bbox_xyxy_pixel`；输入/输出缺失、类别越界、bbox 无效或未配置输出解码时会保守失败，不会静默输出 `OK`。
 - FusionEngine 会按 `fusion.iou_threshold`、`class_aware` 和 `max_candidates_per_roi` 对同机位同 ROI 候选做 IoU NMS，合并重叠候选的证据光源并在 trace 中记录输入、输出和压制数量。
 - Python 回写缺陷结果时会把 `camera_id` 和由特征通道反查得到的真实 `evidence_lights` 映射为共享内存协议中的机位/光源索引，便于 C++ 侧追溯缺陷来源。
 - 低角度暗场、前后高角度和 NIR 作为可选增强光源，不作为主链路输出 `OK` 的默认前置依赖。
@@ -37,7 +37,7 @@
 - Python 检测侧已支持标定文件和 ROI 模板加载，默认 identity 标定位于 `python_detector/config/calibration/`，默认 ROI 位于 `python_detector/config/roi/default_roi.yaml`。
 - 模型推理支持 fake 默认后端和 ONNX 可选后端；ONNX 依赖、模型缺失、输入配置或输出解码异常时保守失败，不会静默输出 `OK`。
 - PatchCore 只能配置为 unknown defect safety net，不能作为全座椅或 ROI 主检测模型。
-- 支持本地追溯落盘，`RECHECK`、`ERROR`、`NG` 默认保存 result、quality、registration、feature summary 和 timings。
+- 支持本地追溯落盘，`RECHECK`、`ERROR`、`NG` 默认保存 result、quality、registration、feature summary、timings 和 error context。
 - 追溯会保存 ROI 单光源灰度图 `.pgm`；存在缺陷时会生成带红色 bbox 的 `.ppm` overlay，bbox 使用原图 `bbox_xyxy_pixel` 映射回 ROI 坐标。
 - `trace.save_ok_ratio` 使用基于座椅和序列号的确定性抽样保存 OK 样本；`NG`、`RECHECK`、`ERROR` 按策略默认保存。
 - 提供模拟回放与 benchmark 工具：`tools/replay_dataset.py`、`tools/benchmark_pipeline.py`。

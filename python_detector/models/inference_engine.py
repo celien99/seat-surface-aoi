@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -41,15 +42,13 @@ class FakeModel:
         return []
 
     def _candidate(self, feature_group: FeatureGroup, score: float) -> DefectCandidate:
-        x0, y0, x1, y1 = feature_group.roi_bbox_xyxy_pixel
-        if x1 <= x0 or y1 <= y0:
+        height, width = feature_group.feature_shape_hw
+        if width <= 0 or height <= 0:
             bbox = (1, 1, 8, 8)
         else:
-            width = x1 - x0 + 1
-            height = y1 - y0 + 1
             box_width = min(8, max(width, 1))
             box_height = min(8, max(height, 1))
-            bbox = (x0, y0, x0 + box_width - 1, y0 + box_height - 1)
+            bbox = _map_roi_bbox_to_source((0.0, 0.0, float(box_width - 1), float(box_height - 1)), feature_group)
         return DefectCandidate(
             camera_id=feature_group.camera_id,
             roi_name=feature_group.roi_name,
@@ -139,28 +138,25 @@ class OnnxModel:
 
     def _map_bbox_xyxy(self, raw_bbox: Any, feature_group: FeatureGroup) -> tuple[int, int, int, int]:
         x0, y0, x1, y1 = (float(value) for value in raw_bbox)
-        roi_x0, roi_y0, roi_x1, roi_y1 = feature_group.roi_bbox_xyxy_pixel
-        width = max(roi_x1 - roi_x0 + 1, 1)
-        height = max(roi_y1 - roi_y0 + 1, 1)
+        feature_height, feature_width = feature_group.feature_shape_hw
+        width = max(feature_width, 1)
+        height = max(feature_height, 1)
         if self.config.bbox_format == "xyxy_normalized":
-            x0 = roi_x0 + x0 * width
-            x1 = roi_x0 + x1 * width
-            y0 = roi_y0 + y0 * height
-            y1 = roi_y0 + y1 * height
+            x0 = x0 * width
+            x1 = x1 * width
+            y0 = y0 * height
+            y1 = y1 * height
         elif self.config.bbox_format == "xyxy_pixel":
-            x0 += roi_x0
-            x1 += roi_x0
-            y0 += roi_y0
-            y1 += roi_y0
+            pass
         else:
             raise RuntimeError(f"不支持的 bbox_format: {self.config.bbox_format}")
-
-        mapped = (
-            int(round(max(min(x0, roi_x1), roi_x0))),
-            int(round(max(min(y0, roi_y1), roi_y0))),
-            int(round(max(min(x1, roi_x1), roi_x0))),
-            int(round(max(min(y1, roi_y1), roi_y0))),
+        roi_bbox = (
+            max(min(x0, float(width - 1)), 0.0),
+            max(min(y0, float(height - 1)), 0.0),
+            max(min(x1, float(width - 1)), 0.0),
+            max(min(y1, float(height - 1)), 0.0),
         )
+        mapped = _map_roi_bbox_to_source(roi_bbox, feature_group)
         if mapped[2] < mapped[0] or mapped[3] < mapped[1]:
             raise RuntimeError(f"ONNX 输出 bbox 无效: {mapped}")
         return mapped
@@ -200,3 +196,47 @@ class InferenceEngine:
             model = self.model_registry.get_model(group.model_key, recipe)
             candidates.extend(model.run(group))
         return candidates
+
+
+def _map_roi_bbox_to_source(
+    roi_bbox_xyxy_pixel: tuple[float, float, float, float],
+    feature_group: FeatureGroup,
+) -> tuple[int, int, int, int]:
+    x0, y0, x1, y1 = roi_bbox_xyxy_pixel
+    matrix = feature_group.roi_to_source_matrix
+    if matrix is None:
+        roi_x0, roi_y0, _roi_x1, _roi_y1 = feature_group.roi_bbox_xyxy_pixel
+        return (
+            int(round(roi_x0 + x0)),
+            int(round(roi_y0 + y0)),
+            int(round(roi_x0 + x1)),
+            int(round(roi_y0 + y1)),
+        )
+
+    corners = (
+        (x0, y0),
+        (x1, y0),
+        (x1, y1),
+        (x0, y1),
+    )
+    mapped_points = [_apply_homography(matrix, x, y) for x, y in corners]
+    if any(point is None for point in mapped_points):
+        raise RuntimeError("ROI 到原图 bbox 映射矩阵无效")
+    xs = [point[0] for point in mapped_points if point is not None]
+    ys = [point[1] for point in mapped_points if point is not None]
+    roi_x0, roi_y0, roi_x1, roi_y1 = feature_group.roi_bbox_xyxy_pixel
+    return (
+        int(max(roi_x0, min(roi_x1, math.floor(min(xs))))),
+        int(max(roi_y0, min(roi_y1, math.floor(min(ys))))),
+        int(max(roi_x0, min(roi_x1, math.ceil(max(xs))))),
+        int(max(roi_y0, min(roi_y1, math.ceil(max(ys))))),
+    )
+
+
+def _apply_homography(matrix: tuple[float, ...], x: float, y: float) -> tuple[float, float] | None:
+    denom = matrix[6] * x + matrix[7] * y + matrix[8]
+    if abs(denom) < 1e-9:
+        return None
+    mapped_x = (matrix[0] * x + matrix[1] * y + matrix[2]) / denom
+    mapped_y = (matrix[3] * x + matrix[4] * y + matrix[5]) / denom
+    return mapped_x, mapped_y

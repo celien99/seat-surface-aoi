@@ -116,6 +116,8 @@ roi_templates:
     assert roi_frame.height == 12
     assert roi_frame.origin_xy == (10, 8)
     assert roi_frame.bbox_xyxy_pixel == (10, 8, 25, 19)
+    assert roi_frame.roi_to_source_matrix == (1.0, 0.0, 10.0, 0.0, 1.0, 8.0, 0.0, 0.0, 1.0)
+    assert roi_frame.source_to_roi_matrix == (1.0, 0.0, -10.0, 0.0, 1.0, -8.0, 0.0, 0.0, 1.0)
     assert int(roi_frame.image[0]) == int(frames["DIFFUSE"].image[8 * 64 + 10])
 
 
@@ -153,7 +155,9 @@ roi_templates:
     assert roi_frame.width == 8
     assert roi_frame.height == 6
     assert roi_frame.origin_xy == (8, 6)
-    assert roi_frame.bbox_xyxy_pixel == (8, 6, 15, 11)
+    assert roi_frame.bbox_xyxy_pixel == (8, 6, 33, 23)
+    assert roi_frame.roi_to_source_matrix is not None
+    assert roi_frame.source_to_roi_matrix is not None
     assert len(roi_frame.image) == 8 * 6
     assert max(roi_frame.image) > min(roi_frame.image)
 

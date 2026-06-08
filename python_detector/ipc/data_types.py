@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 
 
 @dataclass
@@ -26,9 +27,34 @@ class LightFrame:
     origin_xy: tuple[int, int] = (0, 0)
     source_width: int | None = None
     source_height: int | None = None
+    roi_to_source_matrix: tuple[float, ...] | None = None
+    source_to_roi_matrix: tuple[float, ...] | None = None
 
     @property
     def bbox_xyxy_pixel(self) -> tuple[int, int, int, int]:
+        if self.roi_to_source_matrix is not None:
+            corners = (
+                (0.0, 0.0),
+                (float(self.width - 1), 0.0),
+                (float(self.width - 1), float(self.height - 1)),
+                (0.0, float(self.height - 1)),
+            )
+            mapped = [_apply_homography(self.roi_to_source_matrix, x, y) for x, y in corners]
+            if any(point is None for point in mapped):
+                raise ValueError(f"{self.camera_id}/{self.light_id}: ROI 坐标矩阵无效")
+            xs = [point[0] for point in mapped if point is not None]
+            ys = [point[1] for point in mapped if point is not None]
+            x0 = math.floor(min(xs))
+            y0 = math.floor(min(ys))
+            x1 = math.ceil(max(xs))
+            y1 = math.ceil(max(ys))
+            if self.source_width is not None:
+                x0 = max(0, min(self.source_width - 1, x0))
+                x1 = max(0, min(self.source_width - 1, x1))
+            if self.source_height is not None:
+                y0 = max(0, min(self.source_height - 1, y0))
+                y1 = max(0, min(self.source_height - 1, y1))
+            return (x0, y0, x1, y1)
         x0, y0 = self.origin_xy
         return (x0, y0, x0 + self.width - 1, y0 + self.height - 1)
 
@@ -75,3 +101,12 @@ class InspectionResult:
     quality_pass: bool = False
     error_code: int = 0
     elapsed_ms: float = 0.0
+
+
+def _apply_homography(matrix: tuple[float, ...], x: float, y: float) -> tuple[float, float] | None:
+    denom = matrix[6] * x + matrix[7] * y + matrix[8]
+    if abs(denom) < 1e-9:
+        return None
+    mapped_x = (matrix[0] * x + matrix[1] * y + matrix[2]) / denom
+    mapped_y = (matrix[3] * x + matrix[4] * y + matrix[5]) / denom
+    return mapped_x, mapped_y

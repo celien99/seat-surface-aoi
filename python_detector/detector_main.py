@@ -56,7 +56,13 @@ class DetectorProcess:
         try:
             recipe = self.recipe_manager.load(job.recipe_id)
             result = self.pipeline.process(job, recipe)
-        except Exception:
+        except Exception as exc:
+            self.pipeline.last_context = {
+                "error": {
+                    "type": exc.__class__.__name__,
+                    "message": str(exc),
+                }
+            }
             result = InspectionResult(
                 sequence_id=job.sequence_id,
                 trigger_id=job.trigger_id,

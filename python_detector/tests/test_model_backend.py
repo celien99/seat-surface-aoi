@@ -92,6 +92,41 @@ def test_onnx_detection_rows_decode_maps_normalized_roi_bbox() -> None:
     assert model.session.last_inputs["input"][0][0][0][0] == pytest.approx(0.1)
 
 
+def test_onnx_detection_rows_maps_perspective_roi_bbox_to_source() -> None:
+    config = ModelConfig(
+        backend="onnx",
+        model_path="unused.onnx",
+        output_decode="detection_rows",
+        bbox_format="xyxy_pixel",
+        class_names=("scratch",),
+        score_threshold=0.3,
+    )
+    group = replace(
+        _feature_group(),
+        roi_bbox_xyxy_pixel=(8, 6, 33, 23),
+        feature_shape_hw=(6, 8),
+        roi_to_source_matrix=(
+            2.5,
+            -0.4,
+            10.0,
+            -0.2,
+            3.0,
+            8.0,
+            0.0,
+            0.0,
+            1.0,
+        ),
+    )
+    model = object.__new__(OnnxModel)
+    model.config = config
+    model.session = _Session([[1.0, 1.0, 5.0, 4.0, 0.91, 0]])
+
+    candidates = model.run(group)
+
+    assert candidates[0].bbox_xyxy_pixel == (10, 10, 23, 20)
+    assert candidates[0].bbox_xyxy_pixel != (9, 7, 13, 10)
+
+
 def test_onnx_decode_none_fails_conservatively() -> None:
     model = object.__new__(OnnxModel)
     model.config = ModelConfig(backend="onnx", model_path="unused.onnx", output_decode="none")

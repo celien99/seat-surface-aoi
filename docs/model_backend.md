@@ -98,8 +98,8 @@ models:
 
 - `score` 小于 `score_threshold` 的行会被忽略。
 - `class_id` 必须落在 `class_names` 范围内，否则返回保守错误。
-- `bbox_format: xyxy_pixel` 表示 bbox 是 ROI 内像素坐标，结果会映射回原图 ROI 坐标。
-- `bbox_format: xyxy_normalized` 表示 bbox 是 ROI 内归一化坐标，范围按 ROI 宽高映射回原图坐标。
+- `bbox_format: xyxy_pixel` 表示 bbox 是 ROI 输出图内像素坐标，结果会通过 `roi_to_source_matrix` 映射回原图 `bbox_xyxy_pixel`。
+- `bbox_format: xyxy_normalized` 表示 bbox 是 ROI 输出图内归一化坐标，先按 `feature_shape_hw` 还原为 ROI 像素坐标，再通过 `roi_to_source_matrix` 映射回原图 `bbox_xyxy_pixel`。
 - bbox 无效、输出为空、形状不是 `[N, >=6]` 时返回保守错误。
 
 ## 候选融合

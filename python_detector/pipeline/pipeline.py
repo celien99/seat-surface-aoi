@@ -102,8 +102,14 @@ class InspectionPipeline:
                 "timings": timings,
             }
             return self.rule_engine.decide(job, fused, quality_report, recipe, elapsed_ms)
-        except Exception:
+        except Exception as exc:
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             timings["total_ms"] = elapsed_ms
-            self.last_context = {"timings": timings}
+            self.last_context = {
+                "timings": timings,
+                "error": {
+                    "type": exc.__class__.__name__,
+                    "message": str(exc),
+                },
+            }
             return self.rule_engine.make_error_result(job, ErrorCode.INTERNAL_ERROR, elapsed_ms)

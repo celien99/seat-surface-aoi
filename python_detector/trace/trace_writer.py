@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import fields, is_dataclass
 from datetime import datetime
 from pathlib import Path
@@ -38,6 +39,7 @@ class TraceWriter:
         self._write_json(trace_dir / "feature_summary.json", context.get("feature_summary", []))
         self._write_json(trace_dir / "fusion_summary.json", context.get("fusion_summary", {}))
         self._write_json(trace_dir / "timings.json", context.get("timings", {}))
+        self._write_json(trace_dir / "error.json", context.get("error", {}))
         self._write_roi_images(trace_dir, context.get("prepared_bundles", []))
         self._write_defect_overlays(trace_dir, result, context.get("prepared_bundles", []))
         return trace_dir
@@ -148,6 +150,27 @@ class TraceWriter:
         return bytes(rows)
 
     def _bbox_in_frame(self, bbox_xyxy_pixel: tuple[int, int, int, int], frame: LightFrame) -> tuple[int, int, int, int]:
+        if frame.source_to_roi_matrix is not None:
+            x0, y0, x1, y1 = bbox_xyxy_pixel
+            points = (
+                self._apply_homography(frame.source_to_roi_matrix, float(x0), float(y0)),
+                self._apply_homography(frame.source_to_roi_matrix, float(x1), float(y0)),
+                self._apply_homography(frame.source_to_roi_matrix, float(x1), float(y1)),
+                self._apply_homography(frame.source_to_roi_matrix, float(x0), float(y1)),
+            )
+            if any(point is None for point in points):
+                raise ValueError(f"defect bbox 无法映射到 ROI: {bbox_xyxy_pixel}")
+            xs = [point[0] for point in points if point is not None]
+            ys = [point[1] for point in points if point is not None]
+            local = (
+                max(0, min(frame.width - 1, math.floor(min(xs)))),
+                max(0, min(frame.height - 1, math.floor(min(ys)))),
+                max(0, min(frame.width - 1, math.ceil(max(xs)))),
+                max(0, min(frame.height - 1, math.ceil(max(ys)))),
+            )
+            if local[2] < local[0] or local[3] < local[1]:
+                raise ValueError(f"defect bbox 不在 ROI 内: {bbox_xyxy_pixel}")
+            return local
         origin_x, origin_y = frame.origin_xy
         x0, y0, x1, y1 = bbox_xyxy_pixel
         local = (
@@ -159,6 +182,14 @@ class TraceWriter:
         if local[2] < local[0] or local[3] < local[1]:
             raise ValueError(f"defect bbox 不在 ROI 内: {bbox_xyxy_pixel}")
         return local
+
+    def _apply_homography(self, matrix: tuple[float, ...], x: float, y: float) -> tuple[float, float] | None:
+        denom = matrix[6] * x + matrix[7] * y + matrix[8]
+        if abs(denom) < 1e-9:
+            return None
+        mapped_x = (matrix[0] * x + matrix[1] * y + matrix[2]) / denom
+        mapped_y = (matrix[3] * x + matrix[4] * y + matrix[5]) / denom
+        return mapped_x, mapped_y
 
 
 def _jsonable(value: Any) -> Any:

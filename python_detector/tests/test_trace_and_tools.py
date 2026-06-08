@@ -1,5 +1,6 @@
 from dataclasses import replace
 from pathlib import Path
+import json
 
 from python_detector.config.recipe_schema import ModelConfig, RecipeManager
 from python_detector.ipc.data_types import InspectionResult
@@ -40,6 +41,7 @@ def test_trace_writer_generates_result_files(tmp_path: Path) -> None:
     assert (trace_dir / "feature_summary.json").exists()
     assert (trace_dir / "fusion_summary.json").exists()
     assert (trace_dir / "timings.json").exists()
+    assert (trace_dir / "error.json").exists()
     assert (trace_dir / "images" / "TOP_BACK" / "full" / "DIFFUSE.pgm").exists()
 
 
@@ -88,3 +90,27 @@ def test_trace_writer_ok_sampling_ratio_edges(tmp_path: Path) -> None:
     )
     assert TraceWriter(tmp_path)._should_write(job, _recipe(tmp_path, save_ok_ratio=0.0), result) is False
     assert TraceWriter(tmp_path)._should_write(job, _recipe(tmp_path, save_ok_ratio=1.0), result) is True
+
+
+def test_trace_writer_persists_error_context(tmp_path: Path) -> None:
+    recipe = _recipe(tmp_path, save_ok_ratio=1.0)
+    job = make_simulated_job()
+    result = InspectionResult(
+        sequence_id=job.sequence_id,
+        trigger_id=job.trigger_id,
+        seat_id=job.seat_id,
+        decision="ERROR",
+        quality_pass=False,
+        error_code=9,
+    )
+
+    trace_dir = TraceWriter(recipe.trace.root_dir).write(
+        job,
+        recipe,
+        result,
+        {"error": {"type": "RuntimeError", "message": "模型输出异常"}},
+    )
+
+    assert trace_dir is not None
+    error = json.loads((trace_dir / "error.json").read_text(encoding="utf-8"))
+    assert error == {"type": "RuntimeError", "message": "模型输出异常"}

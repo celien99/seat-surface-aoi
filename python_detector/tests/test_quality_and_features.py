@@ -1,6 +1,7 @@
 from python_detector.config.recipe_schema import RecipeManager
 from python_detector.ipc.data_types import CameraBundle, LightFrame, SeatInspectionJob
 from python_detector.pipeline.pipeline import InspectionPipeline
+from python_detector.pipeline.quality_gate import ImageQualityGate
 
 
 LIGHTS = ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")
@@ -101,3 +102,41 @@ def test_duplicate_required_light_frame_index_returns_recheck() -> None:
     result = pipeline.process(job, recipe)
     assert result.decision == "RECHECK"
     assert "TOP_BACK: duplicate frame_index in required lights" in pipeline.last_context["quality_report"].messages
+
+
+def test_quality_gate_ignores_stride_padding_for_exposure_stats() -> None:
+    width = 8
+    height = 8
+    stride = 12
+    data = bytearray()
+    for y in range(height):
+        for x in range(width):
+            data.append(80 + (((x + y) % 2) * 40))
+        data.extend([255] * (stride - width))
+    frame = LightFrame(
+        camera_id="TOP_BACK",
+        light_id="DIFFUSE",
+        frame_index=1,
+        light_seq_index=0,
+        width=width,
+        height=height,
+        channels=1,
+        stride_bytes=stride,
+        pixel_format="MONO8",
+        bit_depth=8,
+        color_order="MONO",
+        dtype="UINT8",
+        timestamp_us=1_000,
+        exposure_us=800,
+        gain=1.0,
+        calibration_id="calib/simulated_v1",
+        image_crc32=0,
+        image=memoryview(data),
+    )
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+
+    report = ImageQualityGate()._check_frame(frame, recipe)
+
+    assert report.is_pass is True
+    assert report.saturation_ratio == 0.0
+    assert 90.0 <= report.mean_gray <= 110.0

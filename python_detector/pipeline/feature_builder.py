@@ -19,6 +19,8 @@ class FeatureGroup:
     tensor_nchw: list[list[list[list[float]]]] | None = None
     tensor_channel_names: tuple[str, ...] = ()
     evidence_lights_by_channel: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    roi_to_source_matrix: tuple[float, ...] | None = None
+    source_to_roi_matrix: tuple[float, ...] | None = None
 
 
 class FeatureBuilder:
@@ -77,6 +79,8 @@ class FeatureBuilder:
             tensor_nchw=tensor,
             tensor_channel_names=model_config.input_channels,
             evidence_lights_by_channel=self._evidence_lights_by_channel(),
+            roi_to_source_matrix=cube.roi_to_source_matrix,
+            source_to_roi_matrix=cube.source_to_roi_matrix,
         )
 
     def _required(self, image: LightFrame | None, name: str) -> list[int]:

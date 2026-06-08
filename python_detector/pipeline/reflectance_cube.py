@@ -34,6 +34,8 @@ class ReflectanceCube:
     pixel_size_mm: float | None
     calibration_id: str
     roi_bbox_xyxy_pixel: tuple[int, int, int, int]
+    roi_to_source_matrix: tuple[float, ...] | None = None
+    source_to_roi_matrix: tuple[float, ...] | None = None
 
     def get(self, light_id: str) -> LightFrame | None:
         return self.frames.get(light_id)
@@ -74,6 +76,7 @@ class ReflectanceCubeBuilder:
         roi_bbox = base.bbox_xyxy_pixel if base else (0, 0, 0, 0)
         if base is None:
             roi_bbox = next(iter(frames.values())).bbox_xyxy_pixel if frames else (0, 0, 0, 0)
+        transform_frame = base or next(iter(frames.values()), None)
         return ReflectanceCube(
             sequence_id=job.sequence_id,
             trigger_id=job.trigger_id,
@@ -87,6 +90,8 @@ class ReflectanceCubeBuilder:
             pixel_size_mm=bundle.calibration.pixel_size_mm,
             calibration_id=bundle.calibration.calibration_id,
             roi_bbox_xyxy_pixel=roi_bbox,
+            roi_to_source_matrix=transform_frame.roi_to_source_matrix if transform_frame is not None else None,
+            source_to_roi_matrix=transform_frame.source_to_roi_matrix if transform_frame is not None else None,
         )
 
     def _registration_report(
