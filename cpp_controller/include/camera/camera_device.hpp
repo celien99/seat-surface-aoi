@@ -14,6 +14,7 @@ struct CameraConfig {
   std::uint32_t width = 64;
   std::uint32_t height = 48;
   std::uint32_t channels = 1;
+  bool simulate_missing_frame = false;
 };
 
 struct CameraHealth {
@@ -38,4 +39,3 @@ private:
 };
 
 }  // namespace seat_aoi
-

@@ -5,22 +5,29 @@
 
 namespace seat_aoi {
 
+void FrameAssembler::configure(const StationRuntimeConfig& config) {
+  config_ = config;
+  initialized_ = false;
+  cameras_.clear();
+}
+
 bool FrameAssembler::ensure_initialized() {
   if (initialized_) {
     return true;
   }
-  if (!light_controller_.initialize()) {
+  if (!light_controller_.initialize(config_.light.simulate_fault)) {
     return false;
   }
   cameras_.clear();
-  for (std::uint32_t camera_index = 0; camera_index < 2; ++camera_index) {
+  for (const auto& runtime_camera : config_.cameras) {
     CameraWorker worker;
     CameraConfig config;
-    config.camera_index = camera_index;
-    config.camera_id = camera_index == 0 ? "TOP_BACK" : "TOP_CUSHION";
-    config.width = 64;
-    config.height = 48;
-    config.channels = 1;
+    config.camera_index = runtime_camera.camera_index;
+    config.camera_id = runtime_camera.camera_id;
+    config.width = runtime_camera.width;
+    config.height = runtime_camera.height;
+    config.channels = runtime_camera.channels;
+    config.simulate_missing_frame = runtime_camera.simulate_missing_frame;
     if (!worker.initialize(config)) {
       return false;
     }
@@ -50,7 +57,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
   for (std::uint32_t light_index : recipe.light_order) {
     sequence.channels.push_back(LightChannelParam{light_index, 800, 1.0F, 60.0F});
   }
-  if (!light_controller_.run_sequence(sequence, trigger.trigger_id, 200)) {
+  if (!light_controller_.run_sequence(sequence, trigger.trigger_id, config_.light_timeout_ms)) {
     if (error_message != nullptr) {
       *error_message = "simulated light sequence failed";
     }
@@ -75,7 +82,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
                                              recipe.light_order[light_seq_index],
                                              light_seq_index,
                                              &frame,
-                                             200)) {
+                                             config_.camera_timeout_ms)) {
         if (error_message != nullptr) {
           *error_message = "simulated camera frame timeout";
         }
@@ -92,4 +99,3 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
 }
 
 }  // namespace seat_aoi
-

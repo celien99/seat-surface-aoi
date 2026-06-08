@@ -22,6 +22,9 @@ bool CameraDevice::capture(std::uint64_t trigger_id,
   if (!initialized_ || out_frame == nullptr || timeout_ms <= 0) {
     return false;
   }
+  if (config_.simulate_missing_frame) {
+    return false;
+  }
 
   std::this_thread::sleep_for(std::chrono::milliseconds(2));
   const std::uint32_t stride = config_.width * config_.channels;

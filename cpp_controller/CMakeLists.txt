@@ -23,6 +23,8 @@ endif()
 
 add_library(seat_aoi_control
   src/control/light_controller.cpp
+  src/control/plc_client.cpp
+  src/control/station_runtime_config.cpp
   src/camera/camera_device.cpp
   src/camera/camera_worker.cpp
   src/control/trigger_scheduler.cpp
@@ -38,4 +40,3 @@ target_link_libraries(seat_aoi_controller PRIVATE seat_aoi_control)
 
 add_executable(protocol_layout tools/protocol_layout.cpp)
 target_include_directories(protocol_layout PRIVATE include)
-

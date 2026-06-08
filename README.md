@@ -14,6 +14,8 @@
 - Python detector 不存在或超时时，C++ 保守返回 `RECHECK`，不会误判 `OK`。
 - YAML 配方加载与 schema 校验，当前默认配方位于 `python_detector/config/default_recipe.yaml`。
 - 配方已覆盖机位、光源顺序、质量阈值、注册策略、模型后端和追溯配置。
+- C++ 主控已具备相机、光源、PLC 的可替换接口和模拟驱动，支持光源故障、缺帧、PLC 输出失败等故障注入。
+- C++ 运行配置示例位于 `cpp_controller/config/station_runtime.example.conf`。
 
 ## 项目规则
 
@@ -46,6 +48,12 @@ bash tools/run_simulated_ipc.sh
 ```
 
 脚本会构建 C++ 主控，启动 C++ 模拟任务发布，再运行 Python detector 处理一次并回写结果。
+
+C++ 故障注入示例：
+
+```bash
+cpp_controller/build/seat_aoi_controller --simulate-missing-frame --wait-ms 200
+```
 
 ## 目录结构
 

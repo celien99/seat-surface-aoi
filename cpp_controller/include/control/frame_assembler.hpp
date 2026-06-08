@@ -6,6 +6,7 @@
 
 #include "camera/camera_worker.hpp"
 #include "control/light_controller.hpp"
+#include "control/station_runtime_config.hpp"
 #include "control/trigger_scheduler.hpp"
 #include "ipc/frame_ring_buffer.hpp"
 
@@ -18,6 +19,7 @@ struct Recipe {
 
 class FrameAssembler {
 public:
+  void configure(const StationRuntimeConfig& config);
   bool acquire_bundles(const Recipe& recipe,
                        const PlcTrigger& trigger,
                        std::uint64_t sequence_id,
@@ -28,9 +30,9 @@ private:
   bool ensure_initialized();
 
   bool initialized_ = false;
+  StationRuntimeConfig config_{};
   LightController light_controller_;
   std::vector<CameraWorker> cameras_;
 };
 
 }  // namespace seat_aoi
-

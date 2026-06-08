@@ -17,6 +17,8 @@ elif command -v clang++ >/dev/null 2>&1; then
     "${ROOT_DIR}/cpp_controller/src/ipc/frame_ring_buffer.cpp" \
     "${ROOT_DIR}/cpp_controller/src/ipc/result_ring_buffer.cpp" \
     "${ROOT_DIR}/cpp_controller/src/control/light_controller.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/control/plc_client.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/control/station_runtime_config.cpp" \
     "${ROOT_DIR}/cpp_controller/src/camera/camera_device.cpp" \
     "${ROOT_DIR}/cpp_controller/src/camera/camera_worker.cpp" \
     "${ROOT_DIR}/cpp_controller/src/control/trigger_scheduler.cpp" \

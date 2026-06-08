@@ -8,6 +8,22 @@ namespace seat_aoi {
 
 bool StationController::initialize(const StationConfig& config) {
   config_ = config;
+  StationRuntimeConfig runtime_config;
+  runtime_config.reset_shared_memory = config.reset_shared_memory;
+  runtime_config.slot_count = config.slot_count;
+  runtime_config.frame_slot_size = config.frame_slot_size;
+  runtime_config.result_slot_size = config.result_slot_size;
+  runtime_config.publish_timeout_ms = config.publish_timeout_ms;
+  runtime_config.detector_timeout_ms = config.detector_timeout_ms;
+  runtime_config.camera_timeout_ms = config.camera_timeout_ms;
+  runtime_config.light_timeout_ms = config.light_timeout_ms;
+  runtime_config.light.simulate_fault = config.simulate_light_fault;
+  runtime_config.plc.simulate_output_fault = config.simulate_plc_output_fault;
+  for (auto& camera : runtime_config.cameras) {
+    camera.simulate_missing_frame = config.simulate_missing_frame;
+  }
+  frame_assembler_.configure(runtime_config);
+  plc_client_.initialize(config.simulate_plc_output_fault);
   const bool frames_ok = frame_ring_.initialize(kFrameShmName,
                                                 config.slot_count,
                                                 config.frame_slot_size,
@@ -42,6 +58,10 @@ InspectionResultPayload StationController::inspect_one_seat(const PlcTrigger& tr
                                     &result,
                                     &error)) {
     return make_recheck_result(trigger, sequence_id, ErrorCode::DetectorTimeout, error);
+  }
+  const auto decision = static_cast<InspectionDecision>(result.meta.decision);
+  if (!plc_client_.send_decision(trigger, sequence_id, decision, 200, &error)) {
+    return make_recheck_result(trigger, sequence_id, ErrorCode::DeviceFault, error);
   }
   log_result(result);
   return result;
@@ -88,4 +108,3 @@ void StationController::log_result(const InspectionResultPayload& result) const 
 }
 
 }  // namespace seat_aoi
-

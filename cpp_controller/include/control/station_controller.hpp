@@ -4,6 +4,8 @@
 #include <string>
 
 #include "control/frame_assembler.hpp"
+#include "control/plc_client.hpp"
+#include "control/station_runtime_config.hpp"
 #include "control/trigger_scheduler.hpp"
 #include "ipc/frame_ring_buffer.hpp"
 #include "ipc/result_ring_buffer.hpp"
@@ -17,6 +19,11 @@ struct StationConfig {
   std::uint32_t result_slot_size = kDefaultResultSlotSize;
   int publish_timeout_ms = 1000;
   int detector_timeout_ms = 5000;
+  int camera_timeout_ms = 200;
+  int light_timeout_ms = 200;
+  bool simulate_light_fault = false;
+  bool simulate_plc_output_fault = false;
+  bool simulate_missing_frame = false;
 };
 
 class StationController {
@@ -37,8 +44,8 @@ private:
   FrameRingBuffer frame_ring_;
   ResultRingBuffer result_ring_;
   FrameAssembler frame_assembler_;
+  PlcClient plc_client_;
   std::uint64_t next_sequence_id_ = 1;
 };
 
 }  // namespace seat_aoi
-

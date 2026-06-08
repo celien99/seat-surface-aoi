@@ -24,7 +24,7 @@ struct LightHealth {
 
 class LightController {
 public:
-  bool initialize();
+  bool initialize(bool simulate_fault = false);
   bool run_sequence(const LightSequence& sequence, std::uint64_t trigger_id, int timeout_ms);
   bool set_channel(std::uint32_t light_index, const LightChannelParam& param);
   LightHealth get_health() const;
@@ -32,7 +32,7 @@ public:
 
 private:
   bool initialized_ = false;
+  bool simulate_fault_ = false;
 };
 
 }  // namespace seat_aoi
-

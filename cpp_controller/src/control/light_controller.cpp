@@ -5,15 +5,16 @@
 
 namespace seat_aoi {
 
-bool LightController::initialize() {
+bool LightController::initialize(bool simulate_fault) {
   initialized_ = true;
+  simulate_fault_ = simulate_fault;
   return true;
 }
 
 bool LightController::run_sequence(const LightSequence& sequence,
                                    std::uint64_t /*trigger_id*/,
                                    int timeout_ms) {
-  if (!initialized_ || sequence.channels.empty() || timeout_ms <= 0) {
+  if (!initialized_ || simulate_fault_ || sequence.channels.empty() || timeout_ms <= 0) {
     return false;
   }
   std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -26,7 +27,7 @@ bool LightController::set_channel(std::uint32_t /*light_index*/,
 }
 
 LightHealth LightController::get_health() const {
-  return LightHealth{initialized_, initialized_ ? "simulated" : "not initialized"};
+  return LightHealth{initialized_ && !simulate_fault_, simulate_fault_ ? "模拟光源故障" : "simulated"};
 }
 
 void LightController::shutdown_all() {
@@ -34,4 +35,3 @@ void LightController::shutdown_all() {
 }
 
 }  // namespace seat_aoi
-
