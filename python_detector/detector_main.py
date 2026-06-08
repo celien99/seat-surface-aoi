@@ -7,6 +7,7 @@ import time
 from python_detector.config.recipe_schema import RecipeManager
 from python_detector.ipc.shm_client import ShmClient
 from python_detector.pipeline.pipeline import InspectionPipeline
+from python_detector.trace.trace_writer import TraceWriter
 
 
 class DetectorProcess:
@@ -14,6 +15,7 @@ class DetectorProcess:
         self.shm_client: ShmClient | None = None
         self.recipe_manager = RecipeManager()
         self.pipeline = InspectionPipeline()
+        self.trace_writer = TraceWriter()
 
     def initialize(self) -> None:
         self.shm_client = ShmClient()
@@ -27,6 +29,8 @@ class DetectorProcess:
                 continue
             recipe = self.recipe_manager.load(job.recipe_id)
             result = self.pipeline.process(job, recipe)
+            self.trace_writer.root_dir = self.trace_writer.root_dir.__class__(recipe.trace.root_dir)
+            self.trace_writer.write(job, recipe, result, self.pipeline.last_context)
             self.shm_client.publish_result(result)
 
     def run_once(self, timeout_ms: int = 5000) -> bool:
@@ -39,6 +43,8 @@ class DetectorProcess:
                 continue
             recipe = self.recipe_manager.load(job.recipe_id)
             result = self.pipeline.process(job, recipe)
+            self.trace_writer.root_dir = self.trace_writer.root_dir.__class__(recipe.trace.root_dir)
+            self.trace_writer.write(job, recipe, result, self.pipeline.last_context)
             self.shm_client.publish_result(result)
             print(
                 f"processed sequence_id={result.sequence_id} trigger_id={result.trigger_id} "

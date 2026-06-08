@@ -18,6 +18,8 @@
 - C++ 运行配置示例位于 `cpp_controller/config/station_runtime.example.conf`。
 - Python 检测侧已支持标定文件和 ROI 模板加载，默认 identity 标定位于 `python_detector/config/calibration/`，默认 ROI 位于 `python_detector/config/roi/default_roi.yaml`。
 - 模型推理支持 fake 默认后端和 ONNX 可选后端；ONNX 依赖或模型缺失时保守失败，不会静默输出 `OK`。
+- 支持本地追溯落盘，`RECHECK`、`ERROR`、`NG` 默认保存 result、quality、registration、feature summary 和 timings。
+- 提供模拟回放与 benchmark 工具：`tools/replay_dataset.py`、`tools/benchmark_pipeline.py`。
 
 ## 项目规则
 
@@ -55,6 +57,13 @@ C++ 故障注入示例：
 
 ```bash
 cpp_controller/build/seat_aoi_controller --simulate-missing-frame --wait-ms 200
+```
+
+Python 回放和 benchmark：
+
+```bash
+python3 -m tools.replay_dataset --count 3 --write-trace
+python3 -m tools.benchmark_pipeline --count 10
 ```
 
 ## 目录结构
