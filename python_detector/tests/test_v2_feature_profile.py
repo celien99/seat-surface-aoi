@@ -22,6 +22,8 @@ def test_v2_production_feature_profile_uses_five_standard_channels() -> None:
     assert len(first.tensor_nchw[0][0]) == 48
     assert len(first.tensor_nchw[0][0][0]) == 64
     assert 0.0 <= first.tensor_nchw[0][0][0][0] <= 1.0
+    assert first.evidence_lights_by_channel["ch0_diffuse"] == ("DIFFUSE",)
+    assert first.evidence_lights_by_channel["ch4_high_max_min"] == ("HIGH_LEFT", "HIGH_RIGHT")
 
 
 def test_v2_roi_features_include_primary_and_safety_net_models() -> None:

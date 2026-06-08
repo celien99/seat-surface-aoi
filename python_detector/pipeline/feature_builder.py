@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from python_detector.config.recipe_schema import ModelConfig, Recipe
 from python_detector.ipc.data_types import LightFrame
@@ -18,6 +18,7 @@ class FeatureGroup:
     feature_shape_hw: tuple[int, int] = (0, 0)
     tensor_nchw: list[list[list[list[float]]]] | None = None
     tensor_channel_names: tuple[str, ...] = ()
+    evidence_lights_by_channel: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 class FeatureBuilder:
@@ -75,6 +76,7 @@ class FeatureBuilder:
             feature_shape_hw=feature_shape,
             tensor_nchw=tensor,
             tensor_channel_names=model_config.input_channels,
+            evidence_lights_by_channel=self._evidence_lights_by_channel(),
         )
 
     def _required(self, image: LightFrame | None, name: str) -> list[int]:
@@ -149,3 +151,16 @@ class FeatureBuilder:
             [max(0.0, min(float(source[row * width + col]) / input_scale, 1.0)) for col in range(width)]
             for row in range(height)
         ]
+
+    def _evidence_lights_by_channel(self) -> dict[str, tuple[str, ...]]:
+        return {
+            "ch0_diffuse": ("DIFFUSE",),
+            "ch1_polar_diffuse": ("POLAR_DIFFUSE",),
+            "ch2_high_left": ("HIGH_LEFT",),
+            "ch3_high_right": ("HIGH_RIGHT",),
+            "ch4_high_max_min": ("HIGH_LEFT", "HIGH_RIGHT"),
+            "optional_dark_low_lr_diff": ("LOW_LEFT", "LOW_RIGHT"),
+            "optional_dark_low_max_min": ("LOW_LEFT", "LOW_RIGHT"),
+            "aux_local_contrast": ("DIFFUSE",),
+            "aux_specular_removed": ("DIFFUSE", "POLAR_DIFFUSE"),
+        }

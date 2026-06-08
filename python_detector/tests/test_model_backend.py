@@ -17,7 +17,11 @@ def _feature_group() -> FeatureGroup:
         roi_bbox_xyxy_pixel=(10, 20, 73, 67),
         feature_shape_hw=(48, 64),
         tensor_nchw=[[[[0.1 for _ in range(64)] for _ in range(48)]]],
-        tensor_channel_names=("ch0_diffuse",),
+        tensor_channel_names=("ch0_diffuse", "ch4_high_max_min"),
+        evidence_lights_by_channel={
+            "ch0_diffuse": ("DIFFUSE",),
+            "ch4_high_max_min": ("HIGH_LEFT", "HIGH_RIGHT"),
+        },
     )
 
 
@@ -84,7 +88,7 @@ def test_onnx_detection_rows_decode_maps_normalized_roi_bbox() -> None:
     assert candidates[0].score == pytest.approx(0.91)
     assert candidates[0].bbox_xyxy_pixel == (26, 32, 42, 44)
     assert candidates[0].area_px == 17 * 13
-    assert candidates[0].evidence_lights == ["ch0_diffuse"]
+    assert candidates[0].evidence_lights == ["DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"]
     assert model.session.last_inputs["input"][0][0][0][0] == pytest.approx(0.1)
 
 

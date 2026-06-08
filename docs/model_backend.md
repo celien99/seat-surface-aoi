@@ -28,6 +28,18 @@ ch4_high_max_min
 
 模型配置必须明确输入通道顺序。ONNX 模型的第一个输入节点会接收该 NCHW tensor。
 
+输入通道进入模型后，候选结果中的 `evidence_lights` 会映射回真实光源名，便于共享内存回写和 C++ 侧追溯：
+
+| 特征通道 | 回写证据光源 |
+|---|---|
+| `ch0_diffuse` | `DIFFUSE` |
+| `ch1_polar_diffuse` | `POLAR_DIFFUSE` |
+| `ch2_high_left` | `HIGH_LEFT` |
+| `ch3_high_right` | `HIGH_RIGHT` |
+| `ch4_high_max_min` | `HIGH_LEFT`, `HIGH_RIGHT` |
+| `aux_specular_removed` | `DIFFUSE`, `POLAR_DIFFUSE` |
+| `optional_dark_low_lr_diff` / `optional_dark_low_max_min` | `LOW_LEFT`, `LOW_RIGHT` |
+
 ## 配方示例
 
 ```yaml

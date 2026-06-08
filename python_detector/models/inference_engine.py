@@ -126,10 +126,16 @@ class OnnxModel:
                     score=score,
                     bbox_xyxy_pixel=bbox,
                     area_px=area_px,
-                    evidence_lights=list(feature_group.tensor_channel_names),
+                    evidence_lights=self._evidence_lights(feature_group),
                 )
             )
         return candidates
+
+    def _evidence_lights(self, feature_group: FeatureGroup) -> list[str]:
+        evidence: list[str] = []
+        for channel_name in feature_group.tensor_channel_names:
+            evidence.extend(feature_group.evidence_lights_by_channel.get(channel_name, ()))
+        return list(dict.fromkeys(evidence))
 
     def _map_bbox_xyxy(self, raw_bbox: Any, feature_group: FeatureGroup) -> tuple[int, int, int, int]:
         x0, y0, x1, y1 = (float(value) for value in raw_bbox)
