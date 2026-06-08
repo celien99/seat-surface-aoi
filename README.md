@@ -19,6 +19,7 @@
 - V2 生产标准默认使用 `DIFFUSE`、`POLAR_DIFFUSE`、`HIGH_LEFT`、`HIGH_RIGHT` 四个必需光源，生成 `ch0_diffuse` 到 `ch4_high_max_min` 的 5 通道标准特征。
 - 规则判定使用配方中的类别阈值 `ng_score`、`recheck_score` 和 `min_area_px`；机位级 `light_order` 会进入 ReflectanceCube 和特征构建。
 - Python 预处理会按 ROI 模板裁剪 MONO8 图像并保留 `bbox_xyxy_pixel` 原图坐标；ROI 越界、ROI 输出尺寸不一致、标定尺寸不一致会保守失败。
+- ROI 预处理支持轴对齐矩形快速裁剪和四点多边形透视展开，可将倾斜 ROI 规整到 `output_size` 后进入特征和模型链路。
 - ReflectanceCube 会使用标定文件中的 `light_alignment.matrix_3x3` 计算 ROI 角点配准误差，超过 `quality.max_registration_error_px` 时返回 `RECHECK`。
 - FeatureBuilder 会为每个 ROI 模型构建 NCHW float 输入张量，通道顺序、输入缩放和模型输出解码方式由配方 `models.*` 字段声明。
 - ONNX 后端支持可配置 `detection_rows` 输出解码，输入/输出缺失、类别越界、bbox 无效或未配置输出解码时会保守失败，不会静默输出 `OK`。

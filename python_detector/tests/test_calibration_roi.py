@@ -119,6 +119,45 @@ roi_templates:
     assert int(roi_frame.image[0]) == int(frames["DIFFUSE"].image[8 * 64 + 10])
 
 
+def test_preprocessor_warps_four_point_roi_to_output_size(tmp_path: Path) -> None:
+    roi_path = tmp_path / "roi.yaml"
+    roi_path.write_text(
+        """
+roi_templates:
+  tilted:
+    polygon_xy:
+      - [10, 8]
+      - [30, 6]
+      - [33, 21]
+      - [8, 23]
+    output_size: [8, 6]
+""",
+        encoding="utf-8",
+    )
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    camera = replace(recipe.cameras[0], roi_template=str(roi_path))
+    recipe = replace(recipe, cameras=(camera,))
+    frames = {light: _frame(light) for light in LIGHT_ORDER}
+    job = SeatInspectionJob(
+        sequence_id=1,
+        trigger_id=2,
+        seat_id="SIM",
+        recipe_id=recipe.recipe_id,
+        sku=recipe.sku,
+        camera_bundles=[CameraBundle(camera_id="TOP_BACK", pose_id="TOP_BACK", light_frames=frames)],
+    )
+
+    prepared = Preprocessor().run(job, recipe)
+    roi_frame = prepared[0].rois["tilted"]["DIFFUSE"]
+
+    assert roi_frame.width == 8
+    assert roi_frame.height == 6
+    assert roi_frame.origin_xy == (8, 6)
+    assert roi_frame.bbox_xyxy_pixel == (8, 6, 15, 11)
+    assert len(roi_frame.image) == 8 * 6
+    assert max(roi_frame.image) > min(roi_frame.image)
+
+
 def test_registration_error_exceeding_threshold_returns_recheck(tmp_path: Path) -> None:
     calibration_dir = tmp_path / "python_detector/config/calibration/TOP_BACK"
     calibration_dir.mkdir(parents=True)

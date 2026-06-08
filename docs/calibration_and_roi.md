@@ -19,6 +19,9 @@ python_detector/config/roi/default_roi.yaml
 - 图像 `calibration_id` 必须和配方/标定文件一致。
 - 图像尺寸必须和标定文件一致。
 - ROI 至少包含 3 个点。
+- 轴对齐 4 点矩形 ROI 会走快速裁剪；`output_size` 必须等于该矩形外接框尺寸。
+- 非轴对齐 ROI 必须提供 4 个点，Python 预处理会按四点透视展开到 `output_size`。
+- 透视展开只支持当前在线主链路的 `MONO8` ROI 输入；输出图仍记录 `origin_xy` 作为原图外接框左上角，用于缺陷框追溯。
 - `base_light_id` 缺失时按配方 fallback；fallback 也缺失时返回 `RECHECK/ERROR`。
 - 生产环境默认策略应为全局 ROI 定位 + ROI 局部对齐；固定 identity 或全局单应矩阵只适用于当前模拟环境、标准样件验证或刚性夹具条件。
 - ROI 定位失败、局部对齐误差超过配方阈值、ROI 模板缺失或坐标越界时不能输出 `OK`。

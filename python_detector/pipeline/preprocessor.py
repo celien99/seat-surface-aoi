@@ -94,30 +94,30 @@ class Preprocessor:
                 f"{frame.camera_id}/{frame.light_id}/{roi.roi_name}: ROI 坐标越界 "
                 f"({x0},{y0})-({x1},{y1}) image={frame.width}x{frame.height}"
             )
-        crop_width = x1 - x0 + 1
-        crop_height = y1 - y0 + 1
-        if roi.output_size != (crop_width, crop_height):
-            raise ValueError(
-                f"{frame.camera_id}/{frame.light_id}/{roi.roi_name}: ROI output_size 与裁剪尺寸不一致 "
-                f"{roi.output_size} != {(crop_width, crop_height)}"
-            )
+        output_width, output_height = roi.output_size
+        if output_width <= 0 or output_height <= 0:
+            raise ValueError(f"{frame.camera_id}/{frame.light_id}/{roi.roi_name}: ROI output_size 无效")
 
-        cropped = bytearray(crop_width * crop_height)
-        for row in range(crop_height):
-            source_start = (y0 + row) * frame.stride_bytes + x0
-            source_end = source_start + crop_width
-            target_start = row * crop_width
-            cropped[target_start : target_start + crop_width] = frame.image[source_start:source_end]
+        bbox_width = x1 - x0 + 1
+        bbox_height = y1 - y0 + 1
+        if self._is_axis_aligned_rectangle(roi) and roi.output_size == (bbox_width, bbox_height):
+            cropped = self._crop_bbox(frame, x0, y0, bbox_width, bbox_height)
+        elif len(roi.polygon_xy) == 4:
+            cropped = self._warp_quad(frame, roi, output_width, output_height)
+        else:
+            raise ValueError(
+                f"{frame.camera_id}/{frame.light_id}/{roi.roi_name}: 非矩形 ROI 必须提供 4 个点用于透视展开"
+            )
         origin_x, origin_y = frame.origin_xy
         return LightFrame(
             camera_id=frame.camera_id,
             light_id=frame.light_id,
             frame_index=frame.frame_index,
             light_seq_index=frame.light_seq_index,
-            width=crop_width,
-            height=crop_height,
+            width=output_width,
+            height=output_height,
             channels=frame.channels,
-            stride_bytes=crop_width,
+            stride_bytes=output_width,
             pixel_format=frame.pixel_format,
             bit_depth=frame.bit_depth,
             color_order=frame.color_order,
@@ -132,3 +132,114 @@ class Preprocessor:
             source_width=frame.source_width or frame.width,
             source_height=frame.source_height or frame.height,
         )
+
+    def _crop_bbox(self, frame: LightFrame, x0: int, y0: int, width: int, height: int) -> bytearray:
+        cropped = bytearray(width * height)
+        for row in range(height):
+            source_start = (y0 + row) * frame.stride_bytes + x0
+            source_end = source_start + width
+            target_start = row * width
+            cropped[target_start : target_start + width] = frame.image[source_start:source_end]
+        return cropped
+
+    def _warp_quad(self, frame: LightFrame, roi: RoiTemplate, output_width: int, output_height: int) -> bytearray:
+        source_points = self._ordered_quad(roi.polygon_xy)
+        destination_points = (
+            (0.0, 0.0),
+            (float(output_width - 1), 0.0),
+            (float(output_width - 1), float(output_height - 1)),
+            (0.0, float(output_height - 1)),
+        )
+        transform = self._homography(destination_points, source_points)
+        warped = bytearray(output_width * output_height)
+        for y in range(output_height):
+            for x in range(output_width):
+                source = self._apply_homography(transform, float(x), float(y))
+                if source is None:
+                    raise ValueError(f"{frame.camera_id}/{frame.light_id}/{roi.roi_name}: ROI 透视变换无效")
+                sx, sy = source
+                warped[y * output_width + x] = self._sample_bilinear(frame, sx, sy)
+        return warped
+
+    def _is_axis_aligned_rectangle(self, roi: RoiTemplate) -> bool:
+        if len(roi.polygon_xy) != 4:
+            return False
+        ordered = self._ordered_quad(roi.polygon_xy)
+        x_values = sorted({point[0] for point in ordered})
+        y_values = sorted({point[1] for point in ordered})
+        return len(x_values) == 2 and len(y_values) == 2
+
+    def _ordered_quad(self, points: tuple[tuple[int, int], ...]) -> tuple[tuple[float, float], ...]:
+        if len(points) != 4:
+            raise ValueError("ROI 透视展开需要 4 个点")
+        as_float = [(float(x), float(y)) for x, y in points]
+        sums = [x + y for x, y in as_float]
+        diffs = [x - y for x, y in as_float]
+        top_left = as_float[sums.index(min(sums))]
+        bottom_right = as_float[sums.index(max(sums))]
+        top_right = as_float[diffs.index(max(diffs))]
+        bottom_left = as_float[diffs.index(min(diffs))]
+        ordered = (top_left, top_right, bottom_right, bottom_left)
+        if len(set(ordered)) != 4:
+            raise ValueError("ROI 四点不能重复或退化")
+        return ordered
+
+    def _homography(
+        self,
+        src_points: tuple[tuple[float, float], ...],
+        dst_points: tuple[tuple[float, float], ...],
+    ) -> tuple[float, ...]:
+        rows: list[list[float]] = []
+        values: list[float] = []
+        for (x, y), (u, v) in zip(src_points, dst_points):
+            rows.append([x, y, 1.0, 0.0, 0.0, 0.0, -u * x, -u * y])
+            values.append(u)
+            rows.append([0.0, 0.0, 0.0, x, y, 1.0, -v * x, -v * y])
+            values.append(v)
+        solved = self._solve_linear(rows, values)
+        return (solved[0], solved[1], solved[2], solved[3], solved[4], solved[5], solved[6], solved[7], 1.0)
+
+    def _solve_linear(self, matrix: list[list[float]], values: list[float]) -> list[float]:
+        size = len(values)
+        augmented = [row[:] + [value] for row, value in zip(matrix, values)]
+        for col in range(size):
+            pivot = max(range(col, size), key=lambda row: abs(augmented[row][col]))
+            if abs(augmented[pivot][col]) < 1e-9:
+                raise ValueError("ROI 透视矩阵不可逆")
+            augmented[col], augmented[pivot] = augmented[pivot], augmented[col]
+            pivot_value = augmented[col][col]
+            for item in range(col, size + 1):
+                augmented[col][item] /= pivot_value
+            for row in range(size):
+                if row == col:
+                    continue
+                factor = augmented[row][col]
+                if factor == 0.0:
+                    continue
+                for item in range(col, size + 1):
+                    augmented[row][item] -= factor * augmented[col][item]
+        return [augmented[row][size] for row in range(size)]
+
+    def _apply_homography(self, transform: tuple[float, ...], x: float, y: float) -> tuple[float, float] | None:
+        denom = transform[6] * x + transform[7] * y + transform[8]
+        if abs(denom) < 1e-9:
+            return None
+        source_x = (transform[0] * x + transform[1] * y + transform[2]) / denom
+        source_y = (transform[3] * x + transform[4] * y + transform[5]) / denom
+        return source_x, source_y
+
+    def _sample_bilinear(self, frame: LightFrame, x: float, y: float) -> int:
+        x = max(0.0, min(float(frame.width - 1), x))
+        y = max(0.0, min(float(frame.height - 1), y))
+        x0 = int(x)
+        y0 = int(y)
+        x1 = min(x0 + 1, frame.width - 1)
+        y1 = min(y0 + 1, frame.height - 1)
+        dx = x - x0
+        dy = y - y0
+        top = self._pixel(frame, x0, y0) * (1.0 - dx) + self._pixel(frame, x1, y0) * dx
+        bottom = self._pixel(frame, x0, y1) * (1.0 - dx) + self._pixel(frame, x1, y1) * dx
+        return int(round(top * (1.0 - dy) + bottom * dy))
+
+    def _pixel(self, frame: LightFrame, x: int, y: int) -> int:
+        return int(frame.image[y * frame.stride_bytes + x])
