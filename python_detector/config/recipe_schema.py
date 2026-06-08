@@ -32,11 +32,14 @@ class RegistrationConfig:
 class CameraRecipe:
     camera_id: str
     enabled: bool = True
-    model_key: str = "fake_default"
+    model_key: str = "default"
+    safety_net_model_key: str | None = None
     roi_template: str = "config/roi/default_roi.yaml"
     calibration_id: str = "calib/simulated_v1"
     base_light_id: str = "POLAR_DIFFUSE"
     light_order: tuple[str, ...] = ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")
+    roi_models: dict[str, str] = field(default_factory=dict)
+    roi_safety_net_models: dict[str, str] = field(default_factory=dict)
     pixel_size_mm: float | None = None
 
 
@@ -52,6 +55,8 @@ class ModelConfig:
     backend: str = "fake"
     model_path: str | None = None
     fake_mode: str = "auto"
+    model_family: str = "supervised"
+    role: str = "primary"
 
 
 @dataclass(frozen=True)
@@ -80,6 +85,19 @@ class Recipe:
             if camera.camera_id == camera_id:
                 return camera
         return None
+
+    def model_key_for(self, camera_id: str, roi_name: str) -> str:
+        camera = self.camera(camera_id)
+        if camera is None:
+            return "default"
+        return camera.roi_models.get(roi_name, camera.model_key)
+
+    def safety_net_model_keys_for(self, camera_id: str, roi_name: str) -> tuple[str, ...]:
+        camera = self.camera(camera_id)
+        if camera is None:
+            return ()
+        model_key = camera.roi_safety_net_models.get(roi_name, camera.safety_net_model_key)
+        return () if model_key is None else (model_key,)
 
 
 class RecipeManager:
@@ -123,6 +141,7 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
     trace = _trace_from_dict(_dict(data.get("trace", {}), "trace"))
 
     _validate_lights(light_order, quality.required_lights)
+    _validate_model_refs(cameras, models)
     if not cameras:
         raise RecipeValidationError("至少需要配置一个启用机位")
     return Recipe(
@@ -176,11 +195,17 @@ def _cameras_from_dict(data: Any, default_light_order: tuple[str, ...], default_
             CameraRecipe(
                 camera_id=_str(raw.get("camera_id", camera_id), f"cameras.{camera_id}.camera_id"),
                 enabled=enabled,
-                model_key=_str(raw.get("model_key", "fake_default"), f"cameras.{camera_id}.model_key"),
+                model_key=_str(raw.get("model_key", "default"), f"cameras.{camera_id}.model_key"),
+                safety_net_model_key=_optional_str(raw.get("safety_net_model_key"), f"cameras.{camera_id}.safety_net_model_key"),
                 roi_template=_str(raw.get("roi_template", "python_detector/config/roi/default_roi.yaml"), f"cameras.{camera_id}.roi_template"),
                 calibration_id=_str(raw.get("calibration_id", "calib/simulated_v1"), f"cameras.{camera_id}.calibration_id"),
                 base_light_id=_str(raw.get("base_light_id", default_base_light_id), f"cameras.{camera_id}.base_light_id"),
                 light_order=light_order,
+                roi_models={str(k): _str(v, f"cameras.{camera_id}.roi_models.{k}") for k, v in _dict(raw.get("roi_models", {}), f"cameras.{camera_id}.roi_models").items()},
+                roi_safety_net_models={
+                    str(k): _str(v, f"cameras.{camera_id}.roi_safety_net_models.{k}")
+                    for k, v in _dict(raw.get("roi_safety_net_models", {}), f"cameras.{camera_id}.roi_safety_net_models").items()
+                },
                 pixel_size_mm=_optional_float(raw.get("pixel_size_mm"), f"cameras.{camera_id}.pixel_size_mm"),
             )
         )
@@ -206,10 +231,20 @@ def _models_from_dict(data: dict[str, Any]) -> dict[str, ModelConfig]:
         backend = _str(raw.get("backend", "fake"), f"models.{model_key}.backend")
         if backend not in {"fake", "onnx"}:
             raise RecipeValidationError(f"不支持的模型后端: {backend}")
+        model_family = _str(raw.get("model_family", "supervised"), f"models.{model_key}.model_family")
+        if model_family not in {"supervised", "patchcore", "efficientad", "yolo_seg", "classifier"}:
+            raise RecipeValidationError(f"不支持的模型家族: {model_family}")
+        role = _str(raw.get("role", "primary"), f"models.{model_key}.role")
+        if role not in {"primary", "safety_net"}:
+            raise RecipeValidationError(f"模型角色必须是 primary 或 safety_net: {model_key}")
+        if model_family == "patchcore" and role != "safety_net":
+            raise RecipeValidationError("PatchCore 只能作为 unknown defect safety_net，不能作为全座椅 primary detector")
         models[str(model_key)] = ModelConfig(
             backend=backend,
             model_path=None if raw.get("model_path") in (None, "") else _str(raw.get("model_path"), f"models.{model_key}.model_path"),
             fake_mode=_str(raw.get("fake_mode", "auto"), f"models.{model_key}.fake_mode"),
+            model_family=model_family,
+            role=role,
         )
     if "default" not in models:
         models["default"] = ModelConfig()
@@ -237,10 +272,45 @@ def _validate_lights(light_order: tuple[str, ...], required_lights: tuple[str, .
         raise RecipeValidationError(f"required_lights 不在 light_order 中: {missing}")
 
 
+def _validate_model_refs(cameras: tuple[CameraRecipe, ...], models: dict[str, ModelConfig]) -> None:
+    for camera in cameras:
+        _validate_model_ref(models, camera.model_key, f"机位 {camera.camera_id}", expected_role="primary")
+        if camera.safety_net_model_key is not None:
+            _validate_model_ref(
+                models,
+                camera.safety_net_model_key,
+                f"机位 {camera.camera_id} safety_net_model_key",
+                expected_role="safety_net",
+            )
+        for roi_name, model_key in camera.roi_models.items():
+            _validate_model_ref(models, model_key, f"机位 {camera.camera_id} ROI {roi_name}", expected_role="primary")
+        for roi_name, model_key in camera.roi_safety_net_models.items():
+            _validate_model_ref(
+                models,
+                model_key,
+                f"机位 {camera.camera_id} ROI {roi_name} safety_net",
+                expected_role="safety_net",
+            )
+
+
+def _validate_model_ref(models: dict[str, ModelConfig], model_key: str, location: str, expected_role: str) -> None:
+    model = models.get(model_key)
+    if model is None:
+        raise RecipeValidationError(f"{location} 引用了不存在的模型: {model_key}")
+    if model.role != expected_role:
+        raise RecipeValidationError(f"{location} 引用的模型角色必须是 {expected_role}: {model_key}")
+
+
 def _required_str(data: dict[str, Any], key: str) -> str:
     if key not in data:
         raise RecipeValidationError(f"缺少必填字段: {key}")
     return _str(data[key], key)
+
+
+def _optional_str(value: Any, name: str) -> str | None:
+    if value in (None, ""):
+        return None
+    return _str(value, name)
 
 
 def _str(value: Any, name: str) -> str:

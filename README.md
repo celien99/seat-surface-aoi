@@ -10,14 +10,17 @@
 - POSIX 共享内存图像/结果 ring buffer。
 - C++ 模拟主控：模拟相机、光源、触发、图像发布和结果等待。
 - Python 检测进程：共享内存读取、质量门禁、预处理、ReflectanceCube、特征构建、fake 推理、融合和规则判定。
+- V2 生产标准默认使用 `DIFFUSE`、`POLAR_DIFFUSE`、`HIGH_LEFT`、`HIGH_RIGHT` 四个必需光源，生成 `ch0_diffuse` 到 `ch4_high_max_min` 的 5 通道标准特征。
+- 低角度暗场、前后高角度和 NIR 作为可选增强光源，不作为主链路输出 `OK` 的默认前置依赖。
 - 正常模拟图像包返回 `OK`。
 - Python detector 不存在或超时时，C++ 保守返回 `RECHECK`，不会误判 `OK`。
 - YAML 配方加载与 schema 校验，当前默认配方位于 `python_detector/config/default_recipe.yaml`。
-- 配方已覆盖机位、光源顺序、质量阈值、注册策略、模型后端和追溯配置。
+- 配方已覆盖机位、光源顺序、质量阈值、注册策略、ROI 级主模型、unknown safety net 模型、模型后端和追溯配置。
 - C++ 主控已具备相机、光源、PLC 的可替换接口和模拟驱动，支持光源故障、缺帧、PLC 输出失败等故障注入。
 - C++ 运行配置示例位于 `cpp_controller/config/station_runtime.example.conf`。
 - Python 检测侧已支持标定文件和 ROI 模板加载，默认 identity 标定位于 `python_detector/config/calibration/`，默认 ROI 位于 `python_detector/config/roi/default_roi.yaml`。
 - 模型推理支持 fake 默认后端和 ONNX 可选后端；ONNX 依赖或模型缺失时保守失败，不会静默输出 `OK`。
+- PatchCore 只能配置为 unknown defect safety net，不能作为全座椅或 ROI 主检测模型。
 - 支持本地追溯落盘，`RECHECK`、`ERROR`、`NG` 默认保存 result、quality、registration、feature summary 和 timings。
 - 提供模拟回放与 benchmark 工具：`tools/replay_dataset.py`、`tools/benchmark_pipeline.py`。
 

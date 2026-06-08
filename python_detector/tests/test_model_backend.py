@@ -13,7 +13,7 @@ def _feature_group() -> FeatureGroup:
         camera_id="TOP_BACK",
         roi_name="full",
         model_key="fake_default",
-        features={"high_lr_diff": [0] * 64},
+        features={"ch4_high_max_min": [0] * 64},
     )
 
 
@@ -30,3 +30,9 @@ def test_onnx_missing_model_path_fails_conservatively() -> None:
     with pytest.raises(RuntimeError):
         InferenceEngine(ModelRegistry()).infer([_feature_group()], recipe)
 
+
+def test_missing_model_key_does_not_fallback_to_default_ok() -> None:
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    missing_group = replace(_feature_group(), model_key="missing_model")
+    with pytest.raises(RuntimeError):
+        InferenceEngine(ModelRegistry()).infer([missing_group], recipe)

@@ -9,6 +9,7 @@ cameras:
   TOP_BACK:
     enabled: true
     model_key: fake_default
+    safety_net_model_key: unknown_safety_net
     roi_template: python_detector/config/roi/default_roi.yaml
     calibration_id: calib/simulated_v1
     base_light_id: POLAR_DIFFUSE
@@ -17,10 +18,15 @@ cameras:
       - POLAR_DIFFUSE
       - HIGH_LEFT
       - HIGH_RIGHT
+    roi_models:
+      full: fake_default
+    roi_safety_net_models:
+      full: unknown_safety_net
     pixel_size_mm: 0.12
   TOP_CUSHION:
     enabled: true
     model_key: fake_default
+    safety_net_model_key: unknown_safety_net
     roi_template: python_detector/config/roi/default_roi.yaml
     calibration_id: calib/simulated_v1
     base_light_id: POLAR_DIFFUSE
@@ -29,6 +35,10 @@ cameras:
       - POLAR_DIFFUSE
       - HIGH_LEFT
       - HIGH_RIGHT
+    roi_models:
+      full: fake_default
+    roi_safety_net_models:
+      full: unknown_safety_net
     pixel_size_mm: 0.12
 quality:
   required_lights:
@@ -58,9 +68,18 @@ models:
   default:
     backend: fake
     fake_mode: auto
+    model_family: supervised
+    role: primary
   fake_default:
     backend: fake
     fake_mode: auto
+    model_family: supervised
+    role: primary
+  unknown_safety_net:
+    backend: fake
+    fake_mode: ok
+    model_family: patchcore
+    role: safety_net
 trace:
   enabled: true
   root_dir: trace

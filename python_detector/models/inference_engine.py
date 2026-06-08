@@ -35,7 +35,7 @@ class FakeModel:
             return [self._candidate(feature_group, 0.88)]
         if self.mode == "recheck":
             return [self._candidate(feature_group, 0.22)]
-        suspicious = max(feature_group.features.get("high_lr_diff", [0]))
+        suspicious = max(feature_group.features.get("ch4_high_max_min", [0]))
         if suspicious > 240:
             return [self._candidate(feature_group, 0.22)]
         return []
@@ -74,7 +74,9 @@ class ModelRegistry:
         self._cache: dict[str, ModelBackend] = {}
 
     def get_model(self, model_key: str, recipe: Recipe) -> ModelBackend:
-        config = recipe.models.get(model_key) or recipe.models.get("default") or ModelConfig()
+        config = recipe.models.get(model_key)
+        if config is None:
+            raise RuntimeError(f"配方引用了不存在的模型: {model_key}")
         cache_key = f"{model_key}:{config.backend}:{config.model_path or ''}"
         if cache_key not in self._cache:
             self._cache[cache_key] = self._create_model(config)
