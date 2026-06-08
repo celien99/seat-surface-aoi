@@ -9,8 +9,13 @@
 - C++ 固定布局 IPC 协议结构体。
 - POSIX 共享内存图像/结果 ring buffer。
 - C++ 模拟主控：模拟相机、光源、触发、图像发布和结果等待。
+- C++ 主控在 PLC 输出前会校验检测结果语义：`sequence_id`、`trigger_id`、`seat_id`、decision、质量状态、错误码和缺陷数量不一致时统一降级为 `RECHECK`，不会输出 `OK`。
+- Frame ring 发布会扫描可用 `EMPTY` slot，单个 `READING`/坏 slot 不会阻塞其它空闲 slot。
+- Result ring 对协议、payload 和 CRC 错误会立即返回真实错误码，不再等待到 detector timeout。
 - Python 检测进程：共享内存读取、质量门禁、预处理、ReflectanceCube、特征构建、fake 推理、融合和规则判定。
+- Python 检测进程读取坏 frame slot 时会释放输入 slot；检测、配方或模型异常会回写 `ERROR`/`RECHECK`，不会让共享内存 slot 长期停留在 `READING`。
 - V2 生产标准默认使用 `DIFFUSE`、`POLAR_DIFFUSE`、`HIGH_LEFT`、`HIGH_RIGHT` 四个必需光源，生成 `ch0_diffuse` 到 `ch4_high_max_min` 的 5 通道标准特征。
+- 规则判定使用配方中的类别阈值 `ng_score`、`recheck_score` 和 `min_area_px`；机位级 `light_order` 会进入 ReflectanceCube 和特征构建。
 - 低角度暗场、前后高角度和 NIR 作为可选增强光源，不作为主链路输出 `OK` 的默认前置依赖。
 - 正常模拟图像包返回 `OK`。
 - Python detector 不存在或超时时，C++ 保守返回 `RECHECK`，不会误判 `OK`。
@@ -60,6 +65,12 @@ C++ 故障注入示例：
 
 ```bash
 cpp_controller/build/seat_aoi_controller --simulate-missing-frame --wait-ms 200
+```
+
+C++ 运行配置示例支持 `recipe_id` 和逗号分隔的 `light_order`：
+
+```bash
+cpp_controller/build/seat_aoi_controller --config cpp_controller/config/station_runtime.example.conf
 ```
 
 Python 回放和 benchmark：

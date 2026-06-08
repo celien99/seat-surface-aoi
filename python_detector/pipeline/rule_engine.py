@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from python_detector.config.recipe_schema import Recipe, ThresholdConfig
 from python_detector.ipc.data_types import DefectResult, InspectionResult, SeatInspectionJob
 from python_detector.ipc.shm_protocol import ErrorCode
 from python_detector.pipeline.fusion_engine import FusedResult
@@ -12,6 +13,7 @@ class RuleEngine:
         job: SeatInspectionJob,
         fused_result: FusedResult,
         quality_report: QualityReport,
+        recipe: Recipe,
         elapsed_ms: float,
     ) -> InspectionResult:
         if not quality_report.is_pass:
@@ -20,7 +22,8 @@ class RuleEngine:
         defects: list[DefectResult] = []
         decision = "OK"
         for index, candidate in enumerate(fused_result.candidates):
-            if candidate.score >= 0.35:
+            threshold = recipe.thresholds.get(candidate.class_name, ThresholdConfig())
+            if candidate.score >= threshold.ng_score and candidate.area_px >= threshold.min_area_px:
                 defect_decision = "NG"
                 decision = "NG"
             else:
@@ -82,4 +85,3 @@ class RuleEngine:
             error_code=error_code,
             elapsed_ms=elapsed_ms,
         )
-

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "control/frame_assembler.hpp"
 #include "control/plc_client.hpp"
@@ -21,6 +22,8 @@ struct StationConfig {
   int detector_timeout_ms = 5000;
   int camera_timeout_ms = 200;
   int light_timeout_ms = 200;
+  std::string recipe_id = "seat_a_black_leather_v1";
+  std::vector<std::uint32_t> light_order = {1, 2, 3, 4};
   bool simulate_light_fault = false;
   bool simulate_plc_output_fault = false;
   bool simulate_missing_frame = false;
@@ -38,6 +41,10 @@ private:
                                               std::uint64_t sequence_id,
                                               ErrorCode error_code,
                                               const std::string& message) const;
+  bool validate_detector_result(const PlcTrigger& trigger,
+                                std::uint64_t sequence_id,
+                                const InspectionResultPayload& result,
+                                std::string* error_message) const;
   void log_result(const InspectionResultPayload& result) const;
 
   StationConfig config_{};

@@ -40,3 +40,6 @@ target_link_libraries(seat_aoi_controller PRIVATE seat_aoi_control)
 
 add_executable(protocol_layout tools/protocol_layout.cpp)
 target_include_directories(protocol_layout PRIVATE include)
+
+add_executable(ipc_safety_checks tools/ipc_safety_checks.cpp)
+target_link_libraries(ipc_safety_checks PRIVATE seat_aoi_ipc)

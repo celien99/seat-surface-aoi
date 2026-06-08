@@ -55,6 +55,8 @@ class ReflectanceCubeBuilder:
         recipe: Recipe,
     ) -> ReflectanceCube:
         camera_id = bundle.camera_id
+        camera_recipe = recipe.camera(camera_id)
+        light_order = camera_recipe.light_order if camera_recipe is not None else recipe.light_order
         base_light_id = recipe.registration.base_light_id
         if base_light_id not in frames:
             base_light_id = recipe.registration.base_light_fallback
@@ -77,8 +79,8 @@ class ReflectanceCubeBuilder:
             camera_id=camera_id,
             roi_name=roi_name,
             base_light_id=base_light_id,
-            light_order=recipe.light_order,
-            frames={light_id: frames[light_id] for light_id in recipe.light_order if light_id in frames},
+            light_order=light_order,
+            frames={light_id: frames[light_id] for light_id in light_order if light_id in frames},
             registration=registration,
             pixel_size_mm=bundle.calibration.pixel_size_mm,
             calibration_id=bundle.calibration.calibration_id,

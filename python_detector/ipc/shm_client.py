@@ -141,11 +141,13 @@ class ShmClient:
                     self._write_result_slot(base, result, defects, payload_size)
                 except Exception:
                     AtomicU32.store(self.results.mm, base, SlotState.CORRUPTED)
+                    self._release_frame_slot(result.sequence_id)
                     raise
                 AtomicU32.store(self.results.mm, base, SlotState.READY)
                 self._release_frame_slot(result.sequence_id)
                 return
             time.sleep(0.002)
+        self._release_frame_slot(result.sequence_id)
         raise TimeoutError("result slot unavailable before timeout")
 
     def _validate_header(self, mm: mmap.mmap, expected_slot_size: int) -> None:
@@ -161,66 +163,64 @@ class ShmClient:
     def _read_frame_slot(self, slot_index: int) -> SeatInspectionJob | None:
         base = self._slot_base(slot_index, self.frame_slot_size)
         AtomicU32.store(self.frames.mm, base, SlotState.READING)
-        prefix = FRAME_SLOT_HEADER_PREFIX.unpack_from(self.frames.mm, base)
-        _state, sequence_id, payload_size, header_crc32, payload_crc32, frame_meta_count, _reserved = prefix
-        if payload_size > self.frame_slot_size or frame_meta_count <= 0:
-            AtomicU32.store(self.frames.mm, base, SlotState.CORRUPTED)
+        try:
+            prefix = FRAME_SLOT_HEADER_PREFIX.unpack_from(self.frames.mm, base)
+            _state, sequence_id, payload_size, header_crc32, payload_crc32, frame_meta_count, _reserved = prefix
+            if payload_size > self.frame_slot_size or frame_meta_count <= 0:
+                raise RuntimeError("invalid frame payload size or frame count")
+
+            payload = memoryview(self.frames.mm)[base + frame_slot_meta_offset() : base + payload_size]
+            if crc32(payload) != payload_crc32:
+                raise RuntimeError("frame payload CRC mismatch")
+
+            header_bytes = bytearray(self.frames.mm[base : base + FRAME_SLOT_HEADER_SIZE])
+            struct.pack_into("<I", header_bytes, 0, 0)
+            struct.pack_into("<I", header_bytes, 20, 0)
+            if crc32(header_bytes) != header_crc32:
+                raise RuntimeError("frame header CRC mismatch")
+
+            job_offset = base + FRAME_SLOT_HEADER_PREFIX.size
+            job_values = SEAT_JOB_META.unpack_from(self.frames.mm, job_offset)
+            (
+                job_sequence_id,
+                trigger_id,
+                seat_id_raw,
+                sku_raw,
+                recipe_id_raw,
+                camera_count,
+                frame_count,
+                _created_at_us,
+            ) = job_values
+            if sequence_id != job_sequence_id or frame_count != frame_meta_count:
+                raise RuntimeError("frame slot sequence or frame count mismatch")
+
+            bundles: dict[str, CameraBundle] = {}
+            meta_offset = base + frame_slot_meta_offset()
+            for i in range(frame_meta_count):
+                values = LIGHT_FRAME_META.unpack_from(self.frames.mm, meta_offset + i * LIGHT_FRAME_META.size)
+                frame = self._make_light_frame(values, base, payload_size)
+                if frame.camera_id not in bundles:
+                    bundles[frame.camera_id] = CameraBundle(
+                        camera_id=frame.camera_id,
+                        pose_id=frame.camera_id,
+                        light_frames={},
+                    )
+                bundles[frame.camera_id].light_frames[frame.light_id] = frame
+
+            job = SeatInspectionJob(
+                sequence_id=sequence_id,
+                trigger_id=trigger_id,
+                seat_id=decode_cstr(seat_id_raw),
+                recipe_id=decode_cstr(recipe_id_raw),
+                sku=decode_cstr(sku_raw),
+                camera_bundles=list(bundles.values()),
+            )
+            if len(job.camera_bundles) != camera_count:
+                raise RuntimeError("frame slot camera count mismatch")
+            return job
+        except Exception:
+            AtomicU32.store(self.frames.mm, base, SlotState.EMPTY)
             return None
-
-        payload = memoryview(self.frames.mm)[base + frame_slot_meta_offset() : base + payload_size]
-        if crc32(payload) != payload_crc32:
-            AtomicU32.store(self.frames.mm, base, SlotState.CORRUPTED)
-            return None
-
-        header_bytes = bytearray(self.frames.mm[base : base + FRAME_SLOT_HEADER_SIZE])
-        struct.pack_into("<I", header_bytes, 0, 0)
-        struct.pack_into("<I", header_bytes, 20, 0)
-        if crc32(header_bytes) != header_crc32:
-            AtomicU32.store(self.frames.mm, base, SlotState.CORRUPTED)
-            return None
-
-        job_offset = base + FRAME_SLOT_HEADER_PREFIX.size
-        job_values = SEAT_JOB_META.unpack_from(self.frames.mm, job_offset)
-        (
-            job_sequence_id,
-            trigger_id,
-            seat_id_raw,
-            sku_raw,
-            recipe_id_raw,
-            camera_count,
-            frame_count,
-            _created_at_us,
-        ) = job_values
-        if sequence_id != job_sequence_id or frame_count != frame_meta_count:
-            AtomicU32.store(self.frames.mm, base, SlotState.CORRUPTED)
-            return None
-
-        bundles: dict[str, CameraBundle] = {}
-        meta_offset = base + frame_slot_meta_offset()
-        for i in range(frame_meta_count):
-            values = LIGHT_FRAME_META.unpack_from(self.frames.mm, meta_offset + i * LIGHT_FRAME_META.size)
-            frame = self._make_light_frame(values, base, payload_size)
-            if frame.camera_id not in bundles:
-                bundles[frame.camera_id] = CameraBundle(
-                    camera_id=frame.camera_id,
-                    pose_id=frame.camera_id,
-                    light_frames={},
-                )
-            bundles[frame.camera_id].light_frames[frame.light_id] = frame
-
-        job = SeatInspectionJob(
-            sequence_id=sequence_id,
-            trigger_id=trigger_id,
-            seat_id=decode_cstr(seat_id_raw),
-            recipe_id=decode_cstr(recipe_id_raw),
-            sku=decode_cstr(sku_raw),
-            camera_bundles=list(bundles.values()),
-        )
-        if len(job.camera_bundles) != camera_count:
-            AtomicU32.store(self.frames.mm, base, SlotState.CORRUPTED)
-            return None
-
-        return job
 
     def _make_light_frame(self, values: tuple, slot_base: int, payload_size: int) -> LightFrame:
         (
@@ -343,3 +343,6 @@ class ShmClient:
             return
         base = self._slot_base(slot_index, self.frame_slot_size)
         AtomicU32.store(self.frames.mm, base, SlotState.EMPTY)
+
+    def release_frame_slot(self, sequence_id: int) -> None:
+        self._release_frame_slot(sequence_id)

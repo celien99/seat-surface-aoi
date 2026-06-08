@@ -26,6 +26,7 @@ public:
   bool wait_for_result(std::uint64_t sequence_id,
                        int timeout_ms,
                        InspectionResultPayload* out_result,
+                       ErrorCode* out_error_code,
                        std::string* error_message);
 
   void close();
@@ -38,6 +39,7 @@ private:
   bool read_ready_slot(std::uint32_t slot_index,
                        std::uint64_t sequence_id,
                        InspectionResultPayload* out_result,
+                       ErrorCode* out_error_code,
                        std::string* error_message);
 
   SharedMemory shm_;
@@ -46,4 +48,3 @@ private:
 };
 
 }  // namespace seat_aoi
-

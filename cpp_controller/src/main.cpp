@@ -52,6 +52,8 @@ int main(int argc, char** argv) {
       config.detector_timeout_ms = runtime_config.detector_timeout_ms;
       config.camera_timeout_ms = runtime_config.camera_timeout_ms;
       config.light_timeout_ms = runtime_config.light_timeout_ms;
+      config.recipe_id = runtime_config.recipe_id;
+      config.light_order = runtime_config.light_order;
       config.simulate_light_fault = runtime_config.light.simulate_fault;
       config.simulate_plc_output_fault = runtime_config.plc.simulate_output_fault;
       for (const auto& camera : runtime_config.cameras) {

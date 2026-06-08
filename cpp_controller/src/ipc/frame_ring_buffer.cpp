@@ -72,49 +72,53 @@ bool FrameRingBuffer::publish(const SeatImageBundle& bundle,
 
   while (std::chrono::steady_clock::now() < deadline) {
     auto* h = header();
-    const std::uint32_t slot_index = static_cast<std::uint32_t>(h->write_index % slot_count_);
-    auto* slot = slot_header(slot_index);
-    std::uint32_t expected = static_cast<std::uint32_t>(SlotState::Empty);
-    if (slot->state.compare_exchange_strong(expected,
-                                            static_cast<std::uint32_t>(SlotState::Writing),
-                                            std::memory_order_acq_rel)) {
-      auto* base = slot_base(slot_index);
-      std::memset(base + sizeof(std::uint32_t), 0, slot_size_ - sizeof(std::uint32_t));
+    const std::uint64_t start_index = h->write_index;
+    for (std::uint32_t probe = 0; probe < slot_count_; ++probe) {
+      const std::uint32_t slot_index =
+          static_cast<std::uint32_t>((start_index + probe) % slot_count_);
+      auto* slot = slot_header(slot_index);
+      std::uint32_t expected = static_cast<std::uint32_t>(SlotState::Empty);
+      if (slot->state.compare_exchange_strong(expected,
+                                              static_cast<std::uint32_t>(SlotState::Writing),
+                                              std::memory_order_acq_rel)) {
+        auto* base = slot_base(slot_index);
+        std::memset(base + sizeof(std::uint32_t), 0, slot_size_ - sizeof(std::uint32_t));
 
-      const std::uint32_t frame_count = static_cast<std::uint32_t>(bundle.frames.size());
-      std::vector<LightFrameMeta> metas;
-      metas.reserve(bundle.frames.size());
+        const std::uint32_t frame_count = static_cast<std::uint32_t>(bundle.frames.size());
+        std::vector<LightFrameMeta> metas;
+        metas.reserve(bundle.frames.size());
 
-      std::uint64_t image_offset = frame_slot_image_offset(frame_count);
-      for (const auto& frame : bundle.frames) {
-        auto meta = frame.meta;
-        meta.image_offset = image_offset;
-        meta.image_size = frame.bytes.size();
-        meta.image_crc32 = crc32(frame.bytes.data(), frame.bytes.size());
-        metas.push_back(meta);
-        std::memcpy(base + image_offset, frame.bytes.data(), frame.bytes.size());
-        image_offset += frame.bytes.size();
+        std::uint64_t image_offset = frame_slot_image_offset(frame_count);
+        for (const auto& frame : bundle.frames) {
+          auto meta = frame.meta;
+          meta.image_offset = image_offset;
+          meta.image_size = frame.bytes.size();
+          meta.image_crc32 = crc32(frame.bytes.data(), frame.bytes.size());
+          metas.push_back(meta);
+          std::memcpy(base + image_offset, frame.bytes.data(), frame.bytes.size());
+          image_offset += frame.bytes.size();
+        }
+
+        slot->sequence_id = bundle.job_meta.sequence_id;
+        slot->payload_size = payload_size;
+        slot->frame_meta_count = frame_count;
+        slot->reserved = 0;
+        slot->job_meta = bundle.job_meta;
+        auto* meta_dst = reinterpret_cast<LightFrameMeta*>(base + frame_slot_meta_offset());
+        std::memcpy(meta_dst, metas.data(), metas.size() * sizeof(LightFrameMeta));
+        slot->payload_crc32 =
+            crc32(base + frame_slot_meta_offset(), payload_size - frame_slot_meta_offset());
+        slot->header_crc32 = 0;
+        slot->header_crc32 = frame_header_crc(slot);
+        slot->state.store(static_cast<std::uint32_t>(SlotState::Ready),
+                          std::memory_order_release);
+        h->write_index = start_index + probe + 1;
+        h->heartbeat = now_us();
+        if (out_sequence_id != nullptr) {
+          *out_sequence_id = bundle.job_meta.sequence_id;
+        }
+        return true;
       }
-
-      slot->sequence_id = bundle.job_meta.sequence_id;
-      slot->payload_size = payload_size;
-      slot->frame_meta_count = frame_count;
-      slot->reserved = 0;
-      slot->job_meta = bundle.job_meta;
-      auto* meta_dst = reinterpret_cast<LightFrameMeta*>(base + frame_slot_meta_offset());
-      std::memcpy(meta_dst, metas.data(), metas.size() * sizeof(LightFrameMeta));
-      slot->payload_crc32 =
-          crc32(base + frame_slot_meta_offset(), payload_size - frame_slot_meta_offset());
-      slot->header_crc32 = 0;
-      slot->header_crc32 = frame_header_crc(slot);
-      slot->state.store(static_cast<std::uint32_t>(SlotState::Ready),
-                        std::memory_order_release);
-      h->write_index += 1;
-      h->heartbeat = now_us();
-      if (out_sequence_id != nullptr) {
-        *out_sequence_id = bundle.job_meta.sequence_id;
-      }
-      return true;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
   }

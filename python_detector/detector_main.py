@@ -5,7 +5,9 @@ import sys
 import time
 
 from python_detector.config.recipe_schema import RecipeManager
+from python_detector.ipc.data_types import InspectionResult, SeatInspectionJob
 from python_detector.ipc.shm_client import ShmClient
+from python_detector.ipc.shm_protocol import ErrorCode
 from python_detector.pipeline.pipeline import InspectionPipeline
 from python_detector.trace.trace_writer import TraceWriter
 
@@ -27,11 +29,7 @@ class DetectorProcess:
             job = self.shm_client.wait_next_job(timeout_ms=100)
             if job is None:
                 continue
-            recipe = self.recipe_manager.load(job.recipe_id)
-            result = self.pipeline.process(job, recipe)
-            self.trace_writer.root_dir = self.trace_writer.root_dir.__class__(recipe.trace.root_dir)
-            self.trace_writer.write(job, recipe, result, self.pipeline.last_context)
-            self.shm_client.publish_result(result)
+            self._process_and_publish(job)
 
     def run_once(self, timeout_ms: int = 5000) -> bool:
         if self.shm_client is None:
@@ -41,11 +39,7 @@ class DetectorProcess:
             job = self.shm_client.wait_next_job(timeout_ms=100)
             if job is None:
                 continue
-            recipe = self.recipe_manager.load(job.recipe_id)
-            result = self.pipeline.process(job, recipe)
-            self.trace_writer.root_dir = self.trace_writer.root_dir.__class__(recipe.trace.root_dir)
-            self.trace_writer.write(job, recipe, result, self.pipeline.last_context)
-            self.shm_client.publish_result(result)
+            result = self._process_and_publish(job)
             print(
                 f"processed sequence_id={result.sequence_id} trigger_id={result.trigger_id} "
                 f"decision={result.decision} quality_pass={result.quality_pass} "
@@ -54,6 +48,38 @@ class DetectorProcess:
             )
             return True
         return False
+
+    def _process_and_publish(self, job: SeatInspectionJob) -> InspectionResult:
+        if self.shm_client is None:
+            raise RuntimeError("检测进程尚未初始化")
+        recipe = None
+        try:
+            recipe = self.recipe_manager.load(job.recipe_id)
+            result = self.pipeline.process(job, recipe)
+        except Exception:
+            result = InspectionResult(
+                sequence_id=job.sequence_id,
+                trigger_id=job.trigger_id,
+                seat_id=job.seat_id,
+                decision="ERROR",
+                defects=[],
+                quality_pass=False,
+                error_code=ErrorCode.INTERNAL_ERROR,
+                elapsed_ms=0.0,
+            )
+
+        if recipe is not None:
+            try:
+                self.trace_writer.root_dir = self.trace_writer.root_dir.__class__(recipe.trace.root_dir)
+                self.trace_writer.write(job, recipe, result, self.pipeline.last_context)
+            except Exception:
+                pass
+        try:
+            self.shm_client.publish_result(result)
+        except Exception:
+            self.shm_client.release_frame_slot(job.sequence_id)
+            raise
+        return result
 
 
 def main(argv: list[str] | None = None) -> int:

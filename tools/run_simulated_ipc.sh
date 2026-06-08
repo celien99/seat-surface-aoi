@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${ROOT_DIR}/cpp_controller/build"
 CONTROLLER="${BUILD_DIR}/seat_aoi_controller"
+IPC_CHECKS="${BUILD_DIR}/ipc_safety_checks"
 
 mkdir -p "${BUILD_DIR}"
 if command -v cmake >/dev/null 2>&1; then
@@ -25,11 +26,19 @@ elif command -v clang++ >/dev/null 2>&1; then
     "${ROOT_DIR}/cpp_controller/src/control/frame_assembler.cpp" \
     "${ROOT_DIR}/cpp_controller/src/control/station_controller.cpp" \
     -o "${CONTROLLER}"
+  clang++ -std=c++17 -I "${ROOT_DIR}/cpp_controller/include" \
+    "${ROOT_DIR}/cpp_controller/tools/ipc_safety_checks.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/ipc/crc32.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/ipc/shared_memory.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/ipc/frame_ring_buffer.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/ipc/result_ring_buffer.cpp" \
+    -o "${IPC_CHECKS}"
 else
   echo "缺少 cmake 或 clang++，无法构建 C++ 主控。" >&2
   exit 2
 fi
 
+"${IPC_CHECKS}"
 "${CONTROLLER}" --cleanup >/dev/null 2>&1 || true
 "${CONTROLLER}" --wait-ms 8000 &
 CPP_PID=$!

@@ -60,21 +60,37 @@ bool ResultRingBuffer::initialize(const std::string& name,
 bool ResultRingBuffer::wait_for_result(std::uint64_t sequence_id,
                                        int timeout_ms,
                                        InspectionResultPayload* out_result,
+                                       ErrorCode* out_error_code,
                                        std::string* error_message) {
   const auto deadline = std::chrono::steady_clock::now() +
                         std::chrono::milliseconds(timeout_ms);
+  if (out_error_code != nullptr) {
+    *out_error_code = ErrorCode::None;
+  }
 
   while (std::chrono::steady_clock::now() < deadline) {
     for (std::uint32_t i = 0; i < slot_count_; ++i) {
-      if (read_ready_slot(i, sequence_id, out_result, error_message)) {
+      ErrorCode slot_error_code = ErrorCode::None;
+      if (read_ready_slot(i, sequence_id, out_result, &slot_error_code, error_message)) {
         header()->read_index += 1;
         header()->heartbeat = now_us();
         return true;
+      }
+      if (slot_error_code != ErrorCode::None) {
+        if (out_error_code != nullptr) {
+          *out_error_code = slot_error_code;
+        }
+        header()->read_index += 1;
+        header()->heartbeat = now_us();
+        return false;
       }
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
   }
 
+  if (out_error_code != nullptr) {
+    *out_error_code = ErrorCode::DetectorTimeout;
+  }
   if (error_message != nullptr) {
     *error_message = "detector result timeout";
   }
@@ -105,6 +121,7 @@ std::uint8_t* ResultRingBuffer::slot_base(std::uint32_t slot_index) {
 bool ResultRingBuffer::read_ready_slot(std::uint32_t slot_index,
                                        std::uint64_t sequence_id,
                                        InspectionResultPayload* out_result,
+                                       ErrorCode* out_error_code,
                                        std::string* error_message) {
   auto* slot = slot_header(slot_index);
   const auto state = static_cast<SlotState>(slot->state.load(std::memory_order_acquire));
@@ -116,8 +133,11 @@ bool ResultRingBuffer::read_ready_slot(std::uint32_t slot_index,
   if (slot->payload_size < result_slot_defects_offset() ||
       slot->payload_size > slot_size_ ||
       slot->defect_count > kMaxDefectsPerResult) {
-    slot->state.store(static_cast<std::uint32_t>(SlotState::Corrupted),
+    slot->state.store(static_cast<std::uint32_t>(SlotState::Empty),
                       std::memory_order_release);
+    if (out_error_code != nullptr) {
+      *out_error_code = ErrorCode::InvalidPayload;
+    }
     if (error_message != nullptr) {
       *error_message = "invalid result payload size or defect count";
     }
@@ -128,8 +148,11 @@ bool ResultRingBuffer::read_ready_slot(std::uint32_t slot_index,
       crc32(slot_base(slot_index) + result_slot_defects_offset(),
             slot->payload_size - result_slot_defects_offset());
   if (expected_payload_crc != slot->payload_crc32) {
-    slot->state.store(static_cast<std::uint32_t>(SlotState::Corrupted),
+    slot->state.store(static_cast<std::uint32_t>(SlotState::Empty),
                       std::memory_order_release);
+    if (out_error_code != nullptr) {
+      *out_error_code = ErrorCode::CrcMismatch;
+    }
     if (error_message != nullptr) {
       *error_message = "result payload CRC mismatch";
     }
@@ -137,8 +160,11 @@ bool ResultRingBuffer::read_ready_slot(std::uint32_t slot_index,
   }
 
   if (result_header_crc(slot) != slot->header_crc32) {
-    slot->state.store(static_cast<std::uint32_t>(SlotState::Corrupted),
+    slot->state.store(static_cast<std::uint32_t>(SlotState::Empty),
                       std::memory_order_release);
+    if (out_error_code != nullptr) {
+      *out_error_code = ErrorCode::CrcMismatch;
+    }
     if (error_message != nullptr) {
       *error_message = "result header CRC mismatch";
     }

@@ -17,6 +17,8 @@ bool StationController::initialize(const StationConfig& config) {
   runtime_config.detector_timeout_ms = config.detector_timeout_ms;
   runtime_config.camera_timeout_ms = config.camera_timeout_ms;
   runtime_config.light_timeout_ms = config.light_timeout_ms;
+  runtime_config.recipe_id = config.recipe_id;
+  runtime_config.light_order = config.light_order;
   runtime_config.light.simulate_fault = config.simulate_light_fault;
   runtime_config.plc.simulate_output_fault = config.simulate_plc_output_fault;
   for (auto& camera : runtime_config.cameras) {
@@ -53,11 +55,19 @@ InspectionResultPayload StationController::inspect_one_seat(const PlcTrigger& tr
   }
 
   InspectionResultPayload result;
+  ErrorCode result_error_code = ErrorCode::None;
   if (!result_ring_.wait_for_result(published_sequence_id,
                                     config_.detector_timeout_ms,
                                     &result,
+                                    &result_error_code,
                                     &error)) {
-    return make_recheck_result(trigger, sequence_id, ErrorCode::DetectorTimeout, error);
+    if (result_error_code == ErrorCode::None) {
+      result_error_code = ErrorCode::DetectorTimeout;
+    }
+    return make_recheck_result(trigger, sequence_id, result_error_code, error);
+  }
+  if (!validate_detector_result(trigger, published_sequence_id, result, &error)) {
+    return make_recheck_result(trigger, sequence_id, ErrorCode::InvalidPayload, error);
   }
   const auto decision = static_cast<InspectionDecision>(result.meta.decision);
   if (!plc_client_.send_decision(trigger, sequence_id, decision, 200, &error)) {
@@ -74,8 +84,8 @@ void StationController::cleanup_shared_memory() {
 
 Recipe StationController::load_recipe(const std::string& /*sku*/) const {
   Recipe recipe;
-  recipe.recipe_id = "seat_a_black_leather_v1";
-  recipe.light_order = {1, 2, 3, 4};
+  recipe.recipe_id = config_.recipe_id;
+  recipe.light_order = config_.light_order;
   return recipe;
 }
 
@@ -95,6 +105,60 @@ InspectionResultPayload StationController::make_recheck_result(const PlcTrigger&
   std::cerr << "[sequence_id=" << sequence_id << " trigger_id=" << trigger.trigger_id
             << "] conservative RECHECK: " << message << std::endl;
   return result;
+}
+
+bool StationController::validate_detector_result(const PlcTrigger& trigger,
+                                                 std::uint64_t sequence_id,
+                                                 const InspectionResultPayload& result,
+                                                 std::string* error_message) const {
+  const auto set_error = [error_message](const std::string& message) {
+    if (error_message != nullptr) {
+      *error_message = message;
+    }
+  };
+  if (result.meta.sequence_id != sequence_id) {
+    set_error("detector result sequence_id mismatch");
+    return false;
+  }
+  if (result.meta.trigger_id != trigger.trigger_id) {
+    set_error("detector result trigger_id mismatch");
+    return false;
+  }
+  if (fixed_cstr_to_string(result.meta.seat_id, kStringIdSize) != trigger.seat_id) {
+    set_error("detector result seat_id mismatch");
+    return false;
+  }
+  const auto decision = static_cast<InspectionDecision>(result.meta.decision);
+  if (decision != InspectionDecision::OK &&
+      decision != InspectionDecision::NG &&
+      decision != InspectionDecision::Recheck &&
+      decision != InspectionDecision::Error) {
+    set_error("detector result decision is invalid");
+    return false;
+  }
+  if (result.meta.defect_count != result.defects.size()) {
+    set_error("detector result defect_count does not match payload");
+    return false;
+  }
+  if (decision == InspectionDecision::OK) {
+    if (result.meta.quality_pass == 0) {
+      set_error("detector result OK with quality_pass=false");
+      return false;
+    }
+    if (result.meta.error_code != static_cast<std::uint32_t>(ErrorCode::None)) {
+      set_error("detector result OK with non-zero error_code");
+      return false;
+    }
+    if (result.meta.defect_count != 0) {
+      set_error("detector result OK with defects");
+      return false;
+    }
+  } else if (result.meta.error_code == static_cast<std::uint32_t>(ErrorCode::None) &&
+             decision == InspectionDecision::Error) {
+    set_error("detector result ERROR with empty error_code");
+    return false;
+  }
+  return true;
 }
 
 void StationController::log_result(const InspectionResultPayload& result) const {

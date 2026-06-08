@@ -35,6 +35,8 @@ struct StationRuntimeConfig {
   int detector_timeout_ms = 5000;
   int camera_timeout_ms = 200;
   int light_timeout_ms = 200;
+  std::string recipe_id = "seat_a_black_leather_v1";
+  std::vector<std::uint32_t> light_order = {1, 2, 3, 4};
   std::string trace_root = "trace";
   std::vector<RuntimeCameraConfig> cameras = {
       RuntimeCameraConfig{0, "TOP_BACK", 64, 48, 1, false},
@@ -49,4 +51,3 @@ bool load_station_runtime_config(const std::string& path,
                                  std::string* error_message);
 
 }  // namespace seat_aoi
-
