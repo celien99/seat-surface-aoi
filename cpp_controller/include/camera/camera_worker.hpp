@@ -10,7 +10,7 @@ public:
   void start();
   void stop();
   bool wait_frame(std::uint64_t trigger_id,
-                  std::uint32_t light_index,
+                  const LightChannelParam& light_param,
                   std::uint32_t light_seq_index,
                   CapturedFrame* out_frame,
                   int timeout_ms);
@@ -22,4 +22,3 @@ private:
 };
 
 }  // namespace seat_aoi
-

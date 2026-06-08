@@ -15,17 +15,20 @@ bool StationController::initialize(const StationConfig& config) {
   runtime_config.result_slot_size = config.result_slot_size;
   runtime_config.publish_timeout_ms = config.publish_timeout_ms;
   runtime_config.detector_timeout_ms = config.detector_timeout_ms;
+  runtime_config.trigger_timeout_ms = config.trigger_timeout_ms;
   runtime_config.camera_timeout_ms = config.camera_timeout_ms;
   runtime_config.light_timeout_ms = config.light_timeout_ms;
+  runtime_config.max_jobs = config.max_jobs;
   runtime_config.recipe_id = config.recipe_id;
   runtime_config.light_order = config.light_order;
   runtime_config.light.simulate_fault = config.simulate_light_fault;
   runtime_config.plc.simulate_output_fault = config.simulate_plc_output_fault;
+  runtime_config.plc.simulate_trigger_timeout = config.simulate_trigger_timeout;
   for (auto& camera : runtime_config.cameras) {
     camera.simulate_missing_frame = config.simulate_missing_frame;
   }
   frame_assembler_.configure(runtime_config);
-  plc_client_.initialize(config.simulate_plc_output_fault);
+  plc_client_.initialize(config.simulate_plc_output_fault, config.simulate_trigger_timeout);
   const bool frames_ok = frame_ring_.initialize(kFrameShmName,
                                                 config.slot_count,
                                                 config.frame_slot_size,
@@ -37,13 +40,17 @@ bool StationController::initialize(const StationConfig& config) {
   return frames_ok && results_ok;
 }
 
+bool StationController::wait_for_trigger(PlcTrigger* out_trigger, std::string* error_message) {
+  return plc_client_.wait_trigger(out_trigger, config_.trigger_timeout_ms, error_message);
+}
+
 InspectionResultPayload StationController::inspect_one_seat(const PlcTrigger& trigger) {
   const std::uint64_t sequence_id = next_sequence_id_++;
   const Recipe recipe = load_recipe(trigger.sku);
   SeatImageBundle bundle;
   std::string error;
   if (!frame_assembler_.acquire_bundles(recipe, trigger, sequence_id, &bundle, &error)) {
-    return make_recheck_result(trigger, sequence_id, ErrorCode::MissingFrame, error);
+    return make_and_send_recheck_result(trigger, sequence_id, ErrorCode::MissingFrame, error);
   }
 
   std::uint64_t published_sequence_id = 0;
@@ -51,7 +58,7 @@ InspectionResultPayload StationController::inspect_one_seat(const PlcTrigger& tr
                            config_.publish_timeout_ms,
                            &published_sequence_id,
                            &error)) {
-    return make_recheck_result(trigger, sequence_id, ErrorCode::SlotUnavailable, error);
+    return make_and_send_recheck_result(trigger, sequence_id, ErrorCode::SlotUnavailable, error);
   }
 
   InspectionResultPayload result;
@@ -64,10 +71,10 @@ InspectionResultPayload StationController::inspect_one_seat(const PlcTrigger& tr
     if (result_error_code == ErrorCode::None) {
       result_error_code = ErrorCode::DetectorTimeout;
     }
-    return make_recheck_result(trigger, sequence_id, result_error_code, error);
+    return make_and_send_recheck_result(trigger, sequence_id, result_error_code, error);
   }
   if (!validate_detector_result(trigger, published_sequence_id, result, &error)) {
-    return make_recheck_result(trigger, sequence_id, ErrorCode::InvalidPayload, error);
+    return make_and_send_recheck_result(trigger, sequence_id, ErrorCode::InvalidPayload, error);
   }
   const auto decision = static_cast<InspectionDecision>(result.meta.decision);
   if (!plc_client_.send_decision(trigger, sequence_id, decision, 200, &error)) {
@@ -104,6 +111,21 @@ InspectionResultPayload StationController::make_recheck_result(const PlcTrigger&
   result.meta.elapsed_ms = 0.0F;
   std::cerr << "[sequence_id=" << sequence_id << " trigger_id=" << trigger.trigger_id
             << "] conservative RECHECK: " << message << std::endl;
+  return result;
+}
+
+InspectionResultPayload StationController::make_and_send_recheck_result(
+    const PlcTrigger& trigger,
+    std::uint64_t sequence_id,
+    ErrorCode error_code,
+    const std::string& message) {
+  auto result = make_recheck_result(trigger, sequence_id, error_code, message);
+  std::string plc_error;
+  if (!plc_client_.send_decision(trigger, sequence_id, InspectionDecision::Recheck, 200, &plc_error)) {
+    result.meta.error_code = static_cast<std::uint32_t>(ErrorCode::DeviceFault);
+    std::cerr << "[sequence_id=" << sequence_id << " trigger_id=" << trigger.trigger_id
+              << "] PLC RECHECK output failed: " << plc_error << std::endl;
+  }
   return result;
 }
 

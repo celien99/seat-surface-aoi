@@ -25,7 +25,19 @@ struct LightHealth {
 class LightController {
 public:
   bool initialize(bool simulate_fault = false);
-  bool run_sequence(const LightSequence& sequence, std::uint64_t trigger_id, int timeout_ms);
+  bool prepare_sequence(const LightSequence& sequence,
+                        std::uint64_t trigger_id,
+                        int timeout_ms,
+                        std::string* error_message);
+  bool trigger_channel(const LightChannelParam& channel,
+                       std::uint64_t trigger_id,
+                       std::uint32_t light_seq_index,
+                       int timeout_ms,
+                       std::string* error_message);
+  bool run_sequence(const LightSequence& sequence,
+                    std::uint64_t trigger_id,
+                    int timeout_ms,
+                    std::string* error_message = nullptr);
   bool set_channel(std::uint32_t light_index, const LightChannelParam& param);
   LightHealth get_health() const;
   void shutdown_all();

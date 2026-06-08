@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "control/light_controller.hpp"
 #include "ipc/frame_ring_buffer.hpp"
 
 namespace seat_aoi {
@@ -27,7 +28,7 @@ class CameraDevice {
 public:
   bool initialize(const CameraConfig& config);
   bool capture(std::uint64_t trigger_id,
-               std::uint32_t light_index,
+               const LightChannelParam& light_param,
                std::uint32_t light_seq_index,
                CapturedFrame* out_frame,
                int timeout_ms);

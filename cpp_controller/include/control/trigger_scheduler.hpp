@@ -1,13 +1,14 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 namespace seat_aoi {
 
 struct PlcTrigger {
   std::uint64_t trigger_id = 0;
-  const char* seat_id = "SIM_SEAT_001";
-  const char* sku = "seat_a_black_leather";
+  std::string seat_id = "SIM_SEAT_001";
+  std::string sku = "seat_a_black_leather";
 };
 
 class TriggerScheduler {
@@ -19,4 +20,3 @@ private:
 };
 
 }  // namespace seat_aoi
-

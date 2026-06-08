@@ -15,14 +15,14 @@ void CameraWorker::stop() {
 }
 
 bool CameraWorker::wait_frame(std::uint64_t trigger_id,
-                              std::uint32_t light_index,
+                              const LightChannelParam& light_param,
                               std::uint32_t light_seq_index,
                               CapturedFrame* out_frame,
                               int timeout_ms) {
   if (!running_) {
     return false;
   }
-  return device_.capture(trigger_id, light_index, light_seq_index, out_frame, timeout_ms);
+  return device_.capture(trigger_id, light_param, light_seq_index, out_frame, timeout_ms);
 }
 
 CameraHealth CameraWorker::get_health() const {
@@ -30,4 +30,3 @@ CameraHealth CameraWorker::get_health() const {
 }
 
 }  // namespace seat_aoi
-

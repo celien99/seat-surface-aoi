@@ -97,6 +97,8 @@ bool load_station_runtime_config(const std::string& path,
     const std::string value = trim(line.substr(eq + 1));
     if (key == "detector_timeout_ms") {
       config.detector_timeout_ms = std::stoi(value);
+    } else if (key == "trigger_timeout_ms") {
+      config.trigger_timeout_ms = std::stoi(value);
     } else if (key == "publish_timeout_ms") {
       config.publish_timeout_ms = std::stoi(value);
     } else if (key == "camera_timeout_ms") {
@@ -105,6 +107,8 @@ bool load_station_runtime_config(const std::string& path,
       config.light_timeout_ms = std::stoi(value);
     } else if (key == "recipe_id") {
       config.recipe_id = value;
+    } else if (key == "max_jobs") {
+      config.max_jobs = std::stoi(value);
     } else if (key == "light_order") {
       if (!parse_light_order(value, &config.light_order, error_message)) {
         return false;
@@ -115,6 +119,8 @@ bool load_station_runtime_config(const std::string& path,
       config.light.simulate_fault = parse_bool(value);
     } else if (key == "simulate_plc_output_fault") {
       config.plc.simulate_output_fault = parse_bool(value);
+    } else if (key == "simulate_trigger_timeout") {
+      config.plc.simulate_trigger_timeout = parse_bool(value);
     } else if (key == "simulate_missing_frame") {
       for (auto& camera : config.cameras) {
         camera.simulate_missing_frame = parse_bool(value);

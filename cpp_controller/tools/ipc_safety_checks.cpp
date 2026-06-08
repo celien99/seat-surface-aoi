@@ -6,6 +6,8 @@
 
 #include "common/string_utils.hpp"
 #include "common/time_utils.hpp"
+#include "control/plc_client.hpp"
+#include "control/station_controller.hpp"
 #include "ipc/crc32.hpp"
 #include "ipc/frame_ring_buffer.hpp"
 #include "ipc/result_ring_buffer.hpp"
@@ -136,6 +138,119 @@ bool test_result_ring_returns_crc_error_immediately() {
   return passed;
 }
 
+bool test_plc_trigger_timeout_fails_closed() {
+  seat_aoi::PlcClient plc;
+  if (!plc.initialize(false, true)) {
+    std::cerr << "PLC initialize failed\n";
+    return false;
+  }
+  seat_aoi::PlcTrigger trigger;
+  std::string error;
+  const bool ok = plc.wait_trigger(&trigger, 1, &error);
+  const bool passed = !ok && error == "模拟 PLC 触发超时";
+  if (!passed) {
+    std::cerr << "PLC trigger timeout did not fail closed: " << error << "\n";
+  }
+  return passed;
+}
+
+bool test_station_fault_returns_recheck(const std::string& name,
+                                        seat_aoi::StationConfig config,
+                                        seat_aoi::ErrorCode expected_error) {
+  config.reset_shared_memory = true;
+  config.slot_count = 1;
+  config.frame_slot_size = 4096;
+  config.result_slot_size = 4096;
+  config.publish_timeout_ms = 5;
+  config.detector_timeout_ms = 5;
+  config.trigger_timeout_ms = 5;
+  config.camera_timeout_ms = 5;
+  config.light_timeout_ms = 5;
+  config.recipe_id = "seat_a_black_leather_v1";
+  config.light_order = {1};
+
+  seat_aoi::StationController station;
+  if (!station.initialize(config)) {
+    std::cerr << name << " station initialize failed\n";
+    return false;
+  }
+
+  seat_aoi::PlcTrigger trigger;
+  trigger.trigger_id = 7001;
+  trigger.seat_id = "SIM_FAULT";
+  trigger.sku = "seat_a_black_leather";
+  const auto result = station.inspect_one_seat(trigger);
+  station.cleanup_shared_memory();
+
+  const auto decision = static_cast<seat_aoi::InspectionDecision>(result.meta.decision);
+  const auto error_code = static_cast<seat_aoi::ErrorCode>(result.meta.error_code);
+  const bool passed = decision == seat_aoi::InspectionDecision::Recheck &&
+                      error_code == expected_error &&
+                      result.meta.quality_pass == 0 &&
+                      result.meta.defect_count == 0;
+  if (!passed) {
+    std::cerr << name << " did not return RECHECK expected_error="
+              << static_cast<std::uint32_t>(expected_error)
+              << " actual_decision=" << result.meta.decision
+              << " actual_error=" << result.meta.error_code << "\n";
+  }
+  return passed;
+}
+
+bool test_light_fault_returns_recheck() {
+  seat_aoi::StationConfig config;
+  config.simulate_light_fault = true;
+  return test_station_fault_returns_recheck("light fault",
+                                            config,
+                                            seat_aoi::ErrorCode::MissingFrame);
+}
+
+bool test_missing_frame_returns_recheck() {
+  seat_aoi::StationConfig config;
+  config.simulate_missing_frame = true;
+  return test_station_fault_returns_recheck("missing frame",
+                                            config,
+                                            seat_aoi::ErrorCode::MissingFrame);
+}
+
+bool test_frame_slot_unavailable_returns_recheck() {
+  seat_aoi::StationConfig config;
+  config.slot_count = 0;
+  config.frame_slot_size = 4096;
+  config.result_slot_size = 4096;
+  config.publish_timeout_ms = 1;
+  config.detector_timeout_ms = 1;
+  config.trigger_timeout_ms = 1;
+  config.camera_timeout_ms = 5;
+  config.light_timeout_ms = 5;
+  config.light_order = {1};
+
+  seat_aoi::StationController station;
+  if (!station.initialize(config)) {
+    std::cerr << "slot unavailable station initialize failed\n";
+    return false;
+  }
+
+  seat_aoi::PlcTrigger trigger;
+  trigger.trigger_id = 7002;
+  trigger.seat_id = "SIM_SLOT_FULL";
+  trigger.sku = "seat_a_black_leather";
+  const auto result = station.inspect_one_seat(trigger);
+  station.cleanup_shared_memory();
+
+  const auto decision = static_cast<seat_aoi::InspectionDecision>(result.meta.decision);
+  const auto error_code = static_cast<seat_aoi::ErrorCode>(result.meta.error_code);
+  const bool passed = decision == seat_aoi::InspectionDecision::Recheck &&
+                      error_code == seat_aoi::ErrorCode::SlotUnavailable &&
+                      result.meta.quality_pass == 0 &&
+                      result.meta.defect_count == 0;
+  if (!passed) {
+    std::cerr << "slot unavailable did not return RECHECK actual_decision="
+              << result.meta.decision << " actual_error=" << result.meta.error_code << "\n";
+  }
+  return passed;
+}
+
 }  // namespace
 
 int main() {
@@ -143,6 +258,18 @@ int main() {
     return 1;
   }
   if (!test_result_ring_returns_crc_error_immediately()) {
+    return 1;
+  }
+  if (!test_plc_trigger_timeout_fails_closed()) {
+    return 1;
+  }
+  if (!test_light_fault_returns_recheck()) {
+    return 1;
+  }
+  if (!test_missing_frame_returns_recheck()) {
+    return 1;
+  }
+  if (!test_frame_slot_unavailable_returns_recheck()) {
     return 1;
   }
   std::cout << "ipc safety checks passed\n";

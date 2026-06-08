@@ -24,6 +24,7 @@ struct RuntimeLightConfig {
 
 struct RuntimePlcConfig {
   bool simulate_output_fault = false;
+  bool simulate_trigger_timeout = false;
 };
 
 struct StationRuntimeConfig {
@@ -33,8 +34,10 @@ struct StationRuntimeConfig {
   std::uint32_t result_slot_size = kDefaultResultSlotSize;
   int publish_timeout_ms = 1000;
   int detector_timeout_ms = 5000;
+  int trigger_timeout_ms = 1000;
   int camera_timeout_ms = 200;
   int light_timeout_ms = 200;
+  int max_jobs = 0;
   std::string recipe_id = "seat_a_black_leather_v1";
   std::vector<std::uint32_t> light_order = {1, 2, 3, 4};
   std::string trace_root = "trace";

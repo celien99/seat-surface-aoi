@@ -1,5 +1,8 @@
 #include "control/frame_assembler.hpp"
 
+#include <future>
+#include <sstream>
+
 #include "common/string_utils.hpp"
 #include "common/time_utils.hpp"
 
@@ -57,10 +60,18 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
   for (std::uint32_t light_index : recipe.light_order) {
     sequence.channels.push_back(LightChannelParam{light_index, 800, 1.0F, 60.0F});
   }
-  if (!light_controller_.run_sequence(sequence, trigger.trigger_id, config_.light_timeout_ms)) {
+  if (!light_controller_.prepare_sequence(sequence,
+                                          trigger.trigger_id,
+                                          config_.light_timeout_ms,
+                                          error_message)) {
     if (error_message != nullptr) {
-      *error_message = "simulated light sequence failed";
+      if (error_message->empty()) {
+        *error_message = "simulated light sequence prepare failed";
+      }
     }
+    light_controller_.shutdown_all();
+    initialized_ = false;
+    cameras_.clear();
     return false;
   }
 
@@ -74,18 +85,55 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
   job.created_at_us = now_us();
 
   std::vector<CapturedFrame> frames;
-  for (std::uint32_t camera_index = 0; camera_index < cameras_.size(); ++camera_index) {
-    for (std::uint32_t light_seq_index = 0; light_seq_index < recipe.light_order.size();
-         ++light_seq_index) {
-      CapturedFrame frame;
-      if (!cameras_[camera_index].wait_frame(trigger.trigger_id,
-                                             recipe.light_order[light_seq_index],
-                                             light_seq_index,
-                                             &frame,
-                                             config_.camera_timeout_ms)) {
+  frames.reserve(cameras_.size() * sequence.channels.size());
+  for (std::uint32_t light_seq_index = 0; light_seq_index < sequence.channels.size();
+       ++light_seq_index) {
+    const auto light_param = sequence.channels[light_seq_index];
+    if (!light_controller_.trigger_channel(light_param,
+                                           trigger.trigger_id,
+                                           light_seq_index,
+                                           config_.light_timeout_ms,
+                                           error_message)) {
+      if (error_message != nullptr && error_message->empty()) {
+        *error_message = "simulated light channel failed";
+      }
+      light_controller_.shutdown_all();
+      initialized_ = false;
+      cameras_.clear();
+      return false;
+    }
+
+    std::vector<std::future<CapturedFrame>> futures;
+    futures.reserve(cameras_.size());
+    for (std::uint32_t camera_index = 0; camera_index < cameras_.size(); ++camera_index) {
+      futures.push_back(std::async(std::launch::async,
+                                   [this, camera_index, trigger_id = trigger.trigger_id,
+                                    light_param, light_seq_index]() {
+                                     CapturedFrame frame;
+                                     if (!cameras_[camera_index].wait_frame(trigger_id,
+                                                                            light_param,
+                                                                            light_seq_index,
+                                                                            &frame,
+                                                                            config_.camera_timeout_ms)) {
+                                       frame.bytes.clear();
+                                     }
+                                     return frame;
+                                   }));
+    }
+
+    for (std::uint32_t camera_index = 0; camera_index < futures.size(); ++camera_index) {
+      CapturedFrame frame = futures[camera_index].get();
+      if (frame.bytes.empty()) {
         if (error_message != nullptr) {
-          *error_message = "simulated camera frame timeout";
+          std::ostringstream oss;
+          oss << "simulated camera frame timeout camera_index=" << camera_index
+              << " light_index=" << light_param.light_index
+              << " light_seq_index=" << light_seq_index;
+          *error_message = oss.str();
         }
+        light_controller_.shutdown_all();
+        initialized_ = false;
+        cameras_.clear();
         return false;
       }
       frames.push_back(std::move(frame));

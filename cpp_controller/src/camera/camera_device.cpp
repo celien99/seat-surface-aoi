@@ -15,7 +15,7 @@ bool CameraDevice::initialize(const CameraConfig& config) {
 }
 
 bool CameraDevice::capture(std::uint64_t trigger_id,
-                           std::uint32_t light_index,
+                           const LightChannelParam& light_param,
                            std::uint32_t light_seq_index,
                            CapturedFrame* out_frame,
                            int timeout_ms) {
@@ -32,16 +32,18 @@ bool CameraDevice::capture(std::uint64_t trigger_id,
   out_frame->bytes.assign(image_size, 0);
   for (std::uint32_t y = 0; y < config_.height; ++y) {
     for (std::uint32_t x = 0; x < stride; ++x) {
-      const std::uint32_t texture = ((x / 4U + y / 4U + light_index) % 2U) * 28U;
+      const std::uint32_t texture = ((x / 4U + y / 4U + light_param.light_index) % 2U) * 28U;
       const std::uint32_t gradient =
-          (trigger_id + config_.camera_index * 17U + light_index * 11U + x + 3U * y) % 72U;
+          (trigger_id + config_.camera_index * 17U + light_param.light_index * 11U + x +
+           3U * y) %
+          72U;
       out_frame->bytes[y * stride + x] = static_cast<std::uint8_t>(70U + texture + gradient);
     }
   }
 
   LightFrameMeta meta{};
   meta.camera_index = config_.camera_index;
-  meta.light_index = light_index;
+  meta.light_index = light_param.light_index;
   meta.frame_index = static_cast<std::uint32_t>(trigger_id % 100000);
   meta.light_seq_index = light_seq_index;
   meta.width = config_.width;
@@ -53,8 +55,8 @@ bool CameraDevice::capture(std::uint64_t trigger_id,
   meta.color_order = static_cast<std::uint32_t>(ColorOrder::Mono);
   meta.dtype_code = static_cast<std::uint32_t>(DTypeCode::UInt8);
   meta.timestamp_us = now_us();
-  meta.exposure_us = 800;
-  meta.gain = 1.0F;
+  meta.exposure_us = light_param.exposure_us;
+  meta.gain = light_param.gain;
   copy_cstr(meta.calibration_id, "calib/simulated_v1");
   out_frame->meta = meta;
   return true;

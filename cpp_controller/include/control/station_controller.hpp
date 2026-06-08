@@ -20,27 +20,35 @@ struct StationConfig {
   std::uint32_t result_slot_size = kDefaultResultSlotSize;
   int publish_timeout_ms = 1000;
   int detector_timeout_ms = 5000;
+  int trigger_timeout_ms = 1000;
   int camera_timeout_ms = 200;
   int light_timeout_ms = 200;
+  int max_jobs = 0;
   std::string recipe_id = "seat_a_black_leather_v1";
   std::vector<std::uint32_t> light_order = {1, 2, 3, 4};
   bool simulate_light_fault = false;
   bool simulate_plc_output_fault = false;
+  bool simulate_trigger_timeout = false;
   bool simulate_missing_frame = false;
 };
 
 class StationController {
 public:
   bool initialize(const StationConfig& config);
+  bool wait_for_trigger(PlcTrigger* out_trigger, std::string* error_message);
   InspectionResultPayload inspect_one_seat(const PlcTrigger& trigger);
   void cleanup_shared_memory();
 
 private:
   Recipe load_recipe(const std::string& sku) const;
   InspectionResultPayload make_recheck_result(const PlcTrigger& trigger,
-                                              std::uint64_t sequence_id,
-                                              ErrorCode error_code,
-                                              const std::string& message) const;
+                                               std::uint64_t sequence_id,
+                                               ErrorCode error_code,
+                                               const std::string& message) const;
+  InspectionResultPayload make_and_send_recheck_result(const PlcTrigger& trigger,
+                                                       std::uint64_t sequence_id,
+                                                       ErrorCode error_code,
+                                                       const std::string& message);
   bool validate_detector_result(const PlcTrigger& trigger,
                                 std::uint64_t sequence_id,
                                 const InspectionResultPayload& result,

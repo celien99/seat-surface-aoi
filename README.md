@@ -8,7 +8,7 @@
 
 - C++ 固定布局 IPC 协议结构体。
 - POSIX 共享内存图像/结果 ring buffer。
-- C++ 模拟主控：模拟相机、光源、触发、图像发布和结果等待。
+- C++ 模拟主控：通过 PLC 抽象接收模拟外部触发，按光源顺序执行软件频闪调度，并行采集多机位模拟图像，完成图像发布和结果等待。
 - C++ 主控在 PLC 输出前会校验检测结果语义：`sequence_id`、`trigger_id`、`seat_id`、decision、质量状态、错误码和缺陷数量不一致时统一降级为 `RECHECK`，不会输出 `OK`。
 - Frame ring 发布会扫描可用 `EMPTY` slot，单个 `READING`/坏 slot 不会阻塞其它空闲 slot。
 - Result ring 对协议、payload 和 CRC 错误会立即返回真实错误码，不再等待到 detector timeout。
@@ -21,7 +21,8 @@
 - Python detector 不存在或超时时，C++ 保守返回 `RECHECK`，不会误判 `OK`。
 - YAML 配方加载与 schema 校验，当前默认配方位于 `python_detector/config/default_recipe.yaml`。
 - 配方已覆盖机位、光源顺序、质量阈值、注册策略、ROI 级主模型、unknown safety net 模型、模型后端和追溯配置。
-- C++ 主控已具备相机、光源、PLC 的可替换接口和模拟驱动，支持光源故障、缺帧、PLC 输出失败等故障注入。
+- C++ 主控已具备相机、光源、PLC 的可替换接口和模拟驱动，支持触发超时、光源故障、缺帧、PLC 输出失败等故障注入。
+- C++ 单个共享内存 frame slot 承载一个座椅任务的所有机位、所有光源图像；Python 检测进程按 `camera_index` 组装 `CameraBundle`。
 - C++ 运行配置示例位于 `cpp_controller/config/station_runtime.example.conf`。
 - Python 检测侧已支持标定文件和 ROI 模板加载，默认 identity 标定位于 `python_detector/config/calibration/`，默认 ROI 位于 `python_detector/config/roi/default_roi.yaml`。
 - 模型推理支持 fake 默认后端和 ONNX 可选后端；ONNX 依赖或模型缺失时保守失败，不会静默输出 `OK`。
@@ -65,12 +66,20 @@ C++ 故障注入示例：
 
 ```bash
 cpp_controller/build/seat_aoi_controller --simulate-missing-frame --wait-ms 200
+cpp_controller/build/seat_aoi_controller --simulate-light-fault --wait-ms 200
+cpp_controller/build/seat_aoi_controller --simulate-trigger-timeout --trigger-timeout-ms 50
 ```
 
-C++ 运行配置示例支持 `recipe_id` 和逗号分隔的 `light_order`：
+C++ 运行配置示例支持 `recipe_id`、逗号分隔的 `light_order`、触发 timeout 和批次数：
 
 ```bash
 cpp_controller/build/seat_aoi_controller --config cpp_controller/config/station_runtime.example.conf
+```
+
+连续模拟 PLC 触发 3 件：
+
+```bash
+cpp_controller/build/seat_aoi_controller --loop --max-jobs 3 --wait-ms 8000
 ```
 
 Python 回放和 benchmark：
