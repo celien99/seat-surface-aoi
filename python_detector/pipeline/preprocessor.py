@@ -32,11 +32,18 @@ class Preprocessor:
             )
             decoded = self._decode_frames(bundle, recipe)
             self._assert_calibration_matches(decoded, calibration)
+            rois = {
+                roi_name: {
+                    light_id: self._crop_to_roi(frame, roi)
+                    for light_id, frame in decoded.items()
+                }
+                for roi_name, roi in calibration.roi_templates.items()
+            }
             prepared.append(
                 PreparedBundle(
                     camera_id=bundle.camera_id,
                     calibration=calibration,
-                    rois={roi_name: decoded for roi_name in calibration.roi_templates},
+                    rois=rois,
                     roi_templates=calibration.roi_templates,
                 )
             )
@@ -58,6 +65,8 @@ class Preprocessor:
             raise ValueError(f"{frame.camera_id}/{frame.light_id}: expected mono image")
         if frame.stride_bytes < frame.width * frame.channels:
             raise ValueError(f"{frame.camera_id}/{frame.light_id}: stride smaller than row size")
+        if len(frame.image) < frame.stride_bytes * frame.height:
+            raise ValueError(f"{frame.camera_id}/{frame.light_id}: image shorter than stride")
 
     def _assert_calibration_matches(self, frames: dict[str, LightFrame], calibration: Calibration) -> None:
         for frame in frames.values():
@@ -72,3 +81,54 @@ class Preprocessor:
                     f"{frame.camera_id}/{frame.light_id}: 图像尺寸与标定不一致 "
                     f"{frame.width}x{frame.height} != {expected_width}x{expected_height}"
                 )
+
+    def _crop_to_roi(self, frame: LightFrame, roi: RoiTemplate) -> LightFrame:
+        x_values = [point[0] for point in roi.polygon_xy]
+        y_values = [point[1] for point in roi.polygon_xy]
+        x0 = min(x_values)
+        y0 = min(y_values)
+        x1 = max(x_values)
+        y1 = max(y_values)
+        if x0 < 0 or y0 < 0 or x1 >= frame.width or y1 >= frame.height:
+            raise ValueError(
+                f"{frame.camera_id}/{frame.light_id}/{roi.roi_name}: ROI 坐标越界 "
+                f"({x0},{y0})-({x1},{y1}) image={frame.width}x{frame.height}"
+            )
+        crop_width = x1 - x0 + 1
+        crop_height = y1 - y0 + 1
+        if roi.output_size != (crop_width, crop_height):
+            raise ValueError(
+                f"{frame.camera_id}/{frame.light_id}/{roi.roi_name}: ROI output_size 与裁剪尺寸不一致 "
+                f"{roi.output_size} != {(crop_width, crop_height)}"
+            )
+
+        cropped = bytearray(crop_width * crop_height)
+        for row in range(crop_height):
+            source_start = (y0 + row) * frame.stride_bytes + x0
+            source_end = source_start + crop_width
+            target_start = row * crop_width
+            cropped[target_start : target_start + crop_width] = frame.image[source_start:source_end]
+        origin_x, origin_y = frame.origin_xy
+        return LightFrame(
+            camera_id=frame.camera_id,
+            light_id=frame.light_id,
+            frame_index=frame.frame_index,
+            light_seq_index=frame.light_seq_index,
+            width=crop_width,
+            height=crop_height,
+            channels=frame.channels,
+            stride_bytes=crop_width,
+            pixel_format=frame.pixel_format,
+            bit_depth=frame.bit_depth,
+            color_order=frame.color_order,
+            dtype=frame.dtype,
+            timestamp_us=frame.timestamp_us,
+            exposure_us=frame.exposure_us,
+            gain=frame.gain,
+            calibration_id=frame.calibration_id,
+            image_crc32=frame.image_crc32,
+            image=memoryview(cropped),
+            origin_xy=(origin_x + x0, origin_y + y0),
+            source_width=frame.source_width or frame.width,
+            source_height=frame.source_height or frame.height,
+        )

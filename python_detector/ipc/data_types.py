@@ -23,6 +23,14 @@ class LightFrame:
     calibration_id: str
     image_crc32: int
     image: memoryview
+    origin_xy: tuple[int, int] = (0, 0)
+    source_width: int | None = None
+    source_height: int | None = None
+
+    @property
+    def bbox_xyxy_pixel(self) -> tuple[int, int, int, int]:
+        x0, y0 = self.origin_xy
+        return (x0, y0, x0 + self.width - 1, y0 + self.height - 1)
 
 
 @dataclass
@@ -67,4 +75,3 @@ class InspectionResult:
     quality_pass: bool = False
     error_code: int = 0
     elapsed_ms: float = 0.0
-

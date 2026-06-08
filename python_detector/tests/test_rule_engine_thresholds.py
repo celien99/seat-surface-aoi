@@ -35,3 +35,32 @@ def test_rule_engine_uses_recipe_thresholds() -> None:
     result = RuleEngine().decide(job, fused, QualityReport(True, []), recipe, elapsed_ms=1.0)
     assert result.decision == "RECHECK"
     assert result.defects[0].decision == "RECHECK"
+
+
+def test_rule_engine_ignores_candidates_below_recheck_threshold() -> None:
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    recipe = replace(recipe, thresholds={"scratch": ThresholdConfig(ng_score=0.95, recheck_score=0.5, min_area_px=8)})
+    job = SeatInspectionJob(
+        sequence_id=1,
+        trigger_id=2,
+        seat_id="SIM",
+        recipe_id=recipe.recipe_id,
+        sku=recipe.sku,
+        camera_bundles=[],
+    )
+    fused = FusedResult(
+        candidates=[
+            DefectCandidate(
+                camera_id="TOP_BACK",
+                roi_name="full",
+                class_name="scratch",
+                score=0.22,
+                bbox_xyxy_pixel=(1, 1, 8, 8),
+                area_px=49,
+                evidence_lights=["HIGH_LEFT", "HIGH_RIGHT"],
+            )
+        ]
+    )
+    result = RuleEngine().decide(job, fused, QualityReport(True, []), recipe, elapsed_ms=1.0)
+    assert result.decision == "OK"
+    assert result.defects == []

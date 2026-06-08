@@ -41,13 +41,22 @@ class FakeModel:
         return []
 
     def _candidate(self, feature_group: FeatureGroup, score: float) -> DefectCandidate:
+        x0, y0, x1, y1 = feature_group.roi_bbox_xyxy_pixel
+        if x1 <= x0 or y1 <= y0:
+            bbox = (1, 1, 8, 8)
+        else:
+            width = x1 - x0 + 1
+            height = y1 - y0 + 1
+            box_width = min(8, max(width, 1))
+            box_height = min(8, max(height, 1))
+            bbox = (x0, y0, x0 + box_width - 1, y0 + box_height - 1)
         return DefectCandidate(
             camera_id=feature_group.camera_id,
             roi_name=feature_group.roi_name,
             class_name="scratch",
             score=score,
-            bbox_xyxy_pixel=(1, 1, 8, 8),
-            area_px=49,
+            bbox_xyxy_pixel=bbox,
+            area_px=(bbox[2] - bbox[0] + 1) * (bbox[3] - bbox[1] + 1),
             evidence_lights=["HIGH_LEFT", "HIGH_RIGHT"],
         )
 

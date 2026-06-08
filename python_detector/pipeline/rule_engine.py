@@ -26,10 +26,12 @@ class RuleEngine:
             if candidate.score >= threshold.ng_score and candidate.area_px >= threshold.min_area_px:
                 defect_decision = "NG"
                 decision = "NG"
-            else:
+            elif candidate.score >= threshold.recheck_score:
                 defect_decision = "RECHECK"
                 if decision != "NG":
                     decision = "RECHECK"
+            else:
+                continue
             defects.append(
                 DefectResult(
                     defect_id=f"{job.sequence_id}-{index}",

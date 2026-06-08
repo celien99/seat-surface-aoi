@@ -28,8 +28,20 @@ class ImageQualityGate:
     def check(self, job: SeatInspectionJob, recipe: Recipe) -> QualityReport:
         reports: list[FrameQuality] = []
         messages: list[str] = []
+        if job.sku != recipe.sku:
+            messages.append(f"sku mismatch: job={job.sku} recipe={recipe.sku}")
+
+        expected_cameras = {camera.camera_id for camera in recipe.cameras}
+        seen_cameras: set[str] = set()
         for bundle in job.camera_bundles:
+            if bundle.camera_id in seen_cameras:
+                messages.append(f"{bundle.camera_id}: duplicate camera bundle")
+            seen_cameras.add(bundle.camera_id)
+            if bundle.camera_id not in expected_cameras:
+                messages.append(f"{bundle.camera_id}: camera not enabled by recipe")
             reports.extend(self._check_camera_bundle(bundle, recipe, messages))
+        for camera_id in sorted(expected_cameras - seen_cameras):
+            messages.append(f"{camera_id}: missing configured camera bundle")
         is_pass = not messages and all(report.is_pass for report in reports)
         return QualityReport(is_pass=is_pass, frame_reports=reports, messages=messages)
 
@@ -43,7 +55,11 @@ class ImageQualityGate:
         for light_id in recipe.quality.required_lights:
             if light_id not in bundle.light_frames:
                 messages.append(f"{bundle.camera_id}: missing required light {light_id}")
-        for frame in bundle.light_frames.values():
+        for light_id, frame in bundle.light_frames.items():
+            if frame.camera_id != bundle.camera_id:
+                messages.append(f"{bundle.camera_id}/{light_id}: frame camera_id mismatch {frame.camera_id}")
+            if frame.light_id != light_id:
+                messages.append(f"{bundle.camera_id}/{light_id}: frame light_id mismatch {frame.light_id}")
             reports.append(self._check_frame(frame, recipe))
         return reports
 
@@ -107,4 +123,3 @@ class ImageQualityGate:
                 total += abs(lap)
                 count += 1
         return total / max(count, 1)
-

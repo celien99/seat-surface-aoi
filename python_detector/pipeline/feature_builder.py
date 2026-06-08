@@ -14,6 +14,8 @@ class FeatureGroup:
     roi_name: str
     model_key: str
     features: dict[str, list[int]]
+    roi_bbox_xyxy_pixel: tuple[int, int, int, int] = (0, 0, 0, 0)
+    feature_shape_hw: tuple[int, int] = (0, 0)
 
 
 class FeatureBuilder:
@@ -51,12 +53,16 @@ class FeatureBuilder:
         return features
 
     def _make_feature_group(self, cube: ReflectanceCube, model_key: str, features: dict[str, list[int]]) -> FeatureGroup:
+        first_frame = next(iter(cube.frames.values()), None)
+        feature_shape = (first_frame.height, first_frame.width) if first_frame is not None else (0, 0)
         return FeatureGroup(
             sequence_id=cube.sequence_id,
             camera_id=cube.camera_id,
             roi_name=cube.roi_name,
             model_key=model_key,
             features=features,
+            roi_bbox_xyxy_pixel=cube.roi_bbox_xyxy_pixel,
+            feature_shape_hw=feature_shape,
         )
 
     def _required(self, image: LightFrame | None, name: str) -> list[int]:

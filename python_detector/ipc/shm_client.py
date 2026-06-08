@@ -61,6 +61,8 @@ CAMERA_ID_BY_INDEX = {
     2: "LEFT",
     3: "RIGHT",
 }
+LIGHT_INDEX_BY_ID = {light_id: index for index, light_id in LIGHT_ID_BY_INDEX.items()}
+CAMERA_INDEX_BY_ID = {camera_id: index for index, camera_id in CAMERA_ID_BY_INDEX.items()}
 
 
 @dataclass
@@ -318,14 +320,14 @@ class ShmClient:
 
     def _pack_defect(self, defect: DefectResult) -> bytes:
         bbox = tuple(int(v) for v in defect.bbox_xyxy_pixel)
-        evidence = [int(light.replace("LIGHT_", "")) if light.startswith("LIGHT_") else 0 for light in defect.evidence_lights]
+        evidence = [self._light_index(light) for light in defect.evidence_lights]
         evidence = (evidence + [0] * 8)[:8]
         return struct.pack(
             "<64s64s64sI64s4ifII8iqII",
             encode_cstr(defect.defect_id),
             encode_cstr(defect.class_name),
             encode_cstr(defect.severity),
-            0,
+            self._camera_index(defect.camera_id),
             encode_cstr(defect.roi_name),
             *bbox,
             float(defect.score),
@@ -336,6 +338,24 @@ class ShmClient:
             InspectionDecision[defect.decision].value,
             0,
         )
+
+    def _camera_index(self, camera_id: str) -> int:
+        if camera_id in CAMERA_INDEX_BY_ID:
+            return CAMERA_INDEX_BY_ID[camera_id]
+        if camera_id.startswith("CAMERA_"):
+            suffix = camera_id.removeprefix("CAMERA_")
+            if suffix.isdigit():
+                return int(suffix)
+        return 0
+
+    def _light_index(self, light_id: str) -> int:
+        if light_id in LIGHT_INDEX_BY_ID:
+            return LIGHT_INDEX_BY_ID[light_id]
+        if light_id.startswith("LIGHT_"):
+            suffix = light_id.removeprefix("LIGHT_")
+            if suffix.isdigit():
+                return int(suffix)
+        return 0
 
     def _release_frame_slot(self, sequence_id: int) -> None:
         slot_index = self._pending_frame_slots.pop(sequence_id, None)

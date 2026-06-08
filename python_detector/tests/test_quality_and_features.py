@@ -31,15 +31,24 @@ def _frame(light_id: str, value: int = 80) -> LightFrame:
     )
 
 
-def _job(lights: tuple[str, ...]) -> SeatInspectionJob:
+def _bundle(camera_id: str, lights: tuple[str, ...]) -> CameraBundle:
     frames = {light: _frame(light) for light in lights}
+    for frame in frames.values():
+        frame.camera_id = camera_id
+    return CameraBundle(camera_id=camera_id, pose_id=camera_id, light_frames=frames)
+
+
+def _job(lights: tuple[str, ...], include_cushion: bool = True) -> SeatInspectionJob:
+    bundles = [_bundle("TOP_BACK", lights)]
+    if include_cushion:
+        bundles.append(_bundle("TOP_CUSHION", lights))
     return SeatInspectionJob(
         sequence_id=1,
         trigger_id=2,
         seat_id="SIM",
         recipe_id="seat_a_black_leather_v1",
         sku="seat_a_black_leather",
-        camera_bundles=[CameraBundle(camera_id="TOP_BACK", pose_id="TOP_BACK", light_frames=frames)],
+        camera_bundles=bundles,
     )
 
 
@@ -57,3 +66,12 @@ def test_missing_required_light_returns_recheck() -> None:
     result = pipeline.process(_job(("DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")), recipe)
     assert result.decision == "RECHECK"
     assert result.quality_pass is False
+
+
+def test_missing_configured_camera_returns_recheck() -> None:
+    pipeline = InspectionPipeline()
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    result = pipeline.process(_job(("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"), include_cushion=False), recipe)
+    assert result.decision == "RECHECK"
+    assert result.quality_pass is False
+    assert "TOP_CUSHION: missing configured camera bundle" in pipeline.last_context["quality_report"].messages
