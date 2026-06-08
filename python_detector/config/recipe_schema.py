@@ -51,6 +51,7 @@ class ThresholdConfig:
 class ModelConfig:
     backend: str = "fake"
     model_path: str | None = None
+    fake_mode: str = "auto"
 
 
 @dataclass(frozen=True)
@@ -208,6 +209,7 @@ def _models_from_dict(data: dict[str, Any]) -> dict[str, ModelConfig]:
         models[str(model_key)] = ModelConfig(
             backend=backend,
             model_path=None if raw.get("model_path") in (None, "") else _str(raw.get("model_path"), f"models.{model_key}.model_path"),
+            fake_mode=_str(raw.get("fake_mode", "auto"), f"models.{model_key}.fake_mode"),
         )
     if "default" not in models:
         models["default"] = ModelConfig()

@@ -17,6 +17,7 @@
 - C++ 主控已具备相机、光源、PLC 的可替换接口和模拟驱动，支持光源故障、缺帧、PLC 输出失败等故障注入。
 - C++ 运行配置示例位于 `cpp_controller/config/station_runtime.example.conf`。
 - Python 检测侧已支持标定文件和 ROI 模板加载，默认 identity 标定位于 `python_detector/config/calibration/`，默认 ROI 位于 `python_detector/config/roi/default_roi.yaml`。
+- 模型推理支持 fake 默认后端和 ONNX 可选后端；ONNX 依赖或模型缺失时保守失败，不会静默输出 `OK`。
 
 ## 项目规则
 

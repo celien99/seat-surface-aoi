@@ -57,8 +57,10 @@ thresholds:
 models:
   default:
     backend: fake
+    fake_mode: auto
   fake_default:
     backend: fake
+    fake_mode: auto
 trace:
   enabled: true
   root_dir: trace

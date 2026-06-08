@@ -49,7 +49,7 @@ class InspectionPipeline:
                     elapsed_ms = (time.perf_counter() - started) * 1000.0
                     return self.rule_engine.make_quality_fail_result(job, quality_report, elapsed_ms)
             features = self.feature_builder.build(cubes, recipe)
-            candidates = self.inference_engine.infer(features)
+            candidates = self.inference_engine.infer(features, recipe)
             fused = self.fusion_engine.fuse(candidates)
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             return self.rule_engine.decide(job, fused, quality_report, elapsed_ms)
