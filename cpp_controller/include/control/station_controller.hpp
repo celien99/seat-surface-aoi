@@ -26,6 +26,7 @@ struct StationConfig {
   int max_jobs = 0;
   std::string recipe_id = "seat_a_black_leather_v1";
   std::vector<std::uint32_t> light_order = {1, 2, 3, 4};
+  TriggerSyncMode trigger_sync_mode = TriggerSyncMode::CameraExposureOutput;
   bool simulate_light_fault = false;
   bool simulate_plc_output_fault = false;
   bool simulate_trigger_timeout = false;

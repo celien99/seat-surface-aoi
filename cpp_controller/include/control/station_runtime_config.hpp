@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "control/light_controller.hpp"
 #include "ipc/shm_protocol.hpp"
 
 namespace seat_aoi {
@@ -40,6 +41,7 @@ struct StationRuntimeConfig {
   int max_jobs = 0;
   std::string recipe_id = "seat_a_black_leather_v1";
   std::vector<std::uint32_t> light_order = {1, 2, 3, 4};
+  TriggerSyncMode trigger_sync_mode = TriggerSyncMode::CameraExposureOutput;
   std::string trace_root = "trace";
   std::vector<RuntimeCameraConfig> cameras = {
       RuntimeCameraConfig{0, "TOP_BACK", 64, 48, 1, false},

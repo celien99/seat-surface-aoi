@@ -14,6 +14,34 @@ bool CameraDevice::initialize(const CameraConfig& config) {
   return true;
 }
 
+bool CameraDevice::arm(std::uint64_t trigger_id,
+                       const LightChannelParam& light_param,
+                       std::uint32_t light_seq_index,
+                       int timeout_ms) {
+  if (!initialized_ || timeout_ms <= 0 || light_param.light_index == 0 ||
+      light_param.exposure_us == 0) {
+    return false;
+  }
+  armed_ = true;
+  armed_trigger_id_ = trigger_id;
+  armed_light_index_ = light_param.light_index;
+  armed_light_seq_index_ = light_seq_index;
+  return true;
+}
+
+bool CameraDevice::simulate_exposure_output(std::uint64_t trigger_id,
+                                            const LightChannelParam& light_param,
+                                            std::uint32_t light_seq_index,
+                                            int timeout_ms) {
+  if (!initialized_ || timeout_ms <= 0 || !armed_ || armed_trigger_id_ != trigger_id ||
+      armed_light_index_ != light_param.light_index ||
+      armed_light_seq_index_ != light_seq_index) {
+    return false;
+  }
+  std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  return true;
+}
+
 bool CameraDevice::capture(std::uint64_t trigger_id,
                            const LightChannelParam& light_param,
                            std::uint32_t light_seq_index,
@@ -23,6 +51,11 @@ bool CameraDevice::capture(std::uint64_t trigger_id,
     return false;
   }
   if (config_.simulate_missing_frame) {
+    return false;
+  }
+  if (armed_ && (armed_trigger_id_ != trigger_id ||
+                 armed_light_index_ != light_param.light_index ||
+                 armed_light_seq_index_ != light_seq_index)) {
     return false;
   }
 
@@ -59,6 +92,7 @@ bool CameraDevice::capture(std::uint64_t trigger_id,
   meta.gain = light_param.gain;
   copy_cstr(meta.calibration_id, "calib/simulated_v1");
   out_frame->meta = meta;
+  armed_ = false;
   return true;
 }
 

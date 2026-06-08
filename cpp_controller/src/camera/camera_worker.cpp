@@ -14,6 +14,26 @@ void CameraWorker::stop() {
   running_ = false;
 }
 
+bool CameraWorker::arm(std::uint64_t trigger_id,
+                       const LightChannelParam& light_param,
+                       std::uint32_t light_seq_index,
+                       int timeout_ms) {
+  if (!running_) {
+    return false;
+  }
+  return device_.arm(trigger_id, light_param, light_seq_index, timeout_ms);
+}
+
+bool CameraWorker::simulate_exposure_output(std::uint64_t trigger_id,
+                                            const LightChannelParam& light_param,
+                                            std::uint32_t light_seq_index,
+                                            int timeout_ms) {
+  if (!running_) {
+    return false;
+  }
+  return device_.simulate_exposure_output(trigger_id, light_param, light_seq_index, timeout_ms);
+}
+
 bool CameraWorker::wait_frame(std::uint64_t trigger_id,
                               const LightChannelParam& light_param,
                               std::uint32_t light_seq_index,

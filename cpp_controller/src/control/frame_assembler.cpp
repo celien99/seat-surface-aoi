@@ -8,6 +8,20 @@
 
 namespace seat_aoi {
 
+namespace {
+
+const char* trigger_sync_mode_name(TriggerSyncMode mode) {
+  switch (mode) {
+    case TriggerSyncMode::Software:
+      return "software";
+    case TriggerSyncMode::CameraExposureOutput:
+      return "camera_exposure_output";
+  }
+  return "unknown";
+}
+
+}  // namespace
+
 void FrameAssembler::configure(const StationRuntimeConfig& config) {
   config_ = config;
   initialized_ = false;
@@ -89,13 +103,86 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
   for (std::uint32_t light_seq_index = 0; light_seq_index < sequence.channels.size();
        ++light_seq_index) {
     const auto light_param = sequence.channels[light_seq_index];
-    if (!light_controller_.trigger_channel(light_param,
-                                           trigger.trigger_id,
-                                           light_seq_index,
-                                           config_.light_timeout_ms,
-                                           error_message)) {
-      if (error_message != nullptr && error_message->empty()) {
-        *error_message = "simulated light channel failed";
+    if (config_.trigger_sync_mode == TriggerSyncMode::Software) {
+      if (!light_controller_.trigger_channel(light_param,
+                                             trigger.trigger_id,
+                                             light_seq_index,
+                                             config_.light_timeout_ms,
+                                             error_message)) {
+        if (error_message != nullptr && error_message->empty()) {
+          *error_message = "simulated light channel failed";
+        }
+        light_controller_.shutdown_all();
+        initialized_ = false;
+        cameras_.clear();
+        return false;
+      }
+    } else if (config_.trigger_sync_mode == TriggerSyncMode::CameraExposureOutput) {
+      if (!light_controller_.arm_hardware_trigger(light_param,
+                                                  trigger.trigger_id,
+                                                  light_seq_index,
+                                                  config_.light_timeout_ms,
+                                                  error_message)) {
+        if (error_message != nullptr && error_message->empty()) {
+          *error_message = "simulated light hardware trigger arm failed";
+        }
+        light_controller_.shutdown_all();
+        initialized_ = false;
+        cameras_.clear();
+        return false;
+      }
+      for (std::uint32_t camera_index = 0; camera_index < cameras_.size(); ++camera_index) {
+        if (!cameras_[camera_index].arm(trigger.trigger_id,
+                                        light_param,
+                                        light_seq_index,
+                                        config_.camera_timeout_ms)) {
+          if (error_message != nullptr) {
+            std::ostringstream oss;
+            oss << "simulated camera arm failed camera_index=" << camera_index
+                << " light_index=" << light_param.light_index
+                << " light_seq_index=" << light_seq_index;
+            *error_message = oss.str();
+          }
+          light_controller_.shutdown_all();
+          initialized_ = false;
+          cameras_.clear();
+          return false;
+        }
+      }
+      if (!cameras_.empty() &&
+          !cameras_[0].simulate_exposure_output(trigger.trigger_id,
+                                                light_param,
+                                                light_seq_index,
+                                                config_.camera_timeout_ms)) {
+        if (error_message != nullptr) {
+          std::ostringstream oss;
+          oss << "simulated camera exposure output failed camera_index=0"
+              << " light_index=" << light_param.light_index
+              << " light_seq_index=" << light_seq_index;
+          *error_message = oss.str();
+        }
+        light_controller_.shutdown_all();
+        initialized_ = false;
+        cameras_.clear();
+        return false;
+      }
+      if (!light_controller_.notify_hardware_triggered(light_param,
+                                                       trigger.trigger_id,
+                                                       light_seq_index,
+                                                       config_.light_timeout_ms,
+                                                       error_message)) {
+        if (error_message != nullptr && error_message->empty()) {
+          *error_message = "simulated light hardware trigger failed";
+        }
+        light_controller_.shutdown_all();
+        initialized_ = false;
+        cameras_.clear();
+        return false;
+      }
+    } else {
+      if (error_message != nullptr) {
+        *error_message = std::string("unsupported trigger sync mode ") +
+                         trigger_sync_mode_name(config_.trigger_sync_mode);
       }
       light_controller_.shutdown_all();
       initialized_ = false;

@@ -21,6 +21,7 @@ bool StationController::initialize(const StationConfig& config) {
   runtime_config.max_jobs = config.max_jobs;
   runtime_config.recipe_id = config.recipe_id;
   runtime_config.light_order = config.light_order;
+  runtime_config.trigger_sync_mode = config.trigger_sync_mode;
   runtime_config.light.simulate_fault = config.simulate_light_fault;
   runtime_config.plc.simulate_output_fault = config.simulate_plc_output_fault;
   runtime_config.plc.simulate_trigger_timeout = config.simulate_trigger_timeout;

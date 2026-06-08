@@ -6,6 +6,11 @@
 
 namespace seat_aoi {
 
+enum class TriggerSyncMode : std::uint32_t {
+  Software = 1,
+  CameraExposureOutput = 2,
+};
+
 struct LightChannelParam {
   std::uint32_t light_index = 0;
   std::uint32_t exposure_us = 0;
@@ -34,6 +39,16 @@ public:
                        std::uint32_t light_seq_index,
                        int timeout_ms,
                        std::string* error_message);
+  bool arm_hardware_trigger(const LightChannelParam& channel,
+                            std::uint64_t trigger_id,
+                            std::uint32_t light_seq_index,
+                            int timeout_ms,
+                            std::string* error_message);
+  bool notify_hardware_triggered(const LightChannelParam& channel,
+                                 std::uint64_t trigger_id,
+                                 std::uint32_t light_seq_index,
+                                 int timeout_ms,
+                                 std::string* error_message);
   bool run_sequence(const LightSequence& sequence,
                     std::uint64_t trigger_id,
                     int timeout_ms,
@@ -45,6 +60,8 @@ public:
 private:
   bool initialized_ = false;
   bool simulate_fault_ = false;
+  bool hardware_trigger_armed_ = false;
+  std::uint32_t armed_light_index_ = 0;
 };
 
 }  // namespace seat_aoi

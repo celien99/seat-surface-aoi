@@ -71,6 +71,65 @@ bool LightController::trigger_channel(const LightChannelParam& channel,
   return true;
 }
 
+bool LightController::arm_hardware_trigger(const LightChannelParam& channel,
+                                           std::uint64_t trigger_id,
+                                           std::uint32_t light_seq_index,
+                                           int timeout_ms,
+                                           std::string* error_message) {
+  if (!initialized_ || timeout_ms <= 0 || channel.light_index == 0 ||
+      channel.exposure_us == 0 || channel.current_percent <= 0.0F) {
+    if (error_message != nullptr) {
+      *error_message = "光源硬触发 arm 参数非法";
+    }
+    shutdown_all();
+    return false;
+  }
+  if (simulate_fault_) {
+    if (error_message != nullptr) {
+      *error_message = "模拟光源故障";
+    }
+    shutdown_all();
+    return false;
+  }
+  hardware_trigger_armed_ = true;
+  armed_light_index_ = channel.light_index;
+  std::cout << "[trigger_id=" << trigger_id << " light_index=" << channel.light_index
+            << " light_seq_index=" << light_seq_index
+            << "] arm light for camera exposure hardware trigger exposure_us="
+            << channel.exposure_us << " gain=" << channel.gain
+            << " current_percent=" << channel.current_percent << std::endl;
+  return true;
+}
+
+bool LightController::notify_hardware_triggered(const LightChannelParam& channel,
+                                                std::uint64_t trigger_id,
+                                                std::uint32_t light_seq_index,
+                                                int timeout_ms,
+                                                std::string* error_message) {
+  if (!initialized_ || timeout_ms <= 0 || !hardware_trigger_armed_ ||
+      armed_light_index_ != channel.light_index) {
+    if (error_message != nullptr) {
+      *error_message = "光源硬触发未 arm 或通道不匹配";
+    }
+    shutdown_all();
+    return false;
+  }
+  if (simulate_fault_) {
+    if (error_message != nullptr) {
+      *error_message = "模拟光源故障";
+    }
+    shutdown_all();
+    return false;
+  }
+  std::cout << "[trigger_id=" << trigger_id << " light_index=" << channel.light_index
+            << " light_seq_index=" << light_seq_index
+            << "] camera exposure output fired strobe" << std::endl;
+  std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  hardware_trigger_armed_ = false;
+  armed_light_index_ = 0;
+  return true;
+}
+
 bool LightController::run_sequence(const LightSequence& sequence,
                                    std::uint64_t trigger_id,
                                    int timeout_ms,
@@ -98,6 +157,8 @@ LightHealth LightController::get_health() const {
 
 void LightController::shutdown_all() {
   initialized_ = false;
+  hardware_trigger_armed_ = false;
+  armed_light_index_ = 0;
 }
 
 }  // namespace seat_aoi

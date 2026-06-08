@@ -59,6 +59,24 @@ bool parse_light_order(const std::string& value,
   return true;
 }
 
+bool parse_trigger_sync_mode(const std::string& value,
+                             TriggerSyncMode* out_mode,
+                             std::string* error_message) {
+  if (value == "camera_exposure_output" || value == "hardware" ||
+      value == "hard_trigger") {
+    *out_mode = TriggerSyncMode::CameraExposureOutput;
+    return true;
+  }
+  if (value == "software") {
+    *out_mode = TriggerSyncMode::Software;
+    return true;
+  }
+  if (error_message != nullptr) {
+    *error_message = "trigger_sync_mode 只能是 camera_exposure_output 或 software: " + value;
+  }
+  return false;
+}
+
 }  // namespace
 
 bool load_station_runtime_config(const std::string& path,
@@ -111,6 +129,10 @@ bool load_station_runtime_config(const std::string& path,
       config.max_jobs = std::stoi(value);
     } else if (key == "light_order") {
       if (!parse_light_order(value, &config.light_order, error_message)) {
+        return false;
+      }
+    } else if (key == "trigger_sync_mode") {
+      if (!parse_trigger_sync_mode(value, &config.trigger_sync_mode, error_message)) {
         return false;
       }
     } else if (key == "reset_shared_memory") {
