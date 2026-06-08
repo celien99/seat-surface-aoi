@@ -70,3 +70,34 @@ def test_recipe_accepts_roi_primary_and_safety_net_models() -> None:
     recipe = RecipeManager().load("seat_a_black_leather_v1")
     assert recipe.model_key_for("TOP_BACK", "full") == "fake_default"
     assert recipe.safety_net_model_keys_for("TOP_BACK", "full") == ("unknown_safety_net",)
+
+
+def test_recipe_parses_onnx_model_io_contract() -> None:
+    recipe = recipe_from_dict(
+        {
+            "recipe_id": "onnx_recipe",
+            "sku": "sku",
+            "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+            "cameras": {"TOP": {"model_key": "scratch_onnx"}},
+            "models": {
+                "scratch_onnx": {
+                    "backend": "onnx",
+                    "model_path": "models/scratch.onnx",
+                    "model_family": "supervised",
+                    "role": "primary",
+                    "input_channels": ["ch0_diffuse", "ch4_high_max_min"],
+                    "input_scale": 255.0,
+                    "class_names": ["scratch", "dent"],
+                    "output_decode": "detection_rows",
+                    "bbox_format": "xyxy_normalized",
+                    "score_threshold": 0.25,
+                }
+            },
+        }
+    )
+    model = recipe.models["scratch_onnx"]
+    assert model.input_channels == ("ch0_diffuse", "ch4_high_max_min")
+    assert model.class_names == ("scratch", "dent")
+    assert model.output_decode == "detection_rows"
+    assert model.bbox_format == "xyxy_normalized"
+    assert model.score_threshold == 0.25

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from python_detector.config.recipe_schema import Recipe
+from python_detector.config.recipe_schema import ModelConfig, Recipe
 from python_detector.ipc.data_types import LightFrame
 from python_detector.pipeline.reflectance_cube import ReflectanceCube
 
@@ -16,6 +16,8 @@ class FeatureGroup:
     features: dict[str, list[int]]
     roi_bbox_xyxy_pixel: tuple[int, int, int, int] = (0, 0, 0, 0)
     feature_shape_hw: tuple[int, int] = (0, 0)
+    tensor_nchw: list[list[list[list[float]]]] | None = None
+    tensor_channel_names: tuple[str, ...] = ()
 
 
 class FeatureBuilder:
@@ -23,9 +25,10 @@ class FeatureBuilder:
         feature_groups: list[FeatureGroup] = []
         for cube in reflectance_cubes:
             features = self._build_feature_dict(cube)
-            feature_groups.append(self._make_feature_group(cube, recipe.model_key_for(cube.camera_id, cube.roi_name), features))
+            primary_model_key = recipe.model_key_for(cube.camera_id, cube.roi_name)
+            feature_groups.append(self._make_feature_group(cube, primary_model_key, recipe.models[primary_model_key], features))
             for model_key in recipe.safety_net_model_keys_for(cube.camera_id, cube.roi_name):
-                feature_groups.append(self._make_feature_group(cube, model_key, features))
+                feature_groups.append(self._make_feature_group(cube, model_key, recipe.models[model_key], features))
         return feature_groups
 
     def _build_feature_dict(self, cube: ReflectanceCube) -> dict[str, list[int]]:
@@ -52,9 +55,16 @@ class FeatureBuilder:
             features["aux_specular_removed"] = self._abs_diff(diffuse, polar)
         return features
 
-    def _make_feature_group(self, cube: ReflectanceCube, model_key: str, features: dict[str, list[int]]) -> FeatureGroup:
+    def _make_feature_group(
+        self,
+        cube: ReflectanceCube,
+        model_key: str,
+        model_config: ModelConfig,
+        features: dict[str, list[int]],
+    ) -> FeatureGroup:
         first_frame = next(iter(cube.frames.values()), None)
         feature_shape = (first_frame.height, first_frame.width) if first_frame is not None else (0, 0)
+        tensor = self._build_tensor(features, model_config.input_channels, feature_shape, model_config.input_scale)
         return FeatureGroup(
             sequence_id=cube.sequence_id,
             camera_id=cube.camera_id,
@@ -63,6 +73,8 @@ class FeatureBuilder:
             features=features,
             roi_bbox_xyxy_pixel=cube.roi_bbox_xyxy_pixel,
             feature_shape_hw=feature_shape,
+            tensor_nchw=tensor,
+            tensor_channel_names=model_config.input_channels,
         )
 
     def _required(self, image: LightFrame | None, name: str) -> list[int]:
@@ -99,9 +111,41 @@ class FeatureBuilder:
         expected = image.stride_bytes * image.height
         data = image.image[:expected]
         if len(data) == 0:
-            return [0] * 64
-        step = max(len(data) // 64, 1)
-        sampled = [int(data[i]) for i in range(0, len(data), step)][:64]
-        if len(sampled) < 64:
-            sampled.extend([0] * (64 - len(sampled)))
-        return sampled
+            return []
+        pixels: list[int] = []
+        for row in range(image.height):
+            start = row * image.stride_bytes
+            end = start + image.width
+            pixels.extend(int(value) for value in data[start:end])
+        return pixels
+
+    def _build_tensor(
+        self,
+        features: dict[str, list[int]],
+        channel_names: tuple[str, ...],
+        shape_hw: tuple[int, int],
+        input_scale: float,
+    ) -> list[list[list[list[float]]]]:
+        height, width = shape_hw
+        if height <= 0 or width <= 0:
+            raise ValueError("feature tensor shape is invalid")
+        channels: list[list[list[float]]] = []
+        for channel_name in channel_names:
+            values = features.get(channel_name)
+            if values is None:
+                raise ValueError(f"model input channel missing: {channel_name}")
+            channels.append(self._resize_feature(values, height, width, input_scale))
+        return [channels]
+
+    def _resize_feature(self, values: list[int], height: int, width: int, input_scale: float) -> list[list[float]]:
+        if not values:
+            raise ValueError("feature channel is empty")
+        total = height * width
+        if len(values) == total:
+            source = values
+        else:
+            source = [values[(index * len(values)) // total] for index in range(total)]
+        return [
+            [max(0.0, min(float(source[row * width + col]) / input_scale, 1.0)) for col in range(width)]
+            for row in range(height)
+        ]

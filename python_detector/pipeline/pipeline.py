@@ -82,6 +82,13 @@ class InspectionPipeline:
                         "roi_name": group.roi_name,
                         "model_key": group.model_key,
                         "feature_names": sorted(group.features),
+                        "tensor_channel_names": list(group.tensor_channel_names),
+                        "tensor_shape_nchw": [
+                            1,
+                            len(group.tensor_channel_names),
+                            group.feature_shape_hw[0],
+                            group.feature_shape_hw[1],
+                        ],
                     }
                     for group in features
                 ],

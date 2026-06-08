@@ -57,6 +57,18 @@ class ModelConfig:
     fake_mode: str = "auto"
     model_family: str = "supervised"
     role: str = "primary"
+    input_channels: tuple[str, ...] = (
+        "ch0_diffuse",
+        "ch1_polar_diffuse",
+        "ch2_high_left",
+        "ch3_high_right",
+        "ch4_high_max_min",
+    )
+    input_scale: float = 255.0
+    class_names: tuple[str, ...] = ("scratch",)
+    output_decode: str = "none"
+    bbox_format: str = "xyxy_pixel"
+    score_threshold: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -245,6 +257,18 @@ def _models_from_dict(data: dict[str, Any]) -> dict[str, ModelConfig]:
             fake_mode=_str(raw.get("fake_mode", "auto"), f"models.{model_key}.fake_mode"),
             model_family=model_family,
             role=role,
+            input_channels=_str_tuple(
+                raw.get(
+                    "input_channels",
+                    ("ch0_diffuse", "ch1_polar_diffuse", "ch2_high_left", "ch3_high_right", "ch4_high_max_min"),
+                ),
+                f"models.{model_key}.input_channels",
+            ),
+            input_scale=_positive_float(raw.get("input_scale", 255.0), f"models.{model_key}.input_scale"),
+            class_names=_str_tuple(raw.get("class_names", ("scratch",)), f"models.{model_key}.class_names"),
+            output_decode=_output_decode(raw.get("output_decode", "none"), f"models.{model_key}.output_decode"),
+            bbox_format=_bbox_format(raw.get("bbox_format", "xyxy_pixel"), f"models.{model_key}.bbox_format"),
+            score_threshold=_float(raw.get("score_threshold", 0.0), f"models.{model_key}.score_threshold"),
         )
     if "default" not in models:
         models["default"] = ModelConfig()
@@ -326,6 +350,20 @@ def _decision(value: Any, name: str) -> str:
     return value
 
 
+def _output_decode(value: Any, name: str) -> str:
+    value = _str(value, name)
+    if value not in {"none", "detection_rows"}:
+        raise RecipeValidationError(f"{name} 必须是 none 或 detection_rows")
+    return value
+
+
+def _bbox_format(value: Any, name: str) -> str:
+    value = _str(value, name)
+    if value not in {"xyxy_pixel", "xyxy_normalized"}:
+        raise RecipeValidationError(f"{name} 必须是 xyxy_pixel 或 xyxy_normalized")
+    return value
+
+
 def _dict(value: Any, name: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise RecipeValidationError(f"{name} 必须是字典")
@@ -343,6 +381,13 @@ def _float(value: Any, name: str) -> float:
     if not isinstance(value, (int, float)):
         raise RecipeValidationError(f"{name} 必须是数字")
     return float(value)
+
+
+def _positive_float(value: Any, name: str) -> float:
+    result = _float(value, name)
+    if result <= 0:
+        raise RecipeValidationError(f"{name} 必须大于 0")
+    return result
 
 
 def _optional_float(value: Any, name: str) -> float | None:

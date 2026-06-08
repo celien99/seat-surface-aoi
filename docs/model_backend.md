@@ -3,7 +3,30 @@
 ## 当前后端
 
 - `fake`：默认后端，用于模拟 OK、RECHECK、NG 分支。
-- `onnx`：可选后端。未安装 `onnxruntime`、模型路径为空、模型文件不存在或输出解码未配置时，返回保守错误。
+- `onnx`：可选后端。未安装 `onnxruntime`、模型路径为空、模型文件不存在、输入 tensor 缺失、输出解码未配置或输出解析失败时，返回保守错误。
+
+## 模型输入约定
+
+FeatureBuilder 会按 ROI 生成 `NCHW` float tensor：
+
+```text
+shape = [1, C, H, W]
+C = models.<model_key>.input_channels 的通道数
+H/W = ROI 裁剪后的 output_size
+value = feature_value / input_scale，并裁剪到 [0, 1]
+```
+
+默认生产标准通道：
+
+```text
+ch0_diffuse
+ch1_polar_diffuse
+ch2_high_left
+ch3_high_right
+ch4_high_max_min
+```
+
+模型配置必须明确输入通道顺序。ONNX 模型的第一个输入节点会接收该 NCHW tensor。
 
 ## 配方示例
 
@@ -19,6 +42,17 @@ models:
     model_path: models/scratch.onnx
     model_family: supervised
     role: primary
+    input_channels:
+      - ch0_diffuse
+      - ch1_polar_diffuse
+      - ch2_high_left
+      - ch3_high_right
+      - ch4_high_max_min
+    input_scale: 255.0
+    class_names: [scratch, dent]
+    output_decode: detection_rows
+    bbox_format: xyxy_pixel
+    score_threshold: 0.2
   unknown_safety_net:
     backend: onnx
     model_path: models/patchcore_unknown.onnx
@@ -39,3 +73,19 @@ models:
 - 明确输出 decode 规则、bbox 坐标格式和 mask 格式。
 - 缺模型、后端异常、输出 decode 失败不能输出 `OK`。
 - 每个 ROI 应明确主模型和可选安全网模型，不允许用单一 PatchCore 覆盖全座椅主检。
+
+## ONNX detection_rows 输出
+
+当前 ONNX 后端支持 `output_decode: detection_rows`。模型第一个输出必须能解析为二维行表：
+
+```text
+[x1, y1, x2, y2, score, class_id]
+```
+
+也支持带 batch 维的 `[1, N, 6]`。字段含义：
+
+- `score` 小于 `score_threshold` 的行会被忽略。
+- `class_id` 必须落在 `class_names` 范围内，否则返回保守错误。
+- `bbox_format: xyxy_pixel` 表示 bbox 是 ROI 内像素坐标，结果会映射回原图 ROI 坐标。
+- `bbox_format: xyxy_normalized` 表示 bbox 是 ROI 内归一化坐标，范围按 ROI 宽高映射回原图坐标。
+- bbox 无效、输出为空、形状不是 `[N, >=6]` 时返回保守错误。

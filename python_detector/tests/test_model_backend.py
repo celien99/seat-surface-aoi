@@ -3,7 +3,7 @@ from dataclasses import replace
 import pytest
 
 from python_detector.config.recipe_schema import ModelConfig, RecipeManager
-from python_detector.models.inference_engine import FakeModel, InferenceEngine, ModelRegistry
+from python_detector.models.inference_engine import FakeModel, InferenceEngine, ModelRegistry, OnnxModel
 from python_detector.pipeline.feature_builder import FeatureGroup
 
 
@@ -14,7 +14,28 @@ def _feature_group() -> FeatureGroup:
         roi_name="full",
         model_key="fake_default",
         features={"ch4_high_max_min": [0] * 64},
+        roi_bbox_xyxy_pixel=(10, 20, 73, 67),
+        feature_shape_hw=(48, 64),
+        tensor_nchw=[[[[0.1 for _ in range(64)] for _ in range(48)]]],
+        tensor_channel_names=("ch0_diffuse",),
     )
+
+
+class _Input:
+    name = "input"
+
+
+class _Session:
+    def __init__(self, output):
+        self.output = output
+        self.last_inputs = None
+
+    def get_inputs(self):
+        return [_Input()]
+
+    def run(self, _output_names, inputs):
+        self.last_inputs = inputs
+        return [self.output]
 
 
 def test_fake_model_modes_cover_ok_recheck_ng() -> None:
@@ -36,3 +57,40 @@ def test_missing_model_key_does_not_fallback_to_default_ok() -> None:
     missing_group = replace(_feature_group(), model_key="missing_model")
     with pytest.raises(RuntimeError):
         InferenceEngine(ModelRegistry()).infer([missing_group], recipe)
+
+
+def test_onnx_detection_rows_decode_maps_normalized_roi_bbox() -> None:
+    config = ModelConfig(
+        backend="onnx",
+        model_path="unused.onnx",
+        output_decode="detection_rows",
+        bbox_format="xyxy_normalized",
+        class_names=("scratch", "dent"),
+        score_threshold=0.3,
+    )
+    model = object.__new__(OnnxModel)
+    model.config = config
+    model.session = _Session(
+        [
+            [0.25, 0.25, 0.5, 0.5, 0.91, 1],
+            [0.0, 0.0, 1.0, 1.0, 0.10, 0],
+        ]
+    )
+
+    candidates = model.run(_feature_group())
+
+    assert len(candidates) == 1
+    assert candidates[0].class_name == "dent"
+    assert candidates[0].score == pytest.approx(0.91)
+    assert candidates[0].bbox_xyxy_pixel == (26, 32, 42, 44)
+    assert candidates[0].area_px == 17 * 13
+    assert candidates[0].evidence_lights == ["ch0_diffuse"]
+    assert model.session.last_inputs["input"][0][0][0][0] == pytest.approx(0.1)
+
+
+def test_onnx_decode_none_fails_conservatively() -> None:
+    model = object.__new__(OnnxModel)
+    model.config = ModelConfig(backend="onnx", model_path="unused.onnx", output_decode="none")
+    model.session = _Session([[0, 0, 1, 1, 0.9, 0]])
+    with pytest.raises(RuntimeError, match="输出解码未配置"):
+        model.run(_feature_group())

@@ -14,6 +14,14 @@ def test_v2_production_feature_profile_uses_five_standard_channels() -> None:
     assert first.model_key == "fake_default"
     assert {"ch0_diffuse", "ch1_polar_diffuse", "ch2_high_left", "ch3_high_right", "ch4_high_max_min"}.issubset(first.features)
     assert "optional_dark_low_lr_diff" not in first.features
+    assert first.tensor_channel_names == ("ch0_diffuse", "ch1_polar_diffuse", "ch2_high_left", "ch3_high_right", "ch4_high_max_min")
+    assert first.feature_shape_hw == (48, 64)
+    assert len(first.features["ch0_diffuse"]) == 48 * 64
+    assert len(first.tensor_nchw or []) == 1
+    assert len(first.tensor_nchw[0]) == 5
+    assert len(first.tensor_nchw[0][0]) == 48
+    assert len(first.tensor_nchw[0][0][0]) == 64
+    assert 0.0 <= first.tensor_nchw[0][0][0][0] <= 1.0
 
 
 def test_v2_roi_features_include_primary_and_safety_net_models() -> None:

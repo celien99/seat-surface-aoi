@@ -19,6 +19,8 @@
 - 规则判定使用配方中的类别阈值 `ng_score`、`recheck_score` 和 `min_area_px`；机位级 `light_order` 会进入 ReflectanceCube 和特征构建。
 - Python 预处理会按 ROI 模板裁剪 MONO8 图像并保留 `bbox_xyxy_pixel` 原图坐标；ROI 越界、ROI 输出尺寸不一致、标定尺寸不一致会保守失败。
 - ReflectanceCube 会使用标定文件中的 `light_alignment.matrix_3x3` 计算 ROI 角点配准误差，超过 `quality.max_registration_error_px` 时返回 `RECHECK`。
+- FeatureBuilder 会为每个 ROI 模型构建 NCHW float 输入张量，通道顺序、输入缩放和模型输出解码方式由配方 `models.*` 字段声明。
+- ONNX 后端支持可配置 `detection_rows` 输出解码，输入/输出缺失、类别越界、bbox 无效或未配置输出解码时会保守失败，不会静默输出 `OK`。
 - Python 回写缺陷结果时会把 `camera_id` 和 `evidence_lights` 映射为共享内存协议中的机位/光源索引，便于 C++ 侧追溯缺陷来源。
 - 低角度暗场、前后高角度和 NIR 作为可选增强光源，不作为主链路输出 `OK` 的默认前置依赖。
 - 正常模拟图像包返回 `OK`。
@@ -30,7 +32,7 @@
 - C++ 单个共享内存 frame slot 承载一个座椅任务的所有机位、所有光源图像；Python 检测进程按 `camera_index` 组装 `CameraBundle`。
 - C++ 运行配置示例位于 `cpp_controller/config/station_runtime.example.conf`。
 - Python 检测侧已支持标定文件和 ROI 模板加载，默认 identity 标定位于 `python_detector/config/calibration/`，默认 ROI 位于 `python_detector/config/roi/default_roi.yaml`。
-- 模型推理支持 fake 默认后端和 ONNX 可选后端；ONNX 依赖或模型缺失时保守失败，不会静默输出 `OK`。
+- 模型推理支持 fake 默认后端和 ONNX 可选后端；ONNX 依赖、模型缺失、输入配置或输出解码异常时保守失败，不会静默输出 `OK`。
 - PatchCore 只能配置为 unknown defect safety net，不能作为全座椅或 ROI 主检测模型。
 - 支持本地追溯落盘，`RECHECK`、`ERROR`、`NG` 默认保存 result、quality、registration、feature summary 和 timings。
 - 提供模拟回放与 benchmark 工具：`tools/replay_dataset.py`、`tools/benchmark_pipeline.py`。
