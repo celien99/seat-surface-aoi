@@ -145,3 +145,61 @@ def test_recipe_rejects_invalid_capture_quality_config() -> None:
                 "models": {"default": {"backend": "fake", "role": "primary"}},
             }
         )
+
+
+def test_recipe_rejects_threshold_recheck_above_ng() -> None:
+    with pytest.raises(RecipeValidationError, match="recheck_score 不能大于 ng_score"):
+        recipe_from_dict(
+            {
+                "recipe_id": "bad_threshold_order",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                "thresholds": {"scratch": {"ng_score": 0.3, "recheck_score": 0.5, "min_area_px": 1}},
+                "cameras": {"TOP": {"model_key": "default"}},
+                "models": {"default": {"backend": "fake", "role": "primary"}},
+            }
+        )
+
+
+def test_recipe_rejects_invalid_threshold_ranges() -> None:
+    with pytest.raises(RecipeValidationError, match="thresholds.scratch.ng_score"):
+        recipe_from_dict(
+            {
+                "recipe_id": "bad_threshold_score",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                "thresholds": {"scratch": {"ng_score": 1.2, "recheck_score": 0.2, "min_area_px": 1}},
+                "cameras": {"TOP": {"model_key": "default"}},
+                "models": {"default": {"backend": "fake", "role": "primary"}},
+            }
+        )
+    with pytest.raises(RecipeValidationError, match="thresholds.scratch.min_area_px"):
+        recipe_from_dict(
+            {
+                "recipe_id": "bad_threshold_area",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                "thresholds": {"scratch": {"ng_score": 0.5, "recheck_score": 0.2, "min_area_px": -1}},
+                "cameras": {"TOP": {"model_key": "default"}},
+                "models": {"default": {"backend": "fake", "role": "primary"}},
+            }
+        )
+
+
+def test_recipe_rejects_invalid_model_score_threshold() -> None:
+    with pytest.raises(RecipeValidationError, match="models.detector.score_threshold"):
+        recipe_from_dict(
+            {
+                "recipe_id": "bad_model_score",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                "cameras": {"TOP": {"model_key": "detector"}},
+                "models": {
+                    "detector": {
+                        "backend": "fake",
+                        "role": "primary",
+                        "score_threshold": -0.1,
+                    }
+                },
+            }
+        )

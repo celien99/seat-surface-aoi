@@ -62,6 +62,15 @@ PatchCore 只能作为 `safety_net`，不能通过 `model_key` 或 `roi_models` 
 
 配方缺失、格式错误、关键光源缺失、模型后端不支持时，检测进程必须返回 `RECHECK` 或 `ERROR`，不能使用默认 OK 兜底。
 
+## 阈值安全校验
+
+- `thresholds.<class>.ng_score` 和 `recheck_score` 必须在 `[0, 1]` 范围内。
+- `recheck_score` 不能大于 `ng_score`，否则同一缺陷会出现复检阈值高于 NG 阈值的反向规则。
+- `thresholds.<class>.min_area_px` 必须大于等于 0。
+- `models.<model>.score_threshold` 必须在 `[0, 1]` 范围内。
+
+这些配置错误会在配方加载阶段失败，不能进入在线判定链路。
+
 ## 测试机新增 SKU 流程
 
 1. 复制默认配方。

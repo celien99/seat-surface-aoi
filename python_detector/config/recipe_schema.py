@@ -256,10 +256,16 @@ def _thresholds_from_dict(data: dict[str, Any]) -> dict[str, ThresholdConfig]:
     thresholds: dict[str, ThresholdConfig] = {}
     for class_name, raw in data.items():
         raw = _dict(raw, f"thresholds.{class_name}")
+        ng_score = _ratio(raw.get("ng_score", 0.35), f"thresholds.{class_name}.ng_score")
+        recheck_score = _ratio(raw.get("recheck_score", 0.20), f"thresholds.{class_name}.recheck_score")
+        if recheck_score > ng_score:
+            raise RecipeValidationError(
+                f"thresholds.{class_name}.recheck_score 不能大于 ng_score: {recheck_score} > {ng_score}"
+            )
         thresholds[str(class_name)] = ThresholdConfig(
-            ng_score=_float(raw.get("ng_score", 0.35), f"thresholds.{class_name}.ng_score"),
-            recheck_score=_float(raw.get("recheck_score", 0.20), f"thresholds.{class_name}.recheck_score"),
-            min_area_px=_int(raw.get("min_area_px", 1), f"thresholds.{class_name}.min_area_px"),
+            ng_score=ng_score,
+            recheck_score=recheck_score,
+            min_area_px=_non_negative_int(raw.get("min_area_px", 1), f"thresholds.{class_name}.min_area_px"),
         )
     return thresholds
 
@@ -296,7 +302,7 @@ def _models_from_dict(data: dict[str, Any]) -> dict[str, ModelConfig]:
             class_names=_str_tuple(raw.get("class_names", ("scratch",)), f"models.{model_key}.class_names"),
             output_decode=_output_decode(raw.get("output_decode", "none"), f"models.{model_key}.output_decode"),
             bbox_format=_bbox_format(raw.get("bbox_format", "xyxy_pixel"), f"models.{model_key}.bbox_format"),
-            score_threshold=_float(raw.get("score_threshold", 0.0), f"models.{model_key}.score_threshold"),
+            score_threshold=_ratio(raw.get("score_threshold", 0.0), f"models.{model_key}.score_threshold"),
         )
     if "default" not in models:
         models["default"] = ModelConfig()
