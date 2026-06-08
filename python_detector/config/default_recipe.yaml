@@ -5,13 +5,63 @@ light_order:
   - POLAR_DIFFUSE
   - HIGH_LEFT
   - HIGH_RIGHT
+cameras:
+  TOP_BACK:
+    enabled: true
+    model_key: fake_default
+    roi_template: python_detector/config/roi/default_roi.yaml
+    calibration_id: calib/simulated_v1
+    base_light_id: POLAR_DIFFUSE
+    light_order:
+      - DIFFUSE
+      - POLAR_DIFFUSE
+      - HIGH_LEFT
+      - HIGH_RIGHT
+    pixel_size_mm: 0.12
+  TOP_CUSHION:
+    enabled: true
+    model_key: fake_default
+    roi_template: python_detector/config/roi/default_roi.yaml
+    calibration_id: calib/simulated_v1
+    base_light_id: POLAR_DIFFUSE
+    light_order:
+      - DIFFUSE
+      - POLAR_DIFFUSE
+      - HIGH_LEFT
+      - HIGH_RIGHT
+    pixel_size_mm: 0.12
 quality:
+  required_lights:
+    - DIFFUSE
+    - POLAR_DIFFUSE
+    - HIGH_LEFT
+    - HIGH_RIGHT
   max_saturation_ratio: 0.01
   min_mean_gray: 20
   max_mean_gray: 235
   min_sharpness: 1.0
+  max_registration_error_px: 1.5
 registration:
   base_light_id: POLAR_DIFFUSE
   base_light_fallback: DIFFUSE
   fail_policy: RECHECK
-
+thresholds:
+  scratch:
+    ng_score: 0.35
+    recheck_score: 0.20
+    min_area_px: 8
+  dent:
+    ng_score: 0.30
+    recheck_score: 0.18
+    min_area_px: 20
+models:
+  default:
+    backend: fake
+  fake_default:
+    backend: fake
+trace:
+  enabled: true
+  root_dir: trace
+  save_ok_ratio: 0.0
+  save_ng: true
+  save_recheck: true

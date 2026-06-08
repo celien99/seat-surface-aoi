@@ -12,6 +12,8 @@
 - Python 检测进程：共享内存读取、质量门禁、预处理、ReflectanceCube、特征构建、fake 推理、融合和规则判定。
 - 正常模拟图像包返回 `OK`。
 - Python detector 不存在或超时时，C++ 保守返回 `RECHECK`，不会误判 `OK`。
+- YAML 配方加载与 schema 校验，当前默认配方位于 `python_detector/config/default_recipe.yaml`。
+- 配方已覆盖机位、光源顺序、质量阈值、注册策略、模型后端和追溯配置。
 
 ## 项目规则
 
