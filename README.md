@@ -66,6 +66,15 @@ python3 -m tools.replay_dataset --count 3 --write-trace
 python3 -m tools.benchmark_pipeline --count 10
 ```
 
+## 对接文档
+
+- [硬件对接说明](docs/hardware_integration.md)
+- [配方设计说明](docs/recipe_design.md)
+- [标定与 ROI 说明](docs/calibration_and_roi.md)
+- [模型后端说明](docs/model_backend.md)
+- [追溯与回放说明](docs/trace_and_replay.md)
+- [测试机集成清单](docs/test_machine_integration.md)
+
 ## 目录结构
 
 ```text
