@@ -140,3 +140,38 @@ def test_quality_gate_ignores_stride_padding_for_exposure_stats() -> None:
     assert report.is_pass is True
     assert report.saturation_ratio == 0.0
     assert 90.0 <= report.mean_gray <= 110.0
+
+
+def test_unsupported_pixel_metadata_returns_recheck_before_preprocess() -> None:
+    pipeline = InspectionPipeline()
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    job = _job(LIGHTS)
+    frame = job.camera_bundles[0].light_frames["DIFFUSE"]
+    frame.pixel_format = "BGR8"
+    frame.color_order = "BGR"
+    frame.channels = 3
+    frame.stride_bytes = frame.width * frame.channels
+
+    result = pipeline.process(job, recipe)
+
+    assert result.decision == "RECHECK"
+    assert result.quality_pass is False
+    report = pipeline.last_context["quality_report"].frame_reports[0]
+    assert "unsupported pixel_format: BGR8" in report.messages
+    assert "unsupported color_order: BGR" in report.messages
+    assert "expected mono channel count 1, got 3" in report.messages
+
+
+def test_stride_smaller_than_active_row_returns_recheck() -> None:
+    pipeline = InspectionPipeline()
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    job = _job(LIGHTS)
+    frame = job.camera_bundles[0].light_frames["DIFFUSE"]
+    frame.stride_bytes = frame.width - 1
+
+    result = pipeline.process(job, recipe)
+
+    assert result.decision == "RECHECK"
+    assert result.quality_pass is False
+    report = pipeline.last_context["quality_report"].frame_reports[0]
+    assert f"stride smaller than active row width: {frame.width - 1} < {frame.width}" in report.messages

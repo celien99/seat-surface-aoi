@@ -49,6 +49,8 @@ quality:
 - `require_monotonic_timestamps`：要求必需光源按配方顺序时间戳单调。
 - `require_unique_frame_indices`：要求必需光源帧号不重复。
 
+质量门禁还会在预处理前校验每帧图像元数据，当前在线主链路只接受 `MONO8`、`UINT8`、`MONO`、单通道图像；`stride_bytes` 必须大于等于有效行宽，图像长度必须覆盖完整 stride。元数据不满足要求时返回 `RECHECK`。
+
 这些检查失败时返回 `RECHECK`，不能输出 `OK`。
 
 ROI 模型使用两个层次：

@@ -109,7 +109,8 @@ class ImageQualityGate:
 
     def _check_frame(self, frame: LightFrame, recipe: Recipe) -> FrameQuality:
         values = frame.image
-        if frame.dtype != "UINT8" or frame.bit_depth != 8:
+        meta_messages = self._frame_meta_messages(frame)
+        if meta_messages:
             return FrameQuality(
                 frame.camera_id,
                 frame.light_id,
@@ -117,10 +118,8 @@ class ImageQualityGate:
                 0.0,
                 0.0,
                 False,
-                [f"unsupported dtype/bit depth: {frame.dtype}/{frame.bit_depth}"],
+                meta_messages,
             )
-        if frame.width <= 0 or frame.height <= 0 or frame.channels <= 0:
-            return FrameQuality(frame.camera_id, frame.light_id, 0.0, 0.0, 0.0, False, ["invalid image shape"])
         expected_min = frame.stride_bytes * frame.height
         if len(values) < expected_min:
             return FrameQuality(frame.camera_id, frame.light_id, 0.0, 0.0, 0.0, False, ["image shorter than stride"])
@@ -147,6 +146,24 @@ class ImageQualityGate:
             is_pass=not messages,
             messages=messages,
         )
+
+    def _frame_meta_messages(self, frame: LightFrame) -> list[str]:
+        messages: list[str] = []
+        if frame.pixel_format != "MONO8":
+            messages.append(f"unsupported pixel_format: {frame.pixel_format}")
+        if frame.color_order != "MONO":
+            messages.append(f"unsupported color_order: {frame.color_order}")
+        if frame.dtype != "UINT8" or frame.bit_depth != 8:
+            messages.append(f"unsupported dtype/bit depth: {frame.dtype}/{frame.bit_depth}")
+        if frame.width <= 0 or frame.height <= 0 or frame.channels <= 0:
+            messages.append("invalid image shape")
+            return messages
+        if frame.channels != 1:
+            messages.append(f"expected mono channel count 1, got {frame.channels}")
+        row_width = frame.width * frame.channels
+        if frame.stride_bytes < row_width:
+            messages.append(f"stride smaller than active row width: {frame.stride_bytes} < {row_width}")
+        return messages
 
     def _active_pixel_bytes(self, frame: LightFrame) -> bytes:
         if frame.stride_bytes == frame.width * frame.channels:
