@@ -93,6 +93,7 @@ python3 -m tools.benchmark_pipeline --count 10
 ## 对接文档
 
 - [硬件对接说明](docs/hardware_integration.md)
+- [C++ 主控硬件集成与使用手册](docs/cpp_controller_hardware_manual.md)
 - [配方设计说明](docs/recipe_design.md)
 - [标定与 ROI 说明](docs/calibration_and_roi.md)
 - [模型后端说明](docs/model_backend.md)

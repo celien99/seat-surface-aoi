@@ -1,0 +1,452 @@
+# C++ 主控硬件集成与使用手册
+
+本文说明后续如何把当前 C++ 模拟主控接入真实 PLC、相机和频闪控制器。当前仓库已经实现共享内存 IPC、模拟 PLC 触发、多光源多机位采集编排、`camera_exposure_output` 硬触发同步模拟链路；真实硬件接入时只替换 C++ 设备驱动层，不修改 Python 检测进程控制边界，也不改在线 IPC 为 TCP。
+
+## 1. 当前控制链路
+
+默认运行模式：
+
+```text
+PLC/工位触发
+  -> C++ wait_trigger
+  -> C++ 根据 light_order 逐个光源轮次执行
+  -> C++ 配置频闪通道参数
+  -> C++ arm 当前频闪通道
+  -> C++ arm 所有相机
+  -> 相机曝光输出或外部硬触发触发频闪
+  -> C++ 并行等待所有机位图像
+  -> C++ 将同一座椅任务的所有图像写入共享内存
+  -> Python detector 读取共享内存并检测
+  -> C++ 读取结果并输出 PLC OK/NG/RECHECK
+```
+
+当前默认同步模式是：
+
+```ini
+trigger_sync_mode=camera_exposure_output
+```
+
+该模式表达的生产意图是：C++ 不依赖软件命令精确点亮频闪，而是负责配置、arm、收图和故障判断；频闪真实点亮时机由硬件链路触发，推荐使用相机曝光输出、IO 脉冲或 PLC/运动控制器硬触发。
+
+保留测试模式：
+
+```ini
+trigger_sync_mode=software
+```
+
+`software` 模式下 C++ 直接调用软件触发频闪，仅用于模拟测试或低精度联调，不建议作为高速生产线最终同步方案。
+
+## 2. 程序运行方式
+
+构建：
+
+```bash
+cmake -S cpp_controller -B cpp_controller/build
+cmake --build cpp_controller/build
+```
+
+启动一次模拟任务：
+
+```bash
+cpp_controller/build/seat_aoi_controller --once --wait-ms 8000
+```
+
+连续模拟 3 件：
+
+```bash
+cpp_controller/build/seat_aoi_controller --loop --max-jobs 3 --wait-ms 8000
+```
+
+使用配置文件：
+
+```bash
+cpp_controller/build/seat_aoi_controller --config cpp_controller/config/station_runtime.example.conf
+```
+
+端到端模拟 IPC：
+
+```bash
+bash tools/run_simulated_ipc.sh
+```
+
+运行前建议先启动或确认 Python detector 的运行策略。`tools/run_simulated_ipc.sh` 会自动启动一次 Python 检测进程；生产部署中 Python detector 应常驻运行，C++ 主控负责持续发布共享内存任务并等待结果。
+
+## 3. 运行配置说明
+
+当前示例配置位于 `cpp_controller/config/station_runtime.example.conf`。
+
+关键字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `reset_shared_memory` | 启动时是否重置共享内存。生产中主控首次启动通常为 `true`，热重启策略需结合 detector 状态确认。 |
+| `publish_timeout_ms` | C++ 等待可用 frame slot 的超时。超时输出 `RECHECK`。 |
+| `detector_timeout_ms` | C++ 等待 Python 检测结果的超时。超时输出 `RECHECK`。 |
+| `trigger_timeout_ms` | C++ 等待 PLC/外部触发的超时。超时不能输出 `OK`。 |
+| `camera_timeout_ms` | 每个光源轮次下等待相机图像的超时。任一相机缺帧输出 `RECHECK`。 |
+| `light_timeout_ms` | 配置、arm、确认频闪状态的超时。失败输出 `RECHECK`。 |
+| `max_jobs` | 模拟运行批次数。`0` 表示 loop 模式无限运行。 |
+| `recipe_id` | 写入共享内存任务的配方 ID，Python detector 用它加载配方。 |
+| `light_order` | 光源轮次顺序，例如 `1,2,3,4`。它决定每个座椅任务采图顺序。 |
+| `trigger_sync_mode` | 同步模式。推荐 `camera_exposure_output`；测试可用 `software`。 |
+| `simulate_light_fault` | 模拟光源故障。 |
+| `simulate_missing_frame` | 模拟相机缺帧。 |
+| `simulate_plc_output_fault` | 模拟 PLC 输出失败。 |
+| `simulate_trigger_timeout` | 模拟 PLC 触发超时。 |
+
+## 4. 真实硬件需要提供的参数
+
+### 4.1 PLC/外部触发
+
+必须提供：
+
+| 参数 | 示例 | 用途 |
+| --- | --- | --- |
+| PLC 品牌和通信方式 | Siemens S7、Modbus TCP、EtherCAT、IO 卡 | 决定 `PlcClient` 驱动实现。 |
+| 触发输入点位或寄存器 | `I0.0`、`coil 100`、`DI3` | 实现 `wait_trigger`。 |
+| 触发边沿或握手方式 | 上升沿、请求/应答位、流水号递增 | 防止重复检测同一座椅。 |
+| `trigger_id` 来源 | PLC 流水号、C++ 自增、扫码绑定 | 写入共享内存并用于日志追踪。 |
+| `seat_id` 来源 | 扫码枪、PLC 字符串寄存器、MES | Python 结果校验会比对 seat_id。 |
+| `sku` 来源 | PLC recipe code、MES、固定工位配置 | C++ 选择配方，Python 加载检测配置。 |
+| OK/NG/RECHECK 输出点位 | `Q0.0/Q0.1/Q0.2` | 实现 `send_decision`。 |
+| 输出保持时间和复位方式 | 保持 100 ms、等待 PLC ack 后复位 | 防止 PLC 漏读输出。 |
+| 通信超时和断线策略 | 100 ms、3 次重连、停线 | 任何不确定状态不能输出 `OK`。 |
+
+需要替换的 C++ 接口：
+
+- `PlcClient::initialize(...)`
+- `PlcClient::wait_trigger(...)`
+- `PlcClient::send_decision(...)`
+- `PlcClient::get_health()`
+
+### 4.2 相机
+
+必须提供：
+
+| 参数 | 示例 | 用途 |
+| --- | --- | --- |
+| 厂商、型号、SDK 版本 | Hikrobot、Basler、Daheng、FLIR | 决定 `CameraDevice` 驱动实现和链接库。 |
+| 相机序列号到 `camera_index` 映射 | `TOP_BACK -> SN123` | 共享内存用 `camera_index` 标识机位。 |
+| 机位 ID | `TOP_BACK`、`TOP_CUSHION` | Python 端映射为 `CameraBundle`。 |
+| 分辨率、像素格式、bit depth | `2448x2048 Mono8` | 写入 `LightFrameMeta`，影响 slot 大小。 |
+| 触发模式 | 外触发、软件触发、连续采集 | 推荐生产使用外触发或相机曝光输出同步。 |
+| 曝光输出配置 | Line1/StrobeOut、极性、延时、脉宽 | 用于触发频闪控制器。 |
+| 曝光、增益、帧率限制 | `800 us`、`gain=1.0` | 需与光源轮次参数一致。 |
+| 图像回调或取帧方式 | SDK callback、blocking grab | 实现 `capture` 和缺帧判断。 |
+| buffer 数量和丢帧计数 | 8 buffers、dropped counter | 做健康检查和追溯。 |
+
+需要替换的 C++ 接口：
+
+- `CameraDevice::initialize(...)`
+- `CameraDevice::arm(...)`
+- `CameraDevice::capture(...)`
+- `CameraDevice::get_health()`
+
+`CameraDevice::simulate_exposure_output(...)` 目前只用于模拟；真实硬件中通常不需要软件调用它，而是由相机 Line 输出真实电信号给频闪或 IO 模块。
+
+### 4.3 频闪光源控制器
+
+必须提供：
+
+| 参数 | 示例 | 用途 |
+| --- | --- | --- |
+| 控制器品牌、型号、SDK 或协议 | CCS、OPT、串口协议、EtherCAT 模块 | 决定 `LightController` 驱动实现。 |
+| 通信方式 | RS232/RS485、EtherCAT、Modbus、IO、厂商 SDK | 实现初始化、配置和状态读取。 |
+| `light_index` 到物理通道映射 | `1 -> CH1 DIFFUSE` | 决定哪个光源在第几轮闪。 |
+| 触发输入线映射 | TriggerIn1、DI2、相机 Line1 | 决定硬触发接线。 |
+| 输出模式 | 外部触发闪光、常亮、软件触发 | 生产推荐外部触发闪光。 |
+| 电流或亮度范围 | 0-100%、0-255、mA | 对应 `current_percent`。 |
+| 脉宽范围和最小间隔 | 10-1000 us、最小 5 ms | 约束 `exposure_us` 和节拍。 |
+| 触发延时 | 0-100 us | 用于对齐相机曝光窗口。 |
+| 状态回读 | ready、overcurrent、overheat、trigger missed | arm 后和触发后必须检查。 |
+| 异常关闭命令 | all off、clear alarm | 实现 `shutdown_all()`。 |
+
+需要替换的 C++ 接口：
+
+- `LightController::initialize(...)`
+- `LightController::prepare_sequence(...)`
+- `LightController::set_channel(...)`
+- `LightController::arm_hardware_trigger(...)`
+- `LightController::notify_hardware_triggered(...)`
+- `LightController::shutdown_all()`
+- `LightController::get_health()`
+
+真实硬件中，`notify_hardware_triggered(...)` 可以有两种实现：
+
+- 控制器支持触发计数或状态回读：读取“本通道已触发”并校验。
+- 控制器不支持触发回读：读取 ready/fault 状态，并由相机图像质量和缺帧判断兜底。
+
+## 5. 光源和相机如何协同工作
+
+推荐生产时序：
+
+```text
+1. PLC 触发座椅到位
+2. C++ 生成 sequence_id 并读取 seat_id/sku
+3. C++ 加载 light_order，例如 1,2,3,4
+4. 对 light_index=1：
+   a. 配置频闪 CH1 的电流、脉宽、外触发模式
+   b. arm 频闪 CH1
+   c. arm 所有相机，等待下一次触发
+   d. PLC/IO/相机曝光输出产生硬触发
+   e. CH1 在相机曝光窗口内闪烁
+   f. C++ 收齐所有相机在 CH1 下的图
+5. 对 light_index=2/3/4 重复第 4 步
+6. C++ 校验 frame_count == camera_count * light_count
+7. C++ 写共享内存
+8. Python detector 检测
+9. C++ 输出 PLC 决策
+```
+
+当前模拟代码中，`camera_exposure_output` 模式按以下顺序执行：
+
+```text
+prepare_sequence
+  -> arm_hardware_trigger(light)
+  -> CameraWorker::arm(all cameras)
+  -> CameraWorker::simulate_exposure_output(camera 0)
+  -> notify_hardware_triggered(light)
+  -> wait_frame(all cameras in parallel)
+```
+
+真实设备接入后，建议用硬件完成第 3 到第 5 步的精确同步：C++ 只负责提前配置和 arm，等待图像和读取故障状态。
+
+## 6. 怎么控制哪个光源何时闪
+
+### 6.1 控制顺序
+
+`light_order` 决定光源轮次顺序：
+
+```ini
+light_order=1,2,3,4
+```
+
+含义：
+
+```text
+第 0 轮：light_index=1
+第 1 轮：light_index=2
+第 2 轮：light_index=3
+第 3 轮：light_index=4
+```
+
+Python 端会把每张图的 `light_index` 映射为光源 ID，例如：
+
+```text
+1 -> DIFFUSE
+2 -> POLAR_DIFFUSE
+3 -> HIGH_LEFT
+4 -> HIGH_RIGHT
+```
+
+如果现场通道不是这个顺序，不要改 Python 控制硬件；应在 C++ 光源通道映射中把 `light_index` 映射到真实物理通道，或者同步更新配方和 Python 映射。
+
+### 6.2 控制闪烁时机
+
+推荐由硬件控制闪烁时机，而不是由 C++ `sleep` 或软件命令卡时间。
+
+推荐接线：
+
+```text
+Camera ExposureOut / StrobeOut
+  -> Strobe Controller TriggerIn
+  -> Light Channel Output
+```
+
+或：
+
+```text
+PLC / IO pulse
+  -> Camera TriggerIn
+  -> Camera ExposureOut
+  -> Strobe Controller TriggerIn
+```
+
+C++ 控制的是“哪一轮 arm 哪个通道”，真实点亮时刻由曝光输出电信号决定：
+
+```text
+C++ arm CH3
+相机下一次曝光开始
+相机 ExposureOut 变为有效
+频闪控制器收到 TriggerIn
+CH3 在曝光窗口内闪
+C++ 收 CH3 对应图像
+```
+
+### 6.3 控制曝光、亮度和脉宽
+
+当前 `LightChannelParam` 包含：
+
+| 字段 | 当前含义 |
+| --- | --- |
+| `light_index` | 逻辑光源编号。 |
+| `exposure_us` | 当前模拟中也写入图像元数据；真实接入时应与相机曝光和频闪脉宽策略一致。 |
+| `gain` | 相机增益或该光源轮次使用的增益。 |
+| `current_percent` | 频闪亮度/电流百分比。 |
+
+当前默认每个光源轮次使用：
+
+```text
+exposure_us=800
+gain=1.0
+current_percent=60.0
+```
+
+后续生产配置建议把每个 `light_index` 的参数放入配方或运行配置，例如：
+
+```ini
+light.1.channel=1
+light.1.name=DIFFUSE
+light.1.exposure_us=800
+light.1.strobe_width_us=600
+light.1.current_percent=60
+light.1.trigger_delay_us=0
+
+light.3.channel=3
+light.3.name=HIGH_LEFT
+light.3.exposure_us=600
+light.3.strobe_width_us=450
+light.3.current_percent=75
+light.3.trigger_delay_us=20
+```
+
+当前代码还没有解析这类逐通道参数；接真实硬件前应先把 `LightChannelParam` 从固定默认值扩展为配置驱动。
+
+## 7. 共享内存图像打包规则
+
+一个座椅任务写入一个 frame slot，包含所有机位、所有光源图像：
+
+```text
+frame_count = camera_count * light_order.size()
+```
+
+每张图都有 `LightFrameMeta`：
+
+| 字段 | 用途 |
+| --- | --- |
+| `camera_index` | 机位编号。Python 用它组装 `CameraBundle`。 |
+| `light_index` | 光源编号。Python 用它映射光源 ID。 |
+| `light_seq_index` | 本次任务中的光源轮次。 |
+| `width/height/channels/stride_bytes` | 图像尺寸和内存布局。 |
+| `pixel_format/bit_depth/color_order/dtype_code` | 图像格式。 |
+| `timestamp_us` | C++ 收图时间戳。 |
+| `exposure_us/gain` | 本光源轮次采集参数。 |
+| `image_offset/image_size/image_crc32` | 图像载荷定位和校验。 |
+
+真实相机分辨率提高后，必须重新计算 `frame_slot_size`：
+
+```text
+slot_size >= header + frame_meta_count * sizeof(LightFrameMeta) + 所有图像字节数
+```
+
+示例：
+
+```text
+4 个相机 * 4 个光源 * 2448 * 2048 * Mono8 ~= 80 MB
+```
+
+此时默认 16 MB 不够，必须同时调整 C++ 和 Python 的共享内存 slot 配置。
+
+## 8. 真实硬件集成步骤
+
+推荐按最小风险顺序集成：
+
+1. 保持模拟 PLC 和模拟频闪，只接真实相机。
+   - 验证每个 `camera_index` 图像尺寸、stride、像素格式和 timestamp。
+   - 确认 Python 能收到所有机位图像。
+2. 接频闪控制器，但先低频手动触发。
+   - 验证 `light_index -> 物理通道` 映射。
+   - 用示波器或控制器日志确认曝光窗口内点亮。
+   - 验证 `shutdown_all()` 能关闭所有通道。
+3. 开启 `camera_exposure_output` 硬触发链路。
+   - 相机曝光输出接到频闪 TriggerIn。
+   - 检查极性、延时和脉宽。
+   - 每个光源轮次保存一组图，确认图像亮度和光源 ID 对应。
+4. 接 PLC 触发输入。
+   - 只读触发，不输出分拣信号。
+   - 验证防重复触发、seat_id、sku、trigger_id。
+5. 接 PLC OK/NG/RECHECK 输出。
+   - 低速节拍，人工确认输出点位。
+   - 任一异常必须输出 RECHECK 或 ERROR，不允许 OK。
+6. 连续运行。
+   - 先 30 分钟，再 2 小时，再 8 小时。
+   - 统计缺帧、光源故障、PLC 通信超时、共享内存 slot 泄漏和 detector timeout。
+
+## 9. 必须验证的失败场景
+
+上线前必须验证：
+
+| 场景 | 期望行为 |
+| --- | --- |
+| Python detector 不启动 | C++ 等待结果超时，输出 `RECHECK`。 |
+| 任一相机缺帧 | C++ 输出 `RECHECK`。 |
+| 频闪控制器 arm 失败 | C++ 输出 `RECHECK`。 |
+| 频闪故障状态回读异常 | C++ 输出 `RECHECK` 或 `ERROR`。 |
+| PLC 触发协议错误 | C++ 不启动检测或输出 `RECHECK`。 |
+| PLC 输出失败 | C++ 报设备故障，不把结果当作 OK 完成。 |
+| 共享内存 frame slot 满 | C++ 输出 `RECHECK`。 |
+| 结果 CRC 或 payload 错误 | C++ 输出 `RECHECK` 或 `ERROR`。 |
+| Python 返回 OK 但质量门禁失败 | C++ 降级 `RECHECK`。 |
+
+已有模拟验证命令：
+
+```bash
+cpp_controller/build/seat_aoi_controller --simulate-light-fault --wait-ms 200
+cpp_controller/build/seat_aoi_controller --simulate-missing-frame --wait-ms 200
+cpp_controller/build/seat_aoi_controller --simulate-trigger-timeout --trigger-timeout-ms 50
+cpp_controller/build/ipc_safety_checks
+```
+
+## 10. 接入代码位置
+
+真实硬件驱动建议保持现有类名和职责，逐步替换内部实现：
+
+| 模块 | 文件 | 职责 |
+| --- | --- | --- |
+| PLC | `cpp_controller/src/control/plc_client.cpp` | 触发读取、结果输出、PLC 健康状态。 |
+| 频闪 | `cpp_controller/src/control/light_controller.cpp` | 通道参数、arm、触发状态、关闭输出。 |
+| 相机 | `cpp_controller/src/camera/camera_device.cpp` | 初始化、arm、采图、图像元数据。 |
+| 采集编排 | `cpp_controller/src/control/frame_assembler.cpp` | 光源轮次、相机并行等待、失败处理。 |
+| 主流程 | `cpp_controller/src/control/station_controller.cpp` | 发布共享内存、等 Python 结果、PLC 输出。 |
+
+真实 SDK 接入时不要把深度学习推理放进 C++；Python detector 仍然负责质量门禁、预处理、模型推理、融合和规则判定。
+
+## 11. 现场参数记录模板
+
+建议每台测试机保存一份现场参数表：
+
+```text
+工位名称：
+PLC 型号：
+PLC 通信方式：
+触发输入点位：
+OK 输出点位：
+NG 输出点位：
+RECHECK 输出点位：
+
+camera_index=0:
+  camera_id:
+  serial:
+  exposure_output_line:
+  trigger_input_line:
+  width:
+  height:
+  pixel_format:
+
+light_index=1:
+  light_name:
+  controller_channel:
+  trigger_input:
+  current_percent:
+  exposure_us:
+  strobe_width_us:
+  trigger_delay_us:
+
+trigger_sync_mode:
+frame_slot_size:
+detector_timeout_ms:
+camera_timeout_ms:
+light_timeout_ms:
+```
+
+这些参数必须和 C++ 运行配置、Python 配方、标定文件和 ROI 模板保持一致。
