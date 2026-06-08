@@ -33,3 +33,7 @@ python_detector/config/roi/default_roi.yaml
 2. 更新配方中的 `calibration_id` 和 `roi_template`。
 3. 用标准样件验证全局 ROI 定位、局部对齐、ROI 边界、清晰度、曝光和多光源对齐。
 4. 标定变更必须形成 commit，并同步更新 README 或相关 docs。
+
+## 缓存边界
+
+Python 检测进程会缓存标定解析结果，缓存 key 包含 `camera_id`、`calibration_id` 和 ROI 模板路径。同一标定文件搭配不同 ROI 模板时会分别加载，避免多 SKU 或多 ROI 版本共用同一个 Python 进程时复用错误 ROI。

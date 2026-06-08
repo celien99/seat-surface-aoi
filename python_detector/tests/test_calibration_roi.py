@@ -52,6 +52,44 @@ def test_calibration_manager_loads_identity_roi() -> None:
     assert calibration.light_alignment["DIFFUSE"] == (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
 
 
+def test_calibration_manager_cache_is_scoped_by_roi_template_path(tmp_path: Path) -> None:
+    roi_a = tmp_path / "roi_a.yaml"
+    roi_b = tmp_path / "roi_b.yaml"
+    roi_a.write_text(
+        """
+roi_templates:
+  a:
+    polygon_xy:
+      - [0, 0]
+      - [9, 0]
+      - [9, 9]
+      - [0, 9]
+    output_size: [10, 10]
+""",
+        encoding="utf-8",
+    )
+    roi_b.write_text(
+        """
+roi_templates:
+  b:
+    polygon_xy:
+      - [1, 1]
+      - [8, 1]
+      - [8, 8]
+      - [1, 8]
+    output_size: [8, 8]
+""",
+        encoding="utf-8",
+    )
+    manager = CalibrationManager()
+
+    calibration_a = manager.load("TOP_BACK", "calib/simulated_v1", str(roi_a))
+    calibration_b = manager.load("TOP_BACK", "calib/simulated_v1", str(roi_b))
+
+    assert set(calibration_a.roi_templates) == {"a"}
+    assert set(calibration_b.roi_templates) == {"b"}
+
+
 def test_calibration_mismatch_returns_error_not_ok() -> None:
     recipe = RecipeManager().load("seat_a_black_leather_v1")
     frames = {

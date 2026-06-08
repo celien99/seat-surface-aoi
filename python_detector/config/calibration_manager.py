@@ -30,10 +30,11 @@ class Calibration:
 class CalibrationManager:
     def __init__(self, base_dir: str | Path = ".") -> None:
         self.base_dir = Path(base_dir)
-        self._cache: dict[tuple[str, str], Calibration] = {}
+        self._cache: dict[tuple[str, str, str], Calibration] = {}
 
     def load(self, camera_id: str, calibration_id: str, roi_template_path: str) -> Calibration:
-        key = (camera_id, calibration_id)
+        roi_path = self.base_dir / roi_template_path
+        key = (camera_id, calibration_id, str(roi_path))
         if key in self._cache:
             return self._cache[key]
         path = self._resolve_calibration_path(camera_id, calibration_id)
@@ -43,7 +44,6 @@ class CalibrationManager:
         if not isinstance(raw, dict):
             raise RecipeValidationError(f"标定文件格式错误: {path}")
         calibration = self._parse_calibration(raw, camera_id, calibration_id)
-        roi_path = self.base_dir / roi_template_path
         if roi_path.exists():
             calibration = self._with_roi_override(calibration, roi_path)
         self._cache[key] = calibration
@@ -124,4 +124,3 @@ def _str(value: Any, name: str) -> str:
     if not isinstance(value, str) or not value:
         raise RecipeValidationError(f"{name} 必须是非空字符串")
     return value
-
