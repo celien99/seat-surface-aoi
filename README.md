@@ -39,6 +39,7 @@
 - PatchCore 只能配置为 unknown defect safety net，不能作为全座椅或 ROI 主检测模型。
 - 支持本地追溯落盘，`RECHECK`、`ERROR`、`NG` 默认保存 result、quality、registration、feature summary 和 timings。
 - 追溯会保存 ROI 单光源灰度图 `.pgm`；存在缺陷时会生成带红色 bbox 的 `.ppm` overlay，bbox 使用原图 `bbox_xyxy_pixel` 映射回 ROI 坐标。
+- `trace.save_ok_ratio` 使用基于座椅和序列号的确定性抽样保存 OK 样本；`NG`、`RECHECK`、`ERROR` 按策略默认保存。
 - 提供模拟回放与 benchmark 工具：`tools/replay_dataset.py`、`tools/benchmark_pipeline.py`。
 
 ## 项目规则

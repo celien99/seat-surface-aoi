@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import fields, is_dataclass
 from datetime import datetime
@@ -21,13 +22,7 @@ class TraceWriter:
         result: InspectionResult,
         context: dict[str, Any],
     ) -> Path | None:
-        if not recipe.trace.enabled:
-            return None
-        if result.decision == "OK" and recipe.trace.save_ok_ratio <= 0:
-            return None
-        if result.decision == "NG" and not recipe.trace.save_ng:
-            return None
-        if result.decision in {"RECHECK", "ERROR"} and not recipe.trace.save_recheck:
+        if not self._should_write(job, recipe, result):
             return None
 
         day = datetime.now().strftime("%Y%m%d")
@@ -46,6 +41,28 @@ class TraceWriter:
         self._write_roi_images(trace_dir, context.get("prepared_bundles", []))
         self._write_defect_overlays(trace_dir, result, context.get("prepared_bundles", []))
         return trace_dir
+
+    def _should_write(self, job: SeatInspectionJob, recipe: Recipe, result: InspectionResult) -> bool:
+        if not recipe.trace.enabled:
+            return False
+        if result.decision == "OK":
+            ratio = max(0.0, min(float(recipe.trace.save_ok_ratio), 1.0))
+            if ratio <= 0.0:
+                return False
+            if ratio >= 1.0:
+                return True
+            return self._stable_sample_score(job, recipe) < ratio
+        if result.decision == "NG":
+            return recipe.trace.save_ng
+        if result.decision in {"RECHECK", "ERROR"}:
+            return recipe.trace.save_recheck
+        return True
+
+    def _stable_sample_score(self, job: SeatInspectionJob, recipe: Recipe) -> float:
+        key = f"{recipe.recipe_id}|{job.sku}|{job.seat_id}|{job.sequence_id}|{job.trigger_id}".encode("utf-8")
+        digest = hashlib.sha256(key).digest()
+        value = int.from_bytes(digest[:8], byteorder="big", signed=False)
+        return value / float(1 << 64)
 
     def _write_json(self, path: Path, value: Any) -> None:
         path.write_text(json.dumps(_jsonable(value), ensure_ascii=False, indent=2), encoding="utf-8")

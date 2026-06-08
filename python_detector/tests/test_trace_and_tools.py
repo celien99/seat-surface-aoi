@@ -2,14 +2,15 @@ from dataclasses import replace
 from pathlib import Path
 
 from python_detector.config.recipe_schema import ModelConfig, RecipeManager
+from python_detector.ipc.data_types import InspectionResult
 from python_detector.pipeline.pipeline import InspectionPipeline
 from python_detector.trace.trace_writer import TraceWriter
 from tools.job_fixture import make_simulated_job
 
 
-def test_trace_writer_generates_result_files(tmp_path: Path) -> None:
+def _recipe(root_dir: Path, save_ok_ratio: float = 1.0, fake_mode: str = "auto"):
     recipe = RecipeManager().load("seat_a_black_leather_v1")
-    recipe = recipe.__class__(
+    return recipe.__class__(
         recipe_id=recipe.recipe_id,
         sku=recipe.sku,
         light_order=recipe.light_order,
@@ -18,9 +19,17 @@ def test_trace_writer_generates_result_files(tmp_path: Path) -> None:
         registration=recipe.registration,
         fusion=recipe.fusion,
         thresholds=recipe.thresholds,
-        models=recipe.models,
-        trace=recipe.trace.__class__(enabled=True, root_dir=str(tmp_path), save_ok_ratio=1.0),
+        models={
+            **recipe.models,
+            "fake_default": replace(recipe.models["fake_default"], fake_mode=fake_mode),
+            "unknown_safety_net": ModelConfig(backend="fake", fake_mode="ok", model_family="patchcore", role="safety_net"),
+        },
+        trace=recipe.trace.__class__(enabled=True, root_dir=str(root_dir), save_ok_ratio=save_ok_ratio),
     )
+
+
+def test_trace_writer_generates_result_files(tmp_path: Path) -> None:
+    recipe = _recipe(tmp_path, save_ok_ratio=1.0)
     pipeline = InspectionPipeline()
     job = make_simulated_job()
     result = pipeline.process(job, recipe)
@@ -35,23 +44,7 @@ def test_trace_writer_generates_result_files(tmp_path: Path) -> None:
 
 
 def test_trace_writer_generates_defect_overlay(tmp_path: Path) -> None:
-    recipe = RecipeManager().load("seat_a_black_leather_v1")
-    recipe = recipe.__class__(
-        recipe_id=recipe.recipe_id,
-        sku=recipe.sku,
-        light_order=recipe.light_order,
-        cameras=recipe.cameras,
-        quality=recipe.quality,
-        registration=recipe.registration,
-        fusion=recipe.fusion,
-        thresholds=recipe.thresholds,
-        models={
-            **recipe.models,
-            "fake_default": replace(recipe.models["fake_default"], fake_mode="ng"),
-            "unknown_safety_net": ModelConfig(backend="fake", fake_mode="ok", model_family="patchcore", role="safety_net"),
-        },
-        trace=recipe.trace.__class__(enabled=True, root_dir=str(tmp_path), save_ok_ratio=0.0),
-    )
+    recipe = _recipe(tmp_path, save_ok_ratio=0.0, fake_mode="ng")
     pipeline = InspectionPipeline()
     job = make_simulated_job()
     result = pipeline.process(job, recipe)
@@ -62,3 +55,36 @@ def test_trace_writer_generates_defect_overlay(tmp_path: Path) -> None:
     overlays = list((trace_dir / "overlays").glob("*.ppm"))
     assert overlays
     assert overlays[0].read_bytes().startswith(b"P6\n")
+
+
+def test_trace_writer_uses_deterministic_ok_sampling(tmp_path: Path) -> None:
+    recipe = _recipe(tmp_path, save_ok_ratio=0.5)
+    writer = TraceWriter(recipe.trace.root_dir)
+    result = InspectionResult(
+        sequence_id=1,
+        trigger_id=1001,
+        seat_id="SIM_1",
+        decision="OK",
+        quality_pass=True,
+    )
+    jobs = [replace(make_simulated_job(index), sequence_id=index, trigger_id=1000 + index) for index in range(1, 21)]
+
+    first = [writer._should_write(job, recipe, replace(result, sequence_id=job.sequence_id, trigger_id=job.trigger_id, seat_id=job.seat_id)) for job in jobs]
+    second = [writer._should_write(job, recipe, replace(result, sequence_id=job.sequence_id, trigger_id=job.trigger_id, seat_id=job.seat_id)) for job in jobs]
+
+    assert first == second
+    assert any(first)
+    assert not all(first)
+
+
+def test_trace_writer_ok_sampling_ratio_edges(tmp_path: Path) -> None:
+    job = make_simulated_job()
+    result = InspectionResult(
+        sequence_id=job.sequence_id,
+        trigger_id=job.trigger_id,
+        seat_id=job.seat_id,
+        decision="OK",
+        quality_pass=True,
+    )
+    assert TraceWriter(tmp_path)._should_write(job, _recipe(tmp_path, save_ok_ratio=0.0), result) is False
+    assert TraceWriter(tmp_path)._should_write(job, _recipe(tmp_path, save_ok_ratio=1.0), result) is True

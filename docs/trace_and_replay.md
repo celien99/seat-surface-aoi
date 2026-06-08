@@ -39,3 +39,5 @@ python3 -m tools.benchmark_pipeline --count 10
 
 - `RECHECK`、`ERROR`、`NG` 默认保存。
 - `OK` 默认不保存，可通过配方 `trace.save_ok_ratio` 调整。
+- `trace.save_ok_ratio: 0` 表示不保存 OK，`1.0` 表示全量保存 OK，中间值按 `recipe_id`、`sku`、`seat_id`、`sequence_id` 和 `trigger_id` 做确定性哈希抽样。
+- 同一批任务重复回放时 OK 抽样结果保持稳定，便于对比模型版本和配方版本。
