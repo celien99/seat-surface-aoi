@@ -36,7 +36,9 @@ from .shm_protocol import (
     decode_cstr,
     encode_cstr,
     ColorOrder,
+    MAX_FRAMES_PER_JOB,
     frame_slot_meta_offset,
+    frame_slot_image_offset,
     result_slot_defects_offset,
 )
 
@@ -87,6 +89,19 @@ class _SharedMemoryMap:
     def close(self) -> None:
         self.mm.close()
         os.close(self.fd)
+
+
+@dataclass(frozen=True)
+class _FrameSlotIdentity:
+    sequence_id: int
+    trigger_id: int
+    seat_id: str
+
+
+class _FrameSlotReadError(RuntimeError):
+    def __init__(self, message: str, error_code: ErrorCode) -> None:
+        super().__init__(message)
+        self.error_code = error_code
 
 
 class ShmClient:
@@ -165,21 +180,12 @@ class ShmClient:
     def _read_frame_slot(self, slot_index: int) -> SeatInspectionJob | None:
         base = self._slot_base(slot_index, self.frame_slot_size)
         AtomicU32.store(self.frames.mm, base, SlotState.READING)
+        identity: _FrameSlotIdentity | None = None
         try:
             prefix = FRAME_SLOT_HEADER_PREFIX.unpack_from(self.frames.mm, base)
             _state, sequence_id, payload_size, header_crc32, payload_crc32, frame_meta_count, _reserved = prefix
-            if payload_size > self.frame_slot_size or frame_meta_count <= 0:
-                raise RuntimeError("invalid frame payload size or frame count")
 
-            payload = memoryview(self.frames.mm)[base + frame_slot_meta_offset() : base + payload_size]
-            if crc32(payload) != payload_crc32:
-                raise RuntimeError("frame payload CRC mismatch")
-
-            header_bytes = bytearray(self.frames.mm[base : base + FRAME_SLOT_HEADER_SIZE])
-            struct.pack_into("<I", header_bytes, 0, 0)
-            struct.pack_into("<I", header_bytes, 20, 0)
-            if crc32(header_bytes) != header_crc32:
-                raise RuntimeError("frame header CRC mismatch")
+            self._validate_frame_header_crc(base, header_crc32)
 
             job_offset = base + FRAME_SLOT_HEADER_PREFIX.size
             job_values = SEAT_JOB_META.unpack_from(self.frames.mm, job_offset)
@@ -193,8 +199,21 @@ class ShmClient:
                 frame_count,
                 _created_at_us,
             ) = job_values
+            identity = _FrameSlotIdentity(
+                sequence_id=sequence_id,
+                trigger_id=trigger_id,
+                seat_id=decode_cstr(seat_id_raw),
+            )
             if sequence_id != job_sequence_id or frame_count != frame_meta_count:
-                raise RuntimeError("frame slot sequence or frame count mismatch")
+                raise _FrameSlotReadError(
+                    "frame slot sequence or frame count mismatch",
+                    ErrorCode.INVALID_PAYLOAD,
+                )
+
+            self._validate_frame_payload_bounds(payload_size, frame_meta_count)
+            payload = memoryview(self.frames.mm)[base + frame_slot_meta_offset() : base + payload_size]
+            if crc32(payload) != payload_crc32:
+                raise _FrameSlotReadError("frame payload CRC mismatch", ErrorCode.CRC_MISMATCH)
 
             bundles: dict[str, CameraBundle] = {}
             meta_offset = base + frame_slot_meta_offset()
@@ -218,11 +237,59 @@ class ShmClient:
                 camera_bundles=list(bundles.values()),
             )
             if len(job.camera_bundles) != camera_count:
-                raise RuntimeError("frame slot camera count mismatch")
+                raise _FrameSlotReadError("frame slot camera count mismatch", ErrorCode.INVALID_PAYLOAD)
             return job
-        except Exception:
-            AtomicU32.store(self.frames.mm, base, SlotState.EMPTY)
+        except _FrameSlotReadError as exc:
+            if identity is None:
+                AtomicU32.store(self.frames.mm, base, SlotState.EMPTY)
+            else:
+                self._publish_frame_slot_error(slot_index, identity, exc.error_code)
             return None
+        except Exception:
+            if identity is None:
+                AtomicU32.store(self.frames.mm, base, SlotState.EMPTY)
+            else:
+                self._publish_frame_slot_error(slot_index, identity, ErrorCode.INTERNAL_ERROR)
+            return None
+
+    def _validate_frame_header_crc(self, base: int, header_crc32: int) -> None:
+        header_bytes = bytearray(self.frames.mm[base : base + FRAME_SLOT_HEADER_SIZE])
+        struct.pack_into("<I", header_bytes, 0, 0)
+        struct.pack_into("<I", header_bytes, 20, 0)
+        if crc32(header_bytes) != header_crc32:
+            raise _FrameSlotReadError("frame header CRC mismatch", ErrorCode.CRC_MISMATCH)
+
+    def _validate_frame_payload_bounds(self, payload_size: int, frame_meta_count: int) -> None:
+        min_payload_size = frame_slot_image_offset(frame_meta_count)
+        if (
+            payload_size < min_payload_size
+            or payload_size > self.frame_slot_size
+            or frame_meta_count <= 0
+            or frame_meta_count > MAX_FRAMES_PER_JOB
+        ):
+            raise _FrameSlotReadError("invalid frame payload size or frame count", ErrorCode.INVALID_PAYLOAD)
+
+    def _publish_frame_slot_error(
+        self,
+        slot_index: int,
+        identity: _FrameSlotIdentity,
+        error_code: ErrorCode,
+    ) -> None:
+        self._pending_frame_slots[identity.sequence_id] = slot_index
+        result = InspectionResult(
+            sequence_id=identity.sequence_id,
+            trigger_id=identity.trigger_id,
+            seat_id=identity.seat_id,
+            decision="ERROR",
+            defects=[],
+            quality_pass=False,
+            error_code=int(error_code),
+            elapsed_ms=0.0,
+        )
+        try:
+            self.publish_result(result)
+        except Exception:
+            self._release_frame_slot(identity.sequence_id)
 
     def _make_light_frame(self, values: tuple, slot_base: int, payload_size: int) -> LightFrame:
         (
@@ -250,10 +317,16 @@ class ShmClient:
         image_start = slot_base + image_offset
         image_end = image_start + image_size
         if image_offset + image_size > payload_size:
-            raise RuntimeError("frame image range exceeds payload")
+            raise _FrameSlotReadError("frame image range exceeds payload", ErrorCode.INVALID_PAYLOAD)
         image = memoryview(self.frames.mm)[image_start:image_end]
         if crc32(image) != image_crc32:
-            raise RuntimeError("frame image CRC mismatch")
+            raise _FrameSlotReadError("frame image CRC mismatch", ErrorCode.CRC_MISMATCH)
+        try:
+            pixel_format_name = PixelFormat(pixel_format).name
+            color_order_name = ColorOrder(color_order).name
+            dtype_name = DTypeCode(dtype_code).name
+        except ValueError as exc:
+            raise _FrameSlotReadError("unknown frame metadata enum value", ErrorCode.INVALID_PAYLOAD) from exc
         return LightFrame(
             camera_id=CAMERA_ID_BY_INDEX.get(camera_index, f"CAMERA_{camera_index}"),
             light_id=LIGHT_ID_BY_INDEX.get(light_index, f"LIGHT_{light_index}"),
@@ -263,10 +336,10 @@ class ShmClient:
             height=height,
             channels=channels,
             stride_bytes=stride_bytes,
-            pixel_format=PixelFormat(pixel_format).name,
+            pixel_format=pixel_format_name,
             bit_depth=bit_depth,
-            color_order=ColorOrder(color_order).name,
-            dtype=DTypeCode(dtype_code).name,
+            color_order=color_order_name,
+            dtype=dtype_name,
             timestamp_us=timestamp_us,
             exposure_us=exposure_us,
             gain=gain,
