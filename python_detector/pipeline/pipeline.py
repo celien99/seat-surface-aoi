@@ -5,7 +5,7 @@ import time
 from python_detector.config.recipe_schema import Recipe
 from python_detector.ipc.data_types import InspectionResult, SeatInspectionJob
 from python_detector.ipc.shm_protocol import ErrorCode
-from python_detector.models.inference_engine import InferenceEngine, ModelRegistry
+from python_detector.models.inference_engine import InferenceEngine, ModelInferenceError, ModelRegistry
 from python_detector.pipeline.feature_builder import FeatureBuilder
 from python_detector.pipeline.fusion_engine import FusionEngine
 from python_detector.pipeline.preprocessor import Preprocessor
@@ -102,6 +102,14 @@ class InspectionPipeline:
                 "timings": timings,
             }
             return self.rule_engine.decide(job, fused, quality_report, recipe, elapsed_ms)
+        except ModelInferenceError as exc:
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
+            timings["total_ms"] = elapsed_ms
+            self.last_context = {
+                "timings": timings,
+                "error": exc.context(),
+            }
+            return self.rule_engine.make_error_result(job, ErrorCode.INTERNAL_ERROR, elapsed_ms)
         except Exception as exc:
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             timings["total_ms"] = elapsed_ms

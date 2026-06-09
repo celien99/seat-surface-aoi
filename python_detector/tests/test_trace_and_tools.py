@@ -124,6 +124,35 @@ def test_trace_writer_persists_error_context(tmp_path: Path) -> None:
     assert error == {"type": "RuntimeError", "message": "模型输出异常"}
 
 
+def test_pipeline_model_error_context_is_traceable(tmp_path: Path) -> None:
+    recipe = _recipe(tmp_path, save_ok_ratio=1.0)
+    recipe = replace(
+        recipe,
+        models={
+            **recipe.models,
+            "fake_default": ModelConfig(backend="onnx", model_path="missing.onnx", role="primary"),
+        },
+    )
+    pipeline = InspectionPipeline()
+    job = make_simulated_job()
+
+    result = pipeline.process(job, recipe)
+    trace_dir = TraceWriter(recipe.trace.root_dir).write(job, recipe, result, pipeline.last_context)
+
+    assert result.decision == "ERROR"
+    assert result.quality_pass is False
+    assert pipeline.last_context["error"]["type"] == "ModelInferenceError"
+    assert pipeline.last_context["error"]["model_key"] == "fake_default"
+    assert pipeline.last_context["error"]["backend"] == "onnx"
+    assert pipeline.last_context["error"]["camera_id"] == "TOP_BACK"
+    assert pipeline.last_context["error"]["roi_name"] == "full"
+    assert pipeline.last_context["error"]["tensor_shape_nchw"] == [1, 5, 48, 64]
+    assert trace_dir is not None
+    error = json.loads((trace_dir / "error.json").read_text(encoding="utf-8"))
+    assert error["type"] == "ModelInferenceError"
+    assert error["model_key"] == "fake_default"
+
+
 def test_replay_report_includes_quality_and_error_context() -> None:
     report = QualityReport(
         is_pass=False,

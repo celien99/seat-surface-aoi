@@ -20,6 +20,39 @@ class DefectCandidate:
     evidence_lights: list[str]
 
 
+class ModelInferenceError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        model_key: str,
+        backend: str,
+        camera_id: str,
+        roi_name: str,
+        tensor_shape_nchw: tuple[int, int, int, int] | None,
+        cause_type: str,
+    ) -> None:
+        super().__init__(message)
+        self.model_key = model_key
+        self.backend = backend
+        self.camera_id = camera_id
+        self.roi_name = roi_name
+        self.tensor_shape_nchw = tensor_shape_nchw
+        self.cause_type = cause_type
+
+    def context(self) -> dict[str, Any]:
+        return {
+            "type": self.__class__.__name__,
+            "message": str(self),
+            "model_key": self.model_key,
+            "backend": self.backend,
+            "camera_id": self.camera_id,
+            "roi_name": self.roi_name,
+            "tensor_shape_nchw": list(self.tensor_shape_nchw) if self.tensor_shape_nchw is not None else None,
+            "cause_type": self.cause_type,
+        }
+
+
 class ModelBackend(Protocol):
     def run(self, feature_group: FeatureGroup) -> list[DefectCandidate]:
         ...
@@ -215,9 +248,35 @@ class InferenceEngine:
     def infer(self, feature_groups: list[FeatureGroup], recipe: Recipe) -> list[DefectCandidate]:
         candidates: list[DefectCandidate] = []
         for group in feature_groups:
-            model = self.model_registry.get_model(group.model_key, recipe)
-            candidates.extend(model.run(group))
+            config = recipe.models.get(group.model_key)
+            backend = config.backend if config is not None else "missing"
+            try:
+                model = self.model_registry.get_model(group.model_key, recipe)
+                candidates.extend(model.run(group))
+            except ModelInferenceError:
+                raise
+            except Exception as exc:
+                raise ModelInferenceError(
+                    f"{group.camera_id}/{group.roi_name}/{group.model_key}: 模型推理失败: {exc}",
+                    model_key=group.model_key,
+                    backend=backend,
+                    camera_id=group.camera_id,
+                    roi_name=group.roi_name,
+                    tensor_shape_nchw=_tensor_shape_nchw(group),
+                    cause_type=exc.__class__.__name__,
+                ) from exc
         return candidates
+
+
+def _tensor_shape_nchw(feature_group: FeatureGroup) -> tuple[int, int, int, int] | None:
+    tensor = feature_group.tensor_nchw
+    if tensor is None:
+        return None
+    batch = len(tensor)
+    channels = len(tensor[0]) if batch > 0 else 0
+    height = len(tensor[0][0]) if channels > 0 else 0
+    width = len(tensor[0][0][0]) if height > 0 else 0
+    return (batch, channels, height, width)
 
 
 def _map_roi_bbox_to_source(

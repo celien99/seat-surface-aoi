@@ -37,6 +37,7 @@
 - C++ 运行配置示例位于 `cpp_controller/config/station_runtime.example.conf`。
 - Python 检测侧已支持标定文件和 ROI 模板加载，默认 identity 标定位于 `python_detector/config/calibration/`，默认 ROI 位于 `python_detector/config/roi/default_roi.yaml`；缺失 ROI 模板、退化 ROI、多边形重复点、非法输出尺寸或非法 `light_alignment.matrix_3x3` 会保守失败；标定缓存按 `camera_id`、`calibration_id` 和 ROI 模板路径隔离，避免多 SKU/多 ROI 模板复用错误 ROI。
 - 模型推理支持 fake 默认后端和 ONNX 可选后端；模型缓存按完整模型配置隔离，避免热切配方时复用旧类别、阈值或 fake 模式；ONNX 依赖、模型缺失、输入配置或输出解码异常时保守失败，不会静默输出 `OK`。
+- Python 模型加载或推理失败会返回 `ERROR`，并在 trace/error context 中记录 `model_key`、后端、机位、ROI、输入 NCHW 形状和原始异常类型，便于现场定位具体模型配置或运行时问题。
 - PatchCore 只能配置为 unknown defect safety net，不能作为全座椅或 ROI 主检测模型。
 - 支持本地追溯落盘，`RECHECK`、`ERROR`、`NG` 默认保存 result、quality、registration、feature summary、timings 和 error context。
 - 追溯会保存 ROI 单光源灰度图 `.pgm`；存在缺陷时会生成带红色 bbox 的 `.ppm` overlay，bbox 使用原图 `bbox_xyxy_pixel` 映射回 ROI 坐标。
