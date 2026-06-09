@@ -20,6 +20,8 @@ SeatInspectionJob
 
 Python 只负责检测链路，不控制 PLC、工业相机或频闪；在线图像和结果交换必须通过共享内存。任意缺帧、CRC 错误、协议错误、质量门禁失败、ROI/配准失败或模型异常都不能输出 `OK`，必须返回 `RECHECK` 或 `ERROR`。
 
+离线训练样本生成、回放评估、benchmark 和 PatchCore memory bank 构建放在根目录 `training_tools/`。调用方向只能是 `training_tools -> python_detector`，在线算法层不能 import 离线训练工具。
+
 ## 依赖管理
 
 Python 层使用项目根目录的 `pyproject.toml` 和 `uv.lock` 管理依赖：
@@ -82,6 +84,18 @@ python_detector/
 ├── trace/
 │   └── trace_writer.py         # trace JSON、ROI PGM 图、缺陷 overlay PPM 写入
 └── tests/                      # 协议、配方、质量门禁、ROI、模型、融合、trace、IPC 安全测试
+```
+
+根目录 `training_tools/` 不是在线检测包的一部分，当前包含：
+
+```text
+training_tools/
+├── collect_trace_dataset.py    # 从 trace 生成训练样本 manifest 和 ROI 图像副本
+├── replay_dataset.py           # 调用检测流水线做模拟回放
+├── benchmark_pipeline.py       # 检测流水线耗时统计和阈值失败
+├── build_patchcore_memory_bank.py # 从 JSONL embedding 构建 PatchCore memory bank
+├── job_fixture.py              # 离线测试和回放使用的模拟 SeatInspectionJob
+└── pipeline_report.py          # 回放和 benchmark 报告格式化
 ```
 
 ## 关键实现说明
@@ -174,6 +188,7 @@ python_detector/
 - 新增模型后端：改 `models/inference_engine.py` 或拆分新后端模块，保持 `ModelBackend.run()` 统一接口。
 - 新增真实模型产物：放入根目录 `model/`，同步 `model/README.md`、生产配方模板和 `tools.validate_model_assets`。
 - 新增 trace 字段：改 `trace/trace_writer.py`、测试和本文。
+- 新增离线样本或训练支撑能力：放入根目录 `training_tools/`，只能消费 `python_detector` 公开入口和 trace 产物。
 - 修改在线共享内存协议：必须同步 C++、Python、校验工具、协议文档和测试。
 
 ## 验证命令
@@ -182,7 +197,14 @@ python_detector/
 uv run pytest
 uv run python -m tools.validate_protocol
 uv run python -m tools.validate_model_assets --recipe production_model_example
+uv run python -m training_tools.replay_dataset --count 3 --write-trace
 bash tools/run_simulated_ipc.sh
+```
+
+有 trace 数据后再执行离线样本生成：
+
+```bash
+uv run python -m training_tools.collect_trace_dataset --trace-root trace --output datasets/seat_trace_v1
 ```
 
 涉及 ONNX 后端时：

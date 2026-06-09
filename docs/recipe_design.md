@@ -170,4 +170,4 @@ models:
 3. 修改质量阈值和缺陷阈值。
 4. 指向对应标定文件和 ROI 模板。
 5. 使用 `python3 -m pytest python_detector/tests` 验证 schema。
-6. 使用 replay 工具回放样本。
+6. 使用 `training_tools.replay_dataset` 或现场 trace 样本回放验证。

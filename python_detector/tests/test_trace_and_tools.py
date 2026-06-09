@@ -7,8 +7,8 @@ from python_detector.ipc.data_types import InspectionResult
 from python_detector.pipeline.pipeline import InspectionPipeline
 from python_detector.pipeline.quality_gate import FrameQuality, QualityReport
 from python_detector.trace.trace_writer import TraceWriter
-from tools.job_fixture import make_simulated_job
-from tools.pipeline_report import (
+from training_tools.job_fixture import make_simulated_job
+from training_tools.pipeline_report import (
     benchmark_failures,
     format_benchmark_report,
     format_replay_line,

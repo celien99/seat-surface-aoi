@@ -11,8 +11,8 @@ from python_detector.models.inference_engine import InferenceEngine, ModelRegist
 from python_detector.pipeline.pipeline import InspectionPipeline
 from python_detector.pipeline.preprocessor import Preprocessor
 from python_detector.pipeline.roi_locator import RoiLocator
-from tools.build_patchcore_memory_bank import build_memory_bank
-from tools.job_fixture import make_simulated_job
+from training_tools.build_patchcore_memory_bank import build_memory_bank
+from training_tools.job_fixture import make_simulated_job
 
 
 def test_default_recipe_declares_v4_light_mapping_and_roi_locator() -> None:

@@ -32,7 +32,7 @@
 ## 回放工具
 
 ```bash
-python3 -m tools.replay_dataset --count 3 --write-trace
+python3 -m training_tools.replay_dataset --count 3 --write-trace
 ```
 
 回放输出包含 `sequence_id`、`decision`、`quality_pass`、`error_code`、缺陷数量和总耗时。存在质量门禁失败时，会追加 `quality_reasons` 摘要；存在流水线异常时，会追加 `error` 摘要；启用 `--write-trace` 且策略允许保存时，会追加 `trace_dir`。
@@ -40,13 +40,31 @@ python3 -m tools.replay_dataset --count 3 --write-trace
 可用 `--summary-limit` 控制每条结果最多输出的质量原因数量：
 
 ```bash
-python3 -m tools.replay_dataset --count 3 --summary-limit 2
+python3 -m training_tools.replay_dataset --count 3 --summary-limit 2
 ```
+
+旧入口 `python3 -m tools.replay_dataset` 仍保留为兼容包装，新开发和文档推荐使用 `training_tools`。
+
+## Trace 转训练样本
+
+`training_tools.collect_trace_dataset` 将一批 trace 转成训练样本 manifest 和 ROI 图像副本，不控制相机、PLC 或频闪：
+
+```bash
+python3 -m training_tools.collect_trace_dataset --trace-root trace --output datasets/seat_trace_v1
+```
+
+输出目录包含：
+
+- `dataset_manifest.jsonl`：每行一个 ROI 单光源样本。
+- `dataset_summary.json`：样本数、trace 数、decision、camera 和缺陷类别统计。
+- `images/<camera_id>/<roi_name>/<light_id>/*.pgm`：从 trace 复制出的 ROI 图像。
+
+manifest 固定包含 `sample_id`、`source_trace_dir`、`recipe_id`、`seat_id`、`sequence_id`、`decision`、`quality_pass`、`camera_id`、`roi_name`、`light_id`、`image_path`、`has_defect`、`defect_classes`、`bbox_xyxy_pixel`、`split` 和 `label_status`。默认 `label_status` 为 `unlabeled`；trace 中已有 defect 只作为弱标签来源，不代表人工标注结论。
 
 ## Benchmark 工具
 
 ```bash
-python3 -m tools.benchmark_pipeline --count 10
+python3 -m training_tools.benchmark_pipeline --count 10
 ```
 
 Benchmark 输出总耗时的平均值、p95、最大值，以及 `quality_ms`、`preprocess_ms`、`cube_ms`、`feature_ms`、`inference_ms`、`fusion_ms`、`total_ms` 等可用步骤的平均和最大耗时。
@@ -54,8 +72,10 @@ Benchmark 输出总耗时的平均值、p95、最大值，以及 `quality_ms`、
 可配置性能阈值，超过阈值时命令返回 `2`，用于 CI 或现场版本回归检查：
 
 ```bash
-python3 -m tools.benchmark_pipeline --count 20 --max-avg-ms 80 --max-ms 120 --max-step-ms quality_ms=10 --max-step-ms inference_ms=30
+python3 -m training_tools.benchmark_pipeline --count 20 --max-avg-ms 80 --max-ms 120 --max-step-ms quality_ms=10 --max-step-ms inference_ms=30
 ```
+
+旧入口 `python3 -m tools.benchmark_pipeline` 仍保留为兼容包装。
 
 ## 保存策略
 

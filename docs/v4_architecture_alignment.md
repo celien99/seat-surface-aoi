@@ -14,7 +14,7 @@
 - Python AI Runtime 以 ONNX Runtime 作为 YOLO/WideResNet50/FilterClassifier 等模型的推理底座，PatchCore 向量检索优先使用 FAISS，缺索引或缺依赖时回退 exact KNN。
 - 协议错误、CRC 错误、缺帧、超时、质量门禁失败和模型异常都不会输出 `OK`。
 
-当前实现已经从「工业 AOI 参考骨架 + 基础算法流水线」推进到「V4.0 主要算法接口可验证参考链路 + 真实模型工程接入点」。真实产线仍需要接入设备 SDK、替换 `model/` 下的真实 YOLO/WideResNet50/PatchCore 产物、完成训练评估、MES/报警和监控平台。
+当前实现已经从「工业 AOI 参考骨架 + 基础算法流水线」推进到「V4.0 主要算法接口可验证参考链路 + 真实模型工程接入点 + 离线训练样本支撑入口」。真实产线仍需要接入设备 SDK、替换 `model/` 下的真实 YOLO/WideResNet50/PatchCore 产物、完成真实标注与训练评估、MES/报警和监控平台。
 
 ## 分层对齐
 
@@ -152,7 +152,7 @@
 
 - 配方 schema 允许 `patchcore` 模型族，并限制只能作为 `safety_net`。
 - 已支持 `patchcore_knn` 后端，读取 memory bank JSON，执行 exact KNN，输出 anomaly score。
-- 已提供 `tools.build_patchcore_memory_bank`，支持从 JSONL embedding 构建 memory bank 并保存 coreset 参数、PCA 版本和 FAISS 元数据。
+- 已提供 `training_tools.build_patchcore_memory_bank`，支持从 JSONL embedding 构建 memory bank 并保存 coreset 参数、PCA 版本和 FAISS 元数据；旧 `tools.build_patchcore_memory_bank` 保留兼容包装。
 - 已支持 `faiss_index_path`，部署环境有有效 FAISS 索引时优先使用 FAISS；缺索引或缺依赖时回退 exact KNN，并在 trace 中记录 `backend` 与 `fallback_reason`。
 - 已在 `model/patchcore/` 预留 PCA、memory bank 和 FAISS 索引产物路径，并提供模型资产校验工具。
 - anomaly score 会作为 `unknown_anomaly` 候选进入融合、缺陷过滤和规则引擎，低置信但可疑样本走 `RECHECK`。
@@ -160,7 +160,7 @@
 差距：
 
 - FAISS 索引文件仍需由部署环境基于真实 memory bank 生成并验证延迟、内存占用和回退行为。
-- 正常样本库、coreset 策略和阈值曲线仍需通过现场数据训练与验证。
+- 正常样本库、coreset 策略和阈值曲线仍需通过现场数据训练与验证；本仓库提供样本与资产准备入口，不重复实现外部 Filter 模型训练项目。
 
 ### 4. 后处理与决策层
 
@@ -192,14 +192,15 @@
 
 当前状态：
 
-- 已有配方、标定、模型配置、trace、回放和 benchmark 文档。
+- 已有配方、标定、模型配置、trace、Trace 转训练样本、回放和 benchmark 文档。
 - 已有根目录 `model/` 模型产物占位、真实模型配方模板和 `tools.validate_model_assets` 上线前资产校验。
 - 已有模型缓存隔离、trace 保存策略和测试机集成清单。
 - trace 已扩展 ROI 定位、ECC、embedding、PCA、KNN 和 anomaly score 摘要。
+- 已将离线训练支撑剥离到 `training_tools/`，只消费 Python 检测层公开入口和 trace 产物，不反向耦合在线 detector。
 
 差距：
 
-- 尚未实现完整数据平台、模型版本平台和系统监控服务。
+- 已补齐 Trace 转训练样本的工程入口；真实人工标注、完整离线训练工程、数据平台、模型版本平台和系统监控服务仍需外部项目或现场平台承接。
 - 现场运行指标、健康检查和报警面板仍需结合部署环境建设。
 
 ### 6. AI Runtime 与依赖
@@ -229,10 +230,11 @@
 2. 训练并接入真实 Dome YOLO ROI 定位权重，固化 ROI 类别、置信度、姿态误差和复检阈值。
 3. 用现场数据验证 ECC 参数，必要时替换为 OpenCV ECC 或更高精度配准后端。
 4. 接入真实 WideResNet50 embedding 权重，固化输入归一化、特征层、embedding 维度和批处理策略。
-5. 基于正常样本训练 PCA 与 PatchCore memory bank，替换 `model/patchcore/` 占位产物，产出阈值曲线和按缺陷类别/ROI/材质/颜色的评估报告。
-6. 在部署环境生成并接入 FAISS 加速索引，验证 KNN 延迟、内存占用和 exact KNN 回退。
-7. 按现场硬件规格固化 ONNX Runtime、FAISS、OpenCV 和 NumPy 版本，完成 AI Runtime 性能基准。
-8. 按现场工艺扩展多 ROI 关联规则、MES/报警接口、数据平台、模型版本平台和系统监控服务。
+5. 使用 `training_tools.collect_trace_dataset` 从现场 trace 生成训练样本 manifest，完成真实人工标注和数据分层。
+6. 基于正常样本训练 PCA 与 PatchCore memory bank，替换 `model/patchcore/` 占位产物，产出阈值曲线和按缺陷类别/ROI/材质/颜色的评估报告。
+7. 在部署环境生成并接入 FAISS 加速索引，验证 KNN 延迟、内存占用和 exact KNN 回退。
+8. 按现场硬件规格固化 ONNX Runtime、FAISS、OpenCV 和 NumPy 版本，完成 AI Runtime 性能基准。
+9. 按现场工艺扩展多 ROI 关联规则、MES/报警接口、数据平台、模型版本平台和系统监控服务。
 
 ## 当前验证命令
 

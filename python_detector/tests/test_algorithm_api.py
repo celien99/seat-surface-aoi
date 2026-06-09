@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from python_detector import RecipeManager, SeatSurfaceAoiAlgorithm
 from python_detector.ipc.shm_protocol import ErrorCode
-from tools.job_fixture import make_simulated_job
+from training_tools.job_fixture import make_simulated_job
 
 
 def test_algorithm_public_api_processes_simulated_job_without_ipc() -> None:

@@ -37,7 +37,7 @@ dev = [
 seat-aoi-detector = "python_detector.detector_main:main"
 
 [tool.setuptools.packages.find]
-include = ["python_detector*"]
+include = ["python_detector*", "training_tools*"]
 exclude = ["cpp_controller*", "docs*", "tools*"]
 
 [tool.setuptools.package-data]

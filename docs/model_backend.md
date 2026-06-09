@@ -129,7 +129,7 @@ uv run python -m tools.validate_model_assets --recipe production_model_example
 离线构建命令：
 
 ```bash
-uv run python -m tools.build_patchcore_memory_bank \
+uv run python -m training_tools.build_patchcore_memory_bank \
   --input embeddings.jsonl \
   --output model/patchcore/seat_patchcore_bank.json \
   --version bank_v1 \
@@ -137,6 +137,8 @@ uv run python -m tools.build_patchcore_memory_bank \
   --pca-version pca_seat_v1 \
   --faiss-enabled
 ```
+
+旧入口 `uv run python -m tools.build_patchcore_memory_bank` 保留为兼容包装；新增离线训练支撑能力统一放在 `training_tools/`。
 
 输入 `embeddings.jsonl` 每行可以是数字数组，也可以是包含 `embedding` 字段的 JSON object。输出 JSON 包含：
 

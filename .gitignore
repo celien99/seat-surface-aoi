@@ -39,6 +39,8 @@ checkpoints/
 
 # Data
 data/
+datasets/
+trace/
 logs/
 
 # Node

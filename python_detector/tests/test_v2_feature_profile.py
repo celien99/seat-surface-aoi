@@ -5,7 +5,7 @@ from python_detector.ipc.data_types import LightFrame
 from python_detector.pipeline.feature_builder import FeatureBuilder
 from python_detector.pipeline.pipeline import InspectionPipeline
 from python_detector.pipeline.reflectance_cube import ReflectanceCube, RegistrationReport
-from tools.job_fixture import make_simulated_job
+from training_tools.job_fixture import make_simulated_job
 
 
 def test_v2_production_feature_profile_uses_five_standard_channels() -> None:
