@@ -50,6 +50,8 @@ quality:
   min_mean_gray: 20
   max_mean_gray: 235
   min_sharpness: 1.0
+  min_motion_gradient: 1.0
+  max_light_mean_delta: 80
   max_registration_error_px: 1.5
   max_capture_span_us: 500000
   max_exposure_delta_us: 200

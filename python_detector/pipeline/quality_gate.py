@@ -13,6 +13,7 @@ class FrameQuality:
     mean_gray: float
     saturation_ratio: float
     sharpness: float
+    motion_gradient: float
     is_pass: bool
     messages: list[str] = field(default_factory=list)
 
@@ -62,6 +63,7 @@ class ImageQualityGate:
             if frame.light_id != light_id:
                 messages.append(f"{bundle.camera_id}/{light_id}: frame light_id mismatch {frame.light_id}")
             reports.append(self._check_frame(frame, recipe))
+        self._check_light_stability(bundle, recipe, reports, messages)
         return reports
 
     def _check_capture_consistency(self, bundle: CameraBundle, recipe: Recipe, messages: list[str]) -> None:
@@ -117,17 +119,19 @@ class ImageQualityGate:
                 0.0,
                 0.0,
                 0.0,
+                0.0,
                 False,
                 meta_messages,
             )
         expected_min = frame.stride_bytes * frame.height
         if len(values) < expected_min:
-            return FrameQuality(frame.camera_id, frame.light_id, 0.0, 0.0, 0.0, False, ["image shorter than stride"])
+            return FrameQuality(frame.camera_id, frame.light_id, 0.0, 0.0, 0.0, 0.0, False, ["image shorter than stride"])
 
         sample = self._active_pixel_bytes(frame)
         mean_gray = sum(sample) / len(sample)
         saturation_ratio = sum(1 for value in sample if value >= 250) / len(sample)
-        sharpness = self._sharpness(sample, frame.width, frame.height, frame.stride_bytes)
+        sharpness = self._sharpness(sample, frame.width, frame.height)
+        motion_gradient = self._motion_gradient(sample, frame.width, frame.height)
         messages: list[str] = []
         if saturation_ratio > recipe.quality.max_saturation_ratio:
             messages.append("overexposure saturation ratio exceeded")
@@ -137,15 +141,40 @@ class ImageQualityGate:
             messages.append("overexposure mean gray above threshold")
         if sharpness < recipe.quality.min_sharpness:
             messages.append("sharpness below threshold")
+        if motion_gradient < recipe.quality.min_motion_gradient:
+            messages.append("motion blur gradient below threshold")
         return FrameQuality(
             camera_id=frame.camera_id,
             light_id=frame.light_id,
             mean_gray=mean_gray,
             saturation_ratio=saturation_ratio,
             sharpness=sharpness,
+            motion_gradient=motion_gradient,
             is_pass=not messages,
             messages=messages,
         )
+
+    def _check_light_stability(
+        self,
+        bundle: CameraBundle,
+        recipe: Recipe,
+        reports: list[FrameQuality],
+        messages: list[str],
+    ) -> None:
+        report_by_light = {report.light_id: report for report in reports if report.camera_id == bundle.camera_id}
+        required_reports = [
+            report_by_light[light_id]
+            for light_id in recipe.quality.required_lights
+            if light_id in report_by_light and report_by_light[light_id].is_pass
+        ]
+        if len(required_reports) < 2:
+            return
+        means = [report.mean_gray for report in required_reports]
+        mean_delta = max(means) - min(means)
+        if mean_delta > recipe.quality.max_light_mean_delta:
+            messages.append(
+                f"{bundle.camera_id}: required light mean delta {mean_delta:.2f} exceeds {recipe.quality.max_light_mean_delta:.2f}"
+            )
 
     def _frame_meta_messages(self, frame: LightFrame) -> list[str]:
         messages: list[str] = []
@@ -175,20 +204,18 @@ class ImageQualityGate:
             rows.extend(frame.image[start : start + row_width])
         return bytes(rows)
 
-    def _sharpness(self, data: bytes, width: int, height: int, stride: int) -> float:
+    def _sharpness(self, data: bytes, width: int, height: int) -> float:
         if width < 3 or height < 3:
             return 0.0
-        if stride != width:
-            stride = width
         total = 0
         count = 0
         for y in range(1, height - 1):
-            row = y * stride
+            row = y * width
             for x in range(1, width - 1):
                 center = data[row + x]
                 lap = (
-                    int(data[row - stride + x])
-                    + int(data[row + stride + x])
+                    int(data[row - width + x])
+                    + int(data[row + width + x])
                     + int(data[row + x - 1])
                     + int(data[row + x + 1])
                     - 4 * int(center)
@@ -196,3 +223,27 @@ class ImageQualityGate:
                 total += abs(lap)
                 count += 1
         return total / max(count, 1)
+
+    def _motion_gradient(self, data: bytes, width: int, height: int) -> float:
+        if width < 2 or height < 2:
+            return 0.0
+        horizontal_total = 0
+        horizontal_count = 0
+        for y in range(height):
+            row = y * width
+            for x in range(width - 1):
+                horizontal_total += abs(int(data[row + x + 1]) - int(data[row + x]))
+                horizontal_count += 1
+
+        vertical_total = 0
+        vertical_count = 0
+        for y in range(height - 1):
+            row = y * width
+            next_row = row + width
+            for x in range(width):
+                vertical_total += abs(int(data[next_row + x]) - int(data[row + x]))
+                vertical_count += 1
+
+        horizontal_mean = horizontal_total / max(horizontal_count, 1)
+        vertical_mean = vertical_total / max(vertical_count, 1)
+        return min(horizontal_mean, vertical_mean)

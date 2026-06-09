@@ -14,7 +14,7 @@
 - Result ring 对协议、payload 和 CRC 错误会立即返回真实错误码，不再等待到 detector timeout。
 - Python 检测进程：共享内存读取、质量门禁、预处理、ReflectanceCube、特征构建、fake 推理、融合和规则判定。
 - Python 质量门禁会校验配方启用机位完整性、SKU 一致性和必需光源；缺机位、重复机位、未知机位或缺关键光源都会返回 `RECHECK`，不会输出 `OK`。
-- Python 质量门禁会校验必需光源的采集一致性，包括时间戳跨度、时间戳单调性、帧序号重复、曝光差和增益差；会在预处理前拒绝非 `MONO8/UINT8/MONO/1ch`、stride 小于有效行宽或图像长度不足的帧；灰度、饱和和清晰度统计只使用有效像素宽度，不把 stride padding 当成图像内容；异常采集包会返回 `RECHECK`。
+- Python 质量门禁会校验必需光源的采集一致性，包括时间戳跨度、时间戳单调性、帧序号重复、曝光差和增益差；会在预处理前拒绝非 `MONO8/UINT8/MONO/1ch`、stride 小于有效行宽或图像长度不足的帧；灰度、饱和、清晰度和运动模糊统计只使用有效像素宽度，不把 stride padding 当成图像内容；必需光源亮度漂移、运动模糊或异常采集包会返回 `RECHECK`。
 - Python 检测进程读取坏 frame slot 时会释放输入 slot；header 校验可信后发现 payload、图像 CRC 或结构错误会立即回写 `ERROR` 和真实错误码，header CRC 错误因任务身份不可信只释放输入 slot 并由 C++ 超时降级；检测、配方或模型异常会回写 `ERROR`/`RECHECK`，不会让共享内存 slot 长期停留在 `READING`。
 - V2 生产标准默认使用 `DIFFUSE`、`POLAR_DIFFUSE`、`HIGH_LEFT`、`HIGH_RIGHT` 四个必需光源，生成 `ch0_diffuse` 到 `ch4_high_max_min` 的 5 通道标准特征。
 - 规则判定使用配方中的类别阈值 `ng_score`、`recheck_score` 和 `min_area_px`；机位级 `light_order` 会进入 ReflectanceCube 和特征构建。
@@ -29,7 +29,7 @@
 - 正常模拟图像包返回 `OK`。
 - Python detector 不存在或超时时，C++ 保守返回 `RECHECK`，不会误判 `OK`。
 - YAML 配方加载与 schema 校验，当前默认配方位于 `python_detector/config/default_recipe.yaml`。
-- 配方已覆盖机位、光源顺序、质量阈值、注册策略、ROI 级主模型、unknown safety net 模型、模型后端和追溯配置；schema 会拒绝越界分数阈值、负面积阈值和 `recheck_score > ng_score` 的不安全规则配置。
+- 配方已覆盖机位、光源顺序、质量阈值、注册策略、ROI 级主模型、unknown safety net 模型、模型后端和追溯配置；schema 会拒绝越界质量阈值、越界分数阈值、负面积阈值和 `recheck_score > ng_score` 的不安全规则配置。
 - C++ 主控已具备相机、光源、PLC 的可替换接口和模拟驱动，支持触发超时、光源故障、缺帧、PLC 输出失败等故障注入。
 - 频闪同步支持 `camera_exposure_output` 默认模式：C++ 负责配置光源、arm 相机和频闪、等待图像与判断故障；模拟链路用相机曝光输出触发频闪。保留 `software` 模式用于纯软件调度测试。
 - C++ 单个共享内存 frame slot 承载一个座椅任务的所有机位、所有光源图像；Python 检测进程按 `camera_index` 组装 `CameraBundle`。

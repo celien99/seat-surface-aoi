@@ -18,6 +18,8 @@ class QualityConfig:
     min_mean_gray: float = 20.0
     max_mean_gray: float = 235.0
     min_sharpness: float = 1.0
+    min_motion_gradient: float = 1.0
+    max_light_mean_delta: float = 80.0
     max_registration_error_px: float = 1.5
     max_capture_span_us: int = 500_000
     max_exposure_delta_us: int = 200
@@ -185,13 +187,21 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
 
 
 def _quality_from_dict(data: dict[str, Any]) -> QualityConfig:
+    min_mean_gray = _gray_value(data.get("min_mean_gray", 20.0), "quality.min_mean_gray")
+    max_mean_gray = _gray_value(data.get("max_mean_gray", 235.0), "quality.max_mean_gray")
+    if min_mean_gray > max_mean_gray:
+        raise RecipeValidationError(
+            f"quality.min_mean_gray 不能大于 max_mean_gray: {min_mean_gray} > {max_mean_gray}"
+        )
     return QualityConfig(
         required_lights=_str_tuple(data.get("required_lights", ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")), "quality.required_lights"),
-        max_saturation_ratio=_float(data.get("max_saturation_ratio", 0.01), "quality.max_saturation_ratio"),
-        min_mean_gray=_float(data.get("min_mean_gray", 20.0), "quality.min_mean_gray"),
-        max_mean_gray=_float(data.get("max_mean_gray", 235.0), "quality.max_mean_gray"),
-        min_sharpness=_float(data.get("min_sharpness", 1.0), "quality.min_sharpness"),
-        max_registration_error_px=_float(data.get("max_registration_error_px", 1.5), "quality.max_registration_error_px"),
+        max_saturation_ratio=_ratio(data.get("max_saturation_ratio", 0.01), "quality.max_saturation_ratio"),
+        min_mean_gray=min_mean_gray,
+        max_mean_gray=max_mean_gray,
+        min_sharpness=_non_negative_float(data.get("min_sharpness", 1.0), "quality.min_sharpness"),
+        min_motion_gradient=_non_negative_float(data.get("min_motion_gradient", 1.0), "quality.min_motion_gradient"),
+        max_light_mean_delta=_non_negative_float(data.get("max_light_mean_delta", 80.0), "quality.max_light_mean_delta"),
+        max_registration_error_px=_non_negative_float(data.get("max_registration_error_px", 1.5), "quality.max_registration_error_px"),
         max_capture_span_us=_non_negative_int(data.get("max_capture_span_us", 500_000), "quality.max_capture_span_us"),
         max_exposure_delta_us=_non_negative_int(data.get("max_exposure_delta_us", 200), "quality.max_exposure_delta_us"),
         max_gain_delta=_non_negative_float(data.get("max_gain_delta", 0.2), "quality.max_gain_delta"),
@@ -435,6 +445,13 @@ def _ratio(value: Any, name: str) -> float:
     result = _float(value, name)
     if result < 0 or result > 1:
         raise RecipeValidationError(f"{name} 必须在 [0, 1] 范围内")
+    return result
+
+
+def _gray_value(value: Any, name: str) -> float:
+    result = _float(value, name)
+    if result < 0 or result > 255:
+        raise RecipeValidationError(f"{name} 必须在 [0, 255] 范围内")
     return result
 
 

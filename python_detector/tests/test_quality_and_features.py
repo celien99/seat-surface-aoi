@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from python_detector.config.recipe_schema import RecipeManager
 from python_detector.ipc.data_types import CameraBundle, LightFrame, SeatInspectionJob
 from python_detector.pipeline.pipeline import InspectionPipeline
@@ -175,3 +177,38 @@ def test_stride_smaller_than_active_row_returns_recheck() -> None:
     assert result.quality_pass is False
     report = pipeline.last_context["quality_report"].frame_reports[0]
     assert f"stride smaller than active row width: {frame.width - 1} < {frame.width}" in report.messages
+
+
+def test_motion_blur_gradient_below_threshold_returns_recheck() -> None:
+    pipeline = InspectionPipeline()
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    job = _job(LIGHTS)
+    frame = job.camera_bundles[0].light_frames["DIFFUSE"]
+    frame.image = memoryview(bytearray([80] * (frame.width * frame.height)))
+
+    result = pipeline.process(job, recipe)
+
+    assert result.decision == "RECHECK"
+    assert result.quality_pass is False
+    report = pipeline.last_context["quality_report"].frame_reports[0]
+    assert "motion blur gradient below threshold" in report.messages
+    assert report.motion_gradient == 0.0
+
+
+def test_required_light_mean_delta_above_threshold_returns_recheck() -> None:
+    pipeline = InspectionPipeline()
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    recipe = replace(recipe, quality=replace(recipe.quality, max_light_mean_delta=20.0))
+    job = _job(LIGHTS)
+    for bundle in job.camera_bundles:
+        bundle.light_frames["POLAR_DIFFUSE"] = _frame("POLAR_DIFFUSE", value=180, frame_index=2, timestamp_us=1_100)
+        bundle.light_frames["POLAR_DIFFUSE"].camera_id = bundle.camera_id
+
+    result = pipeline.process(job, recipe)
+
+    assert result.decision == "RECHECK"
+    assert result.quality_pass is False
+    assert any(
+        message.startswith("TOP_BACK: required light mean delta")
+        for message in pipeline.last_context["quality_report"].messages
+    )

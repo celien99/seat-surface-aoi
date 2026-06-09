@@ -33,10 +33,16 @@ quality:
 
 ## 质量门禁字段
 
-`quality` 除了曝光、饱和、清晰度和配准阈值，还应配置采集一致性阈值：
+`quality` 除了曝光、饱和、清晰度、运动模糊和配准阈值，还应配置采集一致性与光源稳定性阈值：
 
 ```yaml
 quality:
+  max_saturation_ratio: 0.01
+  min_mean_gray: 20
+  max_mean_gray: 235
+  min_sharpness: 1.0
+  min_motion_gradient: 1.0
+  max_light_mean_delta: 80
   max_capture_span_us: 500000
   max_exposure_delta_us: 200
   max_gain_delta: 0.2
@@ -44,6 +50,10 @@ quality:
   require_unique_frame_indices: true
 ```
 
+- `max_saturation_ratio` / `min_mean_gray` / `max_mean_gray`：单帧过曝、欠曝和亮度范围阈值。
+- `min_sharpness`：基于有效像素区域的拉普拉斯清晰度下限。
+- `min_motion_gradient`：基于水平/垂直方向梯度均值的运动模糊下限。
+- `max_light_mean_delta`：同一机位必需光源均值灰度最大跨度，用于发现光源强度漂移或触发异常。
 - `max_capture_span_us`：同一机位必需光源包的最大时间戳跨度。
 - `max_exposure_delta_us` / `max_gain_delta`：必需光源之间曝光和增益允许差值。
 - `require_monotonic_timestamps`：要求必需光源按配方顺序时间戳单调。
@@ -51,7 +61,7 @@ quality:
 
 质量门禁还会在预处理前校验每帧图像元数据，当前在线主链路只接受 `MONO8`、`UINT8`、`MONO`、单通道图像；`stride_bytes` 必须大于等于有效行宽，图像长度必须覆盖完整 stride。元数据不满足要求时返回 `RECHECK`。
 
-这些检查失败时返回 `RECHECK`，不能输出 `OK`。
+这些检查失败时返回 `RECHECK`，不能输出 `OK`。配方加载阶段会拒绝越界质量阈值，例如饱和比例不在 `[0, 1]`、灰度范围不在 `[0, 255]`、灰度上下限反向或运动/光源稳定性阈值为负。
 
 ROI 模型使用两个层次：
 

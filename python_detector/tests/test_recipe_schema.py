@@ -112,6 +112,8 @@ def test_recipe_parses_fusion_config() -> None:
 
 def test_recipe_parses_capture_quality_config() -> None:
     recipe = RecipeManager().load("seat_a_black_leather_v1")
+    assert recipe.quality.min_motion_gradient == 1.0
+    assert recipe.quality.max_light_mean_delta == 80.0
     assert recipe.quality.max_capture_span_us == 500_000
     assert recipe.quality.max_exposure_delta_us == 200
     assert recipe.quality.max_gain_delta == 0.2
@@ -141,6 +143,50 @@ def test_recipe_rejects_invalid_capture_quality_config() -> None:
                 "sku": "sku",
                 "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
                 "quality": {"max_capture_span_us": -1},
+                "cameras": {"TOP": {"model_key": "default"}},
+                "models": {"default": {"backend": "fake", "role": "primary"}},
+            }
+        )
+    with pytest.raises(RecipeValidationError, match="quality.min_motion_gradient"):
+        recipe_from_dict(
+            {
+                "recipe_id": "bad_motion_quality",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                "quality": {"min_motion_gradient": -0.1},
+                "cameras": {"TOP": {"model_key": "default"}},
+                "models": {"default": {"backend": "fake", "role": "primary"}},
+            }
+        )
+    with pytest.raises(RecipeValidationError, match="quality.max_light_mean_delta"):
+        recipe_from_dict(
+            {
+                "recipe_id": "bad_light_stability_quality",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                "quality": {"max_light_mean_delta": -1.0},
+                "cameras": {"TOP": {"model_key": "default"}},
+                "models": {"default": {"backend": "fake", "role": "primary"}},
+            }
+        )
+    with pytest.raises(RecipeValidationError, match="quality.min_mean_gray 不能大于 max_mean_gray"):
+        recipe_from_dict(
+            {
+                "recipe_id": "bad_gray_quality",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                "quality": {"min_mean_gray": 200, "max_mean_gray": 100},
+                "cameras": {"TOP": {"model_key": "default"}},
+                "models": {"default": {"backend": "fake", "role": "primary"}},
+            }
+        )
+    with pytest.raises(RecipeValidationError, match="quality.max_saturation_ratio"):
+        recipe_from_dict(
+            {
+                "recipe_id": "bad_saturation_quality",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                "quality": {"max_saturation_ratio": 1.2},
                 "cameras": {"TOP": {"model_key": "default"}},
                 "models": {"default": {"backend": "fake", "role": "primary"}},
             }
