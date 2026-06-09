@@ -34,7 +34,7 @@
 - 频闪同步支持 `camera_exposure_output` 默认模式：C++ 负责配置光源、arm 相机和频闪、等待图像与判断故障；模拟链路用相机曝光输出触发频闪。保留 `software` 模式用于纯软件调度测试。
 - C++ 单个共享内存 frame slot 承载一个座椅任务的所有机位、所有光源图像；Python 检测进程按 `camera_index` 组装 `CameraBundle`。
 - C++ 运行配置示例位于 `cpp_controller/config/station_runtime.example.conf`。
-- Python 检测侧已支持标定文件和 ROI 模板加载，默认 identity 标定位于 `python_detector/config/calibration/`，默认 ROI 位于 `python_detector/config/roi/default_roi.yaml`；标定缓存按 `camera_id`、`calibration_id` 和 ROI 模板路径隔离，避免多 SKU/多 ROI 模板复用错误 ROI。
+- Python 检测侧已支持标定文件和 ROI 模板加载，默认 identity 标定位于 `python_detector/config/calibration/`，默认 ROI 位于 `python_detector/config/roi/default_roi.yaml`；缺失 ROI 模板、退化 ROI、多边形重复点、非法输出尺寸或非法 `light_alignment.matrix_3x3` 会保守失败；标定缓存按 `camera_id`、`calibration_id` 和 ROI 模板路径隔离，避免多 SKU/多 ROI 模板复用错误 ROI。
 - 模型推理支持 fake 默认后端和 ONNX 可选后端；模型缓存按完整模型配置隔离，避免热切配方时复用旧类别、阈值或 fake 模式；ONNX 依赖、模型缺失、输入配置或输出解码异常时保守失败，不会静默输出 `OK`。
 - PatchCore 只能配置为 unknown defect safety net，不能作为全座椅或 ROI 主检测模型。
 - 支持本地追溯落盘，`RECHECK`、`ERROR`、`NG` 默认保存 result、quality、registration、feature summary、timings 和 error context。

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from pathlib import Path
 from typing import Any
 
@@ -44,8 +45,9 @@ class CalibrationManager:
         if not isinstance(raw, dict):
             raise RecipeValidationError(f"标定文件格式错误: {path}")
         calibration = self._parse_calibration(raw, camera_id, calibration_id)
-        if roi_path.exists():
-            calibration = self._with_roi_override(calibration, roi_path)
+        if not roi_path.exists():
+            raise RecipeValidationError(f"ROI 模板文件不存在: {roi_path}")
+        calibration = self._with_roi_override(calibration, roi_path)
         self._cache[key] = calibration
         return calibration
 
@@ -63,10 +65,7 @@ class CalibrationManager:
         if actual_calibration_id != calibration_id:
             raise RecipeValidationError(f"标定 calibration_id 不一致: {actual_calibration_id} != {calibration_id}")
         image_size = _dict(raw.get("image_size"), "image_size")
-        light_alignment = {
-            str(light_id): tuple(float(v) for v in _dict(item, f"light_alignment.{light_id}").get("matrix_3x3", [1, 0, 0, 0, 1, 0, 0, 0, 1]))
-            for light_id, item in _dict(raw.get("light_alignment", {}), "light_alignment").items()
-        }
+        light_alignment = _parse_light_alignment(_dict(raw.get("light_alignment", {}), "light_alignment"))
         rois = _parse_rois(_dict(raw.get("roi_templates", {}), "roi_templates"))
         return Calibration(
             calibration_id=actual_calibration_id,
@@ -98,20 +97,61 @@ def _parse_rois(raw: dict[str, Any]) -> dict[str, RoiTemplate]:
     rois: dict[str, RoiTemplate] = {}
     for roi_name, item in raw.items():
         item = _dict(item, f"roi_templates.{roi_name}")
-        polygon = tuple((int(x), int(y)) for x, y in item.get("polygon_xy", []))
+        polygon = _parse_polygon(item.get("polygon_xy", []), f"roi_templates.{roi_name}.polygon_xy")
         if len(polygon) < 3:
             raise RecipeValidationError(f"ROI 至少需要 3 个点: {roi_name}")
         output_size_raw = item.get("output_size", [0, 0])
         if not isinstance(output_size_raw, list) or len(output_size_raw) != 2:
             raise RecipeValidationError(f"ROI output_size 必须是两个整数: {roi_name}")
+        output_size = (
+            _positive_int(output_size_raw[0], f"roi_templates.{roi_name}.output_size.width"),
+            _positive_int(output_size_raw[1], f"roi_templates.{roi_name}.output_size.height"),
+        )
+        _validate_roi_polygon(str(roi_name), polygon)
         rois[str(roi_name)] = RoiTemplate(
             roi_name=str(roi_name),
             polygon_xy=polygon,
-            output_size=(int(output_size_raw[0]), int(output_size_raw[1])),
+            output_size=output_size,
         )
     if not rois:
         raise RecipeValidationError("至少需要一个 ROI 模板")
     return rois
+
+
+def _parse_light_alignment(raw: dict[str, Any]) -> dict[str, tuple[float, ...]]:
+    alignment: dict[str, tuple[float, ...]] = {}
+    for light_id, item in raw.items():
+        matrix_raw = _dict(item, f"light_alignment.{light_id}").get("matrix_3x3", [1, 0, 0, 0, 1, 0, 0, 0, 1])
+        if not isinstance(matrix_raw, list) or len(matrix_raw) != 9:
+            raise RecipeValidationError(f"light_alignment.{light_id}.matrix_3x3 必须包含 9 个数字")
+        matrix = tuple(_finite_float(value, f"light_alignment.{light_id}.matrix_3x3") for value in matrix_raw)
+        alignment[str(light_id)] = matrix
+    return alignment
+
+
+def _parse_polygon(value: Any, name: str) -> tuple[tuple[int, int], ...]:
+    if not isinstance(value, list):
+        raise RecipeValidationError(f"{name} 必须是点列表")
+    points: list[tuple[int, int]] = []
+    for index, point in enumerate(value):
+        if not isinstance(point, list) or len(point) != 2:
+            raise RecipeValidationError(f"{name}[{index}] 必须是 [x, y]")
+        points.append((_int(point[0], f"{name}[{index}].x"), _int(point[1], f"{name}[{index}].y")))
+    return tuple(points)
+
+
+def _validate_roi_polygon(roi_name: str, polygon: tuple[tuple[int, int], ...]) -> None:
+    if len(set(polygon)) != len(polygon):
+        raise RecipeValidationError(f"ROI 存在重复点: {roi_name}")
+    if _polygon_area(polygon) <= 0.0:
+        raise RecipeValidationError(f"ROI 面积无效: {roi_name}")
+
+
+def _polygon_area(polygon: tuple[tuple[int, int], ...]) -> float:
+    area = 0.0
+    for (x0, y0), (x1, y1) in zip(polygon, polygon[1:] + polygon[:1]):
+        area += float(x0 * y1 - x1 * y0)
+    return abs(area) * 0.5
 
 
 def _dict(value: Any, name: str) -> dict[str, Any]:
@@ -124,3 +164,25 @@ def _str(value: Any, name: str) -> str:
     if not isinstance(value, str) or not value:
         raise RecipeValidationError(f"{name} 必须是非空字符串")
     return value
+
+
+def _int(value: Any, name: str) -> int:
+    if not isinstance(value, int):
+        raise RecipeValidationError(f"{name} 必须是整数")
+    return value
+
+
+def _positive_int(value: Any, name: str) -> int:
+    result = _int(value, name)
+    if result <= 0:
+        raise RecipeValidationError(f"{name} 必须大于 0")
+    return result
+
+
+def _finite_float(value: Any, name: str) -> float:
+    if not isinstance(value, (int, float)):
+        raise RecipeValidationError(f"{name} 必须是数字")
+    result = float(value)
+    if not math.isfinite(result):
+        raise RecipeValidationError(f"{name} 必须是有限数字")
+    return result

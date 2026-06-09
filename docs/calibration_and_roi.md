@@ -19,6 +19,10 @@ python_detector/config/roi/default_roi.yaml
 - 图像 `calibration_id` 必须和配方/标定文件一致。
 - 图像尺寸必须和标定文件一致。
 - ROI 至少包含 3 个点。
+- 配方声明的 `roi_template` 文件必须存在，不允许静默回退到标定文件内置 ROI。
+- ROI 点必须是整数 `[x, y]`，不能重复，多边形面积必须大于 0。
+- `output_size` 必须是两个大于 0 的整数。
+- `light_alignment.<light>.matrix_3x3` 必须包含 9 个有限数字。
 - 轴对齐 4 点矩形 ROI 会走快速裁剪；`output_size` 必须等于该矩形外接框尺寸。
 - 非轴对齐 ROI 必须提供 4 个点，Python 预处理会按四点透视展开到 `output_size`。
 - 透视展开只支持当前在线主链路的 `MONO8` ROI 输入；输出图会记录 `roi_to_source_matrix` 和 `source_to_roi_matrix`，用于把模型 ROI 局部 bbox 映射为原图 `bbox_xyxy_pixel`，以及把原图 bbox 映射回 ROI 图生成 overlay。

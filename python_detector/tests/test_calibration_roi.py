@@ -3,7 +3,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from python_detector.config.calibration_manager import CalibrationManager
-from python_detector.config.recipe_schema import RecipeManager
+from python_detector.config.recipe_schema import RecipeManager, RecipeValidationError
 from python_detector.ipc.data_types import CameraBundle, LightFrame, SeatInspectionJob
 from python_detector.pipeline.pipeline import InspectionPipeline
 from python_detector.pipeline.preprocessor import Preprocessor
@@ -88,6 +88,98 @@ roi_templates:
 
     assert set(calibration_a.roi_templates) == {"a"}
     assert set(calibration_b.roi_templates) == {"b"}
+
+
+def test_calibration_manager_rejects_missing_roi_template_file() -> None:
+    with pytest.raises(RecipeValidationError, match="ROI 模板文件不存在"):
+        CalibrationManager().load("TOP_BACK", "calib/simulated_v1", "python_detector/config/roi/missing.yaml")
+
+
+def test_calibration_manager_rejects_invalid_roi_template(tmp_path: Path) -> None:
+    invalid_output_size = tmp_path / "invalid_output_size.yaml"
+    invalid_output_size.write_text(
+        """
+roi_templates:
+  bad:
+    polygon_xy:
+      - [0, 0]
+      - [9, 0]
+      - [9, 9]
+      - [0, 9]
+    output_size: [0, 10]
+""",
+        encoding="utf-8",
+    )
+    repeated_point = tmp_path / "repeated_point.yaml"
+    repeated_point.write_text(
+        """
+roi_templates:
+  bad:
+    polygon_xy:
+      - [0, 0]
+      - [9, 0]
+      - [9, 0]
+      - [0, 9]
+    output_size: [10, 10]
+""",
+        encoding="utf-8",
+    )
+    degenerate_polygon = tmp_path / "degenerate_polygon.yaml"
+    degenerate_polygon.write_text(
+        """
+roi_templates:
+  bad:
+    polygon_xy:
+      - [0, 0]
+      - [4, 0]
+      - [8, 0]
+    output_size: [10, 10]
+""",
+        encoding="utf-8",
+    )
+
+    manager = CalibrationManager()
+    with pytest.raises(RecipeValidationError, match="output_size.width"):
+        manager.load("TOP_BACK", "calib/simulated_v1", str(invalid_output_size))
+    with pytest.raises(RecipeValidationError, match="ROI 存在重复点"):
+        manager.load("TOP_BACK", "calib/simulated_v1", str(repeated_point))
+    with pytest.raises(RecipeValidationError, match="ROI 面积无效"):
+        manager.load("TOP_BACK", "calib/simulated_v1", str(degenerate_polygon))
+
+
+def test_calibration_manager_rejects_invalid_alignment_matrix(tmp_path: Path) -> None:
+    calibration_dir = tmp_path / "python_detector/config/calibration/TOP_BACK"
+    calibration_dir.mkdir(parents=True)
+    (calibration_dir / "invalid_matrix.yaml").write_text(
+        """
+calibration_id: calib/invalid_matrix
+camera_id: TOP_BACK
+image_size:
+  width: 64
+  height: 48
+pixel_size_mm: 0.12
+base_light_id: POLAR_DIFFUSE
+light_alignment:
+  DIFFUSE:
+    matrix_3x3: [1, 0, 0]
+roi_templates:
+  full:
+    polygon_xy:
+      - [0, 0]
+      - [63, 0]
+      - [63, 47]
+      - [0, 47]
+    output_size: [64, 48]
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RecipeValidationError, match="matrix_3x3 必须包含 9 个数字"):
+        CalibrationManager(tmp_path).load(
+            "TOP_BACK",
+            "calib/invalid_matrix",
+            "python_detector/config/roi/default_roi.yaml",
+        )
 
 
 def test_calibration_mismatch_returns_error_not_ok() -> None:
@@ -203,6 +295,21 @@ roi_templates:
 def test_registration_error_exceeding_threshold_returns_recheck(tmp_path: Path) -> None:
     calibration_dir = tmp_path / "python_detector/config/calibration/TOP_BACK"
     calibration_dir.mkdir(parents=True)
+    roi_dir = tmp_path / "python_detector/config/roi"
+    roi_dir.mkdir(parents=True)
+    (roi_dir / "default_roi.yaml").write_text(
+        """
+roi_templates:
+  full:
+    polygon_xy:
+      - [0, 0]
+      - [63, 0]
+      - [63, 47]
+      - [0, 47]
+    output_size: [64, 48]
+""",
+        encoding="utf-8",
+    )
     calibration_path = calibration_dir / "shifted.yaml"
     calibration_path.write_text(
         """
