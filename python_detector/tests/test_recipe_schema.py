@@ -28,6 +28,73 @@ def test_recipe_rejects_required_light_not_in_light_order() -> None:
         )
 
 
+def test_recipe_rejects_registration_lights_not_in_light_order() -> None:
+    with pytest.raises(RecipeValidationError, match="registration.base_light_id 不在 light_order 中"):
+        recipe_from_dict(
+            {
+                "recipe_id": "bad_base_light",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                "registration": {"base_light_id": "LOW_LEFT", "base_light_fallback": "DIFFUSE"},
+                "cameras": {"TOP": {"model_key": "default"}},
+                "models": {"default": {"backend": "fake", "role": "primary"}},
+            }
+        )
+    with pytest.raises(RecipeValidationError, match="registration.base_light_fallback 必须属于 quality.required_lights"):
+        recipe_from_dict(
+            {
+                "recipe_id": "bad_fallback_light",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT", "LOW_LEFT"],
+                "registration": {"base_light_id": "POLAR_DIFFUSE", "base_light_fallback": "LOW_LEFT"},
+                "cameras": {
+                    "TOP": {
+                        "model_key": "default",
+                        "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT", "LOW_LEFT"],
+                    }
+                },
+                "models": {"default": {"backend": "fake", "role": "primary"}},
+            }
+        )
+
+
+def test_recipe_rejects_camera_light_order_missing_required_lights() -> None:
+    with pytest.raises(RecipeValidationError, match="cameras.TOP.light_order 缺少 required_lights"):
+        recipe_from_dict(
+            {
+                "recipe_id": "bad_camera_required_lights",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                "cameras": {
+                    "TOP": {
+                        "model_key": "default",
+                        "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT"],
+                    }
+                },
+                "models": {"default": {"backend": "fake", "role": "primary"}},
+            }
+        )
+
+
+def test_recipe_rejects_camera_base_light_not_in_camera_light_order() -> None:
+    with pytest.raises(RecipeValidationError, match="cameras.TOP.base_light_id 不在该机位 light_order 中"):
+        recipe_from_dict(
+            {
+                "recipe_id": "bad_camera_base_light",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                "cameras": {
+                    "TOP": {
+                        "model_key": "default",
+                        "base_light_id": "LOW_LEFT",
+                        "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                    }
+                },
+                "models": {"default": {"backend": "fake", "role": "primary"}},
+            }
+        )
+
+
 def test_recipe_rejects_patchcore_as_primary_detector() -> None:
     with pytest.raises(RecipeValidationError):
         recipe_from_dict(

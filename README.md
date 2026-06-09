@@ -30,6 +30,7 @@
 - Python detector 不存在或超时时，C++ 保守返回 `RECHECK`，不会误判 `OK`。
 - YAML 配方加载与 schema 校验，当前默认配方位于 `python_detector/config/default_recipe.yaml`。
 - 配方已覆盖机位、光源顺序、质量阈值、注册策略、ROI 级主模型、unknown safety net 模型、模型后端和追溯配置；schema 会拒绝越界质量阈值、越界分数阈值、负面积阈值和 `recheck_score > ng_score` 的不安全规则配置。
+- 配方加载阶段会校验全局/机位级 `light_order`、`quality.required_lights`、`registration.base_light_id` 和 `registration.base_light_fallback` 的一致性；基准光源、fallback 光源或必需光源未启用时会提前拒绝配方，避免运行中退化到不可追溯的注册失败。
 - C++ 主控已具备相机、光源、PLC 的可替换接口和模拟驱动，支持触发超时、光源故障、缺帧、PLC 输出失败等故障注入。
 - 频闪同步支持 `camera_exposure_output` 默认模式：C++ 负责配置光源、arm 相机和频闪、等待图像与判断故障；模拟链路用相机曝光输出触发频闪。保留 `software` 模式用于纯软件调度测试。
 - C++ 单个共享内存 frame slot 承载一个座椅任务的所有机位、所有光源图像；Python 检测进程按 `camera_index` 组装 `CameraBundle`。

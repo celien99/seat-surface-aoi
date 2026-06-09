@@ -169,6 +169,8 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
     trace = _trace_from_dict(_dict(data.get("trace", {}), "trace"))
 
     _validate_lights(light_order, quality.required_lights)
+    _validate_registration_lights(light_order, quality.required_lights, registration)
+    _validate_camera_lights(cameras, quality.required_lights, registration)
     _validate_model_refs(cameras, models)
     if not cameras:
         raise RecipeValidationError("至少需要配置一个启用机位")
@@ -343,6 +345,45 @@ def _validate_lights(light_order: tuple[str, ...], required_lights: tuple[str, .
     missing = [light for light in required_lights if light not in light_order]
     if missing:
         raise RecipeValidationError(f"required_lights 不在 light_order 中: {missing}")
+
+
+def _validate_registration_lights(
+    light_order: tuple[str, ...],
+    required_lights: tuple[str, ...],
+    registration: RegistrationConfig,
+) -> None:
+    for field_name, light_id in (
+        ("registration.base_light_id", registration.base_light_id),
+        ("registration.base_light_fallback", registration.base_light_fallback),
+    ):
+        if light_id not in light_order:
+            raise RecipeValidationError(f"{field_name} 不在 light_order 中: {light_id}")
+        if light_id not in required_lights:
+            raise RecipeValidationError(f"{field_name} 必须属于 quality.required_lights: {light_id}")
+
+
+def _validate_camera_lights(
+    cameras: tuple[CameraRecipe, ...],
+    required_lights: tuple[str, ...],
+    registration: RegistrationConfig,
+) -> None:
+    for camera in cameras:
+        missing = [light_id for light_id in required_lights if light_id not in camera.light_order]
+        if missing:
+            raise RecipeValidationError(f"cameras.{camera.camera_id}.light_order 缺少 required_lights: {missing}")
+        if camera.base_light_id not in camera.light_order:
+            raise RecipeValidationError(
+                f"cameras.{camera.camera_id}.base_light_id 不在该机位 light_order 中: {camera.base_light_id}"
+            )
+        if camera.base_light_id not in required_lights:
+            raise RecipeValidationError(
+                f"cameras.{camera.camera_id}.base_light_id 必须属于 quality.required_lights: {camera.base_light_id}"
+            )
+        if registration.base_light_fallback not in camera.light_order:
+            raise RecipeValidationError(
+                f"registration.base_light_fallback 不在 cameras.{camera.camera_id}.light_order 中: "
+                f"{registration.base_light_fallback}"
+            )
 
 
 def _validate_model_refs(cameras: tuple[CameraRecipe, ...], models: dict[str, ModelConfig]) -> None:
