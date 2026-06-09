@@ -146,6 +146,10 @@ def test_recipe_parses_onnx_model_io_contract() -> None:
             "sku": "sku",
             "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
             "cameras": {"TOP": {"model_key": "scratch_onnx"}},
+            "thresholds": {
+                "scratch": {"ng_score": 0.35, "recheck_score": 0.20, "min_area_px": 8},
+                "dent": {"ng_score": 0.30, "recheck_score": 0.18, "min_area_px": 20},
+            },
             "models": {
                 "scratch_onnx": {
                     "backend": "onnx",
@@ -175,6 +179,28 @@ def test_recipe_parses_fusion_config() -> None:
     assert recipe.fusion.iou_threshold == 0.5
     assert recipe.fusion.class_aware is True
     assert recipe.fusion.max_candidates_per_roi == 16
+
+
+def test_recipe_rejects_model_class_without_explicit_threshold() -> None:
+    with pytest.raises(RecipeValidationError, match="models.detector.class_names 缺少显式 thresholds 配置"):
+        recipe_from_dict(
+            {
+                "recipe_id": "missing_class_threshold",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                "cameras": {"TOP": {"model_key": "detector"}},
+                "thresholds": {
+                    "scratch": {"ng_score": 0.35, "recheck_score": 0.20, "min_area_px": 8},
+                },
+                "models": {
+                    "detector": {
+                        "backend": "fake",
+                        "role": "primary",
+                        "class_names": ["scratch", "dent"],
+                    }
+                },
+            }
+        )
 
 
 def test_recipe_parses_capture_quality_config() -> None:

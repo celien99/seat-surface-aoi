@@ -172,6 +172,7 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
     _validate_registration_lights(light_order, quality.required_lights, registration)
     _validate_camera_lights(cameras, quality.required_lights, registration)
     _validate_model_refs(cameras, models)
+    _validate_model_thresholds(models, thresholds)
     if not cameras:
         raise RecipeValidationError("至少需要配置一个启用机位")
     return Recipe(
@@ -413,6 +414,13 @@ def _validate_model_ref(models: dict[str, ModelConfig], model_key: str, location
         raise RecipeValidationError(f"{location} 引用了不存在的模型: {model_key}")
     if model.role != expected_role:
         raise RecipeValidationError(f"{location} 引用的模型角色必须是 {expected_role}: {model_key}")
+
+
+def _validate_model_thresholds(models: dict[str, ModelConfig], thresholds: dict[str, ThresholdConfig]) -> None:
+    for model_key, model in models.items():
+        missing = [class_name for class_name in model.class_names if class_name not in thresholds]
+        if missing:
+            raise RecipeValidationError(f"models.{model_key}.class_names 缺少显式 thresholds 配置: {missing}")
 
 
 def _required_str(data: dict[str, Any], key: str) -> str:
