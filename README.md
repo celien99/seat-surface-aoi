@@ -16,6 +16,7 @@
 - Python 质量门禁会校验配方启用机位完整性、SKU 一致性和必需光源；缺机位、重复机位、未知机位或缺关键光源都会返回 `RECHECK`，不会输出 `OK`。
 - Python 质量门禁会校验必需光源的采集一致性，包括时间戳跨度、时间戳单调性、帧序号重复、曝光差和增益差；会在预处理前拒绝非 `MONO8/UINT8/MONO/1ch`、stride 小于有效行宽或图像长度不足的帧；灰度、饱和、清晰度和运动模糊统计只使用有效像素宽度，不把 stride padding 当成图像内容；必需光源亮度漂移、运动模糊或异常采集包会返回 `RECHECK`。
 - Python 检测进程读取坏 frame slot 时会释放输入 slot；header 校验可信后发现 payload、图像 CRC 或结构错误会立即回写 `ERROR` 和真实错误码，header CRC 错误因任务身份不可信只释放输入 slot 并由 C++ 超时降级；检测、配方或模型异常会回写 `ERROR`/`RECHECK`，不会让共享内存 slot 长期停留在 `READING`。
+- Python 解析共享内存 frame slot 时会拒绝同一机位/同一光源的重复帧，直接回写 `ERROR/INVALID_PAYLOAD`，避免重复 meta 覆盖真实采集异常。
 - V2 生产标准默认使用 `DIFFUSE`、`POLAR_DIFFUSE`、`HIGH_LEFT`、`HIGH_RIGHT` 四个必需光源，生成 `ch0_diffuse` 到 `ch4_high_max_min` 的 5 通道标准特征。
 - 规则判定使用配方中的类别阈值 `ng_score`、`recheck_score` 和 `min_area_px`；机位级 `light_order` 会进入 ReflectanceCube 和特征构建。
 - Python 预处理会按 ROI 模板裁剪 MONO8 图像并保留 `bbox_xyxy_pixel` 原图坐标；ROI 越界、ROI 输出尺寸不一致、标定尺寸不一致会保守失败。

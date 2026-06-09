@@ -226,6 +226,11 @@ class ShmClient:
                         pose_id=frame.camera_id,
                         light_frames={},
                     )
+                if frame.light_id in bundles[frame.camera_id].light_frames:
+                    raise _FrameSlotReadError(
+                        f"duplicate frame for camera/light: {frame.camera_id}/{frame.light_id}",
+                        ErrorCode.INVALID_PAYLOAD,
+                    )
                 bundles[frame.camera_id].light_frames[frame.light_id] = frame
 
             job = SeatInspectionJob(
