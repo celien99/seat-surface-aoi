@@ -295,21 +295,26 @@ def _models_from_dict(data: dict[str, Any]) -> dict[str, ModelConfig]:
             raise RecipeValidationError(f"模型角色必须是 primary 或 safety_net: {model_key}")
         if model_family == "patchcore" and role != "safety_net":
             raise RecipeValidationError("PatchCore 只能作为 unknown defect safety_net，不能作为全座椅 primary detector")
+        fake_mode = _str(raw.get("fake_mode", "auto"), f"models.{model_key}.fake_mode")
+        if fake_mode not in {"auto", "ok", "ng", "recheck"}:
+            raise RecipeValidationError(f"models.{model_key}.fake_mode 必须是 auto、ok、ng 或 recheck")
+        input_channels = _unique_str_tuple(
+            raw.get(
+                "input_channels",
+                ("ch0_diffuse", "ch1_polar_diffuse", "ch2_high_left", "ch3_high_right", "ch4_high_max_min"),
+            ),
+            f"models.{model_key}.input_channels",
+        )
+        class_names = _unique_str_tuple(raw.get("class_names", ("scratch",)), f"models.{model_key}.class_names")
         models[str(model_key)] = ModelConfig(
             backend=backend,
             model_path=None if raw.get("model_path") in (None, "") else _str(raw.get("model_path"), f"models.{model_key}.model_path"),
-            fake_mode=_str(raw.get("fake_mode", "auto"), f"models.{model_key}.fake_mode"),
+            fake_mode=fake_mode,
             model_family=model_family,
             role=role,
-            input_channels=_str_tuple(
-                raw.get(
-                    "input_channels",
-                    ("ch0_diffuse", "ch1_polar_diffuse", "ch2_high_left", "ch3_high_right", "ch4_high_max_min"),
-                ),
-                f"models.{model_key}.input_channels",
-            ),
+            input_channels=input_channels,
             input_scale=_positive_float(raw.get("input_scale", 255.0), f"models.{model_key}.input_scale"),
-            class_names=_str_tuple(raw.get("class_names", ("scratch",)), f"models.{model_key}.class_names"),
+            class_names=class_names,
             output_decode=_output_decode(raw.get("output_decode", "none"), f"models.{model_key}.output_decode"),
             bbox_format=_bbox_format(raw.get("bbox_format", "xyxy_pixel"), f"models.{model_key}.bbox_format"),
             score_threshold=_ratio(raw.get("score_threshold", 0.0), f"models.{model_key}.score_threshold"),
@@ -418,6 +423,16 @@ def _str_tuple(value: Any, name: str) -> tuple[str, ...]:
     if not isinstance(value, (list, tuple)):
         raise RecipeValidationError(f"{name} 必须是字符串列表")
     result = tuple(_str(item, name) for item in value)
+    if not result:
+        raise RecipeValidationError(f"{name} 不能为空")
+    return result
+
+
+def _unique_str_tuple(value: Any, name: str) -> tuple[str, ...]:
+    result = _str_tuple(value, name)
+    duplicated = sorted({item for item in result if result.count(item) > 1})
+    if duplicated:
+        raise RecipeValidationError(f"{name} 存在重复项: {duplicated}")
     return result
 
 

@@ -174,13 +174,26 @@ class ModelRegistry:
         config = recipe.models.get(model_key)
         if config is None:
             raise RuntimeError(f"配方引用了不存在的模型: {model_key}")
-        cache_key = (
-            f"{model_key}:{config.backend}:{config.model_path or ''}:"
-            f"{config.output_decode}:{config.bbox_format}:{','.join(config.input_channels)}"
-        )
+        cache_key = self._cache_key(model_key, config)
         if cache_key not in self._cache:
             self._cache[cache_key] = self._create_model(config)
         return self._cache[cache_key]
+
+    def _cache_key(self, model_key: str, config: ModelConfig) -> tuple[Any, ...]:
+        return (
+            model_key,
+            config.backend,
+            config.model_path or "",
+            config.fake_mode,
+            config.model_family,
+            config.role,
+            config.input_channels,
+            float(config.input_scale),
+            config.class_names,
+            config.output_decode,
+            config.bbox_format,
+            float(config.score_threshold),
+        )
 
     def _create_model(self, config: ModelConfig) -> ModelBackend:
         if config.backend == "fake":

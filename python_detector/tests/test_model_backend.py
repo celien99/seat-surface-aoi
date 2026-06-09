@@ -63,6 +63,30 @@ def test_missing_model_key_does_not_fallback_to_default_ok() -> None:
         InferenceEngine(ModelRegistry()).infer([missing_group], recipe)
 
 
+def test_model_registry_cache_is_scoped_by_full_model_config() -> None:
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    registry = ModelRegistry()
+    ok_recipe = replace(
+        recipe,
+        models={
+            "fake_default": replace(recipe.models["fake_default"], fake_mode="ok"),
+        },
+    )
+    ng_recipe = replace(
+        recipe,
+        models={
+            "fake_default": replace(recipe.models["fake_default"], fake_mode="ng"),
+        },
+    )
+
+    ok_model = registry.get_model("fake_default", ok_recipe)
+    ng_model = registry.get_model("fake_default", ng_recipe)
+
+    assert ok_model is not ng_model
+    assert ok_model.run(_feature_group()) == []
+    assert ng_model.run(_feature_group())[0].score == 0.88
+
+
 def test_onnx_detection_rows_decode_maps_normalized_roi_bbox() -> None:
     config = ModelConfig(
         backend="onnx",

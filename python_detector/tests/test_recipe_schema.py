@@ -249,3 +249,54 @@ def test_recipe_rejects_invalid_model_score_threshold() -> None:
                 },
             }
         )
+
+
+def test_recipe_rejects_unsafe_model_io_config() -> None:
+    with pytest.raises(RecipeValidationError, match="models.detector.input_channels 存在重复项"):
+        recipe_from_dict(
+            {
+                "recipe_id": "bad_duplicate_input_channels",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                "cameras": {"TOP": {"model_key": "detector"}},
+                "models": {
+                    "detector": {
+                        "backend": "fake",
+                        "role": "primary",
+                        "input_channels": ["ch0_diffuse", "ch0_diffuse"],
+                    }
+                },
+            }
+        )
+    with pytest.raises(RecipeValidationError, match="models.detector.class_names 存在重复项"):
+        recipe_from_dict(
+            {
+                "recipe_id": "bad_duplicate_class_names",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                "cameras": {"TOP": {"model_key": "detector"}},
+                "models": {
+                    "detector": {
+                        "backend": "fake",
+                        "role": "primary",
+                        "class_names": ["scratch", "scratch"],
+                    }
+                },
+            }
+        )
+    with pytest.raises(RecipeValidationError, match="models.detector.fake_mode"):
+        recipe_from_dict(
+            {
+                "recipe_id": "bad_fake_mode",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                "cameras": {"TOP": {"model_key": "detector"}},
+                "models": {
+                    "detector": {
+                        "backend": "fake",
+                        "role": "primary",
+                        "fake_mode": "maybe_ok",
+                    }
+                },
+            }
+        )
