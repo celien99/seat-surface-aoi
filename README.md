@@ -49,28 +49,31 @@
 
 - macOS 或 Linux
 - Python 3.10+
+- uv 0.11+，用于 Python 层依赖、虚拟环境和 lockfile 管理
 - C++17 编译器
 - CMake 3.16+，若本机没有 CMake，模拟 IPC 脚本会回退到 `clang++`
 
 ### Python 算法环境
 
-Python 检测层已按独立算法模块规范化，根目录 `pyproject.toml` 统一管理包元数据、依赖分组、测试配置和命令行入口。
+Python 检测层已按独立算法模块规范化，根目录 `pyproject.toml` 和 `uv.lock` 统一管理包元数据、依赖分组、锁定版本、测试配置和命令行入口。`.python-version` 固定默认 Python 版本为 3.10。
 
 ```bash
-# 基础算法链路依赖，包含 PyYAML
-python3 -m pip install -e .
+# 开发环境，包含 pytest、numpy 和 ruff
+uv sync --group dev
 
-# 测试环境
-python3 -m pip install -e ".[test]"
+# 测试环境，包含 pytest 和 numpy
+uv sync --group test
 
 # 启用 ONNX/YOLO/WideResNet50 后端时再安装
-python3 -m pip install -e ".[onnx]"
+uv sync --group dev --extra onnx
 
-# 开发环境，包含 pytest 和 ruff
-python3 -m pip install -e ".[dev]"
+# 生产/测试机按锁文件安装基础链路
+uv sync --locked --no-dev
 ```
 
-默认 fake/statistical/PatchCore exact KNN 参考链路不依赖 ONNX Runtime 或 FAISS；缺少可选后端依赖、模型文件或输出解码配置时，检测结果必须保守返回 `RECHECK` 或 `ERROR`。
+默认 fake/statistical/PatchCore exact KNN 参考链路只依赖 PyYAML，不依赖 ONNX Runtime 或 FAISS；测试组额外包含 numpy 用于 ONNX 输出解析单元测试。缺少可选后端依赖、模型文件或输出解码配置时，检测结果必须保守返回 `RECHECK` 或 `ERROR`。
+
+`pyproject.toml` 仍保持标准 Python 项目格式，必要时可用 `python3 -m pip install -e .` 做兼容安装；日常开发、CI 和测试机复现优先使用 uv。
 
 Python 算法模块公开入口：
 
@@ -81,8 +84,8 @@ Python 算法模块公开入口：
 ### 运行验证
 
 ```bash
-python3 -m pytest
-python3 -m tools.validate_protocol
+uv run pytest
+uv run python -m tools.validate_protocol
 bash tools/run_simulated_ipc.sh
 ```
 
@@ -92,26 +95,26 @@ bash tools/run_simulated_ipc.sh
 
 ```bash
 # Python 测试
-python3 -m pytest
+uv run pytest
 
 # 校验 C++ / Python 共享内存协议布局
-python3 -m tools.validate_protocol
+uv run python -m tools.validate_protocol
 
 # 模拟端到端 IPC
 bash tools/run_simulated_ipc.sh
 
 # 在线 Python detector 入口
-python3 -m python_detector.detector_main --once --timeout-ms 8000
-seat-aoi-detector --once --timeout-ms 8000
+uv run python -m python_detector.detector_main --once --timeout-ms 8000
+uv run seat-aoi-detector --once --timeout-ms 8000
 
 # Python 回放
-python3 -m tools.replay_dataset --count 3 --write-trace
+uv run python -m tools.replay_dataset --count 3 --write-trace
 
 # Python benchmark
-python3 -m tools.benchmark_pipeline --count 10
+uv run python -m tools.benchmark_pipeline --count 10
 
 # PatchCore memory bank 构建示例
-python3 -m tools.build_patchcore_memory_bank --input embeddings.jsonl --output models/patchcore_bank.json --version bank_v1 --coreset-ratio 0.1
+uv run python -m tools.build_patchcore_memory_bank --input embeddings.jsonl --output models/patchcore_bank.json --version bank_v1 --coreset-ratio 0.1
 
 # C++ 故障注入示例
 cpp_controller/build/seat_aoi_controller --simulate-missing-frame --wait-ms 200
@@ -128,6 +131,8 @@ seat-surface-aoi/
 ├── docs/                # 架构、协议、部署、硬件和模型文档
 ├── tools/               # 协议校验、模拟 IPC、回放和 benchmark 工具
 ├── pyproject.toml       # Python 算法模块包元数据、依赖分组、测试和 lint 配置
+├── uv.lock              # Python 依赖锁文件
+├── .python-version      # uv/pyenv 默认 Python 版本
 └── AGENTS.md            # 项目级协作与工程约束
 ```
 
@@ -141,6 +146,7 @@ seat-surface-aoi/
 - [标定与 ROI 说明](docs/calibration_and_roi.md)
 - [模型后端说明](docs/model_backend.md)
 - [Python 检测算法模块规范](docs/python_detector_module.md)
+- [Python 检测算法层导览](python_detector/README.md)
 - [追溯与回放说明](docs/trace_and_replay.md)
 - [测试机集成清单](docs/test_machine_integration.md)
 - [部署说明](docs/deployment.md)
@@ -155,6 +161,7 @@ seat-surface-aoi/
 - C++ 主控不允许实现深度学习推理。
 - 任意不确定状态不得输出 `OK`。
 - 修改共享内存协议时必须同步更新 C++、Python、协议校验工具和相关测试。
+- 修改 `python_detector` 时必须同步更新 [Python 检测算法层导览](python_detector/README.md)。
 
 ## 许可
 

@@ -7,6 +7,12 @@ CONTROLLER="${BUILD_DIR}/seat_aoi_controller"
 IPC_CHECKS="${BUILD_DIR}/ipc_safety_checks"
 
 mkdir -p "${BUILD_DIR}"
+if command -v uv >/dev/null 2>&1; then
+  PYTHON_RUNNER=(uv run python)
+else
+  PYTHON_RUNNER=(python3)
+fi
+
 if command -v cmake >/dev/null 2>&1; then
   cmake -S "${ROOT_DIR}/cpp_controller" -B "${BUILD_DIR}"
   cmake --build "${BUILD_DIR}"
@@ -52,8 +58,10 @@ fi
 CPP_PID=$!
 sleep 0.2
 
-PYTHONPATH="${ROOT_DIR}" \
-python3 -m python_detector.detector_main --once --timeout-ms 8000
+(
+  cd "${ROOT_DIR}"
+  PYTHONPATH="${ROOT_DIR}" "${PYTHON_RUNNER[@]}" -m python_detector.detector_main --once --timeout-ms 8000
+)
 
 wait "${CPP_PID}"
 "${CONTROLLER}" --cleanup >/dev/null 2>&1 || true

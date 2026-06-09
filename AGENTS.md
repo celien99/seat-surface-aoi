@@ -19,21 +19,22 @@
 7. 修改共享内存协议时，必须同步更新 C++ 与 Python 两侧结构、协议校验工具和相关测试。
 8. 优先寻找适合的skills进行开发，例如开发C++模块可以使用 Seat Inspection C++ Strobe Controller; 开发Python程序利用 Seat Inspection Python Detector和 Seat Inspection Visiion Algorithm
 9. 开发思维要具备模块化思维，避免耦合度过高以及代码冗余，性能优先原则
+10. 对 `python_detector` 进行新增、修改、修复或重构时，必须同步更新 `python_detector/README.md`，确保 Python 算法层文件结构、实现内容、作用和验证方式保持最新。
 
 ## 推荐执行顺序
 
 1. 先阅读 `seat-defect-inspection-architecture.md`、`v4_architecture_alignment.md` 和本文件。
 2. 检查当前 git 状态，确认是否存在用户未提交改动。
 3. 按最小可验证范围修改代码。
-4. 同步更新 `README.md`。
+4. 同步更新 `README.md`；如涉及 `python_detector`，同步更新 `python_detector/README.md`。
 5. 运行相关验证命令。
 6. 提交 commit，并在提交信息中说明变更范围和验证结果。
 
 ## 常用验证命令
 
 ```bash
-python3 -m pytest python_detector/tests
-python3 -m tools.validate_protocol
+uv run pytest
+uv run python -m tools.validate_protocol
 bash tools/run_simulated_ipc.sh
 ```
 

@@ -1,0 +1,186 @@
+# Python 检测算法层导览
+
+本文面向新开发者和 Agent，用于快速理解 `python_detector` 包的职责、文件结构、主流程、扩展点和维护规则。凡是新增、修改或重构 `python_detector` 下的算法、配置、模型后端、IPC 解析、trace 或测试结构，都需要同步更新本文。
+
+## 模块职责
+
+`python_detector` 是汽车座椅表面 AOI 的 Python 检测算法层，职责是把 C++ 主控写入共享内存的 `SeatInspectionJob` 转换为 `InspectionResult`：
+
+```text
+SeatInspectionJob
+  -> ImageQualityGate
+  -> Preprocessor / RoiLocator
+  -> ReflectanceCubeBuilder / EccRegistration
+  -> FeatureBuilder
+  -> InferenceEngine / ModelRegistry
+  -> FusionEngine
+  -> RuleEngine
+  -> InspectionResult
+```
+
+Python 只负责检测链路，不控制 PLC、工业相机或频闪；在线图像和结果交换必须通过共享内存。任意缺帧、CRC 错误、协议错误、质量门禁失败、ROI/配准失败或模型异常都不能输出 `OK`，必须返回 `RECHECK` 或 `ERROR`。
+
+## 依赖管理
+
+Python 层使用项目根目录的 `pyproject.toml` 和 `uv.lock` 管理依赖：
+
+- 默认运行依赖：`PyYAML`，用于配方、标定和 ROI YAML。
+- `test` dependency group：`pytest`、`numpy`，用于单元测试和 ONNX 输出解析测试。
+- `dev` dependency group：`pytest`、`numpy`、`ruff`，用于开发验证。
+- `onnx` extra：`numpy`、`onnxruntime`，仅在启用 ONNX detection、YOLO ROI 或 WideResNet50 embedding 后端时需要。
+
+常用命令：
+
+```bash
+uv sync --group dev
+uv run pytest
+uv run python -m tools.validate_protocol
+uv run python -m python_detector.detector_main --once --timeout-ms 8000
+```
+
+端到端模拟仍使用 `bash tools/run_simulated_ipc.sh`。该脚本会优先使用 `uv run python` 启动 detector；如果本机没有 uv，则回退到系统 `python3`。
+
+## 文件结构
+
+```text
+python_detector/
+├── __init__.py                 # 包级公开 API，导出算法入口、核心数据类型和 RecipeManager
+├── algorithm.py                # SeatSurfaceAoiAlgorithm 纯算法 facade，不包含共享内存循环
+├── detector_main.py            # 在线 Python detector 进程入口，负责 ShmClient 循环和结果发布
+├── paths.py                    # 包内配置、标定、ROI 模板路径解析，兼容仓库相对路径
+├── py.typed                    # 标记该包提供类型信息
+├── config/
+│   ├── default_recipe.yaml     # 默认检测配方
+│   ├── recipe_schema.py        # 配方 dataclass、YAML 加载、字段校验和模型引用校验
+│   ├── calibration_manager.py  # 标定文件、ROI 模板加载和几何合法性校验
+│   ├── calibration/            # 按 camera_id 存放模拟标定
+│   └── roi/                    # ROI 模板
+├── ipc/
+│   ├── data_types.py           # LightFrame、CameraBundle、SeatInspectionJob、InspectionResult 等数据结构
+│   ├── shm_protocol.py         # Python 侧共享内存协议常量、结构体布局、CRC、枚举
+│   └── shm_client.py           # POSIX shared memory 读取任务和写回结果
+├── pipeline/
+│   ├── pipeline.py             # InspectionPipeline 主编排
+│   ├── quality_gate.py         # 图像质量门禁：缺帧、曝光、锐度、运动模糊、时间戳等
+│   ├── preprocessor.py         # 元数据断言、标定匹配、ROI 裁剪和透视展开
+│   ├── roi_locator.py          # Dome 语义光源 ROI 定位，支持 template/fake_yolo/onnx_yolo
+│   ├── reflectance_cube.py     # 多光源 ROI 对齐后的 ReflectanceCube 构建
+│   ├── ecc_registration.py     # 轻量 ECC 风格平移搜索配准报告
+│   ├── feature_builder.py      # 多光源特征和 NCHW tensor 构建
+│   ├── fusion_engine.py        # 候选框融合、NMS、候选数量限制
+│   ├── defect_filter.py        # 类别阈值、面积阈值等缺陷过滤
+│   └── rule_engine.py          # OK/NG/RECHECK/ERROR 规则判定
+├── models/
+│   ├── inference_engine.py     # Fake/ONNX/PatchCore 后端统一推理入口和模型缓存
+│   ├── embedding.py            # statistical 与 onnx_wideresnet50 embedding 入口
+│   ├── pca.py                  # PCA JSON 参数加载、版本校验和投影
+│   └── patchcore.py            # PatchCore memory bank exact KNN 参考实现
+├── trace/
+│   └── trace_writer.py         # trace JSON、ROI PGM 图、缺陷 overlay PPM 写入
+└── tests/                      # 协议、配方、质量门禁、ROI、模型、融合、trace、IPC 安全测试
+```
+
+## 关键实现说明
+
+### 公开入口
+
+- `SeatSurfaceAoiAlgorithm`：纯算法入口。输入 `SeatInspectionJob`，按 `recipe_id` 加载配方，调用 `InspectionPipeline`，可选写 trace，返回 `AlgorithmRun`。
+- `InspectionPipeline`：测试和扩展时最常用的编排类。构造函数允许注入质量门禁、预处理、特征、推理、融合、规则引擎等子模块。
+- `DetectorProcess`：在线进程入口。只负责初始化 `ShmClient`、等待任务、调用算法 facade、发布结果和释放共享内存 slot。
+
+### 配方与标定
+
+`RecipeManager` 默认从包内 `python_detector/config` 加载 YAML，不依赖当前工作目录。`CalibrationManager` 通过 `paths.resolve_package_path()` 同时兼容包内路径和历史仓库相对路径，例如 `python_detector/config/roi/default_roi.yaml`。
+
+配方 schema 会校验：
+
+- `light_order` 与 `quality.required_lights` 一致性。
+- V4 语义光源到真实光源的映射。
+- ROI 定位、配准基准光源和 fallback 光源合法性。
+- 模型引用存在，且 primary / safety_net 角色不能混用。
+- 模型输入通道、类别列表、阈值、bbox 格式和输出 decode 规则。
+
+### IPC 与协议
+
+`ipc/shm_protocol.py` 必须与 `cpp_controller/include/ipc/shm_protocol.hpp` 保持二进制布局一致。`tools.validate_protocol` 用于校验 Python 结构体大小；修改协议时必须同步：
+
+- C++ 协议结构体和 ring buffer。
+- Python `shm_protocol.py`、`shm_client.py`、`data_types.py`。
+- `tools.validate_protocol` 和相关测试。
+- `docs/shm_protocol.md`、README 和本文。
+
+`ShmClient` 对共享内存输入执行 header CRC、payload CRC、slot 状态、序列号、payload 边界、重复 camera/light 等安全校验。解析失败会发布保守错误结果并释放输入 slot。
+
+### 质量门禁与预处理
+
+`ImageQualityGate` 在进入模型前拦截不可靠输入，包括缺少必需机位/光源、非单调时间戳、重复帧号、曝光/增益漂移、过曝欠曝、锐度不足和光源亮度漂移。失败结果进入 `RuleEngine.make_quality_fail_result()`，不会输出 `OK`。
+
+`Preprocessor` 只接受当前实现支持的 `MONO8` / `UINT8` / 单通道图像，并显式检查 stride、图像长度、标定版本和图像尺寸。ROI 可以是轴对齐矩形裁剪，也可以是四点透视展开。
+
+### 多光源特征
+
+`ReflectanceCubeBuilder` 将同一 ROI 下多个光源图组织成 cube，并应用固定标定或 ECC 风格配准报告。`FeatureBuilder` 构建当前标准通道：
+
+- `ch0_diffuse`
+- `ch1_polar_diffuse`
+- `ch2_high_left`
+- `ch3_high_right`
+- `ch4_high_max_min`
+
+可选增强包括低角度暗场差分、局部对比和高光抑制。模型输入 tensor 使用 `NCHW`，并保留 `evidence_lights_by_channel` 供结果回写和 trace 使用。
+
+### 模型后端
+
+`InferenceEngine` 通过 `ModelRegistry` 缓存后端实例，缓存 key 包含后端、路径、fake 模式、模型族、角色、输入通道、类别列表、decode、bbox 格式、阈值、embedding/PCA/PatchCore 参数等关键配置，避免不同配方误复用模型。
+
+当前后端：
+
+- `fake`：测试和模拟链路默认后端。
+- `onnx`：可选 ONNX detection rows 后端，要求 `onnxruntime` 和 `numpy`。
+- `patchcore_knn`：PatchCore safety net，使用 statistical 或 ONNX embedding、可选 PCA、memory bank exact KNN。
+
+任何模型缺失、后端依赖缺失、输出为空、bbox 越界、class id 错误或维度不匹配都必须抛出保守错误，由 pipeline 转成 `ERROR` 或 `RECHECK`。
+
+### 融合、规则和追溯
+
+`FusionEngine` 对同一 camera/ROI/class 执行 IoU NMS，合并 evidence lights，并限制每个 ROI 候选数。`DefectFilter` 和 `RuleEngine` 根据类别阈值、面积阈值和候选分数输出 `OK`、`NG`、`RECHECK` 或 `ERROR`。
+
+`TraceWriter` 按配方 trace 策略保存：
+
+- `job.json`
+- `result.json`
+- `quality_report.json`
+- `roi_location_report.json`
+- `registration_report.json`
+- `feature_summary.json`
+- `fusion_summary.json`
+- `timings.json`
+- `error.json`
+- ROI PGM 图和缺陷 overlay PPM 图
+
+## 扩展规则
+
+新增能力时优先按层放置：
+
+- 新增配方字段：改 `config/recipe_schema.py`、默认配方、测试和本文。
+- 新增标定或 ROI 格式：改 `config/calibration_manager.py`、`pipeline/preprocessor.py`、测试和本文。
+- 新增质量门禁：改 `pipeline/quality_gate.py` 和对应测试。
+- 新增特征：改 `pipeline/feature_builder.py`，明确 feature 名、输入光源和 evidence lights。
+- 新增模型后端：改 `models/inference_engine.py` 或拆分新后端模块，保持 `ModelBackend.run()` 统一接口。
+- 新增 trace 字段：改 `trace/trace_writer.py`、测试和本文。
+- 修改在线共享内存协议：必须同步 C++、Python、校验工具、协议文档和测试。
+
+## 验证命令
+
+```bash
+uv run pytest
+uv run python -m tools.validate_protocol
+bash tools/run_simulated_ipc.sh
+```
+
+涉及 ONNX 后端时：
+
+```bash
+uv sync --group dev --extra onnx
+uv run pytest python_detector/tests/test_model_backend.py
+```
