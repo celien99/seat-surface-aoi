@@ -1,28 +1,10 @@
 #pragma once
 
-#include <cstdint>
-#include <string>
-#include <vector>
-
-#include "control/light_controller.hpp"
-#include "ipc/frame_ring_buffer.hpp"
+#include "camera/icamera.hpp"
 
 namespace seat_aoi {
 
-struct CameraConfig {
-  std::uint32_t camera_index = 0;
-  std::string camera_id;
-  std::uint32_t width = 64;
-  std::uint32_t height = 48;
-  std::uint32_t channels = 1;
-  bool simulate_missing_frame = false;
-};
-
-struct CameraHealth {
-  bool ok = true;
-  std::uint64_t dropped_frames = 0;
-  std::string message = "simulated";
-};
+// CameraConfig, CameraHealth moved to icamera.hpp
 
 class CameraDevice {
 public:

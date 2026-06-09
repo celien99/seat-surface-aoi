@@ -2,19 +2,19 @@
 
 namespace seat_aoi {
 
-bool CameraWorker::initialize(const CameraConfig& config) {
+bool SimCamera::initialize(const CameraConfig& config) {
   return device_.initialize(config);
 }
 
-void CameraWorker::start() {
+void SimCamera::start() {
   running_ = true;
 }
 
-void CameraWorker::stop() {
+void SimCamera::stop() {
   running_ = false;
 }
 
-bool CameraWorker::arm(std::uint64_t trigger_id,
+bool SimCamera::arm(std::uint64_t trigger_id,
                        const LightChannelParam& light_param,
                        std::uint32_t light_seq_index,
                        int timeout_ms) {
@@ -24,7 +24,7 @@ bool CameraWorker::arm(std::uint64_t trigger_id,
   return device_.arm(trigger_id, light_param, light_seq_index, timeout_ms);
 }
 
-bool CameraWorker::simulate_exposure_output(std::uint64_t trigger_id,
+bool SimCamera::simulate_exposure_output(std::uint64_t trigger_id,
                                             const LightChannelParam& light_param,
                                             std::uint32_t light_seq_index,
                                             int timeout_ms) {
@@ -34,7 +34,7 @@ bool CameraWorker::simulate_exposure_output(std::uint64_t trigger_id,
   return device_.simulate_exposure_output(trigger_id, light_param, light_seq_index, timeout_ms);
 }
 
-bool CameraWorker::wait_frame(std::uint64_t trigger_id,
+bool SimCamera::wait_frame(std::uint64_t trigger_id,
                               const LightChannelParam& light_param,
                               std::uint32_t light_seq_index,
                               CapturedFrame* out_frame,
@@ -45,7 +45,7 @@ bool CameraWorker::wait_frame(std::uint64_t trigger_id,
   return device_.capture(trigger_id, light_param, light_seq_index, out_frame, timeout_ms);
 }
 
-CameraHealth CameraWorker::get_health() const {
+CameraHealth SimCamera::get_health() const {
   return device_.get_health();
 }
 
