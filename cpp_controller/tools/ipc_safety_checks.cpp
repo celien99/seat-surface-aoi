@@ -139,7 +139,7 @@ bool test_result_ring_returns_crc_error_immediately() {
 }
 
 bool test_plc_trigger_timeout_fails_closed() {
-  seat_aoi::PlcClient plc;
+  seat_aoi::SimPlcClient plc;
   if (!plc.initialize(false, true)) {
     std::cerr << "PLC initialize failed\n";
     return false;

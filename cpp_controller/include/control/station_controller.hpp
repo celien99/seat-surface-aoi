@@ -1,11 +1,12 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "control/frame_assembler.hpp"
-#include "control/plc_client.hpp"
+#include "control/iplc_client.hpp"
 #include "control/station_runtime_config.hpp"
 #include "control/trigger_scheduler.hpp"
 #include "ipc/frame_ring_buffer.hpp"
@@ -60,7 +61,7 @@ private:
   FrameRingBuffer frame_ring_;
   ResultRingBuffer result_ring_;
   FrameAssembler frame_assembler_;
-  PlcClient plc_client_;
+  std::unique_ptr<IPlcClient> plc_client_;
   std::uint64_t next_sequence_id_ = 1;
 };
 

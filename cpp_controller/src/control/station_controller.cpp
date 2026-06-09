@@ -2,6 +2,8 @@
 
 #include <iostream>
 
+#include "control/plc_client.hpp"
+
 #include "common/string_utils.hpp"
 
 namespace seat_aoi {
@@ -29,7 +31,8 @@ bool StationController::initialize(const StationConfig& config) {
     camera.simulate_missing_frame = config.simulate_missing_frame;
   }
   frame_assembler_.configure(runtime_config);
-  plc_client_.initialize(config.simulate_plc_output_fault, config.simulate_trigger_timeout);
+  plc_client_ = std::make_unique<SimPlcClient>();
+  plc_client_->initialize(config.simulate_plc_output_fault, config.simulate_trigger_timeout);
   const bool frames_ok = frame_ring_.initialize(kFrameShmName,
                                                 config.slot_count,
                                                 config.frame_slot_size,
@@ -42,7 +45,7 @@ bool StationController::initialize(const StationConfig& config) {
 }
 
 bool StationController::wait_for_trigger(PlcTrigger* out_trigger, std::string* error_message) {
-  return plc_client_.wait_trigger(out_trigger, config_.trigger_timeout_ms, error_message);
+  return plc_client_->wait_trigger(out_trigger, config_.trigger_timeout_ms, error_message);
 }
 
 InspectionResultPayload StationController::inspect_one_seat(const PlcTrigger& trigger) {
@@ -78,7 +81,7 @@ InspectionResultPayload StationController::inspect_one_seat(const PlcTrigger& tr
     return make_and_send_recheck_result(trigger, sequence_id, ErrorCode::InvalidPayload, error);
   }
   const auto decision = static_cast<InspectionDecision>(result.meta.decision);
-  if (!plc_client_.send_decision(trigger, sequence_id, decision, 200, &error)) {
+  if (!plc_client_->send_decision(trigger, sequence_id, decision, 200, &error)) {
     return make_recheck_result(trigger, sequence_id, ErrorCode::DeviceFault, error);
   }
   log_result(result);
@@ -122,7 +125,7 @@ InspectionResultPayload StationController::make_and_send_recheck_result(
     const std::string& message) {
   auto result = make_recheck_result(trigger, sequence_id, error_code, message);
   std::string plc_error;
-  if (!plc_client_.send_decision(trigger, sequence_id, InspectionDecision::Recheck, 200, &plc_error)) {
+  if (!plc_client_->send_decision(trigger, sequence_id, InspectionDecision::Recheck, 200, &plc_error)) {
     result.meta.error_code = static_cast<std::uint32_t>(ErrorCode::DeviceFault);
     std::cerr << "[sequence_id=" << sequence_id << " trigger_id=" << trigger.trigger_id
               << "] PLC RECHECK output failed: " << plc_error << std::endl;

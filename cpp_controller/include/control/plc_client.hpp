@@ -25,8 +25,4 @@ private:
   std::uint64_t next_trigger_id_ = 1000;
 };
 
-// Backward-compatible alias — will be removed in Task 2 when all callers are
-// updated to use SimPlcClient or std::unique_ptr<IPlcClient>.
-using PlcClient = SimPlcClient;
-
 }  // namespace seat_aoi
