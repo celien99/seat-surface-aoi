@@ -93,6 +93,23 @@ class ImageQualityGate:
         if recipe.quality.require_unique_frame_indices and len(set(frame_indices)) != len(frame_indices):
             messages.append(f"{bundle.camera_id}: duplicate frame_index in required lights")
 
+        light_seq_indices = [frame.light_seq_index for frame in frames]
+        if len(set(light_seq_indices)) != len(light_seq_indices):
+            messages.append(f"{bundle.camera_id}: duplicate light_seq_index in required lights")
+        camera_recipe = recipe.camera(bundle.camera_id)
+        light_order = camera_recipe.light_order if camera_recipe is not None else recipe.light_order
+        light_seq_by_id = {light_id: index for index, light_id in enumerate(light_order)}
+        for frame in frames:
+            expected_seq_index = light_seq_by_id.get(frame.light_id)
+            if expected_seq_index is None:
+                messages.append(f"{bundle.camera_id}/{frame.light_id}: light not in configured light_order")
+                continue
+            if frame.light_seq_index != expected_seq_index:
+                messages.append(
+                    f"{bundle.camera_id}/{frame.light_id}: light_seq_index {frame.light_seq_index} "
+                    f"does not match configured order {expected_seq_index}"
+                )
+
         exposures = [frame.exposure_us for frame in frames]
         if any(exposure <= 0 for exposure in exposures):
             messages.append(f"{bundle.camera_id}: invalid exposure_us")

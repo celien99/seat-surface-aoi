@@ -106,6 +106,35 @@ def test_duplicate_required_light_frame_index_returns_recheck() -> None:
     assert "TOP_BACK: duplicate frame_index in required lights" in pipeline.last_context["quality_report"].messages
 
 
+def test_duplicate_required_light_seq_index_returns_recheck() -> None:
+    pipeline = InspectionPipeline()
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    job = _job(LIGHTS)
+    job.camera_bundles[0].light_frames["HIGH_LEFT"].light_seq_index = (
+        job.camera_bundles[0].light_frames["DIFFUSE"].light_seq_index
+    )
+
+    result = pipeline.process(job, recipe)
+
+    assert result.decision == "RECHECK"
+    assert "TOP_BACK: duplicate light_seq_index in required lights" in pipeline.last_context["quality_report"].messages
+
+
+def test_light_seq_index_must_match_configured_light_order() -> None:
+    pipeline = InspectionPipeline()
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    job = _job(LIGHTS)
+    job.camera_bundles[0].light_frames["HIGH_LEFT"].light_seq_index = 9
+
+    result = pipeline.process(job, recipe)
+
+    assert result.decision == "RECHECK"
+    assert (
+        "TOP_BACK/HIGH_LEFT: light_seq_index 9 does not match configured order 2"
+        in pipeline.last_context["quality_report"].messages
+    )
+
+
 def test_quality_gate_ignores_stride_padding_for_exposure_stats() -> None:
     width = 8
     height = 8
