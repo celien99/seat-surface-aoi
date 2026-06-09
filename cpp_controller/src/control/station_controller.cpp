@@ -2,6 +2,7 @@
 
 #include <iostream>
 
+#include "control/hardware_factory.hpp"
 #include "control/plc_client.hpp"
 
 #include "common/string_utils.hpp"
@@ -31,7 +32,7 @@ bool StationController::initialize(const StationConfig& config) {
     camera.simulate_missing_frame = config.simulate_missing_frame;
   }
   frame_assembler_.configure(runtime_config);
-  plc_client_ = std::make_unique<SimPlcClient>();
+  plc_client_ = create_plc_client(HardwareBackend::Simulated);
   plc_client_->initialize(config.simulate_plc_output_fault, config.simulate_trigger_timeout);
   const bool frames_ok = frame_ring_.initialize(kFrameShmName,
                                                 config.slot_count,

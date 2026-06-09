@@ -3,6 +3,7 @@
 #include <sstream>
 
 #include "camera/camera_worker.hpp"
+#include "control/hardware_factory.hpp"
 #include "control/light_controller.hpp"
 
 #include "common/string_utils.hpp"
@@ -35,7 +36,7 @@ bool FrameAssembler::ensure_initialized() {
     return true;
   }
   if (!light_controller_) {
-    light_controller_ = std::make_unique<SimLightController>();
+    light_controller_ = create_light_controller(HardwareBackend::Simulated);
   }
   if (!light_controller_->initialize(config_.light.simulate_fault)) {
     return false;
@@ -49,7 +50,7 @@ bool FrameAssembler::ensure_initialized() {
     config.height = runtime_camera.height;
     config.channels = runtime_camera.channels;
     config.simulate_missing_frame = runtime_camera.simulate_missing_frame;
-    auto camera = std::make_unique<SimCamera>();
+    auto camera = create_camera(HardwareBackend::Simulated);
     if (!camera->initialize(config)) {
       return false;
     }
