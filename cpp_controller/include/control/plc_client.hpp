@@ -1,28 +1,22 @@
 #pragma once
 
-#include <cstdint>
-#include <string>
-
-#include "common/inspection_types.hpp"
-#include "control/trigger_scheduler.hpp"
+#include "control/iplc_client.hpp"
 
 namespace seat_aoi {
 
-struct PlcHealth {
-  bool ok = true;
-  std::string message = "simulated";
-};
-
-class PlcClient {
+class SimPlcClient : public IPlcClient {
 public:
-  bool initialize(bool simulate_output_fault, bool simulate_trigger_timeout = false);
-  bool wait_trigger(PlcTrigger* out_trigger, int timeout_ms, std::string* error_message);
+  bool initialize(bool simulate_output_fault,
+                  bool simulate_trigger_timeout = false) override;
+  bool wait_trigger(PlcTrigger* out_trigger,
+                    int timeout_ms,
+                    std::string* error_message) override;
   bool send_decision(const PlcTrigger& trigger,
                      std::uint64_t sequence_id,
                      InspectionDecision decision,
                      int timeout_ms,
-                     std::string* error_message);
-  PlcHealth get_health() const;
+                     std::string* error_message) override;
+  PlcHealth get_health() const override;
 
 private:
   bool initialized_ = false;
@@ -30,5 +24,9 @@ private:
   bool simulate_trigger_timeout_ = false;
   std::uint64_t next_trigger_id_ = 1000;
 };
+
+// Backward-compatible alias — will be removed in Task 2 when all callers are
+// updated to use SimPlcClient or std::unique_ptr<IPlcClient>.
+using PlcClient = SimPlcClient;
 
 }  // namespace seat_aoi

@@ -5,14 +5,14 @@
 
 namespace seat_aoi {
 
-bool PlcClient::initialize(bool simulate_output_fault, bool simulate_trigger_timeout) {
+bool SimPlcClient::initialize(bool simulate_output_fault, bool simulate_trigger_timeout) {
   initialized_ = true;
   simulate_output_fault_ = simulate_output_fault;
   simulate_trigger_timeout_ = simulate_trigger_timeout;
   return true;
 }
 
-bool PlcClient::wait_trigger(PlcTrigger* out_trigger,
+bool SimPlcClient::wait_trigger(PlcTrigger* out_trigger,
                              int timeout_ms,
                              std::string* error_message) {
   if (!initialized_ || out_trigger == nullptr || timeout_ms <= 0) {
@@ -37,7 +37,7 @@ bool PlcClient::wait_trigger(PlcTrigger* out_trigger,
   return true;
 }
 
-bool PlcClient::send_decision(const PlcTrigger& /*trigger*/,
+bool SimPlcClient::send_decision(const PlcTrigger& /*trigger*/,
                               std::uint64_t /*sequence_id*/,
                               InspectionDecision /*decision*/,
                               int timeout_ms,
@@ -57,7 +57,7 @@ bool PlcClient::send_decision(const PlcTrigger& /*trigger*/,
   return true;
 }
 
-PlcHealth PlcClient::get_health() const {
+PlcHealth SimPlcClient::get_health() const {
   return PlcHealth{initialized_ && !simulate_output_fault_ && !simulate_trigger_timeout_,
                    simulate_output_fault_     ? "模拟 PLC 输出失败"
                    : simulate_trigger_timeout_ ? "模拟 PLC 触发超时"
