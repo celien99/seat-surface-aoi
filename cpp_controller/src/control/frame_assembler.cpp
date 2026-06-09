@@ -2,6 +2,7 @@
 
 #include <sstream>
 
+#include "camera/camera_worker.hpp"
 #include "control/light_controller.hpp"
 
 #include "common/string_utils.hpp"
@@ -41,7 +42,6 @@ bool FrameAssembler::ensure_initialized() {
   }
   cameras_.clear();
   for (const auto& runtime_camera : config_.cameras) {
-    CameraWorker worker;
     CameraConfig config;
     config.camera_index = runtime_camera.camera_index;
     config.camera_id = runtime_camera.camera_id;
@@ -49,11 +49,12 @@ bool FrameAssembler::ensure_initialized() {
     config.height = runtime_camera.height;
     config.channels = runtime_camera.channels;
     config.simulate_missing_frame = runtime_camera.simulate_missing_frame;
-    if (!worker.initialize(config)) {
+    auto camera = std::make_unique<SimCamera>();
+    if (!camera->initialize(config)) {
       return false;
     }
-    worker.start();
-    cameras_.push_back(std::move(worker));
+    camera->start();
+    cameras_.push_back(std::move(camera));
   }
   initialized_ = true;
   return true;
@@ -95,7 +96,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
   // 时分频闪方案：外层按机位串行，内层按光源串行
   // 每个机位独立完成全部光源频闪序列后，下一个机位才开始
   for (std::uint32_t camera_index = 0; camera_index < cameras_.size(); ++camera_index) {
-    auto& camera = cameras_[camera_index];
+    auto& camera = *cameras_[camera_index];
 
     // 每个机位开始前重新准备光源序列
     if (!light_controller_->prepare_sequence(sequence,

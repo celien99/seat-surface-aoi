@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include "camera/camera_worker.hpp"
+#include "camera/icamera.hpp"
 #include "control/ilight_controller.hpp"
 #include "control/station_runtime_config.hpp"
 #include "control/trigger_scheduler.hpp"
@@ -33,7 +33,7 @@ private:
   bool initialized_ = false;
   StationRuntimeConfig config_{};
   std::unique_ptr<ILightController> light_controller_;
-  std::vector<CameraWorker> cameras_;
+  std::vector<std::unique_ptr<ICamera>> cameras_;
 };
 
 }  // namespace seat_aoi

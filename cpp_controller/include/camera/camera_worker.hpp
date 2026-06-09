@@ -30,7 +30,5 @@ private:
   bool running_ = false;
 };
 
-// Backward-compat alias — will be removed in Task 6
-using CameraWorker = SimCamera;
 
 }  // namespace seat_aoi
