@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "seat-surface-aoi-python-detector"
+version = "0.1.0"
+description = "汽车座椅表面 AOI Python 检测算法模块"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.0",
+]
+onnx = [
+  "numpy>=1.24",
+  "onnxruntime>=1.16",
+]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.8.0",
+]
+
+[project.scripts]
+seat-aoi-detector = "python_detector.detector_main:main"
+
+[tool.setuptools.packages.find]
+include = ["python_detector*"]
+exclude = ["cpp_controller*", "docs*", "tools*"]
+
+[tool.setuptools.package-data]
+python_detector = ["py.typed", "config/**/*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["python_detector/tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+extend-exclude = [
+  "cpp_controller/build",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+  "B905",
+]

@@ -8,6 +8,7 @@ from typing import Any
 import yaml
 
 from python_detector.config.recipe_schema import RecipeValidationError
+from python_detector.paths import PACKAGE_ROOT, resolve_package_path
 
 
 @dataclass(frozen=True)
@@ -29,12 +30,12 @@ class Calibration:
 
 
 class CalibrationManager:
-    def __init__(self, base_dir: str | Path = ".") -> None:
-        self.base_dir = Path(base_dir)
+    def __init__(self, base_dir: str | Path | None = None) -> None:
+        self.base_dir = Path(base_dir) if base_dir is not None else PACKAGE_ROOT
         self._cache: dict[tuple[str, str, str], Calibration] = {}
 
     def load(self, camera_id: str, calibration_id: str, roi_template_path: str) -> Calibration:
-        roi_path = self.base_dir / roi_template_path
+        roi_path = resolve_package_path(self.base_dir, roi_template_path)
         key = (camera_id, calibration_id, str(roi_path))
         if key in self._cache:
             return self._cache[key]
@@ -55,7 +56,7 @@ class CalibrationManager:
         filename = calibration_id.split("/")[-1]
         if not filename.endswith(".yaml"):
             filename = f"{filename}.yaml"
-        return self.base_dir / "python_detector" / "config" / "calibration" / camera_id / filename
+        return resolve_package_path(self.base_dir, Path("python_detector") / "config" / "calibration" / camera_id / filename)
 
     def _parse_calibration(self, raw: dict[str, Any], camera_id: str, calibration_id: str) -> Calibration:
         actual_camera_id = _str(raw.get("camera_id"), "camera_id")

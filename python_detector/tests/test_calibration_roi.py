@@ -52,6 +52,19 @@ def test_calibration_manager_loads_identity_roi() -> None:
     assert calibration.light_alignment["DIFFUSE"] == (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
 
 
+def test_calibration_manager_default_path_is_independent_from_cwd(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    calibration = CalibrationManager().load(
+        "TOP_BACK",
+        "calib/simulated_v1",
+        "python_detector/config/roi/default_roi.yaml",
+    )
+
+    assert calibration.camera_id == "TOP_BACK"
+    assert calibration.roi_templates["full"].output_size == (64, 48)
+
+
 def test_calibration_manager_cache_is_scoped_by_roi_template_path(tmp_path: Path) -> None:
     roi_a = tmp_path / "roi_a.yaml"
     roi_b = tmp_path / "roi_b.yaml"

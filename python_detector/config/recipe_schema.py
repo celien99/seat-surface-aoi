@@ -6,6 +6,8 @@ from typing import Any
 
 import yaml
 
+from python_detector.paths import DEFAULT_CONFIG_DIR
+
 
 class RecipeValidationError(ValueError):
     """配方校验失败。"""
@@ -173,8 +175,8 @@ class Recipe:
 
 
 class RecipeManager:
-    def __init__(self, recipe_dir: str | Path = "python_detector/config") -> None:
-        self.recipe_dir = Path(recipe_dir)
+    def __init__(self, recipe_dir: str | Path | None = None) -> None:
+        self.recipe_dir = Path(recipe_dir) if recipe_dir is not None else DEFAULT_CONFIG_DIR
         self._recipes: dict[str, Recipe] = {}
         self._load_recipe_dir()
 

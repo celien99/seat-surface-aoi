@@ -52,10 +52,36 @@
 - C++17 编译器
 - CMake 3.16+，若本机没有 CMake，模拟 IPC 脚本会回退到 `clang++`
 
+### Python 算法环境
+
+Python 检测层已按独立算法模块规范化，根目录 `pyproject.toml` 统一管理包元数据、依赖分组、测试配置和命令行入口。
+
+```bash
+# 基础算法链路依赖，包含 PyYAML
+python3 -m pip install -e .
+
+# 测试环境
+python3 -m pip install -e ".[test]"
+
+# 启用 ONNX/YOLO/WideResNet50 后端时再安装
+python3 -m pip install -e ".[onnx]"
+
+# 开发环境，包含 pytest 和 ruff
+python3 -m pip install -e ".[dev]"
+```
+
+默认 fake/statistical/PatchCore exact KNN 参考链路不依赖 ONNX Runtime 或 FAISS；缺少可选后端依赖、模型文件或输出解码配置时，检测结果必须保守返回 `RECHECK` 或 `ERROR`。
+
+Python 算法模块公开入口：
+
+- `python_detector.SeatSurfaceAoiAlgorithm`：不包含 IPC 的纯算法入口，适合回放、测试和离线验证。
+- `python_detector.InspectionPipeline`：质量门禁、预处理、特征、推理、融合和规则判定的流水线编排入口。
+- `python_detector.detector_main` / `seat-aoi-detector`：在线检测进程入口，只负责共享内存循环和结果发布。
+
 ### 运行验证
 
 ```bash
-python3 -m pytest python_detector/tests
+python3 -m pytest
 python3 -m tools.validate_protocol
 bash tools/run_simulated_ipc.sh
 ```
@@ -66,13 +92,17 @@ bash tools/run_simulated_ipc.sh
 
 ```bash
 # Python 测试
-python3 -m pytest python_detector/tests
+python3 -m pytest
 
 # 校验 C++ / Python 共享内存协议布局
 python3 -m tools.validate_protocol
 
 # 模拟端到端 IPC
 bash tools/run_simulated_ipc.sh
+
+# 在线 Python detector 入口
+python3 -m python_detector.detector_main --once --timeout-ms 8000
+seat-aoi-detector --once --timeout-ms 8000
 
 # Python 回放
 python3 -m tools.replay_dataset --count 3 --write-trace
@@ -94,9 +124,10 @@ cpp_controller/build/seat_aoi_controller --simulate-trigger-timeout --trigger-ti
 ```text
 seat-surface-aoi/
 ├── cpp_controller/      # C++ 主控、采集调度、共享内存 IPC、模拟硬件驱动
-├── python_detector/     # Python 检测进程、V4 ROI/ECC/embedding/PCA/PatchCore 流水线、配方、测试
+├── python_detector/     # 独立 Python 检测算法模块、V4 ROI/ECC/embedding/PCA/PatchCore 流水线、配方、测试
 ├── docs/                # 架构、协议、部署、硬件和模型文档
 ├── tools/               # 协议校验、模拟 IPC、回放和 benchmark 工具
+├── pyproject.toml       # Python 算法模块包元数据、依赖分组、测试和 lint 配置
 └── AGENTS.md            # 项目级协作与工程约束
 ```
 
@@ -109,6 +140,7 @@ seat-surface-aoi/
 - [配方设计说明](docs/recipe_design.md)
 - [标定与 ROI 说明](docs/calibration_and_roi.md)
 - [模型后端说明](docs/model_backend.md)
+- [Python 检测算法模块规范](docs/python_detector_module.md)
 - [追溯与回放说明](docs/trace_and_replay.md)
 - [测试机集成清单](docs/test_machine_integration.md)
 - [部署说明](docs/deployment.md)
