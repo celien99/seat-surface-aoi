@@ -99,10 +99,10 @@ models:
 
 也支持带 batch 维的 `[1, N, 6]`。字段含义：
 
-- `score` 小于 `score_threshold` 的行会被忽略。
-- `class_id` 必须落在 `class_names` 范围内，否则返回保守错误。
+- `score` 必须是 `[0, 1]` 范围内的有限值；小于 `score_threshold` 的行会被忽略。
+- `class_id` 必须是整数值并落在 `class_names` 范围内，否则返回保守错误。
 - `bbox_format: xyxy_pixel` 表示 bbox 是 ROI 输出图内像素坐标，结果会通过 `roi_to_source_matrix` 映射回原图 `bbox_xyxy_pixel`。
-- `bbox_format: xyxy_normalized` 表示 bbox 是 ROI 输出图内归一化坐标，先按 `feature_shape_hw` 还原为 ROI 像素坐标，再通过 `roi_to_source_matrix` 映射回原图 `bbox_xyxy_pixel`。
+- `bbox_format: xyxy_normalized` 表示 bbox 是 ROI 输出图内归一化坐标，先按 `feature_shape_hw` 还原到 `[0, width - 1] / [0, height - 1]` 像素坐标，再通过 `roi_to_source_matrix` 映射回原图 `bbox_xyxy_pixel`。
 - bbox 越界、反向、包含 NaN/Inf、输出为空或形状不是 `[N, >=6]` 时返回保守错误，不会对模型输出做静默 clamp。
 
 ## 候选融合

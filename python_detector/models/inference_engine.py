@@ -110,9 +110,14 @@ class OnnxModel:
         candidates: list[DefectCandidate] = []
         for row in rows:
             score = float(row[4])
+            if not math.isfinite(score) or score < 0.0 or score > 1.0:
+                raise RuntimeError(f"ONNX 输出 score 越界或非有限: {score}")
             if score < self.config.score_threshold:
                 continue
-            class_id = int(row[5])
+            class_value = float(row[5])
+            if not math.isfinite(class_value) or not class_value.is_integer():
+                raise RuntimeError(f"ONNX 输出 class_id 不是整数: {class_value}")
+            class_id = int(class_value)
             if class_id < 0 or class_id >= len(self.config.class_names):
                 raise RuntimeError(f"ONNX 输出 class_id 越界: {class_id}")
             bbox = self._map_bbox_xyxy(row[:4], feature_group)
@@ -146,10 +151,10 @@ class OnnxModel:
         if self.config.bbox_format == "xyxy_normalized":
             if not all(0.0 <= value <= 1.0 for value in (x0, y0, x1, y1)):
                 raise RuntimeError(f"ONNX 归一化 bbox 越界: {(x0, y0, x1, y1)}")
-            x0 = x0 * width
-            x1 = x1 * width
-            y0 = y0 * height
-            y1 = y1 * height
+            x0 = x0 * float(width - 1)
+            x1 = x1 * float(width - 1)
+            y0 = y0 * float(height - 1)
+            y1 = y1 * float(height - 1)
         elif self.config.bbox_format == "xyxy_pixel":
             if not (0.0 <= x0 <= float(width - 1) and 0.0 <= x1 <= float(width - 1)):
                 raise RuntimeError(f"ONNX 像素 bbox x 越界: {(x0, y0, x1, y1)}")

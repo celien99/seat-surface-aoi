@@ -116,6 +116,24 @@ def test_onnx_detection_rows_decode_maps_normalized_roi_bbox() -> None:
     assert model.session.last_inputs["input"][0][0][0][0] == pytest.approx(0.1)
 
 
+def test_onnx_detection_rows_maps_full_normalized_bbox_inside_roi() -> None:
+    model = object.__new__(OnnxModel)
+    model.config = ModelConfig(
+        backend="onnx",
+        model_path="unused.onnx",
+        output_decode="detection_rows",
+        bbox_format="xyxy_normalized",
+        class_names=("scratch",),
+        score_threshold=0.3,
+    )
+    model.session = _Session([[0.0, 0.0, 1.0, 1.0, 0.91, 0]])
+
+    candidate = model.run(_feature_group())[0]
+
+    assert candidate.bbox_xyxy_pixel == (10, 20, 73, 67)
+    assert candidate.area_px == 64 * 48
+
+
 def test_onnx_detection_rows_maps_perspective_roi_bbox_to_source() -> None:
     config = ModelConfig(
         backend="onnx",
@@ -159,6 +177,9 @@ def test_onnx_detection_rows_maps_perspective_roi_bbox_to_source() -> None:
         ("xyxy_pixel", [0.0, 0.0, 10.0, 48.0, 0.91, 0], "像素 bbox y 越界"),
         ("xyxy_pixel", [10.0, 0.0, 5.0, 10.0, 0.91, 0], "bbox 坐标反向"),
         ("xyxy_pixel", [float("nan"), 0.0, 5.0, 10.0, 0.91, 0], "非有限值"),
+        ("xyxy_pixel", [0.0, 0.0, 5.0, 10.0, 1.2, 0], "score 越界"),
+        ("xyxy_pixel", [0.0, 0.0, 5.0, 10.0, float("nan"), 0], "score 越界"),
+        ("xyxy_pixel", [0.0, 0.0, 5.0, 10.0, 0.91, 0.5], "class_id 不是整数"),
     ],
 )
 def test_onnx_detection_rows_rejects_invalid_bbox_without_clamping(
