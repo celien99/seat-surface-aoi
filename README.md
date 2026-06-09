@@ -40,7 +40,7 @@
 - 支持本地追溯落盘，`RECHECK`、`ERROR`、`NG` 默认保存 result、quality、registration、feature summary、timings 和 error context。
 - 追溯会保存 ROI 单光源灰度图 `.pgm`；存在缺陷时会生成带红色 bbox 的 `.ppm` overlay，bbox 使用原图 `bbox_xyxy_pixel` 映射回 ROI 坐标。
 - `trace.save_ok_ratio` 使用基于座椅和序列号的确定性抽样保存 OK 样本；`NG`、`RECHECK`、`ERROR` 按策略默认保存。
-- 提供模拟回放与 benchmark 工具：`tools/replay_dataset.py`、`tools/benchmark_pipeline.py`。
+- 提供模拟回放与 benchmark 工具：`tools/replay_dataset.py` 会输出质量失败和错误摘要，`tools/benchmark_pipeline.py` 会输出分步骤耗时并支持阈值失败退出。
 
 ## 项目规则
 
@@ -99,6 +99,7 @@ Python 回放和 benchmark：
 ```bash
 python3 -m tools.replay_dataset --count 3 --write-trace
 python3 -m tools.benchmark_pipeline --count 10
+python3 -m tools.benchmark_pipeline --count 10 --max-avg-ms 80 --max-step-ms quality_ms=10
 ```
 
 ## 对接文档

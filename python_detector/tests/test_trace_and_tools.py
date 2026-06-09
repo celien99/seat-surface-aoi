@@ -5,8 +5,16 @@ import json
 from python_detector.config.recipe_schema import ModelConfig, RecipeManager
 from python_detector.ipc.data_types import InspectionResult
 from python_detector.pipeline.pipeline import InspectionPipeline
+from python_detector.pipeline.quality_gate import FrameQuality, QualityReport
 from python_detector.trace.trace_writer import TraceWriter
 from tools.job_fixture import make_simulated_job
+from tools.pipeline_report import (
+    benchmark_failures,
+    format_benchmark_report,
+    format_replay_line,
+    parse_step_thresholds,
+    quality_reasons,
+)
 
 
 def _recipe(root_dir: Path, save_ok_ratio: float = 1.0, fake_mode: str = "auto"):
@@ -114,3 +122,73 @@ def test_trace_writer_persists_error_context(tmp_path: Path) -> None:
     assert trace_dir is not None
     error = json.loads((trace_dir / "error.json").read_text(encoding="utf-8"))
     assert error == {"type": "RuntimeError", "message": "模型输出异常"}
+
+
+def test_replay_report_includes_quality_and_error_context() -> None:
+    report = QualityReport(
+        is_pass=False,
+        messages=["TOP_BACK: missing required light HIGH_LEFT"],
+        frame_reports=[
+            FrameQuality(
+                camera_id="TOP_BACK",
+                light_id="DIFFUSE",
+                mean_gray=0.0,
+                saturation_ratio=0.0,
+                sharpness=0.0,
+                motion_gradient=0.0,
+                is_pass=False,
+                messages=["underexposure mean gray below threshold"],
+            )
+        ],
+    )
+    result = InspectionResult(
+        sequence_id=3,
+        trigger_id=1003,
+        seat_id="SIM_3",
+        decision="RECHECK",
+        quality_pass=False,
+        error_code=7,
+    )
+
+    line = format_replay_line(
+        result,
+        {
+            "quality_report": report,
+            "error": {"type": "RuntimeError", "message": "模型输出异常"},
+        },
+        summary_limit=2,
+    )
+
+    assert quality_reasons({"quality_report": report}) == [
+        "TOP_BACK: missing required light HIGH_LEFT",
+        "TOP_BACK/DIFFUSE: underexposure mean gray below threshold",
+    ]
+    assert "decision=RECHECK" in line
+    assert 'quality_reasons="TOP_BACK: missing required light HIGH_LEFT | TOP_BACK/DIFFUSE: underexposure mean gray below threshold"' in line
+    assert 'error="RuntimeError: 模型输出异常"' in line
+
+
+def test_benchmark_report_and_threshold_failures() -> None:
+    samples = [
+        {"quality_ms": 1.0, "preprocess_ms": 2.0, "total_ms": 10.0},
+        {"quality_ms": 3.0, "preprocess_ms": 4.0, "total_ms": 20.0},
+    ]
+
+    report = format_benchmark_report(2, [10.0, 20.0], samples)
+    failures = benchmark_failures(
+        [10.0, 20.0],
+        samples,
+        max_avg_ms=12.0,
+        max_ms=15.0,
+        max_step_ms=parse_step_thresholds(["quality_ms=2.0"]),
+    )
+
+    assert "avg_ms=15.00" in report
+    assert "p95_ms=20.00" in report
+    assert "quality_ms_avg=2.00" in report
+    assert "total_ms_max=20.00" in report
+    assert failures == [
+        "avg_ms 15.00 exceeds 12.00",
+        "max_ms 20.00 exceeds 15.00",
+        "quality_ms_max 3.00 exceeds 2.00",
+    ]

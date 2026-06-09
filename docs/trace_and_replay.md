@@ -31,10 +31,26 @@
 python3 -m tools.replay_dataset --count 3 --write-trace
 ```
 
+回放输出包含 `sequence_id`、`decision`、`quality_pass`、`error_code`、缺陷数量和总耗时。存在质量门禁失败时，会追加 `quality_reasons` 摘要；存在流水线异常时，会追加 `error` 摘要；启用 `--write-trace` 且策略允许保存时，会追加 `trace_dir`。
+
+可用 `--summary-limit` 控制每条结果最多输出的质量原因数量：
+
+```bash
+python3 -m tools.replay_dataset --count 3 --summary-limit 2
+```
+
 ## Benchmark 工具
 
 ```bash
 python3 -m tools.benchmark_pipeline --count 10
+```
+
+Benchmark 输出总耗时的平均值、p95、最大值，以及 `quality_ms`、`preprocess_ms`、`cube_ms`、`feature_ms`、`inference_ms`、`fusion_ms`、`total_ms` 等可用步骤的平均和最大耗时。
+
+可配置性能阈值，超过阈值时命令返回 `2`，用于 CI 或现场版本回归检查：
+
+```bash
+python3 -m tools.benchmark_pipeline --count 20 --max-avg-ms 80 --max-ms 120 --max-step-ms quality_ms=10 --max-step-ms inference_ms=30
 ```
 
 ## 保存策略
