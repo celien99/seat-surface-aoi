@@ -56,7 +56,7 @@ def test_onnx_missing_model_path_fails_conservatively() -> None:
         InferenceEngine(ModelRegistry()).infer([_feature_group()], recipe)
     assert exc_info.value.context() == {
         "type": "ModelInferenceError",
-        "message": "TOP_BACK/full/fake_default: 模型推理失败: ONNX 模型文件不存在: missing.onnx",
+        "message": "TOP_BACK/full/fake_default: 模型推理失败: ONNX detection 模型文件不存在: missing.onnx",
         "model_key": "fake_default",
         "backend": "onnx",
         "camera_id": "TOP_BACK",
@@ -64,6 +64,18 @@ def test_onnx_missing_model_path_fails_conservatively() -> None:
         "tensor_shape_nchw": [1, 1, 48, 64],
         "cause_type": "RuntimeError",
     }
+
+
+def test_onnx_placeholder_model_path_fails_before_session_creation(tmp_path) -> None:
+    placeholder = tmp_path / "placeholder.onnx"
+    placeholder.write_text("\n", encoding="utf-8")
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    recipe = replace(recipe, models={"fake_default": ModelConfig(backend="onnx", model_path=str(placeholder))})
+
+    with pytest.raises(ModelInferenceError) as exc_info:
+        InferenceEngine(ModelRegistry()).infer([_feature_group()], recipe)
+
+    assert "模型文件为空或仍是占位文件" in str(exc_info.value)
 
 
 def test_missing_model_key_does_not_fallback_to_default_ok() -> None:

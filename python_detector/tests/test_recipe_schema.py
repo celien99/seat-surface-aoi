@@ -174,6 +174,40 @@ def test_recipe_parses_onnx_model_io_contract() -> None:
     assert model.score_threshold == 0.25
 
 
+def test_recipe_parses_patchcore_faiss_index_path() -> None:
+    recipe = recipe_from_dict(
+        {
+            "recipe_id": "patchcore_faiss_recipe",
+            "sku": "sku",
+            "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+            "cameras": {
+                "TOP": {
+                    "model_key": "default",
+                    "safety_net_model_key": "unknown_safety_net",
+                }
+            },
+            "thresholds": {
+                "scratch": {"ng_score": 0.35, "recheck_score": 0.20, "min_area_px": 8},
+                "unknown_anomaly": {"ng_score": 0.55, "recheck_score": 0.20, "min_area_px": 1},
+            },
+            "models": {
+                "default": {"backend": "fake", "role": "primary", "class_names": ["scratch"]},
+                "unknown_safety_net": {
+                    "backend": "patchcore_knn",
+                    "model_family": "patchcore",
+                    "role": "safety_net",
+                    "class_names": ["unknown_anomaly"],
+                    "embedding_backend": "statistical",
+                    "memory_bank_path": "model/patchcore/seat_patchcore_bank.json",
+                    "faiss_index_path": "model/patchcore/seat_patchcore.faiss",
+                },
+            },
+        }
+    )
+
+    assert recipe.models["unknown_safety_net"].faiss_index_path == "model/patchcore/seat_patchcore.faiss"
+
+
 def test_recipe_parses_fusion_config() -> None:
     recipe = RecipeManager().load("seat_a_black_leather_v1")
     assert recipe.fusion.iou_threshold == 0.5

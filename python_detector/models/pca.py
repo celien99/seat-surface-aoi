@@ -27,7 +27,7 @@ class PcaProjector:
         self._cache: dict[str, PcaParameters] = {}
 
     def project(self, embedding: tuple[float, ...], pca_path: str, expected_version: str | None) -> PcaProjectionResult:
-        params = self._load(pca_path)
+        params = self.load(pca_path)
         if expected_version is not None and params.version != expected_version:
             raise RuntimeError(f"PCA 版本不匹配: {params.version} != {expected_version}")
         if len(embedding) != len(params.mean):
@@ -44,6 +44,9 @@ class PcaProjector:
             input_dim=len(embedding),
             output_dim=len(projected),
         )
+
+    def load(self, path_value: str) -> PcaParameters:
+        return self._load(path_value)
 
     def _load(self, path_value: str) -> PcaParameters:
         if path_value in self._cache:

@@ -5,6 +5,7 @@ import math
 from pathlib import Path
 
 from python_detector.config.recipe_schema import ModelConfig
+from python_detector.models.onnx_runtime import create_onnx_session, numpy_module, run_first_input
 from python_detector.pipeline.feature_builder import FeatureGroup
 
 
@@ -63,19 +64,10 @@ class EmbeddingExtractor:
             raise RuntimeError(f"WideResNet50 embedding 模型文件不存在: {config.embedding_model_path}")
         if feature_group.tensor_nchw is None:
             raise RuntimeError("WideResNet50 embedding 输入 tensor 缺失")
-        try:
-            import numpy as np  # type: ignore
-            import onnxruntime as ort  # type: ignore
-        except Exception as exc:
-            raise RuntimeError("onnxruntime/numpy 未安装，无法启用 WideResNet50 embedding 后端") from exc
-        session = ort.InferenceSession(str(path))
-        inputs = session.get_inputs()
-        if not inputs:
-            raise RuntimeError("WideResNet50 embedding 模型没有输入节点")
+        np = numpy_module("WideResNet50 embedding")
+        session = create_onnx_session(str(path), "WideResNet50 embedding")
         tensor = np.asarray(feature_group.tensor_nchw, dtype=np.float32)
-        outputs = session.run(None, {inputs[0].name: tensor})
-        if not outputs:
-            raise RuntimeError("WideResNet50 embedding 输出为空")
+        outputs = run_first_input(session, tensor, "WideResNet50 embedding")
         vector = np.asarray(outputs[0], dtype=np.float32).reshape(-1)
         if vector.size != config.embedding_dim:
             raise RuntimeError(f"embedding 维度不匹配: {vector.size} != {config.embedding_dim}")

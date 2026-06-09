@@ -122,6 +122,7 @@ class ModelConfig:
     pca_path: str | None = None
     pca_version: str | None = None
     memory_bank_path: str | None = None
+    faiss_index_path: str | None = None
     coreset_ratio: float = 1.0
     knn_k: int = 1
     anomaly_score_scale: float = 1.0
@@ -455,6 +456,9 @@ def _models_from_dict(data: dict[str, Any]) -> dict[str, ModelConfig]:
             memory_bank_path=None
             if raw.get("memory_bank_path") in (None, "")
             else _str(raw.get("memory_bank_path"), f"models.{model_key}.memory_bank_path"),
+            faiss_index_path=None
+            if raw.get("faiss_index_path") in (None, "")
+            else _str(raw.get("faiss_index_path"), f"models.{model_key}.faiss_index_path"),
             coreset_ratio=coreset_ratio,
             knn_k=_positive_int(raw.get("knn_k", 1), f"models.{model_key}.knn_k"),
             anomaly_score_scale=_positive_float(

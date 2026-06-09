@@ -11,6 +11,7 @@ from python_detector.models.inference_engine import (
     OnnxModel,
     PatchCoreModel,
 )
+from python_detector.models.onnx_runtime import create_onnx_session, numpy_module, run_first_input
 from python_detector.models.patchcore import PatchCoreBank, PatchCoreKnnIndex, PatchCoreScore
 from python_detector.models.pca import PcaParameters, PcaProjectionResult, PcaProjector
 
@@ -31,4 +32,7 @@ __all__ = [
     "PcaProjectionResult",
     "PcaProjector",
     "UnifiedEmbedding",
+    "create_onnx_session",
+    "numpy_module",
+    "run_first_input",
 ]

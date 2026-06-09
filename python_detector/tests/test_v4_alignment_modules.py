@@ -156,6 +156,7 @@ def test_patchcore_knn_backend_emits_unknown_anomaly_and_trace(tmp_path: Path) -
     summaries = [item for item in pipeline.last_context["feature_summary"] if item["model_key"] == "unknown_safety_net"]
     assert summaries[0]["embedding_summary"]["backend"] == "statistical"
     assert summaries[0]["anomaly_summary"]["memory_bank_version"] == "bank_v1"
+    assert summaries[0]["anomaly_summary"]["backend"] == "exact_knn"
 
 
 def test_patchcore_knn_backend_applies_pca_projection(tmp_path: Path) -> None:
@@ -236,3 +237,46 @@ def test_patchcore_memory_bank_builder_uses_coreset_stride(tmp_path: Path) -> No
     assert bank["pca_version"] == "pca_v1"
     assert bank["faiss_enabled"] is True
     assert len(bank["vectors"]) == 2
+
+
+def test_patchcore_faiss_metadata_falls_back_to_exact_knn_when_index_missing(tmp_path: Path) -> None:
+    bank_path = tmp_path / "memory_bank.json"
+    bank_path.write_text(
+        json.dumps(
+            {
+                "version": "bank_v1",
+                "model_family": "patchcore",
+                "embedding_dim": 10,
+                "coreset_ratio": 1.0,
+                "pca_version": None,
+                "faiss_enabled": True,
+                "vectors": [[0.0] * 10],
+            }
+        ),
+        encoding="utf-8",
+    )
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    patchcore = ModelConfig(
+        backend="patchcore_knn",
+        model_family="patchcore",
+        role="safety_net",
+        class_names=("unknown_anomaly",),
+        input_channels=recipe.models["fake_default"].input_channels,
+        embedding_backend="statistical",
+        embedding_version="stat_v1",
+        embedding_dim=10,
+        memory_bank_path=str(bank_path),
+        faiss_index_path=str(tmp_path / "missing.faiss"),
+        score_threshold=0.01,
+        anomaly_score_scale=2.0,
+        knn_k=1,
+    )
+    recipe = replace(recipe, models={**recipe.models, "unknown_safety_net": patchcore})
+    pipeline = InspectionPipeline()
+
+    result = pipeline.process(make_simulated_job(), recipe)
+
+    assert result.defects
+    summaries = [item for item in pipeline.last_context["feature_summary"] if item["model_key"] == "unknown_safety_net"]
+    assert summaries[0]["anomaly_summary"]["backend"] == "exact_knn"
+    assert summaries[0]["anomaly_summary"]["fallback_reason"] == "faiss_index_missing"

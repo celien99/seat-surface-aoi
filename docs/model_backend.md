@@ -3,8 +3,8 @@
 ## 当前后端
 
 - `fake`：默认后端，用于模拟 OK、RECHECK、NG 分支。
-- `onnx`：可选后端。未安装 `onnxruntime`、模型路径为空、模型文件不存在、输入 tensor 缺失、输出解码未配置或输出解析失败时，返回保守错误。
-- `patchcore_knn`：PatchCore safety net 参考后端。读取 memory bank JSON，使用 unified embedding 和可选 PCA 投影执行 exact KNN，输出 `unknown_anomaly` anomaly score。
+- `onnx`：可选后端。未安装 `onnxruntime`、模型路径为空、模型文件不存在、占位文件未替换、输入 tensor 缺失、输出解码未配置或输出解析失败时，返回保守错误。
+- `patchcore_knn`：PatchCore safety net 后端。读取 memory bank JSON，使用 unified embedding 和可选 PCA 投影；配置 FAISS 索引时优先尝试 FAISS，缺索引、缺依赖或加载失败时回退 exact KNN，输出 `unknown_anomaly` anomaly score。
 
 embedding 支持两类后端：
 
@@ -50,6 +50,8 @@ ch4_high_max_min
 
 ## 配方示例
 
+真实模型产物默认放在根目录 `model/`，`python_detector/config/production_model.example.yaml` 提供完整模板：
+
 ```yaml
 models:
   fake_default:
@@ -59,7 +61,7 @@ models:
     role: primary
   scratch_onnx:
     backend: onnx
-    model_path: models/scratch.onnx
+    model_path: model/supervised_defect/seat_defect_detector.onnx
     model_family: supervised
     role: primary
     input_channels:
@@ -85,13 +87,14 @@ models:
       - ch3_high_right
       - ch4_high_max_min
     embedding_backend: onnx_wideresnet50
-    embedding_model_path: models/wideresnet50_embedding.onnx
+    embedding_model_path: model/wideresnet50/seat_wrn50_embedding.onnx
     embedding_version: wrn50_seat_v1
     embedding_dim: 1024
     embedding_layers: [layer2, layer3]
-    pca_path: models/pca_seat_v1.json
+    pca_path: model/patchcore/seat_pca.json
     pca_version: pca_seat_v1
-    memory_bank_path: models/patchcore_bank_v1.json
+    memory_bank_path: model/patchcore/seat_patchcore_bank.json
+    faiss_index_path: model/patchcore/seat_patchcore.faiss
     knn_k: 1
     anomaly_score_scale: 1.0
     score_threshold: 0.20
@@ -111,19 +114,28 @@ models:
 - 缺模型、后端异常、输出 decode 失败不能输出 `OK`。
 - 每个 ROI 应明确主模型和可选安全网模型，不允许用单一 PatchCore 覆盖全座椅主检。
 - 模型缓存按 `model_key`、后端、路径、fake 模式、模型家族、角色、输入通道、输入缩放、类别列表、输出解码、bbox 格式和分数阈值隔离；同名模型在不同配方中改变任一关键配置时会创建独立后端实例。
-- PatchCore 配置还会把 embedding 后端、embedding 版本、embedding 维度、PCA 路径/版本、memory bank 路径、KNN 参数和 anomaly score scale 纳入缓存隔离。
+- PatchCore 配置还会把 embedding 后端、embedding 版本、embedding 维度、PCA 路径/版本、memory bank 路径、FAISS 索引路径、KNN 参数和 anomaly score scale 纳入缓存隔离。
+
+上线前校验模型产物：
+
+```bash
+uv run python -m tools.validate_model_assets --recipe production_model_example
+```
+
+仓库提交的 `model/` 下目标文件是空置占位。占位文件会被校验工具判定为失败，必须由真实训练产物替换后才能作为生产配方上线。
 
 ## PatchCore memory bank
 
 离线构建命令：
 
 ```bash
-python3 -m tools.build_patchcore_memory_bank \
+uv run python -m tools.build_patchcore_memory_bank \
   --input embeddings.jsonl \
-  --output models/patchcore_bank_v1.json \
+  --output model/patchcore/seat_patchcore_bank.json \
   --version bank_v1 \
   --coreset-ratio 0.1 \
-  --pca-version pca_seat_v1
+  --pca-version pca_seat_v1 \
+  --faiss-enabled
 ```
 
 输入 `embeddings.jsonl` 每行可以是数字数组，也可以是包含 `embedding` 字段的 JSON object。输出 JSON 包含：
@@ -136,7 +148,13 @@ python3 -m tools.build_patchcore_memory_bank \
 - `faiss_enabled`
 - `vectors`
 
-当前在线后端使用 exact KNN，不依赖 FAISS；`faiss_enabled` 是部署环境接入 FAISS 索引时的版本元数据。memory bank 缺失、维度不匹配、PCA 版本不匹配或 vectors 为空都会返回保守错误。
+在线后端在配置 `faiss_index_path` 时会尝试加载 FAISS 索引。索引文件缺失、为空、未安装 `faiss-cpu`、维度不一致或加载失败时，后端回退 exact KNN，并在 trace 的 `anomaly_summary.backend` 和 `fallback_reason` 中记录实际状态。memory bank 缺失、维度不匹配、PCA 版本不匹配或 vectors 为空都会返回保守错误。
+
+安装 FAISS 可选依赖：
+
+```bash
+uv sync --group dev --extra onnx --extra faiss
+```
 
 ## PCA 参数
 
@@ -167,6 +185,12 @@ PCA 参数文件为 JSON：
 - `bbox_format: xyxy_pixel` 表示 bbox 是 ROI 输出图内像素坐标，结果会通过 `roi_to_source_matrix` 映射回原图 `bbox_xyxy_pixel`。
 - `bbox_format: xyxy_normalized` 表示 bbox 是 ROI 输出图内归一化坐标，先按 `feature_shape_hw` 还原到 `[0, width - 1] / [0, height - 1]` 像素坐标，再通过 `roi_to_source_matrix` 映射回原图 `bbox_xyxy_pixel`。
 - bbox 越界、反向、包含 NaN/Inf、输出为空或形状不是 `[N, >=6]` 时返回保守错误，不会对模型输出做静默 clamp。
+
+## YOLO ROI 与 WideResNet50
+
+- `roi_locator.backend: onnx_yolo` 使用 Dome 语义光源图，模型路径默认为 `model/roi_yolo/seat_roi_yolo.onnx`，输出行表与 ONNX detection rows 相同。
+- `embedding_backend: onnx_wideresnet50` 使用 `model/wideresnet50/seat_wrn50_embedding.onnx`，输出一维向量，长度必须等于 `embedding_dim`。
+- 两者都通过统一 ONNX Runtime 适配层创建 session。模型文件缺失、为空、依赖未安装、输入节点缺失或输出为空都会返回保守错误。
 
 ## 候选融合
 

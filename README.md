@@ -2,7 +2,7 @@
 
 汽车座椅表面缺陷检测系统参考实现。项目以生产线在线 AOI 场景为目标，采用 **C++ 实时主控 + Python 独立检测进程 + 共享内存 IPC** 的架构，覆盖多机位、多光源频闪采集、质量门禁、ROI 处理、多光源特征、模型推理、融合决策和追溯验证链路。
 
-> 当前项目以 V4.0 方案架构图作为目标架构与后续验收口径。已有实现覆盖控制通信骨架、基础检测流水线、V4 光源语义映射、Dome ROI 定位接口、ECC 配准、embedding/PCA/PatchCore KNN 参考链路和全链路 trace；真实硬件 SDK、真实模型权重、FAISS 加速索引、MES/报警和平台化监控仍需按现场项目接入。
+> 当前项目以 V4.0 方案架构图作为目标架构与后续验收口径。已有实现覆盖控制通信骨架、基础检测流水线、V4 光源语义映射、Dome ROI 定位接口、ECC 配准、ONNX/WideResNet50/PCA/PatchCore 工程接入点、模型资产校验和全链路 trace；真实硬件 SDK、真实模型权重、MES/报警和平台化监控仍需按现场项目接入。
 
 ![汽车座椅表面缺陷检测系统整体架构图 V4.0](docs/assets/architecture-v4.png)
 
@@ -22,8 +22,9 @@
 | C++ 主控 | 支持 PLC 抽象、相机/光源模拟驱动、硬触发同步模式、故障注入和保守降级 |
 | 共享内存 IPC | POSIX shared memory，固定布局结构体，frame/result ring buffer，CRC 与协议布局校验 |
 | Python 检测进程 | 支持共享内存读取、质量门禁、Dome ROI 定位接口、ROI 裁剪/透视展开、固定标定或 ECC 配准、特征构建、推理、融合、缺陷过滤和规则判定 |
-| 模型后端 | 支持 fake、ONNX detection rows、统计 embedding、ONNX WideResNet50 embedding、PCA 投影和 PatchCore exact KNN safety net；FAISS 作为 memory bank 元数据和后续加速接入点 |
-| 追溯与工具 | 支持 trace、ROI 定位报告、ECC 报告、embedding/PCA/anomaly summary、ROI 图落盘、overlay、回放、benchmark、PatchCore memory bank 构建和模拟 IPC 验证 |
+| 模型后端 | 支持 fake、ONNX detection rows、统计 embedding、ONNX WideResNet50 embedding、PCA 投影和 PatchCore safety net；PatchCore 优先尝试 FAISS，缺索引或缺依赖时回退 exact KNN 并写入 trace |
+| 模型产物 | 根目录 `model/` 提供 YOLO、监督检测、WideResNet50、PCA、PatchCore memory bank 和可选 FAISS 索引占位；`production_model.example.yaml` 展示真实模型配方 |
+| 追溯与工具 | 支持 trace、ROI 定位报告、ECC 报告、embedding/PCA/anomaly summary、ROI 图落盘、overlay、回放、benchmark、PatchCore memory bank 构建、模型资产校验和模拟 IPC 验证 |
 
 ## V4.0 对齐状态
 
@@ -33,11 +34,11 @@
 |---|---|
 | 1. 光学采集层 | 部分对齐：已有多光源/多机位模拟链路和 V4 语义光源映射，真实硬件 SDK 集成仍需项目化接入 |
 | 2. 控制与通信层 | 基本对齐：C++ 控制，Python 不控制 PLC/相机/频闪，在线链路使用共享内存 |
-| 3.1 ROI 定位 | 接口对齐：支持 Dome 语义光源、模板/fake YOLO/ONNX YOLO 后端和 YOLO row 到 ROI 模板坐标转换；真实 YOLO 权重需接入 |
+| 3.1 ROI 定位 | 工程接入点对齐：支持 Dome 语义光源、模板/fake YOLO/ONNX YOLO 后端、真实 YOLO 占位目录和 YOLO row 到 ROI 模板坐标转换；真实权重和训练评估需现场产出 |
 | 3.2 ROI 裁剪与配准 | 基本对齐：已有 ROI 裁剪/透视展开、固定标定误差检查和 ECC 在线配准报告 |
-| 3.3 特征提取 | 接口对齐：已有多光源手工特征、统计 embedding 和 ONNX WideResNet50 embedding 入口；真实权重和层选择需按模型接入 |
+| 3.3 特征提取 | 工程接入点对齐：已有多光源手工特征、统计 embedding、ONNX WideResNet50 embedding 入口和占位产物路径；真实权重和层选择需按模型接入 |
 | 3.4 特征融合与降维 | 基本对齐：支持 unified embedding summary、PCA 参数加载、版本校验和投影 |
-| 3.5 PatchCore 异常检测 | 参考链路对齐：支持 memory bank JSON、coreset 工具、KNN anomaly score 和规则阈值；FAISS 加速仍需接入 |
+| 3.5 PatchCore 异常检测 | 工程接入点对齐：支持 memory bank JSON、coreset 工具、PCA、可选 FAISS 索引、exact KNN 回退、anomaly score 和规则阈值 |
 | 4. 后处理与决策层 | 部分对齐：已有融合、缺陷过滤模块和规则判定，MES/报警接口仍需扩展 |
 | 5. 系统管理维护 | 部分对齐：已有配置、模型、trace 和工具文档，完整数据/模型/监控平台不在当前实现范围内 |
 
@@ -66,6 +67,9 @@ uv sync --group test
 
 # 启用 ONNX/YOLO/WideResNet50 后端时再安装
 uv sync --group dev --extra onnx
+
+# 启用 PatchCore FAISS 索引加速时再安装
+uv sync --group dev --extra onnx --extra faiss
 
 # 生产/测试机按锁文件安装基础链路
 uv sync --locked --no-dev
@@ -100,6 +104,9 @@ uv run pytest
 # 校验 C++ / Python 共享内存协议布局
 uv run python -m tools.validate_protocol
 
+# 校验真实模型产物是否已替换占位文件
+uv run python -m tools.validate_model_assets --recipe production_model_example
+
 # 模拟端到端 IPC
 bash tools/run_simulated_ipc.sh
 
@@ -114,7 +121,7 @@ uv run python -m tools.replay_dataset --count 3 --write-trace
 uv run python -m tools.benchmark_pipeline --count 10
 
 # PatchCore memory bank 构建示例
-uv run python -m tools.build_patchcore_memory_bank --input embeddings.jsonl --output models/patchcore_bank.json --version bank_v1 --coreset-ratio 0.1
+uv run python -m tools.build_patchcore_memory_bank --input embeddings.jsonl --output model/patchcore/seat_patchcore_bank.json --version bank_v1 --coreset-ratio 0.1 --pca-version pca_seat_v1 --faiss-enabled
 
 # C++ 故障注入示例
 cpp_controller/build/seat_aoi_controller --simulate-missing-frame --wait-ms 200
@@ -127,6 +134,7 @@ cpp_controller/build/seat_aoi_controller --simulate-trigger-timeout --trigger-ti
 ```text
 seat-surface-aoi/
 ├── cpp_controller/      # C++ 主控、采集调度、共享内存 IPC、模拟硬件驱动
+├── model/               # 真实模型产物占位目录：YOLO、监督检测、WideResNet50、PCA、PatchCore、可选 FAISS
 ├── python_detector/     # 独立 Python 检测算法模块、V4 ROI/ECC/embedding/PCA/PatchCore 流水线、配方、测试
 ├── docs/                # 架构、协议、部署、硬件和模型文档
 ├── tools/               # 协议校验、模拟 IPC、回放和 benchmark 工具
@@ -139,6 +147,7 @@ seat-surface-aoi/
 ## 关键文档
 
 - [V4.0 架构对齐说明](docs/v4_architecture_alignment.md)
+- [模型产物目录说明](model/README.md)
 - [共享内存协议](docs/shm_protocol.md)
 - [硬件对接说明](docs/hardware_integration.md)
 - [C++ 主控硬件集成与使用手册](docs/cpp_controller_hardware_manual.md)

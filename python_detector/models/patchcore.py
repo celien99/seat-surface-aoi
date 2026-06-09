@@ -27,6 +27,8 @@ class PatchCoreScore:
     embedding_dim: int
     backend: str
     version: str
+    faiss_index_path: str | None = None
+    fallback_reason: str | None = None
 
 
 class PatchCoreKnnIndex:
@@ -40,6 +42,7 @@ class PatchCoreKnnIndex:
         knn_k: int,
         score_scale: float,
         expected_pca_version: str | None,
+        faiss_index_path: str | None = None,
     ) -> PatchCoreScore:
         bank = self._load(memory_bank_path)
         if bank.model_family != "patchcore":
@@ -51,6 +54,16 @@ class PatchCoreKnnIndex:
         k = min(knn_k, len(bank.vectors))
         if k <= 0:
             raise RuntimeError("PatchCore memory bank 为空")
+        faiss_score = self._score_with_faiss(
+            embedding,
+            bank,
+            k,
+            score_scale,
+            faiss_index_path,
+        )
+        if faiss_score is not None:
+            return faiss_score
+        fallback_reason = self._faiss_fallback_reason(bank, faiss_index_path)
         distances = sorted(self._euclidean(embedding, vector) for vector in bank.vectors)[:k]
         nearest = distances[0]
         anomaly_score = min(max(nearest * score_scale, 0.0), 1.0)
@@ -60,9 +73,14 @@ class PatchCoreKnnIndex:
             knn_distances=tuple(distances),
             memory_bank_size=len(bank.vectors),
             embedding_dim=bank.embedding_dim,
-            backend="faiss" if bank.faiss_enabled else "exact_knn",
+            backend="exact_knn",
             version=bank.version,
+            faiss_index_path=faiss_index_path,
+            fallback_reason=fallback_reason,
         )
+
+    def load(self, path_value: str) -> PatchCoreBank:
+        return self._load(path_value)
 
     def _load(self, path_value: str) -> PatchCoreBank:
         if path_value in self._cache:
@@ -106,6 +124,68 @@ class PatchCoreKnnIndex:
 
     def _euclidean(self, left: tuple[float, ...], right: tuple[float, ...]) -> float:
         return math.sqrt(sum((a - b) ** 2 for a, b in zip(left, right)))
+
+    def _score_with_faiss(
+        self,
+        embedding: tuple[float, ...],
+        bank: PatchCoreBank,
+        knn_k: int,
+        score_scale: float,
+        faiss_index_path: str | None,
+    ) -> PatchCoreScore | None:
+        if not faiss_index_path:
+            return None
+        path = Path(faiss_index_path)
+        if not path.exists() or path.stat().st_size <= 1:
+            return None
+        try:
+            import faiss  # type: ignore
+            import numpy as np  # type: ignore
+        except Exception:
+            return None
+        try:
+            index = faiss.read_index(str(path))
+            index_dim = int(getattr(index, "d"))
+            if index_dim != len(embedding):
+                return None
+            query = np.asarray([embedding], dtype=np.float32)
+            distances_raw, _indices = index.search(query, knn_k)
+            distances = tuple(math.sqrt(max(float(value), 0.0)) for value in distances_raw[0].tolist())
+            distances = tuple(value for value in distances if math.isfinite(value))
+            if not distances:
+                return None
+            nearest = distances[0]
+            anomaly_score = min(max(nearest * score_scale, 0.0), 1.0)
+            return PatchCoreScore(
+                anomaly_score=anomaly_score,
+                nearest_distance=nearest,
+                knn_distances=distances,
+                memory_bank_size=len(bank.vectors),
+                embedding_dim=bank.embedding_dim,
+                backend="faiss",
+                version=bank.version,
+                faiss_index_path=faiss_index_path,
+                fallback_reason=None,
+            )
+        except Exception:
+            return None
+
+    def _faiss_fallback_reason(self, bank: PatchCoreBank, faiss_index_path: str | None) -> str | None:
+        if not bank.faiss_enabled and not faiss_index_path:
+            return None
+        if not faiss_index_path:
+            return "faiss_index_path_not_configured"
+        path = Path(faiss_index_path)
+        if not path.exists():
+            return "faiss_index_missing"
+        if path.stat().st_size <= 1:
+            return "faiss_index_empty_or_placeholder"
+        try:
+            import faiss  # type: ignore  # noqa: F401
+            import numpy  # type: ignore  # noqa: F401
+        except Exception:
+            return "faiss_unavailable"
+        return "faiss_load_or_search_failed"
 
     def _str(self, value: Any, name: str) -> str:
         if not isinstance(value, str) or not value:

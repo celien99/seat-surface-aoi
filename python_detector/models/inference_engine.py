@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from pathlib import Path
 from typing import Any, Protocol
 
 from python_detector.config.recipe_schema import ModelConfig, Recipe
 from python_detector.models.embedding import EmbeddingExtractor
+from python_detector.models.onnx_runtime import create_onnx_session, numpy_module, run_first_input
 from python_detector.models.patchcore import PatchCoreKnnIndex
 from python_detector.models.pca import PcaProjector
 from python_detector.pipeline.feature_builder import FeatureGroup
@@ -100,14 +100,7 @@ class OnnxModel:
     def __init__(self, config: ModelConfig) -> None:
         if not config.model_path:
             raise RuntimeError("ONNX 模型路径不能为空")
-        path = Path(config.model_path)
-        if not path.exists():
-            raise RuntimeError(f"ONNX 模型文件不存在: {config.model_path}")
-        try:
-            import onnxruntime as ort  # type: ignore
-        except Exception as exc:
-            raise RuntimeError("onnxruntime 未安装，无法启用 ONNX 后端") from exc
-        self.session = ort.InferenceSession(str(path))
+        self.session = create_onnx_session(config.model_path, "ONNX detection")
         self.config = config
 
     def run(self, feature_group: FeatureGroup) -> list[DefectCandidate]:
@@ -115,17 +108,10 @@ class OnnxModel:
             raise RuntimeError("ONNX 输出解码未配置，不能默认输出 OK")
         if feature_group.tensor_nchw is None:
             raise RuntimeError("ONNX 输入 tensor 缺失")
-        try:
-            import numpy as np  # type: ignore
-        except Exception as exc:
-            raise RuntimeError("numpy 未安装，无法构建 ONNX 输入") from exc
 
-        input_info = self.session.get_inputs()
-        if not input_info:
-            raise RuntimeError("ONNX 模型没有输入节点")
-        input_name = input_info[0].name
+        np = numpy_module("ONNX detection")
         tensor = np.asarray(feature_group.tensor_nchw, dtype=np.float32)
-        outputs = self.session.run(None, {input_name: tensor})
+        outputs = run_first_input(self.session, tensor, "ONNX detection")
         if self.config.output_decode == "detection_rows":
             return self._decode_detection_rows(outputs, feature_group)
         raise RuntimeError(f"不支持的 ONNX 输出解码方式: {self.config.output_decode}")
@@ -248,11 +234,14 @@ class PatchCoreModel:
             self.config.knn_k,
             self.config.anomaly_score_scale,
             self.config.pca_version,
+            self.config.faiss_index_path,
         )
         feature_group.anomaly_summary = {
             "model_family": self.config.model_family,
             "memory_bank_version": score.version,
             "backend": score.backend,
+            "faiss_index_path": score.faiss_index_path,
+            "fallback_reason": score.fallback_reason,
             "anomaly_score": score.anomaly_score,
             "nearest_distance": score.nearest_distance,
             "knn_distances": list(score.knn_distances),
@@ -330,6 +319,7 @@ class ModelRegistry:
             config.pca_path or "",
             config.pca_version or "",
             config.memory_bank_path or "",
+            config.faiss_index_path or "",
             float(config.coreset_ratio),
             int(config.knn_k),
             float(config.anomaly_score_scale),

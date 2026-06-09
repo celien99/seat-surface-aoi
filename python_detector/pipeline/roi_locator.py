@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 import math
 
 from python_detector.config.calibration_manager import RoiTemplate
 from python_detector.config.recipe_schema import Recipe
 from python_detector.ipc.data_types import LightFrame
+from python_detector.models.onnx_runtime import create_onnx_session, numpy_module, run_first_input
 
 
 @dataclass(frozen=True)
@@ -103,22 +103,10 @@ class RoiLocator:
         model_path = recipe.roi_locator.model_path
         if not model_path:
             raise RuntimeError("YOLO ROI 模型路径不能为空")
-        path = Path(model_path)
-        if not path.exists():
-            raise RuntimeError(f"YOLO ROI 模型文件不存在: {model_path}")
-        try:
-            import numpy as np  # type: ignore
-            import onnxruntime as ort  # type: ignore
-        except Exception as exc:
-            raise RuntimeError("onnxruntime/numpy 未安装，无法启用 YOLO ROI 后端") from exc
-        session = ort.InferenceSession(str(path))
-        inputs = session.get_inputs()
-        if not inputs:
-            raise RuntimeError("YOLO ROI 模型没有输入节点")
+        np = numpy_module("YOLO ROI")
+        session = create_onnx_session(model_path, "YOLO ROI")
         tensor = self._frame_to_nchw(dome_frame, np)
-        outputs = session.run(None, {inputs[0].name: tensor})
-        if not outputs:
-            raise RuntimeError("YOLO ROI 模型输出为空")
+        outputs = run_first_input(session, tensor, "YOLO ROI")
         rows = np.asarray(outputs[0], dtype=np.float32)
         if rows.ndim == 3 and rows.shape[0] == 1:
             rows = rows[0]
