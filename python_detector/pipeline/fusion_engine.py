@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 from python_detector.config.recipe_schema import FusionConfig
 from python_detector.models.inference_engine import DefectCandidate
@@ -100,7 +101,11 @@ class FusionEngine:
 
     def _validate_candidate(self, candidate: DefectCandidate) -> None:
         x0, y0, x1, y1 = candidate.bbox_xyxy_pixel
+        if not math.isfinite(candidate.score) or candidate.score < 0.0 or candidate.score > 1.0:
+            raise ValueError(f"invalid candidate score: {candidate.score}")
         if x1 < x0 or y1 < y0:
             raise ValueError(f"invalid candidate bbox_xyxy_pixel: {candidate.bbox_xyxy_pixel}")
         if candidate.area_px <= 0:
             raise ValueError(f"invalid candidate area_px: {candidate.area_px}")
+        if not candidate.evidence_lights:
+            raise ValueError("candidate evidence_lights is empty")

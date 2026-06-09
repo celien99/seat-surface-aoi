@@ -1,3 +1,5 @@
+import pytest
+
 from python_detector.config.recipe_schema import FusionConfig
 from python_detector.models.inference_engine import DefectCandidate
 from python_detector.pipeline.fusion_engine import FusionEngine
@@ -18,7 +20,7 @@ def _candidate(
         score=score,
         bbox_xyxy_pixel=bbox_xyxy_pixel,
         area_px=(x1 - x0 + 1) * (y1 - y0 + 1),
-        evidence_lights=evidence_lights or ["HIGH_LEFT"],
+        evidence_lights=["HIGH_LEFT"] if evidence_lights is None else evidence_lights,
     )
 
 
@@ -58,3 +60,14 @@ def test_fusion_caps_candidates_per_roi() -> None:
 
     assert fused.suppressed_count == 2
     assert len(fused.candidates) == 2
+
+
+@pytest.mark.parametrize("score", [float("nan"), -0.1, 1.1])
+def test_fusion_rejects_invalid_candidate_score(score: float) -> None:
+    with pytest.raises(ValueError, match="invalid candidate score"):
+        FusionEngine().fuse([_candidate(score, (10, 10, 30, 30))])
+
+
+def test_fusion_rejects_empty_candidate_evidence_lights() -> None:
+    with pytest.raises(ValueError, match="candidate evidence_lights is empty"):
+        FusionEngine().fuse([_candidate(0.8, (10, 10, 30, 30), evidence_lights=[])])
