@@ -1,8 +1,8 @@
 # V4.0 架构对齐说明
 
-本文以 `docs/assets/architecture-v4.png` 中的「汽车座椅表面缺陷检测系统整体架构图（V4.0 方案）」作为目标架构，说明当前仓库已经实现的能力、已验证的边界和后续需要补齐的模块。
+本文以 `docs/assets/architecture-v4.png` 中的「汽车座椅表面缺陷检测系统整体架构图（V4.0 集成 ONNX + FAISS 方案）」作为目标架构，说明当前仓库已经实现的能力、已验证的边界和后续需要补齐的模块。
 
-![汽车座椅表面缺陷检测系统整体架构图 V4.0](assets/architecture-v4.png)
+![汽车座椅表面缺陷检测系统整体架构图 V4.0 集成 ONNX + FAISS 方案](assets/architecture-v4.png)
 
 ## 总体判断
 
@@ -11,6 +11,7 @@
 - C++ 作为实时主控，负责 PLC、相机、光源、触发同步、共享内存写入、结果读取和保守降级。
 - Python 作为独立检测进程，负责检测链路，不参与 PLC、相机和频闪控制。
 - 在线图像与结果通过 POSIX 共享内存传输，不使用 TCP。
+- Python AI Runtime 以 ONNX Runtime 作为 YOLO/WideResNet50/FilterClassifier 等模型的推理底座，PatchCore 向量检索优先使用 FAISS，缺索引或缺依赖时回退 exact KNN。
 - 协议错误、CRC 错误、缺帧、超时、质量门禁失败和模型异常都不会输出 `OK`。
 
 当前实现已经从「工业 AOI 参考骨架 + 基础算法流水线」推进到「V4.0 主要算法接口可验证参考链路 + 真实模型工程接入点」。真实产线仍需要接入设备 SDK、替换 `model/` 下的真实 YOLO/WideResNet50/PatchCore 产物、完成训练评估、MES/报警和监控平台。
@@ -201,6 +202,27 @@
 - 尚未实现完整数据平台、模型版本平台和系统监控服务。
 - 现场运行指标、健康检查和报警面板仍需结合部署环境建设。
 
+### 6. AI Runtime 与依赖
+
+架构图要求：
+
+- AI Runtime 使用 ONNX 作为推理底座，承载 YOLOvX ROI 定位、WideResNet50 特征提取和 FilterClassifier 缺陷过滤分类等模型。
+- 向量检索引擎使用 FAISS，支持 CPU/GPU、IndexFlatL2、IVF、PQ 等部署选择。
+- 基础依赖包括 OpenCV、NumPy、共享内存 SDK 和图像处理组件。
+
+当前状态：
+
+- 已提供统一 ONNX Runtime 适配层，ROI YOLO、通用 ONNX detection rows 和 WideResNet50 embedding 共享 session 创建、输入构建和保守错误处理。
+- 已在 `model/` 目录预留 YOLO ROI、监督缺陷检测、WideResNet50 embedding、PCA、PatchCore memory bank 和 FAISS 索引产物路径。
+- `pyproject.toml` 已提供 `onnx` 和 `faiss` optional extras；默认模拟链路不强制安装 ONNX Runtime 或 FAISS。
+- PatchCore 在线链路配置 `faiss_index_path` 后优先尝试 FAISS，失败时回退 exact KNN，并在 trace 中记录 `backend` 与 `fallback_reason`。
+- Python 层当前只负责检测算法，不控制 PLC、相机或频闪。
+
+差距：
+
+- 真实 ONNX 模型、FAISS 索引、OpenCV 高精度 ECC 后端和现场性能参数仍需部署环境实测确认。
+- GPU 推理、FAISS GPU 索引和平台化依赖管理仍需结合产线硬件规格建设。
+
 ## 推荐补齐顺序
 
 1. 接入真实相机、频闪、PLC/编码器和光源控制器 SDK，并做节拍、稳定性和故障注入压测。
@@ -209,7 +231,8 @@
 4. 接入真实 WideResNet50 embedding 权重，固化输入归一化、特征层、embedding 维度和批处理策略。
 5. 基于正常样本训练 PCA 与 PatchCore memory bank，替换 `model/patchcore/` 占位产物，产出阈值曲线和按缺陷类别/ROI/材质/颜色的评估报告。
 6. 在部署环境生成并接入 FAISS 加速索引，验证 KNN 延迟、内存占用和 exact KNN 回退。
-7. 按现场工艺扩展多 ROI 关联规则、MES/报警接口、数据平台、模型版本平台和系统监控服务。
+7. 按现场硬件规格固化 ONNX Runtime、FAISS、OpenCV 和 NumPy 版本，完成 AI Runtime 性能基准。
+8. 按现场工艺扩展多 ROI 关联规则、MES/报警接口、数据平台、模型版本平台和系统监控服务。
 
 ## 当前验证命令
 

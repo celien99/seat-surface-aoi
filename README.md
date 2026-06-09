@@ -2,9 +2,9 @@
 
 汽车座椅表面缺陷检测系统参考实现。项目以生产线在线 AOI 场景为目标，采用 **C++ 实时主控 + Python 独立检测进程 + 共享内存 IPC** 的架构，覆盖多机位、多光源频闪采集、质量门禁、ROI 处理、多光源特征、模型推理、融合决策和追溯验证链路。
 
-> 当前项目以 V4.0 方案架构图作为目标架构与后续验收口径。已有实现覆盖控制通信骨架、基础检测流水线、V4 光源语义映射、Dome ROI 定位接口、ECC 配准、ONNX/WideResNet50/PCA/PatchCore 工程接入点、模型资产校验和全链路 trace；真实硬件 SDK、真实模型权重、MES/报警和平台化监控仍需按现场项目接入。
+> 当前项目以 V4.0 集成 ONNX + FAISS 方案架构图作为目标架构与后续验收口径。已有实现覆盖控制通信骨架、基础检测流水线、V4 光源语义映射、Dome ROI 定位接口、ECC 配准、ONNX/WideResNet50/PCA/PatchCore 工程接入点、模型资产校验和全链路 trace；真实硬件 SDK、真实模型权重、MES/报警和平台化监控仍需按现场项目接入。
 
-![汽车座椅表面缺陷检测系统整体架构图 V4.0](docs/assets/architecture-v4.png)
+![汽车座椅表面缺陷检测系统整体架构图 V4.0 集成 ONNX + FAISS 方案](docs/assets/architecture-v4.png)
 
 ## 核心原则
 
@@ -41,6 +41,7 @@
 | 3.5 PatchCore 异常检测 | 工程接入点对齐：支持 memory bank JSON、coreset 工具、PCA、可选 FAISS 索引、exact KNN 回退、anomaly score 和规则阈值 |
 | 4. 后处理与决策层 | 部分对齐：已有融合、缺陷过滤模块和规则判定，MES/报警接口仍需扩展 |
 | 5. 系统管理维护 | 部分对齐：已有配置、模型、trace 和工具文档，完整数据/模型/监控平台不在当前实现范围内 |
+| 6. AI Runtime 与依赖 | 工程接入点对齐：ONNX Runtime 适配、YOLO/WideResNet50/FilterClassifier ONNX 路径、FAISS 可选索引、OpenCV/NumPy 等基础依赖按部署环境安装 |
 
 详见 [V4.0 架构对齐说明](docs/v4_architecture_alignment.md)。
 
