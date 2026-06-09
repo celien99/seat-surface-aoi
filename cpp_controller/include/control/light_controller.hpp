@@ -43,6 +43,4 @@ private:
   std::uint32_t armed_light_index_ = 0;
 };
 
-using LightController = SimLightController;  // will be removed in Task 4
-
 }  // namespace seat_aoi

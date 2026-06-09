@@ -1,11 +1,12 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "camera/camera_worker.hpp"
-#include "control/light_controller.hpp"
+#include "control/ilight_controller.hpp"
 #include "control/station_runtime_config.hpp"
 #include "control/trigger_scheduler.hpp"
 #include "ipc/frame_ring_buffer.hpp"
@@ -31,7 +32,7 @@ private:
 
   bool initialized_ = false;
   StationRuntimeConfig config_{};
-  LightController light_controller_;
+  std::unique_ptr<ILightController> light_controller_;
   std::vector<CameraWorker> cameras_;
 };
 

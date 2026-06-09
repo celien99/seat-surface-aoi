@@ -6,13 +6,13 @@
 
 namespace seat_aoi {
 
-bool LightController::initialize(bool simulate_fault) {
+bool SimLightController::initialize(bool simulate_fault) {
   initialized_ = true;
   simulate_fault_ = simulate_fault;
   return true;
 }
 
-bool LightController::prepare_sequence(const LightSequence& sequence,
+bool SimLightController::prepare_sequence(const LightSequence& sequence,
                                        std::uint64_t trigger_id,
                                        int timeout_ms,
                                        std::string* error_message) {
@@ -43,7 +43,7 @@ bool LightController::prepare_sequence(const LightSequence& sequence,
   return true;
 }
 
-bool LightController::trigger_channel(const LightChannelParam& channel,
+bool SimLightController::trigger_channel(const LightChannelParam& channel,
                                       std::uint64_t trigger_id,
                                       std::uint32_t light_seq_index,
                                       int timeout_ms,
@@ -71,7 +71,7 @@ bool LightController::trigger_channel(const LightChannelParam& channel,
   return true;
 }
 
-bool LightController::arm_hardware_trigger(const LightChannelParam& channel,
+bool SimLightController::arm_hardware_trigger(const LightChannelParam& channel,
                                            std::uint64_t trigger_id,
                                            std::uint32_t light_seq_index,
                                            int timeout_ms,
@@ -101,7 +101,7 @@ bool LightController::arm_hardware_trigger(const LightChannelParam& channel,
   return true;
 }
 
-bool LightController::notify_hardware_triggered(const LightChannelParam& channel,
+bool SimLightController::notify_hardware_triggered(const LightChannelParam& channel,
                                                 std::uint64_t trigger_id,
                                                 std::uint32_t light_seq_index,
                                                 int timeout_ms,
@@ -130,7 +130,7 @@ bool LightController::notify_hardware_triggered(const LightChannelParam& channel
   return true;
 }
 
-bool LightController::run_sequence(const LightSequence& sequence,
+bool SimLightController::run_sequence(const LightSequence& sequence,
                                    std::uint64_t trigger_id,
                                    int timeout_ms,
                                    std::string* error_message) {
@@ -145,17 +145,17 @@ bool LightController::run_sequence(const LightSequence& sequence,
   return true;
 }
 
-bool LightController::set_channel(std::uint32_t light_index,
+bool SimLightController::set_channel(std::uint32_t light_index,
                                   const LightChannelParam& param) {
   return initialized_ && light_index == param.light_index && light_index != 0 &&
          param.exposure_us > 0 && param.current_percent > 0.0F;
 }
 
-LightHealth LightController::get_health() const {
+LightHealth SimLightController::get_health() const {
   return LightHealth{initialized_ && !simulate_fault_, simulate_fault_ ? "模拟光源故障" : "simulated"};
 }
 
-void LightController::shutdown_all() {
+void SimLightController::shutdown_all() {
   initialized_ = false;
   hardware_trigger_armed_ = false;
   armed_light_index_ = 0;

@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "control/light_controller.hpp"
+#include "control/ilight_controller.hpp"
 #include "ipc/shm_protocol.hpp"
 
 namespace seat_aoi {

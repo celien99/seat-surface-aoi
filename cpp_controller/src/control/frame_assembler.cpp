@@ -2,6 +2,8 @@
 
 #include <sstream>
 
+#include "control/light_controller.hpp"
+
 #include "common/string_utils.hpp"
 #include "common/time_utils.hpp"
 
@@ -31,7 +33,10 @@ bool FrameAssembler::ensure_initialized() {
   if (initialized_) {
     return true;
   }
-  if (!light_controller_.initialize(config_.light.simulate_fault)) {
+  if (!light_controller_) {
+    light_controller_ = std::make_unique<SimLightController>();
+  }
+  if (!light_controller_->initialize(config_.light.simulate_fault)) {
     return false;
   }
   cameras_.clear();
@@ -93,7 +98,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
     auto& camera = cameras_[camera_index];
 
     // 每个机位开始前重新准备光源序列
-    if (!light_controller_.prepare_sequence(sequence,
+    if (!light_controller_->prepare_sequence(sequence,
                                             trigger.trigger_id,
                                             config_.light_timeout_ms,
                                             error_message)) {
@@ -102,7 +107,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
         oss << "simulated light sequence prepare failed camera_index=" << camera_index;
         *error_message = oss.str();
       }
-      light_controller_.shutdown_all();
+      light_controller_->shutdown_all();
       initialized_ = false;
       cameras_.clear();
       return false;
@@ -114,7 +119,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
 
       if (config_.trigger_sync_mode == TriggerSyncMode::Software) {
         // 软件触发：直接触发光源频闪
-        if (!light_controller_.trigger_channel(light_param,
+        if (!light_controller_->trigger_channel(light_param,
                                                trigger.trigger_id,
                                                light_seq_index,
                                                config_.light_timeout_ms,
@@ -122,14 +127,14 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
           if (error_message != nullptr && error_message->empty()) {
             *error_message = "simulated light channel failed";
           }
-          light_controller_.shutdown_all();
+          light_controller_->shutdown_all();
           initialized_ = false;
           cameras_.clear();
           return false;
         }
       } else if (config_.trigger_sync_mode == TriggerSyncMode::CameraExposureOutput) {
         // ① 光源 arm — 进入预就绪状态
-        if (!light_controller_.arm_hardware_trigger(light_param,
+        if (!light_controller_->arm_hardware_trigger(light_param,
                                                     trigger.trigger_id,
                                                     light_seq_index,
                                                     config_.light_timeout_ms,
@@ -137,7 +142,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
           if (error_message != nullptr && error_message->empty()) {
             *error_message = "simulated light hardware trigger arm failed";
           }
-          light_controller_.shutdown_all();
+          light_controller_->shutdown_all();
           initialized_ = false;
           cameras_.clear();
           return false;
@@ -155,7 +160,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
                 << " light_seq_index=" << light_seq_index;
             *error_message = oss.str();
           }
-          light_controller_.shutdown_all();
+          light_controller_->shutdown_all();
           initialized_ = false;
           cameras_.clear();
           return false;
@@ -173,14 +178,14 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
                 << " light_seq_index=" << light_seq_index;
             *error_message = oss.str();
           }
-          light_controller_.shutdown_all();
+          light_controller_->shutdown_all();
           initialized_ = false;
           cameras_.clear();
           return false;
         }
 
         // ④ 通知光源硬件触发完成
-        if (!light_controller_.notify_hardware_triggered(light_param,
+        if (!light_controller_->notify_hardware_triggered(light_param,
                                                          trigger.trigger_id,
                                                          light_seq_index,
                                                          config_.light_timeout_ms,
@@ -188,7 +193,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
           if (error_message != nullptr && error_message->empty()) {
             *error_message = "simulated light hardware trigger failed";
           }
-          light_controller_.shutdown_all();
+          light_controller_->shutdown_all();
           initialized_ = false;
           cameras_.clear();
           return false;
@@ -198,7 +203,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
           *error_message = std::string("unsupported trigger sync mode ") +
                            trigger_sync_mode_name(config_.trigger_sync_mode);
         }
-        light_controller_.shutdown_all();
+        light_controller_->shutdown_all();
         initialized_ = false;
         cameras_.clear();
         return false;
@@ -218,7 +223,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
               << " light_seq_index=" << light_seq_index;
           *error_message = oss.str();
         }
-        light_controller_.shutdown_all();
+        light_controller_->shutdown_all();
         initialized_ = false;
         cameras_.clear();
         return false;
