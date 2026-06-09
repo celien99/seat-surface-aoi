@@ -67,6 +67,7 @@ class FeatureBuilder:
     ) -> FeatureGroup:
         first_frame = next(iter(cube.frames.values()), None)
         feature_shape = (first_frame.height, first_frame.width) if first_frame is not None else (0, 0)
+        self._assert_feature_shapes(features, feature_shape, cube.camera_id, cube.roi_name)
         tensor = self._build_tensor(features, model_config.input_channels, feature_shape, model_config.input_scale)
         return FeatureGroup(
             sequence_id=cube.sequence_id,
@@ -98,12 +99,14 @@ class FeatureBuilder:
             return [0] * 64
         a = self._sample(image_a)
         b = self._sample(image_b)
+        self._assert_same_length("abs_diff", (len(a), len(b)))
         return [abs(x - y) for x, y in zip(a, b)]
 
     def _max_min(self, images: list[LightFrame | None]) -> list[int]:
         samples = [self._sample(image) for image in images if image is not None]
         if not samples:
             return [0] * 64
+        self._assert_same_length("max_min", tuple(len(sample) for sample in samples))
         return [max(values) - min(values) for values in zip(*samples)]
 
     def _local_contrast(self, image: LightFrame | None) -> list[int]:
@@ -140,21 +143,44 @@ class FeatureBuilder:
             values = features.get(channel_name)
             if values is None:
                 raise ValueError(f"model input channel missing: {channel_name}")
-            channels.append(self._resize_feature(values, height, width, input_scale))
+            channels.append(self._normalize_feature(values, height, width, input_scale))
         return [channels]
 
-    def _resize_feature(self, values: list[int], height: int, width: int, input_scale: float) -> list[list[float]]:
+    def _normalize_feature(self, values: list[int], height: int, width: int, input_scale: float) -> list[list[float]]:
         if not values:
             raise ValueError("feature channel is empty")
         total = height * width
-        if len(values) == total:
-            source = values
-        else:
-            source = [values[(index * len(values)) // total] for index in range(total)]
+        if len(values) != total:
+            raise ValueError(f"feature channel length mismatch: {len(values)} != {total}")
         return [
-            [max(0.0, min(float(source[row * width + col]) / input_scale, 1.0)) for col in range(width)]
+            [max(0.0, min(float(values[row * width + col]) / input_scale, 1.0)) for col in range(width)]
             for row in range(height)
         ]
+
+    def _assert_feature_shapes(
+        self,
+        features: dict[str, list[int]],
+        shape_hw: tuple[int, int],
+        camera_id: str,
+        roi_name: str,
+    ) -> None:
+        height, width = shape_hw
+        expected = height * width
+        if expected <= 0:
+            raise ValueError(f"{camera_id}/{roi_name}: feature shape is invalid: {shape_hw}")
+        mismatched = {
+            name: len(values)
+            for name, values in features.items()
+            if len(values) != expected
+        }
+        if mismatched:
+            raise ValueError(f"{camera_id}/{roi_name}: feature channel length mismatch: {mismatched}, expected={expected}")
+
+    def _assert_same_length(self, operation: str, lengths: tuple[int, ...]) -> None:
+        if not lengths:
+            return
+        if len(set(lengths)) != 1:
+            raise ValueError(f"{operation} feature source length mismatch: {lengths}")
 
     def _evidence_lights_by_channel(self) -> dict[str, tuple[str, ...]]:
         return {
