@@ -20,6 +20,7 @@ from .shm_protocol import (
     FRAME_SLOT_HEADER_SIZE,
     INSPECTION_RESULT_META,
     LIGHT_FRAME_META,
+    MAX_EVIDENCE_LIGHTS,
     MAX_DEFECTS_PER_RESULT,
     PixelFormat,
     RESULT_SHM_NAME,
@@ -398,8 +399,13 @@ class ShmClient:
 
     def _pack_defect(self, defect: DefectResult) -> bytes:
         bbox = tuple(int(v) for v in defect.bbox_xyxy_pixel)
+        if len(defect.evidence_lights) > MAX_EVIDENCE_LIGHTS:
+            raise ValueError(
+                f"too many evidence_lights for defect {defect.defect_id}: "
+                f"{len(defect.evidence_lights)} > {MAX_EVIDENCE_LIGHTS}"
+            )
         evidence = [self._light_index(light) for light in defect.evidence_lights]
-        evidence = (evidence + [0] * 8)[:8]
+        evidence = (evidence + [0] * MAX_EVIDENCE_LIGHTS)[:MAX_EVIDENCE_LIGHTS]
         return struct.pack(
             "<64s64s64sI64s4ifII8iqII",
             encode_cstr(defect.defect_id),
@@ -424,7 +430,7 @@ class ShmClient:
             suffix = camera_id.removeprefix("CAMERA_")
             if suffix.isdigit():
                 return int(suffix)
-        return 0
+        raise ValueError(f"unknown camera_id for result serialization: {camera_id}")
 
     def _light_index(self, light_id: str) -> int:
         if light_id in LIGHT_INDEX_BY_ID:
@@ -433,7 +439,7 @@ class ShmClient:
             suffix = light_id.removeprefix("LIGHT_")
             if suffix.isdigit():
                 return int(suffix)
-        return 0
+        raise ValueError(f"unknown evidence light_id for result serialization: {light_id}")
 
     def _release_frame_slot(self, sequence_id: int) -> None:
         slot_index = self._pending_frame_slots.pop(sequence_id, None)
