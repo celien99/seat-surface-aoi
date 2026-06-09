@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.torch_cache/
+.pytest_cache/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# Environment
+.env
+.env.local
+*.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ML
+*.pt
+*.pth
+*.onnx
+mlruns/
+
+checkpoints/
+
+# Data
+data/
+logs/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Docker
+.docker/
+
+# Misc
+*.log
+.celery/
+
+.claude/
+.codex/
+
+CLAUDE.md
+prompt.md
+
+/models/
+
+outputs/
+sample_images/
