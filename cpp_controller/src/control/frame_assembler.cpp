@@ -1,6 +1,5 @@
 #include "control/frame_assembler.hpp"
 
-#include <future>
 #include <sstream>
 
 #include "common/string_utils.hpp"
@@ -70,23 +69,10 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
     return false;
   }
 
+  // Build light sequence from recipe (one strobe per channel)
   LightSequence sequence;
   for (std::uint32_t light_index : recipe.light_order) {
     sequence.channels.push_back(LightChannelParam{light_index, 800, 1.0F, 60.0F});
-  }
-  if (!light_controller_.prepare_sequence(sequence,
-                                          trigger.trigger_id,
-                                          config_.light_timeout_ms,
-                                          error_message)) {
-    if (error_message != nullptr) {
-      if (error_message->empty()) {
-        *error_message = "simulated light sequence prepare failed";
-      }
-    }
-    light_controller_.shutdown_all();
-    initialized_ = false;
-    cameras_.clear();
-    return false;
   }
 
   SeatJobMeta job{};
@@ -100,42 +86,68 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
 
   std::vector<CapturedFrame> frames;
   frames.reserve(cameras_.size() * sequence.channels.size());
-  for (std::uint32_t light_seq_index = 0; light_seq_index < sequence.channels.size();
-       ++light_seq_index) {
-    const auto light_param = sequence.channels[light_seq_index];
-    if (config_.trigger_sync_mode == TriggerSyncMode::Software) {
-      if (!light_controller_.trigger_channel(light_param,
-                                             trigger.trigger_id,
-                                             light_seq_index,
-                                             config_.light_timeout_ms,
-                                             error_message)) {
-        if (error_message != nullptr && error_message->empty()) {
-          *error_message = "simulated light channel failed";
-        }
-        light_controller_.shutdown_all();
-        initialized_ = false;
-        cameras_.clear();
-        return false;
+
+  // 时分频闪方案：外层按机位串行，内层按光源串行
+  // 每个机位独立完成全部光源频闪序列后，下一个机位才开始
+  for (std::uint32_t camera_index = 0; camera_index < cameras_.size(); ++camera_index) {
+    auto& camera = cameras_[camera_index];
+
+    // 每个机位开始前重新准备光源序列
+    if (!light_controller_.prepare_sequence(sequence,
+                                            trigger.trigger_id,
+                                            config_.light_timeout_ms,
+                                            error_message)) {
+      if (error_message != nullptr && error_message->empty()) {
+        std::ostringstream oss;
+        oss << "simulated light sequence prepare failed camera_index=" << camera_index;
+        *error_message = oss.str();
       }
-    } else if (config_.trigger_sync_mode == TriggerSyncMode::CameraExposureOutput) {
-      if (!light_controller_.arm_hardware_trigger(light_param,
-                                                  trigger.trigger_id,
-                                                  light_seq_index,
-                                                  config_.light_timeout_ms,
-                                                  error_message)) {
-        if (error_message != nullptr && error_message->empty()) {
-          *error_message = "simulated light hardware trigger arm failed";
+      light_controller_.shutdown_all();
+      initialized_ = false;
+      cameras_.clear();
+      return false;
+    }
+
+    for (std::uint32_t light_seq_index = 0; light_seq_index < sequence.channels.size();
+         ++light_seq_index) {
+      const auto light_param = sequence.channels[light_seq_index];
+
+      if (config_.trigger_sync_mode == TriggerSyncMode::Software) {
+        // 软件触发：直接触发光源频闪
+        if (!light_controller_.trigger_channel(light_param,
+                                               trigger.trigger_id,
+                                               light_seq_index,
+                                               config_.light_timeout_ms,
+                                               error_message)) {
+          if (error_message != nullptr && error_message->empty()) {
+            *error_message = "simulated light channel failed";
+          }
+          light_controller_.shutdown_all();
+          initialized_ = false;
+          cameras_.clear();
+          return false;
         }
-        light_controller_.shutdown_all();
-        initialized_ = false;
-        cameras_.clear();
-        return false;
-      }
-      for (std::uint32_t camera_index = 0; camera_index < cameras_.size(); ++camera_index) {
-        if (!cameras_[camera_index].arm(trigger.trigger_id,
-                                        light_param,
-                                        light_seq_index,
-                                        config_.camera_timeout_ms)) {
+      } else if (config_.trigger_sync_mode == TriggerSyncMode::CameraExposureOutput) {
+        // ① 光源 arm — 进入预就绪状态
+        if (!light_controller_.arm_hardware_trigger(light_param,
+                                                    trigger.trigger_id,
+                                                    light_seq_index,
+                                                    config_.light_timeout_ms,
+                                                    error_message)) {
+          if (error_message != nullptr && error_message->empty()) {
+            *error_message = "simulated light hardware trigger arm failed";
+          }
+          light_controller_.shutdown_all();
+          initialized_ = false;
+          cameras_.clear();
+          return false;
+        }
+
+        // ② 当前机位相机 arm — 等待曝光
+        if (!camera.arm(trigger.trigger_id,
+                        light_param,
+                        light_seq_index,
+                        config_.camera_timeout_ms)) {
           if (error_message != nullptr) {
             std::ostringstream oss;
             oss << "simulated camera arm failed camera_index=" << camera_index
@@ -148,69 +160,57 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
           cameras_.clear();
           return false;
         }
-      }
-      if (!cameras_.empty() &&
-          !cameras_[0].simulate_exposure_output(trigger.trigger_id,
-                                                light_param,
-                                                light_seq_index,
-                                                config_.camera_timeout_ms)) {
+
+        // ③ 当前机位相机模拟曝光输出 → 触发光源频闪
+        if (!camera.simulate_exposure_output(trigger.trigger_id,
+                                             light_param,
+                                             light_seq_index,
+                                             config_.camera_timeout_ms)) {
+          if (error_message != nullptr) {
+            std::ostringstream oss;
+            oss << "simulated camera exposure output failed camera_index=" << camera_index
+                << " light_index=" << light_param.light_index
+                << " light_seq_index=" << light_seq_index;
+            *error_message = oss.str();
+          }
+          light_controller_.shutdown_all();
+          initialized_ = false;
+          cameras_.clear();
+          return false;
+        }
+
+        // ④ 通知光源硬件触发完成
+        if (!light_controller_.notify_hardware_triggered(light_param,
+                                                         trigger.trigger_id,
+                                                         light_seq_index,
+                                                         config_.light_timeout_ms,
+                                                         error_message)) {
+          if (error_message != nullptr && error_message->empty()) {
+            *error_message = "simulated light hardware trigger failed";
+          }
+          light_controller_.shutdown_all();
+          initialized_ = false;
+          cameras_.clear();
+          return false;
+        }
+      } else {
         if (error_message != nullptr) {
-          std::ostringstream oss;
-          oss << "simulated camera exposure output failed camera_index=0"
-              << " light_index=" << light_param.light_index
-              << " light_seq_index=" << light_seq_index;
-          *error_message = oss.str();
+          *error_message = std::string("unsupported trigger sync mode ") +
+                           trigger_sync_mode_name(config_.trigger_sync_mode);
         }
         light_controller_.shutdown_all();
         initialized_ = false;
         cameras_.clear();
         return false;
       }
-      if (!light_controller_.notify_hardware_triggered(light_param,
-                                                       trigger.trigger_id,
-                                                       light_seq_index,
-                                                       config_.light_timeout_ms,
-                                                       error_message)) {
-        if (error_message != nullptr && error_message->empty()) {
-          *error_message = "simulated light hardware trigger failed";
-        }
-        light_controller_.shutdown_all();
-        initialized_ = false;
-        cameras_.clear();
-        return false;
-      }
-    } else {
-      if (error_message != nullptr) {
-        *error_message = std::string("unsupported trigger sync mode ") +
-                         trigger_sync_mode_name(config_.trigger_sync_mode);
-      }
-      light_controller_.shutdown_all();
-      initialized_ = false;
-      cameras_.clear();
-      return false;
-    }
 
-    std::vector<std::future<CapturedFrame>> futures;
-    futures.reserve(cameras_.size());
-    for (std::uint32_t camera_index = 0; camera_index < cameras_.size(); ++camera_index) {
-      futures.push_back(std::async(std::launch::async,
-                                   [this, camera_index, trigger_id = trigger.trigger_id,
-                                    light_param, light_seq_index]() {
-                                     CapturedFrame frame;
-                                     if (!cameras_[camera_index].wait_frame(trigger_id,
-                                                                            light_param,
-                                                                            light_seq_index,
-                                                                            &frame,
-                                                                            config_.camera_timeout_ms)) {
-                                       frame.bytes.clear();
-                                     }
-                                     return frame;
-                                   }));
-    }
-
-    for (std::uint32_t camera_index = 0; camera_index < futures.size(); ++camera_index) {
-      CapturedFrame frame = futures[camera_index].get();
-      if (frame.bytes.empty()) {
+      // ⑤ 当前机位单相机采集（串行，不使用 std::async）
+      CapturedFrame frame;
+      if (!camera.wait_frame(trigger.trigger_id,
+                             light_param,
+                             light_seq_index,
+                             &frame,
+                             config_.camera_timeout_ms)) {
         if (error_message != nullptr) {
           std::ostringstream oss;
           oss << "simulated camera frame timeout camera_index=" << camera_index
