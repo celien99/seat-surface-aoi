@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-from python_detector.config.recipe_schema import Recipe, ThresholdConfig
+from python_detector.config.recipe_schema import Recipe
 from python_detector.ipc.data_types import DefectResult, InspectionResult, SeatInspectionJob
 from python_detector.ipc.shm_protocol import ErrorCode
+from python_detector.pipeline.defect_filter import DefectFilter
 from python_detector.pipeline.fusion_engine import FusedResult
 from python_detector.pipeline.quality_gate import QualityReport
 
 
 class RuleEngine:
+    def __init__(self, defect_filter: DefectFilter | None = None) -> None:
+        self.defect_filter = defect_filter or DefectFilter()
+
     def decide(
         self,
         job: SeatInspectionJob,
@@ -21,22 +25,18 @@ class RuleEngine:
 
         defects: list[DefectResult] = []
         decision = "OK"
-        for index, candidate in enumerate(fused_result.candidates):
-            threshold = recipe.thresholds.get(candidate.class_name, ThresholdConfig())
-            if candidate.score >= threshold.ng_score and candidate.area_px >= threshold.min_area_px:
-                defect_decision = "NG"
+        for index, filtered in enumerate(self.defect_filter.filter(fused_result.candidates, recipe)):
+            candidate = filtered.candidate
+            if filtered.decision == "NG":
                 decision = "NG"
-            elif candidate.score >= threshold.recheck_score:
-                defect_decision = "RECHECK"
+            elif filtered.decision == "RECHECK":
                 if decision != "NG":
                     decision = "RECHECK"
-            else:
-                continue
             defects.append(
                 DefectResult(
                     defect_id=f"{job.sequence_id}-{index}",
                     class_name=candidate.class_name,
-                    severity="suspect" if defect_decision == "RECHECK" else "critical",
+                    severity=filtered.severity,
                     camera_id=candidate.camera_id,
                     roi_name=candidate.roi_name,
                     bbox_xyxy_pixel=candidate.bbox_xyxy_pixel,
@@ -44,7 +44,7 @@ class RuleEngine:
                     area_px=candidate.area_px,
                     evidence_lights=candidate.evidence_lights,
                     mask_offset=None,
-                    decision=defect_decision,
+                    decision=filtered.decision,
                 )
             )
 

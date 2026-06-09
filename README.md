@@ -2,7 +2,7 @@
 
 汽车座椅表面缺陷检测系统参考实现。项目以生产线在线 AOI 场景为目标，采用 **C++ 实时主控 + Python 独立检测进程 + 共享内存 IPC** 的架构，覆盖多机位、多光源频闪采集、质量门禁、ROI 处理、多光源特征、模型推理、融合决策和追溯验证链路。
 
-> 当前项目以 V4.0 方案架构图作为目标架构与后续验收口径。已有实现覆盖控制通信骨架和基础检测流水线，PatchCore/FAISS、WideResNet50、ECC 配准等 V4.0 算法能力仍在补齐中。
+> 当前项目以 V4.0 方案架构图作为目标架构与后续验收口径。已有实现覆盖控制通信骨架、基础检测流水线、V4 光源语义映射、Dome ROI 定位接口、ECC 配准、embedding/PCA/PatchCore KNN 参考链路和全链路 trace；真实硬件 SDK、真实模型权重、FAISS 加速索引、MES/报警和平台化监控仍需按现场项目接入。
 
 ![汽车座椅表面缺陷检测系统整体架构图 V4.0](docs/assets/architecture-v4.png)
 
@@ -21,24 +21,24 @@
 | 光学采集抽象 | 支持多机位、多光源模拟采集；默认光源为 `DIFFUSE`、`POLAR_DIFFUSE`、`HIGH_LEFT`、`HIGH_RIGHT` |
 | C++ 主控 | 支持 PLC 抽象、相机/光源模拟驱动、硬触发同步模式、故障注入和保守降级 |
 | 共享内存 IPC | POSIX shared memory，固定布局结构体，frame/result ring buffer，CRC 与协议布局校验 |
-| Python 检测进程 | 支持共享内存读取、质量门禁、ROI 裁剪/透视展开、固定标定配准检查、特征构建、推理、融合、规则判定 |
-| 模型后端 | 支持 fake 后端和 ONNX detection rows 解码；PatchCore 目前仅作为 safety net 配方约束，尚未实现完整 memory bank/FAISS 链路 |
-| 追溯与工具 | 支持 trace、ROI 图落盘、overlay、回放、benchmark 和模拟 IPC 验证 |
+| Python 检测进程 | 支持共享内存读取、质量门禁、Dome ROI 定位接口、ROI 裁剪/透视展开、固定标定或 ECC 配准、特征构建、推理、融合、缺陷过滤和规则判定 |
+| 模型后端 | 支持 fake、ONNX detection rows、统计 embedding、ONNX WideResNet50 embedding、PCA 投影和 PatchCore exact KNN safety net；FAISS 作为 memory bank 元数据和后续加速接入点 |
+| 追溯与工具 | 支持 trace、ROI 定位报告、ECC 报告、embedding/PCA/anomaly summary、ROI 图落盘、overlay、回放、benchmark、PatchCore memory bank 构建和模拟 IPC 验证 |
 
 ## V4.0 对齐状态
 
-当前代码已经对齐 V4.0 的进程边界、共享内存通信和安全降级要求；算法核心仍有明确待补齐项。
+当前代码已经对齐 V4.0 的进程边界、共享内存通信、安全降级要求和主要算法接口；生产落地仍需要接入真实权重、真实硬件和现场平台服务。
 
 | V4.0 架构模块 | 当前实现 |
 |---|---|
-| 1. 光学采集层 | 部分对齐：已有多光源/多机位模拟链路，真实硬件 SDK 集成仍需项目化接入 |
+| 1. 光学采集层 | 部分对齐：已有多光源/多机位模拟链路和 V4 语义光源映射，真实硬件 SDK 集成仍需项目化接入 |
 | 2. 控制与通信层 | 基本对齐：C++ 控制，Python 不控制 PLC/相机/频闪，在线链路使用共享内存 |
-| 3.1 ROI 定位 | 未完全对齐：当前是模板 ROI，不是 Dome 图 YOLO ROI 定位 |
-| 3.2 ROI 裁剪与配准 | 部分对齐：已有 ROI 裁剪/透视展开和固定标定误差检查，尚未实现 ECC 在线配准 |
-| 3.3 特征提取 | 部分对齐：已有多光源手工特征和 ONNX 入口，尚未实现 WideResNet50 共享特征网络 |
-| 3.4 特征融合与降维 | 未完全对齐：尚未实现 Concat 后 PCA 降维和 unified embedding 标准对象 |
-| 3.5 PatchCore 异常检测 | 未完全对齐：尚未实现 memory bank、coreset subsampling、FAISS/KNN 和 anomaly score |
-| 4. 后处理与决策层 | 部分对齐：已有融合与规则判定，缺陷过滤分类器、MES/报警接口仍需扩展 |
+| 3.1 ROI 定位 | 接口对齐：支持 Dome 语义光源、模板/fake YOLO/ONNX YOLO 后端和 YOLO row 到 ROI 模板坐标转换；真实 YOLO 权重需接入 |
+| 3.2 ROI 裁剪与配准 | 基本对齐：已有 ROI 裁剪/透视展开、固定标定误差检查和 ECC 在线配准报告 |
+| 3.3 特征提取 | 接口对齐：已有多光源手工特征、统计 embedding 和 ONNX WideResNet50 embedding 入口；真实权重和层选择需按模型接入 |
+| 3.4 特征融合与降维 | 基本对齐：支持 unified embedding summary、PCA 参数加载、版本校验和投影 |
+| 3.5 PatchCore 异常检测 | 参考链路对齐：支持 memory bank JSON、coreset 工具、KNN anomaly score 和规则阈值；FAISS 加速仍需接入 |
+| 4. 后处理与决策层 | 部分对齐：已有融合、缺陷过滤模块和规则判定，MES/报警接口仍需扩展 |
 | 5. 系统管理维护 | 部分对齐：已有配置、模型、trace 和工具文档，完整数据/模型/监控平台不在当前实现范围内 |
 
 详见 [V4.0 架构对齐说明](docs/v4_architecture_alignment.md)。
@@ -80,6 +80,9 @@ python3 -m tools.replay_dataset --count 3 --write-trace
 # Python benchmark
 python3 -m tools.benchmark_pipeline --count 10
 
+# PatchCore memory bank 构建示例
+python3 -m tools.build_patchcore_memory_bank --input embeddings.jsonl --output models/patchcore_bank.json --version bank_v1 --coreset-ratio 0.1
+
 # C++ 故障注入示例
 cpp_controller/build/seat_aoi_controller --simulate-missing-frame --wait-ms 200
 cpp_controller/build/seat_aoi_controller --simulate-light-fault --wait-ms 200
@@ -91,7 +94,7 @@ cpp_controller/build/seat_aoi_controller --simulate-trigger-timeout --trigger-ti
 ```text
 seat-surface-aoi/
 ├── cpp_controller/      # C++ 主控、采集调度、共享内存 IPC、模拟硬件驱动
-├── python_detector/     # Python 检测进程、算法流水线、配方、测试
+├── python_detector/     # Python 检测进程、V4 ROI/ECC/embedding/PCA/PatchCore 流水线、配方、测试
 ├── docs/                # 架构、协议、部署、硬件和模型文档
 ├── tools/               # 协议校验、模拟 IPC、回放和 benchmark 工具
 └── AGENTS.md            # 项目级协作与工程约束

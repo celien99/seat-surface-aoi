@@ -9,8 +9,10 @@
 - `recipe_id`
 - `sku`
 - `light_order`
+- `v4_lights`
 - `cameras`
 - `quality`
+- `roi_locator`
 - `registration`
 - `thresholds`
 - `models`
@@ -30,6 +32,54 @@ quality:
 ```
 
 `LOW_LEFT`、`LOW_RIGHT`、`LOW_FRONT`、`LOW_REAR`、`HIGH_FRONT`、`HIGH_REAR`、`NIR` 只能作为 ROI 增强光源。未声明依赖这些增强光源的 ROI，不能因为增强光源不存在而中断主流程。
+
+V4.0 语义光源通过 `v4_lights.semantic_to_light_id` 映射到当前协议 light id：
+
+```yaml
+v4_lights:
+  semantic_to_light_id:
+    DOME: DIFFUSE
+    DARKFIELD_L: HIGH_LEFT
+    DARKFIELD_R: HIGH_RIGHT
+    BRIGHTFIELD: POLAR_DIFFUSE
+```
+
+配方加载会校验映射目标必须在 `light_order` 中。`DOME`、`DARKFIELD_L` 和 `DARKFIELD_R` 是必需语义，`BRIGHTFIELD` 可按现场方案映射或移除。
+
+## ROI 定位与配准
+
+ROI 定位使用 `roi_locator`：
+
+```yaml
+roi_locator:
+  backend: template            # template / fake_yolo / onnx_yolo
+  dome_semantic_light: DOME
+  model_path: models/roi.onnx  # fake_yolo/onnx_yolo 需要配置
+  min_confidence: 0.50
+  max_pose_error_px: 4.0
+  output_decode: yolo_xyxy_rows
+  bbox_format: xyxy_pixel
+  class_names: [full]
+  fail_policy: RECHECK
+```
+
+YOLO 输出行格式为 `[x1, y1, x2, y2, score, class_id]`。`class_id` 按 `roi_locator.class_names` 映射到 ROI 模板名；bbox 会转换成 ROI 四点矩形，再进入现有裁剪和透视展开。缺 Dome 图、输出越界、置信度不足或姿态超差返回 `RECHECK`。
+
+配准使用 `registration.method`：
+
+```yaml
+registration:
+  base_light_id: POLAR_DIFFUSE
+  base_light_fallback: DIFFUSE
+  fail_policy: RECHECK
+  method: fixed_calibration    # fixed_calibration / ecc
+  max_iterations: 30
+  convergence_epsilon: 0.0001
+  search_radius_px: 2
+  min_correlation: 0.05
+```
+
+`fixed_calibration` 使用标定文件 `light_alignment.matrix_3x3` 做误差检查。`ecc` 使用在线 ROI 平移搜索参考实现，输出矩阵、相关系数、迭代次数、收敛状态和误差报告；失败时返回 `RECHECK`。
 
 ## 质量门禁字段
 
@@ -69,6 +119,36 @@ ROI 模型使用两个层次：
 - `safety_net_model_key` / `roi_safety_net_models`：未知缺陷安全网，必须引用 `role: safety_net` 的模型。
 
 PatchCore 只能作为 `safety_net`，不能通过 `model_key` 或 `roi_models` 成为主检测模型。
+
+PatchCore KNN 参考后端示例：
+
+```yaml
+models:
+  unknown_safety_net:
+    backend: patchcore_knn
+    model_family: patchcore
+    role: safety_net
+    class_names: [unknown_anomaly]
+    input_channels:
+      - ch0_diffuse
+      - ch1_polar_diffuse
+      - ch2_high_left
+      - ch3_high_right
+      - ch4_high_max_min
+    embedding_backend: onnx_wideresnet50
+    embedding_model_path: models/wideresnet50_embedding.onnx
+    embedding_version: wrn50_seat_v1
+    embedding_dim: 1024
+    embedding_layers: [layer2, layer3]
+    pca_path: models/pca_seat_v1.json
+    pca_version: pca_seat_v1
+    memory_bank_path: models/patchcore_bank_v1.json
+    knn_k: 1
+    anomaly_score_scale: 1.0
+    score_threshold: 0.20
+```
+
+`backend: patchcore_knn` 必须配置 `memory_bank_path` 和非 `none` 的 `embedding_backend`。memory bank、PCA 或 embedding 维度不一致时返回 `ERROR`，不会输出 `OK`。
 
 ## 失败策略
 

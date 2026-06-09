@@ -12,6 +12,30 @@ class RecipeValidationError(ValueError):
 
 
 @dataclass(frozen=True)
+class V4LightConfig:
+    semantic_to_light_id: dict[str, str] = field(
+        default_factory=lambda: {
+            "DOME": "DIFFUSE",
+            "DARKFIELD_L": "HIGH_LEFT",
+            "DARKFIELD_R": "HIGH_RIGHT",
+        }
+    )
+
+
+@dataclass(frozen=True)
+class RoiLocatorConfig:
+    backend: str = "template"
+    dome_semantic_light: str = "DOME"
+    model_path: str | None = None
+    min_confidence: float = 0.5
+    max_pose_error_px: float = 4.0
+    output_decode: str = "yolo_xyxy_rows"
+    bbox_format: str = "xyxy_pixel"
+    class_names: tuple[str, ...] = ("full",)
+    fail_policy: str = "RECHECK"
+
+
+@dataclass(frozen=True)
 class QualityConfig:
     required_lights: tuple[str, ...] = ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")
     max_saturation_ratio: float = 0.01
@@ -33,6 +57,11 @@ class RegistrationConfig:
     base_light_id: str = "POLAR_DIFFUSE"
     base_light_fallback: str = "DIFFUSE"
     fail_policy: str = "RECHECK"
+    method: str = "fixed_calibration"
+    max_iterations: int = 30
+    convergence_epsilon: float = 1e-4
+    search_radius_px: int = 2
+    min_correlation: float = 0.05
 
 
 @dataclass(frozen=True)
@@ -83,6 +112,17 @@ class ModelConfig:
     output_decode: str = "none"
     bbox_format: str = "xyxy_pixel"
     score_threshold: float = 0.0
+    embedding_backend: str = "none"
+    embedding_model_path: str | None = None
+    embedding_version: str = "none"
+    embedding_dim: int = 10
+    embedding_layers: tuple[str, ...] = ()
+    pca_path: str | None = None
+    pca_version: str | None = None
+    memory_bank_path: str | None = None
+    coreset_ratio: float = 1.0
+    knn_k: int = 1
+    anomaly_score_scale: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -99,8 +139,10 @@ class Recipe:
     recipe_id: str
     sku: str
     light_order: tuple[str, ...] = ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")
+    v4_lights: V4LightConfig = field(default_factory=V4LightConfig)
     cameras: tuple[CameraRecipe, ...] = field(default_factory=tuple)
     quality: QualityConfig = field(default_factory=QualityConfig)
+    roi_locator: RoiLocatorConfig = field(default_factory=RoiLocatorConfig)
     registration: RegistrationConfig = field(default_factory=RegistrationConfig)
     fusion: FusionConfig = field(default_factory=FusionConfig)
     thresholds: dict[str, ThresholdConfig] = field(default_factory=dict)
@@ -125,6 +167,9 @@ class Recipe:
             return ()
         model_key = camera.roi_safety_net_models.get(roi_name, camera.safety_net_model_key)
         return () if model_key is None else (model_key,)
+
+    def semantic_light_id(self, semantic_light: str) -> str:
+        return self.v4_lights.semantic_to_light_id.get(semantic_light, semantic_light)
 
 
 class RecipeManager:
@@ -160,7 +205,9 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
     recipe_id = _required_str(data, "recipe_id")
     sku = _required_str(data, "sku")
     light_order = _str_tuple(data.get("light_order", ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")), "light_order")
+    v4_lights = _v4_lights_from_dict(_dict(data.get("v4_lights", {}), "v4_lights"))
     quality = _quality_from_dict(_dict(data.get("quality", {}), "quality"))
+    roi_locator = _roi_locator_from_dict(_dict(data.get("roi_locator", {}), "roi_locator"))
     registration = _registration_from_dict(_dict(data.get("registration", {}), "registration"))
     fusion = _fusion_from_dict(_dict(data.get("fusion", {}), "fusion"))
     cameras = _cameras_from_dict(data.get("cameras", {}), light_order, registration.base_light_id)
@@ -169,6 +216,8 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
     trace = _trace_from_dict(_dict(data.get("trace", {}), "trace"))
 
     _validate_lights(light_order, quality.required_lights)
+    _validate_v4_lights(light_order, v4_lights)
+    _validate_roi_locator_light(v4_lights, roi_locator, light_order)
     _validate_registration_lights(light_order, quality.required_lights, registration)
     _validate_camera_lights(cameras, quality.required_lights, registration)
     _validate_model_refs(cameras, models)
@@ -179,8 +228,10 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
         recipe_id=recipe_id,
         sku=sku,
         light_order=light_order,
+        v4_lights=v4_lights,
         cameras=cameras,
         quality=quality,
+        roi_locator=roi_locator,
         registration=registration,
         fusion=fusion,
         thresholds=thresholds,
@@ -213,11 +264,65 @@ def _quality_from_dict(data: dict[str, Any]) -> QualityConfig:
     )
 
 
+def _v4_lights_from_dict(data: dict[str, Any]) -> V4LightConfig:
+    raw_mapping = data.get(
+        "semantic_to_light_id",
+        {
+            "DOME": "DIFFUSE",
+            "DARKFIELD_L": "HIGH_LEFT",
+            "DARKFIELD_R": "HIGH_RIGHT",
+        },
+    )
+    mapping = {
+        _str(key, f"v4_lights.semantic_to_light_id.{key}"): _str(
+            value,
+            f"v4_lights.semantic_to_light_id.{key}",
+        )
+        for key, value in _dict(raw_mapping, "v4_lights.semantic_to_light_id").items()
+    }
+    required_semantics = ("DOME", "DARKFIELD_L", "DARKFIELD_R")
+    missing = [semantic for semantic in required_semantics if semantic not in mapping]
+    if missing:
+        raise RecipeValidationError(f"v4_lights.semantic_to_light_id 缺少 V4 语义光源: {missing}")
+    return V4LightConfig(semantic_to_light_id=mapping)
+
+
+def _roi_locator_from_dict(data: dict[str, Any]) -> RoiLocatorConfig:
+    backend = _str(data.get("backend", "template"), "roi_locator.backend")
+    if backend not in {"template", "fake_yolo", "onnx_yolo"}:
+        raise RecipeValidationError(f"roi_locator.backend 不支持: {backend}")
+    output_decode = _str(data.get("output_decode", "yolo_xyxy_rows"), "roi_locator.output_decode")
+    if output_decode not in {"yolo_xyxy_rows"}:
+        raise RecipeValidationError("roi_locator.output_decode 必须是 yolo_xyxy_rows")
+    bbox_format = _bbox_format(data.get("bbox_format", "xyxy_pixel"), "roi_locator.bbox_format")
+    return RoiLocatorConfig(
+        backend=backend,
+        dome_semantic_light=_str(data.get("dome_semantic_light", "DOME"), "roi_locator.dome_semantic_light"),
+        model_path=None
+        if data.get("model_path") in (None, "")
+        else _str(data.get("model_path"), "roi_locator.model_path"),
+        min_confidence=_ratio(data.get("min_confidence", 0.5), "roi_locator.min_confidence"),
+        max_pose_error_px=_non_negative_float(data.get("max_pose_error_px", 4.0), "roi_locator.max_pose_error_px"),
+        output_decode=output_decode,
+        bbox_format=bbox_format,
+        class_names=_unique_str_tuple(data.get("class_names", ("full",)), "roi_locator.class_names"),
+        fail_policy=_decision(data.get("fail_policy", "RECHECK"), "roi_locator.fail_policy"),
+    )
+
+
 def _registration_from_dict(data: dict[str, Any]) -> RegistrationConfig:
+    method = _str(data.get("method", "fixed_calibration"), "registration.method")
+    if method not in {"fixed_calibration", "ecc"}:
+        raise RecipeValidationError("registration.method 必须是 fixed_calibration 或 ecc")
     return RegistrationConfig(
         base_light_id=_str(data.get("base_light_id", "POLAR_DIFFUSE"), "registration.base_light_id"),
         base_light_fallback=_str(data.get("base_light_fallback", "DIFFUSE"), "registration.base_light_fallback"),
         fail_policy=_decision(data.get("fail_policy", "RECHECK"), "registration.fail_policy"),
+        method=method,
+        max_iterations=_positive_int(data.get("max_iterations", 30), "registration.max_iterations"),
+        convergence_epsilon=_positive_float(data.get("convergence_epsilon", 1e-4), "registration.convergence_epsilon"),
+        search_radius_px=_non_negative_int(data.get("search_radius_px", 2), "registration.search_radius_px"),
+        min_correlation=_ratio(data.get("min_correlation", 0.05), "registration.min_correlation"),
     )
 
 
@@ -288,7 +393,7 @@ def _models_from_dict(data: dict[str, Any]) -> dict[str, ModelConfig]:
     for model_key, raw in data.items():
         raw = _dict(raw, f"models.{model_key}")
         backend = _str(raw.get("backend", "fake"), f"models.{model_key}.backend")
-        if backend not in {"fake", "onnx"}:
+        if backend not in {"fake", "onnx", "patchcore_knn"}:
             raise RecipeValidationError(f"不支持的模型后端: {backend}")
         model_family = _str(raw.get("model_family", "supervised"), f"models.{model_key}.model_family")
         if model_family not in {"supervised", "patchcore", "efficientad", "yolo_seg", "classifier"}:
@@ -298,6 +403,8 @@ def _models_from_dict(data: dict[str, Any]) -> dict[str, ModelConfig]:
             raise RecipeValidationError(f"模型角色必须是 primary 或 safety_net: {model_key}")
         if model_family == "patchcore" and role != "safety_net":
             raise RecipeValidationError("PatchCore 只能作为 unknown defect safety_net，不能作为全座椅 primary detector")
+        if backend == "patchcore_knn" and model_family != "patchcore":
+            raise RecipeValidationError(f"models.{model_key}.backend=patchcore_knn 必须配置 model_family=patchcore")
         fake_mode = _str(raw.get("fake_mode", "auto"), f"models.{model_key}.fake_mode")
         if fake_mode not in {"auto", "ok", "ng", "recheck"}:
             raise RecipeValidationError(f"models.{model_key}.fake_mode 必须是 auto、ok、ng 或 recheck")
@@ -309,6 +416,14 @@ def _models_from_dict(data: dict[str, Any]) -> dict[str, ModelConfig]:
             f"models.{model_key}.input_channels",
         )
         class_names = _unique_str_tuple(raw.get("class_names", ("scratch",)), f"models.{model_key}.class_names")
+        embedding_backend = _str(raw.get("embedding_backend", "none"), f"models.{model_key}.embedding_backend")
+        if embedding_backend not in {"none", "statistical", "onnx_wideresnet50"}:
+            raise RecipeValidationError(
+                f"models.{model_key}.embedding_backend 必须是 none、statistical 或 onnx_wideresnet50"
+            )
+        coreset_ratio = _ratio(raw.get("coreset_ratio", 1.0), f"models.{model_key}.coreset_ratio")
+        if coreset_ratio <= 0.0:
+            raise RecipeValidationError(f"models.{model_key}.coreset_ratio 必须大于 0")
         models[str(model_key)] = ModelConfig(
             backend=backend,
             model_path=None if raw.get("model_path") in (None, "") else _str(raw.get("model_path"), f"models.{model_key}.model_path"),
@@ -321,6 +436,29 @@ def _models_from_dict(data: dict[str, Any]) -> dict[str, ModelConfig]:
             output_decode=_output_decode(raw.get("output_decode", "none"), f"models.{model_key}.output_decode"),
             bbox_format=_bbox_format(raw.get("bbox_format", "xyxy_pixel"), f"models.{model_key}.bbox_format"),
             score_threshold=_ratio(raw.get("score_threshold", 0.0), f"models.{model_key}.score_threshold"),
+            embedding_backend=embedding_backend,
+            embedding_model_path=None
+            if raw.get("embedding_model_path") in (None, "")
+            else _str(raw.get("embedding_model_path"), f"models.{model_key}.embedding_model_path"),
+            embedding_version=_str(raw.get("embedding_version", "none"), f"models.{model_key}.embedding_version"),
+            embedding_dim=_positive_int(raw.get("embedding_dim", 10), f"models.{model_key}.embedding_dim"),
+            embedding_layers=_optional_unique_str_tuple(
+                raw.get("embedding_layers", ()),
+                f"models.{model_key}.embedding_layers",
+            ),
+            pca_path=None if raw.get("pca_path") in (None, "") else _str(raw.get("pca_path"), f"models.{model_key}.pca_path"),
+            pca_version=None
+            if raw.get("pca_version") in (None, "")
+            else _str(raw.get("pca_version"), f"models.{model_key}.pca_version"),
+            memory_bank_path=None
+            if raw.get("memory_bank_path") in (None, "")
+            else _str(raw.get("memory_bank_path"), f"models.{model_key}.memory_bank_path"),
+            coreset_ratio=coreset_ratio,
+            knn_k=_positive_int(raw.get("knn_k", 1), f"models.{model_key}.knn_k"),
+            anomaly_score_scale=_positive_float(
+                raw.get("anomaly_score_scale", 1.0),
+                f"models.{model_key}.anomaly_score_scale",
+            ),
         )
     if "default" not in models:
         models["default"] = ModelConfig()
@@ -346,6 +484,27 @@ def _validate_lights(light_order: tuple[str, ...], required_lights: tuple[str, .
     missing = [light for light in required_lights if light not in light_order]
     if missing:
         raise RecipeValidationError(f"required_lights 不在 light_order 中: {missing}")
+
+
+def _validate_v4_lights(light_order: tuple[str, ...], v4_lights: V4LightConfig) -> None:
+    for semantic, light_id in v4_lights.semantic_to_light_id.items():
+        if light_id not in light_order:
+            raise RecipeValidationError(f"v4_lights.semantic_to_light_id.{semantic} 不在 light_order 中: {light_id}")
+
+
+def _validate_roi_locator_light(
+    v4_lights: V4LightConfig,
+    roi_locator: RoiLocatorConfig,
+    light_order: tuple[str, ...],
+) -> None:
+    dome_light = v4_lights.semantic_to_light_id.get(roi_locator.dome_semantic_light, roi_locator.dome_semantic_light)
+    if dome_light not in light_order:
+        raise RecipeValidationError(
+            f"roi_locator.dome_semantic_light 映射光源不在 light_order 中: "
+            f"{roi_locator.dome_semantic_light}->{dome_light}"
+        )
+    if roi_locator.backend in {"fake_yolo", "onnx_yolo"} and roi_locator.model_path in (None, ""):
+        raise RecipeValidationError(f"roi_locator.backend={roi_locator.backend} 必须配置 model_path")
 
 
 def _validate_registration_lights(
@@ -421,6 +580,11 @@ def _validate_model_thresholds(models: dict[str, ModelConfig], thresholds: dict[
         missing = [class_name for class_name in model.class_names if class_name not in thresholds]
         if missing:
             raise RecipeValidationError(f"models.{model_key}.class_names 缺少显式 thresholds 配置: {missing}")
+        if model.backend == "patchcore_knn":
+            if model.memory_bank_path in (None, ""):
+                raise RecipeValidationError(f"models.{model_key}.backend=patchcore_knn 必须配置 memory_bank_path")
+            if model.embedding_backend == "none":
+                raise RecipeValidationError(f"models.{model_key}.backend=patchcore_knn 必须配置 embedding_backend")
 
 
 def _required_str(data: dict[str, Any], key: str) -> str:
@@ -483,6 +647,14 @@ def _unique_str_tuple(value: Any, name: str) -> tuple[str, ...]:
     if duplicated:
         raise RecipeValidationError(f"{name} 存在重复项: {duplicated}")
     return result
+
+
+def _optional_unique_str_tuple(value: Any, name: str) -> tuple[str, ...]:
+    if value in (None, ()):
+        return ()
+    if isinstance(value, list) and not value:
+        return ()
+    return _unique_str_tuple(value, name)
 
 
 def _float(value: Any, name: str) -> float:

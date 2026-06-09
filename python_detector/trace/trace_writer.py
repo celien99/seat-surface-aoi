@@ -35,6 +35,7 @@ class TraceWriter:
         self._write_json(trace_dir / "result.json", result)
         self._write_json(trace_dir / "recipe_summary.json", {"recipe_id": recipe.recipe_id, "sku": recipe.sku})
         self._write_json(trace_dir / "quality_report.json", context.get("quality_report"))
+        self._write_json(trace_dir / "roi_location_report.json", context.get("roi_location_reports", []))
         self._write_json(trace_dir / "registration_report.json", context.get("registration_reports", []))
         self._write_json(trace_dir / "feature_summary.json", context.get("feature_summary", []))
         self._write_json(trace_dir / "fusion_summary.json", context.get("fusion_summary", {}))

@@ -6,6 +6,9 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from python_detector.config.recipe_schema import ModelConfig, Recipe
+from python_detector.models.embedding import EmbeddingExtractor
+from python_detector.models.patchcore import PatchCoreKnnIndex
+from python_detector.models.pca import PcaProjector
 from python_detector.pipeline.feature_builder import FeatureGroup
 
 
@@ -204,9 +207,97 @@ class OnnxModel:
         return mapped
 
 
+class PatchCoreModel:
+    def __init__(
+        self,
+        config: ModelConfig,
+        embedding_extractor: EmbeddingExtractor | None = None,
+        pca_projector: PcaProjector | None = None,
+        knn_index: PatchCoreKnnIndex | None = None,
+    ) -> None:
+        if config.embedding_backend == "none":
+            raise RuntimeError("PatchCore 必须配置 embedding_backend")
+        if not config.memory_bank_path:
+            raise RuntimeError("PatchCore memory_bank_path 不能为空")
+        self.config = config
+        self.embedding_extractor = embedding_extractor or EmbeddingExtractor()
+        self.pca_projector = pca_projector or PcaProjector()
+        self.knn_index = knn_index or PatchCoreKnnIndex()
+
+    def run(self, feature_group: FeatureGroup) -> list[DefectCandidate]:
+        embedding = self.embedding_extractor.extract(feature_group, self.config)
+        embedding_values = embedding.values
+        feature_group.embedding_summary = {
+            "backend": embedding.backend,
+            "version": embedding.version,
+            "embedding_dim": len(embedding.values),
+            "layer_names": list(embedding.layer_names),
+            "input_shape_nchw": list(embedding.input_shape_nchw) if embedding.input_shape_nchw is not None else None,
+        }
+        if self.config.pca_path:
+            pca = self.pca_projector.project(embedding_values, self.config.pca_path, self.config.pca_version)
+            embedding_values = pca.values
+            feature_group.pca_summary = {
+                "version": pca.version,
+                "input_dim": pca.input_dim,
+                "output_dim": pca.output_dim,
+            }
+        score = self.knn_index.score(
+            embedding_values,
+            self.config.memory_bank_path,
+            self.config.knn_k,
+            self.config.anomaly_score_scale,
+            self.config.pca_version,
+        )
+        feature_group.anomaly_summary = {
+            "model_family": self.config.model_family,
+            "memory_bank_version": score.version,
+            "backend": score.backend,
+            "anomaly_score": score.anomaly_score,
+            "nearest_distance": score.nearest_distance,
+            "knn_distances": list(score.knn_distances),
+            "memory_bank_size": score.memory_bank_size,
+            "embedding_dim": score.embedding_dim,
+        }
+        if score.anomaly_score < self.config.score_threshold:
+            return []
+        bbox = feature_group.roi_bbox_xyxy_pixel
+        area_px = max(bbox[2] - bbox[0] + 1, 0) * max(bbox[3] - bbox[1] + 1, 0)
+        if area_px <= 0:
+            height, width = feature_group.feature_shape_hw
+            bbox = _map_roi_bbox_to_source((0.0, 0.0, float(width - 1), float(height - 1)), feature_group)
+            area_px = max(bbox[2] - bbox[0] + 1, 0) * max(bbox[3] - bbox[1] + 1, 0)
+        class_name = self.config.class_names[0] if self.config.class_names else "unknown_anomaly"
+        return [
+            DefectCandidate(
+                camera_id=feature_group.camera_id,
+                roi_name=feature_group.roi_name,
+                class_name=class_name,
+                score=score.anomaly_score,
+                bbox_xyxy_pixel=bbox,
+                area_px=area_px,
+                evidence_lights=self._evidence_lights(feature_group),
+            )
+        ]
+
+    def _evidence_lights(self, feature_group: FeatureGroup) -> list[str]:
+        evidence: list[str] = []
+        for channel_name in feature_group.tensor_channel_names:
+            evidence.extend(feature_group.evidence_lights_by_channel.get(channel_name, ()))
+        return list(dict.fromkeys(evidence)) or ["DIFFUSE"]
+
+
 class ModelRegistry:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        embedding_extractor: EmbeddingExtractor | None = None,
+        pca_projector: PcaProjector | None = None,
+        patchcore_index: PatchCoreKnnIndex | None = None,
+    ) -> None:
         self._cache: dict[str, ModelBackend] = {}
+        self.embedding_extractor = embedding_extractor or EmbeddingExtractor()
+        self.pca_projector = pca_projector or PcaProjector()
+        self.patchcore_index = patchcore_index or PatchCoreKnnIndex()
 
     def get_model(self, model_key: str, recipe: Recipe) -> ModelBackend:
         config = recipe.models.get(model_key)
@@ -231,6 +322,17 @@ class ModelRegistry:
             config.output_decode,
             config.bbox_format,
             float(config.score_threshold),
+            config.embedding_backend,
+            config.embedding_model_path or "",
+            config.embedding_version,
+            int(config.embedding_dim),
+            config.embedding_layers,
+            config.pca_path or "",
+            config.pca_version or "",
+            config.memory_bank_path or "",
+            float(config.coreset_ratio),
+            int(config.knn_k),
+            float(config.anomaly_score_scale),
         )
 
     def _create_model(self, config: ModelConfig) -> ModelBackend:
@@ -238,6 +340,8 @@ class ModelRegistry:
             return FakeModel(config.fake_mode)
         if config.backend == "onnx":
             return OnnxModel(config)
+        if config.backend == "patchcore_knn":
+            return PatchCoreModel(config, self.embedding_extractor, self.pca_projector, self.patchcore_index)
         raise RuntimeError(f"不支持的模型后端: {config.backend}")
 
 

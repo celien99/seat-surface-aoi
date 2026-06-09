@@ -5,6 +5,11 @@ from dataclasses import dataclass
 from python_detector.config.calibration_manager import Calibration, CalibrationManager, RoiTemplate
 from python_detector.config.recipe_schema import Recipe
 from python_detector.ipc.data_types import CameraBundle, LightFrame, SeatInspectionJob
+from python_detector.pipeline.roi_locator import RoiLocationReport, RoiLocator
+
+
+class PreprocessRecheckError(ValueError):
+    """预处理阶段发现可复检的不确定状态。"""
 
 
 @dataclass
@@ -13,11 +18,17 @@ class PreparedBundle:
     calibration: Calibration
     rois: dict[str, dict[str, LightFrame]]
     roi_templates: dict[str, RoiTemplate]
+    roi_location_report: RoiLocationReport | None = None
 
 
 class Preprocessor:
-    def __init__(self, calibration_manager: CalibrationManager | None = None) -> None:
+    def __init__(
+        self,
+        calibration_manager: CalibrationManager | None = None,
+        roi_locator: RoiLocator | None = None,
+    ) -> None:
         self.calibration_manager = calibration_manager or CalibrationManager()
+        self.roi_locator = roi_locator or RoiLocator()
 
     def run(self, job: SeatInspectionJob, recipe: Recipe) -> list[PreparedBundle]:
         prepared: list[PreparedBundle] = []
@@ -32,19 +43,28 @@ class Preprocessor:
             )
             decoded = self._decode_frames(bundle, recipe)
             self._assert_calibration_matches(decoded, calibration)
+            roi_templates, roi_report = self.roi_locator.locate(
+                bundle.camera_id,
+                decoded,
+                calibration.roi_templates,
+                recipe,
+            )
+            if not roi_report.is_pass:
+                raise PreprocessRecheckError(f"{bundle.camera_id}: ROI 定位失败: {roi_report.message}")
             rois = {
                 roi_name: {
                     light_id: self._crop_to_roi(frame, roi)
                     for light_id, frame in decoded.items()
                 }
-                for roi_name, roi in calibration.roi_templates.items()
+                for roi_name, roi in roi_templates.items()
             }
             prepared.append(
                 PreparedBundle(
                     camera_id=bundle.camera_id,
                     calibration=calibration,
                     rois=rois,
-                    roi_templates=calibration.roi_templates,
+                    roi_templates=roi_templates,
+                    roi_location_report=roi_report,
                 )
             )
         return prepared

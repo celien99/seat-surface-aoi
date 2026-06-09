@@ -8,7 +8,7 @@ from python_detector.ipc.shm_protocol import ErrorCode
 from python_detector.models.inference_engine import InferenceEngine, ModelInferenceError, ModelRegistry
 from python_detector.pipeline.feature_builder import FeatureBuilder
 from python_detector.pipeline.fusion_engine import FusionEngine
-from python_detector.pipeline.preprocessor import Preprocessor
+from python_detector.pipeline.preprocessor import PreprocessRecheckError, Preprocessor
 from python_detector.pipeline.quality_gate import ImageQualityGate
 from python_detector.pipeline.reflectance_cube import ReflectanceCubeBuilder
 from python_detector.pipeline.rule_engine import RuleEngine
@@ -59,6 +59,9 @@ class InspectionPipeline:
                     self.last_context = {
                         "quality_report": quality_report,
                         "prepared_bundles": prepared,
+                        "roi_location_reports": [
+                            bundle.roi_location_report for bundle in prepared if bundle.roi_location_report is not None
+                        ],
                         "registration_reports": [cube.registration for cube in cubes],
                         "timings": timings,
                     }
@@ -77,6 +80,9 @@ class InspectionPipeline:
             self.last_context = {
                 "quality_report": quality_report,
                 "prepared_bundles": prepared,
+                "roi_location_reports": [
+                    bundle.roi_location_report for bundle in prepared if bundle.roi_location_report is not None
+                ],
                 "registration_reports": [cube.registration for cube in cubes],
                 "feature_summary": [
                     {
@@ -91,6 +97,9 @@ class InspectionPipeline:
                             group.feature_shape_hw[0],
                             group.feature_shape_hw[1],
                         ],
+                        "embedding_summary": group.embedding_summary,
+                        "pca_summary": group.pca_summary,
+                        "anomaly_summary": group.anomaly_summary,
                     }
                     for group in features
                 ],
@@ -110,6 +119,22 @@ class InspectionPipeline:
                 "error": exc.context(),
             }
             return self.rule_engine.make_error_result(job, ErrorCode.INTERNAL_ERROR, elapsed_ms)
+        except PreprocessRecheckError as exc:
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
+            timings["total_ms"] = elapsed_ms
+            quality_report = locals().get("quality_report")
+            if quality_report is not None:
+                quality_report.is_pass = False
+                quality_report.messages.append(str(exc))
+            self.last_context = {
+                "quality_report": quality_report,
+                "timings": timings,
+                "error": {
+                    "type": exc.__class__.__name__,
+                    "message": str(exc),
+                },
+            }
+            return self.rule_engine.make_quality_fail_result(job, quality_report, elapsed_ms)
         except Exception as exc:
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             timings["total_ms"] = elapsed_ms

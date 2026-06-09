@@ -31,6 +31,24 @@ python_detector/config/roi/default_roi.yaml
 - 生产环境默认策略应为全局 ROI 定位 + ROI 局部对齐；固定 identity 或全局单应矩阵只适用于当前模拟环境、标准样件验证或刚性夹具条件。
 - ROI 定位失败、局部对齐误差超过配方阈值、ROI 模板缺失或坐标越界时不能输出 `OK`。
 
+## V4 Dome ROI 定位
+
+配方 `roi_locator.dome_semantic_light` 默认使用 `DOME`，再通过 `v4_lights.semantic_to_light_id` 映射到实际 light id，例如默认 `DOME -> DIFFUSE`。
+
+支持三类 ROI 定位后端：
+
+- `template`：使用 ROI 模板，适用于模拟、夹具稳定样件或兜底验证。
+- `fake_yolo`：按模板生成可追溯 YOLO 行，用于测试 YOLO 输出到 ROI 模板坐标系的转换链路。
+- `onnx_yolo`：读取 Dome ROI 图，调用 ONNX 模型，解析 `[x1, y1, x2, y2, score, class_id]`。
+
+`class_id` 按 `roi_locator.class_names` 映射到 ROI 名称。置信度不足、姿态误差超过 `max_pose_error_px`、bbox 越界、Dome 图缺失或类别未映射时返回 `RECHECK`。
+
+## ECC 配准
+
+`registration.method: fixed_calibration` 使用标定矩阵检查角点误差。
+
+`registration.method: ecc` 使用在线 ROI 平移搜索参考实现，输出每个光源相对 `base_light_id` 的矩阵、平移量、相关系数、迭代次数、收敛状态和误差。相关系数低于 `min_correlation`、ROI 尺寸不一致或误差超过 `quality.max_registration_error_px` 时返回 `RECHECK`。
+
 ## 测试机更新标定流程
 
 1. 按机位生成独立标定文件。

@@ -10,6 +10,7 @@
 - `result.json`
 - `recipe_summary.json`
 - `quality_report.json`
+- `roi_location_report.json`
 - `registration_report.json`
 - `feature_summary.json`
 - `fusion_summary.json`
@@ -22,6 +23,9 @@
 
 - `.pgm` 保存 ROI 单光源灰度图，像素来自预处理后的 MONO8 ROI。
 - `.ppm` 保存缺陷 overlay，在 ROI 图上以红色框绘制 `bbox_xyxy_pixel` 通过 `source_to_roi_matrix` 映射后的缺陷框；轴对齐 ROI 会退化为普通平移映射。
+- `roi_location_report.json` 保存 Dome ROI 定位后端、Dome 映射光源、ROI 置信度、姿态误差和定位来源。
+- `registration_report.json` 在 `method: ecc` 时包含每个非基准光源的矩阵、平移量、相关系数、迭代次数、收敛状态和误差。
+- `feature_summary.json` 包含 tensor shape、输入通道、evidence lights，以及 PatchCore safety net 的 `embedding_summary`、`pca_summary` 和 `anomaly_summary`。
 - `error.json` 保存检测流水线或模型异常的类型和消息；无异常时为空对象。
 - 如果配方默认不保存 OK，OK 样本不会落盘图像；`NG`、`RECHECK`、`ERROR` 按默认策略保存。
 

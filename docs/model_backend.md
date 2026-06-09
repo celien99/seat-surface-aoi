@@ -4,6 +4,12 @@
 
 - `fake`：默认后端，用于模拟 OK、RECHECK、NG 分支。
 - `onnx`：可选后端。未安装 `onnxruntime`、模型路径为空、模型文件不存在、输入 tensor 缺失、输出解码未配置或输出解析失败时，返回保守错误。
+- `patchcore_knn`：PatchCore safety net 参考后端。读取 memory bank JSON，使用 unified embedding 和可选 PCA 投影执行 exact KNN，输出 `unknown_anomaly` anomaly score。
+
+embedding 支持两类后端：
+
+- `statistical`：统计特征参考后端，用于测试和无真实权重时的可验证链路。
+- `onnx_wideresnet50`：WideResNet50 或等价共享特征网络 ONNX 入口，要求 `embedding_model_path`、`embedding_dim`、`embedding_version` 与模型产物一致。
 
 ## 模型输入约定
 
@@ -68,10 +74,27 @@ models:
     bbox_format: xyxy_pixel
     score_threshold: 0.2
   unknown_safety_net:
-    backend: onnx
-    model_path: models/patchcore_unknown.onnx
+    backend: patchcore_knn
     model_family: patchcore
     role: safety_net
+    class_names: [unknown_anomaly]
+    input_channels:
+      - ch0_diffuse
+      - ch1_polar_diffuse
+      - ch2_high_left
+      - ch3_high_right
+      - ch4_high_max_min
+    embedding_backend: onnx_wideresnet50
+    embedding_model_path: models/wideresnet50_embedding.onnx
+    embedding_version: wrn50_seat_v1
+    embedding_dim: 1024
+    embedding_layers: [layer2, layer3]
+    pca_path: models/pca_seat_v1.json
+    pca_version: pca_seat_v1
+    memory_bank_path: models/patchcore_bank_v1.json
+    knn_k: 1
+    anomaly_score_scale: 1.0
+    score_threshold: 0.20
 ```
 
 ## 模型角色
@@ -88,6 +111,46 @@ models:
 - 缺模型、后端异常、输出 decode 失败不能输出 `OK`。
 - 每个 ROI 应明确主模型和可选安全网模型，不允许用单一 PatchCore 覆盖全座椅主检。
 - 模型缓存按 `model_key`、后端、路径、fake 模式、模型家族、角色、输入通道、输入缩放、类别列表、输出解码、bbox 格式和分数阈值隔离；同名模型在不同配方中改变任一关键配置时会创建独立后端实例。
+- PatchCore 配置还会把 embedding 后端、embedding 版本、embedding 维度、PCA 路径/版本、memory bank 路径、KNN 参数和 anomaly score scale 纳入缓存隔离。
+
+## PatchCore memory bank
+
+离线构建命令：
+
+```bash
+python3 -m tools.build_patchcore_memory_bank \
+  --input embeddings.jsonl \
+  --output models/patchcore_bank_v1.json \
+  --version bank_v1 \
+  --coreset-ratio 0.1 \
+  --pca-version pca_seat_v1
+```
+
+输入 `embeddings.jsonl` 每行可以是数字数组，也可以是包含 `embedding` 字段的 JSON object。输出 JSON 包含：
+
+- `version`
+- `model_family: patchcore`
+- `embedding_dim`
+- `coreset_ratio`
+- `pca_version`
+- `faiss_enabled`
+- `vectors`
+
+当前在线后端使用 exact KNN，不依赖 FAISS；`faiss_enabled` 是部署环境接入 FAISS 索引时的版本元数据。memory bank 缺失、维度不匹配、PCA 版本不匹配或 vectors 为空都会返回保守错误。
+
+## PCA 参数
+
+PCA 参数文件为 JSON：
+
+```json
+{
+  "version": "pca_seat_v1",
+  "mean": [0.0, 0.0],
+  "components": [[1.0, 0.0], [0.0, 1.0]]
+}
+```
+
+在线投影会校验 `version`、输入维度、均值维度和 component 维度，任何不一致都不会输出 `OK`。
 
 ## ONNX detection_rows 输出
 

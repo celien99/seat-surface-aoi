@@ -13,7 +13,7 @@
 - 在线图像与结果通过 POSIX 共享内存传输，不使用 TCP。
 - 协议错误、CRC 错误、缺帧、超时、质量门禁失败和模型异常都不会输出 `OK`。
 
-但当前实现还不是完整 V4.0 算法方案。项目目前更接近「可验证的工业 AOI 参考骨架 + 基础算法流水线」，而不是已经完成的 PatchCore 异常检测生产算法。
+当前实现已经从「工业 AOI 参考骨架 + 基础算法流水线」推进到「V4.0 主要算法接口可验证参考链路」。真实产线仍需要接入设备 SDK、真实 YOLO/WideResNet50/PatchCore 权重、FAISS 加速索引、MES/报警和监控平台。
 
 ## 分层对齐
 
@@ -32,12 +32,12 @@
 
 - 已在 C++ 配置和 Python 配方中支持多光源顺序。
 - 默认主链路使用 `DIFFUSE`、`POLAR_DIFFUSE`、`HIGH_LEFT`、`HIGH_RIGHT`。
+- Python 配方通过 `v4_lights.semantic_to_light_id` 统一 V4 语义光源，默认映射为 `DOME -> DIFFUSE`、`DARKFIELD_L -> HIGH_LEFT`、`DARKFIELD_R -> HIGH_RIGHT`、`BRIGHTFIELD -> POLAR_DIFFUSE`。
 - C++ 模拟链路支持 `camera_exposure_output` 硬触发同步模式。
 - 当前硬件 SDK 接入仍是可替换接口和模拟驱动，不是完整真实产线驱动。
 
 差距：
 
-- 光源命名和图中 `Dome`、`DarkField-L/R`、`BrightField` 语义尚未完全统一。
 - 真实光源控制器、工业相机 SDK、PLC/编码器现场协议仍需按设备型号接入。
 - 微秒级抖动指标需要真实硬件压测证明。
 
@@ -71,13 +71,13 @@
 当前状态：
 
 - 已支持 ROI 模板加载、轴对齐矩形裁剪和四点多边形透视展开。
-- 当前 ROI 来源是标定/模板，不是 YOLO 在线定位。
+- 已增加 `RoiLocator`，支持 `template`、`fake_yolo` 和 `onnx_yolo` 后端。
+- ROI 定位只读取 `DOME` 语义光源映射出的图像；YOLO 输出按 `[x1, y1, x2, y2, score, class_id]` 解码，并通过 `roi_locator.class_names` 映射到 ROI 模板。
+- ROI 置信度不足、姿态误差超差、输出越界或缺 Dome 图会返回 `RECHECK`，不会输出 `OK`。
 
 差距：
 
-- 需要增加 Dome 图 ROI detector。
-- 需要定义 YOLO 输出到 ROI 模板/坐标系的转换规则。
-- ROI 定位失败、置信度不足、姿态超差必须返回 `RECHECK`。
+- 真实 YOLO ROI 权重、输入尺寸和类别训练集仍需按现场数据接入与验证。
 
 #### 3.2 ROI 裁剪与图像配准
 
@@ -93,11 +93,11 @@
 - 已支持所有光源 ROI 裁剪。
 - 已支持透视展开和 ROI 到原图的双向矩阵。
 - 已使用标定文件中的 `light_alignment.matrix_3x3` 计算配准误差。
+- 已支持 `registration.method: ecc`，通过 ROI 平移搜索输出 ECC 风格配准矩阵、相关系数、迭代次数、收敛状态和误差报告。
 
 差距：
 
-- 当前方法是固定标定矩阵检查，不是 ECC 在线配准。
-- 需要实现 ECC 配准策略、最大迭代次数、收敛阈值、失败策略和配准质量报告。
+- 当前 ECC 为轻量参考实现，真实产线可替换为 OpenCV ECC 或设备侧高精度配准并继续复用相同报告字段。
 
 #### 3.3 特征提取
 
@@ -110,11 +110,11 @@
 
 - 已构建多光源手工特征，包括 diffuse、polar diffuse、high left/right、high max-min、可选 low dark 差分、局部对比和高光抑制特征。
 - 已具备 ONNX 推理入口和 fake 后端。
+- 已支持统计 embedding 参考后端和 `onnx_wideresnet50` embedding 入口，配置中可声明 embedding 版本、维度和特征层。
 
 差距：
 
-- 需要实现 WideResNet50 或等价 embedding 提取后端。
-- 需要明确各光源输入归一化、特征层选择、embedding 维度和批处理策略。
+- 真实 WideResNet50 权重、输入归一化、特征层选择和批处理策略仍需按训练产物接入。
 
 #### 3.4 特征融合与降维
 
@@ -128,11 +128,12 @@
 
 - 已能按模型配置生成 NCHW tensor。
 - 已记录 feature summary 和 evidence lights。
+- 已实现 unified embedding summary。
+- 已实现 PCA JSON 参数加载、版本校验、输入/输出维度校验和投影。
 
 差距：
 
-- 尚未实现统一 embedding 对象。
-- 尚未实现 PCA 训练参数加载、投影、版本校验和维度校验。
+- PCA 参数训练与版本发布仍需纳入离线模型管理流程。
 
 #### 3.5 PatchCore 异常检测
 
@@ -146,15 +147,15 @@
 
 当前状态：
 
-- 配方 schema 已允许 `patchcore` 模型族，并限制只能作为 `safety_net`。
-- 当前实际推理后端只有 `fake` 和 `onnx`。
+- 配方 schema 允许 `patchcore` 模型族，并限制只能作为 `safety_net`。
+- 已支持 `patchcore_knn` 后端，读取 memory bank JSON，执行 exact KNN，输出 anomaly score。
+- 已提供 `tools.build_patchcore_memory_bank`，支持从 JSONL embedding 构建 memory bank 并保存 coreset 参数、PCA 版本和 FAISS 元数据。
+- anomaly score 会作为 `unknown_anomaly` 候选进入融合、缺陷过滤和规则引擎，低置信但可疑样本走 `RECHECK`。
 
 差距：
 
-- 需要实现 PatchCore 训练工具。
-- 需要保存 memory bank、coreset 参数、PCA 参数和版本元数据。
-- 需要实现 FAISS/KNN 推理后端。
-- 需要定义 anomaly score 到 `OK`、`RECHECK`、`NG` 的阈值策略。
+- 当前在线 KNN 为标准库 exact KNN 参考实现；FAISS 加速索引仍需在安装 FAISS 的部署环境接入。
+- 正常样本库、coreset 策略和阈值曲线仍需通过现场数据训练与验证。
 
 ### 4. 后处理与决策层
 
@@ -167,12 +168,12 @@
 当前状态：
 
 - 已实现候选融合/NMS。
+- 已将缺陷过滤抽为 `DefectFilter`，便于后续接入二阶段分类器或工艺过滤规则。
 - 已实现类别阈值、面积阈值、`OK`、`NG`、`RECHECK`、`ERROR` 判定。
 - 已支持 trace、ROI 图和缺陷 overlay。
 
 差距：
 
-- 缺陷过滤分类器仍需独立模块化。
 - MES、报警输出和可视化界面不是当前仓库完整实现。
 - 多 ROI 关联规则需要按实际缺陷工艺继续扩展。
 
@@ -188,6 +189,7 @@
 
 - 已有配方、标定、模型配置、trace、回放和 benchmark 文档。
 - 已有模型缓存隔离、trace 保存策略和测试机集成清单。
+- trace 已扩展 ROI 定位、ECC、embedding、PCA、KNN 和 anomaly score 摘要。
 
 差距：
 
@@ -196,15 +198,13 @@
 
 ## 推荐补齐顺序
 
-1. 统一 V4.0 光源命名与配方字段，明确 `DOME`、`DARKFIELD_L`、`DARKFIELD_R`、`BRIGHTFIELD` 到当前 light id 的映射。
-2. 增加 Dome 图 YOLO ROI 定位后端，并保留模板 ROI 作为模拟和兜底模式。
-3. 实现 ECC ROI 配准模块，输出配准矩阵、收敛状态和误差指标。
-4. 增加 WideResNet50 embedding 后端，定义多光源特征层和统一 embedding 数据结构。
-5. 增加 PCA 参数加载、版本校验和投影模块。
-6. 实现 PatchCore memory bank 构建、coreset subsampling 和 FAISS/KNN 推理。
-7. 将 anomaly score 接入规则引擎，并补齐 `RECHECK` 优先的阈值策略。
-8. 扩展 trace，使 ROI 定位、ECC、embedding、PCA、KNN 和 anomaly score 全链路可追溯。
-9. 接入真实相机、频闪和 PLC 后做节拍、稳定性和故障注入压测。
+1. 接入真实相机、频闪、PLC/编码器和光源控制器 SDK，并做节拍、稳定性和故障注入压测。
+2. 训练并接入真实 Dome YOLO ROI 定位权重，固化 ROI 类别、置信度、姿态误差和复检阈值。
+3. 用现场数据验证 ECC 参数，必要时替换为 OpenCV ECC 或更高精度配准后端。
+4. 接入真实 WideResNet50 embedding 权重，固化输入归一化、特征层、embedding 维度和批处理策略。
+5. 基于正常样本训练 PCA 与 PatchCore memory bank，产出阈值曲线和按缺陷类别/ROI/材质/颜色的评估报告。
+6. 在部署环境接入 FAISS 加速索引，并验证 KNN 延迟、内存占用和异常兜底。
+7. 按现场工艺扩展多 ROI 关联规则、MES/报警接口、数据平台、模型版本平台和系统监控服务。
 
 ## 当前验证命令
 

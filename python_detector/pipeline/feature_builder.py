@@ -21,6 +21,9 @@ class FeatureGroup:
     evidence_lights_by_channel: dict[str, tuple[str, ...]] = field(default_factory=dict)
     roi_to_source_matrix: tuple[float, ...] | None = None
     source_to_roi_matrix: tuple[float, ...] | None = None
+    embedding_summary: dict[str, object] | None = None
+    pca_summary: dict[str, object] | None = None
+    anomaly_summary: dict[str, object] | None = None
 
 
 class FeatureBuilder:
