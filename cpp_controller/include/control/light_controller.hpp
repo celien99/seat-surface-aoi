@@ -1,61 +1,40 @@
 #pragma once
 
-#include <cstdint>
-#include <string>
-#include <vector>
+#include "control/ilight_controller.hpp"
 
 namespace seat_aoi {
 
-enum class TriggerSyncMode : std::uint32_t {
-  Software = 1,
-  CameraExposureOutput = 2,
-};
+// TriggerSyncMode, LightChannelParam, LightSequence, LightHealth moved to ilight_controller.hpp
 
-struct LightChannelParam {
-  std::uint32_t light_index = 0;
-  std::uint32_t exposure_us = 0;
-  float gain = 1.0F;
-  float current_percent = 0.0F;
-};
-
-struct LightSequence {
-  std::vector<LightChannelParam> channels;
-};
-
-struct LightHealth {
-  bool ok = true;
-  std::string message = "simulated";
-};
-
-class LightController {
+class SimLightController : public ILightController {
 public:
-  bool initialize(bool simulate_fault = false);
+  bool initialize(bool simulate_fault = false) override;
   bool prepare_sequence(const LightSequence& sequence,
                         std::uint64_t trigger_id,
                         int timeout_ms,
-                        std::string* error_message);
+                        std::string* error_message) override;
   bool trigger_channel(const LightChannelParam& channel,
                        std::uint64_t trigger_id,
                        std::uint32_t light_seq_index,
                        int timeout_ms,
-                       std::string* error_message);
+                       std::string* error_message) override;
   bool arm_hardware_trigger(const LightChannelParam& channel,
                             std::uint64_t trigger_id,
                             std::uint32_t light_seq_index,
                             int timeout_ms,
-                            std::string* error_message);
+                            std::string* error_message) override;
   bool notify_hardware_triggered(const LightChannelParam& channel,
                                  std::uint64_t trigger_id,
                                  std::uint32_t light_seq_index,
                                  int timeout_ms,
-                                 std::string* error_message);
+                                 std::string* error_message) override;
   bool run_sequence(const LightSequence& sequence,
                     std::uint64_t trigger_id,
                     int timeout_ms,
-                    std::string* error_message = nullptr);
-  bool set_channel(std::uint32_t light_index, const LightChannelParam& param);
-  LightHealth get_health() const;
-  void shutdown_all();
+                    std::string* error_message = nullptr) override;
+  bool set_channel(std::uint32_t light_index, const LightChannelParam& param) override;
+  LightHealth get_health() const override;
+  void shutdown_all() override;
 
 private:
   bool initialized_ = false;
@@ -63,5 +42,7 @@ private:
   bool hardware_trigger_armed_ = false;
   std::uint32_t armed_light_index_ = 0;
 };
+
+using LightController = SimLightController;  // will be removed in Task 4
 
 }  // namespace seat_aoi
