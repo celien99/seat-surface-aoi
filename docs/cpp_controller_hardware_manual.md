@@ -104,7 +104,6 @@ bash tools/run_simulated_ipc.sh
 | `critical_recheck_threshold` | 连续复检达到该次数后进入 `Fault/Critical`，必须大于 warning 阈值。 |
 | `max_jobs` | 模拟运行批次数。`0` 表示 loop 模式无限运行。 |
 | `recipe_id` | 写入共享内存任务的配方 ID，Python detector 用它加载配方。 |
-| `acquisition_strategy` | 当前只允许 `serial_tdm`。逐机位串行完成全部光源后再进入下一机位，禁止多机位并行频闪。 |
 | `light_order` | 光源轮次顺序，例如 `1,2,3,4`。它决定每个座椅任务采图顺序。 |
 | `light.<N>.physical_channel` | 逻辑光源 `N` 对应的真实频闪控制器物理通道。 |
 | `light.<N>.exposure_us` | 逻辑光源 `N` 的相机曝光时间，写入图像元数据。 |
@@ -130,7 +129,7 @@ bash tools/run_simulated_ipc.sh
 生产配置校验规则：
 
 - `hardware_mode=production` 时，`plc.backend`、`camera.backend`、`light.backend` 不能是 `simulated`。
-- `acquisition_strategy` 只能是 `serial_tdm`；生产模式必须使用 `camera_exposure_output` 或等价硬触发同步。
+- C++ 主控固定采用串行 TDM 采集路径，不支持外部配置采集策略；生产模式必须使用 `camera_exposure_output` 或等价硬触发同步。
 - `strobe_width_us <= exposure_us`，且 `frame_slot_size` 必须足够容纳完整串行 TDM 图像包。
 - 生产必填字段不能留空，也不能保留 `TODO` 占位。
 - 配置校验通过只表示字段齐全，不表示真实驱动已经链接成功。

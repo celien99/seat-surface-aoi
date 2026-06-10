@@ -79,21 +79,6 @@ bool parse_trigger_sync_mode(const std::string& value,
   return false;
 }
 
-bool parse_acquisition_strategy(const std::string& value,
-                                AcquisitionStrategy* out_strategy,
-                                std::string* error_message) {
-  if (value == "serial_tdm" || value == "serial" ||
-      value == "camera_serial_tdm" || value == "per_camera_serial") {
-    *out_strategy = AcquisitionStrategy::SerialTdm;
-    return true;
-  }
-  if (error_message != nullptr) {
-    *error_message = "acquisition_strategy 只能是 serial_tdm；"
-                     "禁止多机位并行频闪采集，避免光源互相污染: " + value;
-  }
-  return false;
-}
-
 bool parse_uint32_field(const std::string& field_name,
                         const std::string& value,
                         bool allow_zero,
@@ -588,10 +573,6 @@ bool load_station_runtime_config(const std::string& path,
       if (!parse_trigger_sync_mode(value, &config.trigger_sync_mode, error_message)) {
         return false;
       }
-    } else if (key == "acquisition_strategy") {
-      if (!parse_acquisition_strategy(value, &config.acquisition_strategy, error_message)) {
-        return false;
-      }
     } else if (key == "reset_shared_memory") {
       config.reset_shared_memory = parse_bool(value);
     } else if (key == "simulate_light_fault") {
@@ -663,12 +644,6 @@ bool load_station_runtime_config(const std::string& path,
 
 bool validate_station_runtime_config(const StationRuntimeConfig& config,
                                      std::string* error_message) {
-  if (config.acquisition_strategy != AcquisitionStrategy::SerialTdm) {
-    if (error_message != nullptr) {
-      *error_message = "当前只允许 serial_tdm 采集策略";
-    }
-    return false;
-  }
   if (config.slot_count == 0) {
     if (error_message != nullptr) {
       *error_message = "slot_count 必须大于 0";
@@ -861,14 +836,6 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
     return false;
   }
   return true;
-}
-
-const char* acquisition_strategy_name(AcquisitionStrategy strategy) {
-  switch (strategy) {
-    case AcquisitionStrategy::SerialTdm:
-      return "serial_tdm";
-  }
-  return "unknown";
 }
 
 }  // namespace seat_aoi

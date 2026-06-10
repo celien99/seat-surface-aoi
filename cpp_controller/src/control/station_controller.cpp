@@ -37,7 +37,6 @@ bool StationController::initialize(const StationConfig& config) {
   StationRuntimeConfig runtime_config;
   runtime_config.hardware_mode = config.hardware_mode;
   runtime_config.camera_backend = config.camera_backend;
-  runtime_config.acquisition_strategy = config.acquisition_strategy;
   runtime_config.reset_shared_memory = config.reset_shared_memory;
   runtime_config.slot_count = config.slot_count;
   runtime_config.frame_slot_size = config.frame_slot_size;

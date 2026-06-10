@@ -42,7 +42,6 @@ void apply_runtime_config(const seat_aoi::StationRuntimeConfig& runtime_config,
                           seat_aoi::StationConfig* config) {
   config->hardware_mode = runtime_config.hardware_mode;
   config->camera_backend = runtime_config.camera_backend;
-  config->acquisition_strategy = runtime_config.acquisition_strategy;
   config->reset_shared_memory = runtime_config.reset_shared_memory;
   config->slot_count = runtime_config.slot_count;
   config->frame_slot_size = runtime_config.frame_slot_size;

@@ -5,7 +5,7 @@
 ## 1. 上线前置条件
 
 1. 复制并填写 `cpp_controller/config/station_runtime.production.example.conf`。
-2. `acquisition_strategy=serial_tdm`，现场接线确认不会同时触发多个机位光源。
+2. C++ 主控固定串行 TDM 采集，现场接线确认不会同时触发多个机位光源。
 3. `trigger_sync_mode=camera_exposure_output` 或等价硬触发同步。
 4. `strobe_width_us <= exposure_us`，电流、脉宽和触发延时不超过频闪控制器规格。
 5. `frame_slot_size` 能容纳 `camera_count x light_count` 的完整图像包。

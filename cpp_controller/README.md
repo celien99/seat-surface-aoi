@@ -276,7 +276,6 @@ warning_recheck_threshold=3
 critical_recheck_threshold=5
 max_jobs=1
 recipe_id=seat_a_black_leather_v1
-acquisition_strategy=serial_tdm
 light_order=1,2,3,4
 trigger_sync_mode=camera_exposure_output
 trace_root=trace
@@ -315,7 +314,7 @@ cp config/station_runtime.production.example.conf config/station_runtime.product
 
 新增生产校验要点：
 
-- `acquisition_strategy` 当前只允许 `serial_tdm`，表示“当前机位全光源采集完成后再切换下一机位”。
+- C++ 主控固定采用串行 TDM 采集路径，不再支持通过运行配置覆盖采集策略；配置文件中出现 `acquisition_strategy` 会被拒绝。
 - 生产模式必须使用 `camera_exposure_output` 或等价硬触发同步，`software` 仅用于模拟或低精度联调。
 - `strobe_width_us` 不能大于 `exposure_us`，`frame_slot_size` 必须能容纳 `camera_count x light_count` 的完整图像包。
 - `warning_recheck_threshold` 和 `critical_recheck_threshold` 控制连续复检报警升级，后者必须大于前者。
@@ -392,7 +391,7 @@ cp config/station_runtime.production.example.conf config/station_runtime.product
 ```
 实际产线约束：每个机位独立完成全部光源频闪序列，机位之间串行执行。
 即：机位A 依次完成 [光源1→光源2→光源3→光源4] 全部拍摄后，机位B 才开始。
-这是硬规则，不是性能优化选项；多机位并行频闪会造成光源互相污染，当前配置和采集包校验都会拒绝偏离 `serial_tdm` 的路径。
+这是硬规则，不是性能优化选项；多机位并行频闪会造成光源互相污染，当前实现不开放外部采集策略配置，并通过采集包校验拒绝偏离串行 TDM 的路径。
 ```
 
 ### 源码入口

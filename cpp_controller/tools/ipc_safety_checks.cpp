@@ -1,4 +1,5 @@
 #include <array>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -356,14 +357,23 @@ bool test_filled_production_config_validates() {
   return ok;
 }
 
-bool test_parallel_acquisition_strategy_rejected() {
-  auto config = make_filled_production_runtime_config();
-  config.acquisition_strategy = static_cast<seat_aoi::AcquisitionStrategy>(999U);
+bool test_acquisition_strategy_config_field_rejected() {
+  constexpr const char* kConfigPath = "/tmp/seat_aoi_acquisition_strategy_rejected.conf";
+  {
+    std::ofstream file(kConfigPath);
+    file << "hardware_mode=simulated\n"
+         << "plc.backend=simulated\n"
+         << "camera.backend=simulated\n"
+         << "light.backend=simulated\n"
+         << "acquisition_strategy=serial_tdm\n";
+  }
+  seat_aoi::StationRuntimeConfig config;
   std::string error;
-  const bool ok = seat_aoi::validate_station_runtime_config(config, &error);
-  const bool passed = !ok && error.find("serial_tdm") != std::string::npos;
+  const bool ok = seat_aoi::load_station_runtime_config(kConfigPath, &config, &error);
+  std::remove(kConfigPath);
+  const bool passed = !ok && error.find("未知运行配置字段: acquisition_strategy") != std::string::npos;
   if (!passed) {
-    std::cerr << "parallel acquisition strategy was not rejected: " << error << "\n";
+    std::cerr << "acquisition_strategy config field was not rejected: " << error << "\n";
   }
   return passed;
 }
@@ -519,7 +529,7 @@ int main() {
   if (!test_filled_production_config_validates()) {
     return 1;
   }
-  if (!test_parallel_acquisition_strategy_rejected()) {
+  if (!test_acquisition_strategy_config_field_rejected()) {
     return 1;
   }
   if (!test_strobe_width_larger_than_exposure_rejected()) {

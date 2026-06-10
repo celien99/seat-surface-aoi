@@ -64,14 +64,9 @@ struct RuntimePlcConfig {
   bool simulate_trigger_timeout = false;
 };
 
-enum class AcquisitionStrategy : std::uint32_t {
-  SerialTdm = 1,
-};
-
 struct StationRuntimeConfig {
   HardwareMode hardware_mode = HardwareMode::Simulated;
   HardwareBackend camera_backend = HardwareBackend::Simulated;
-  AcquisitionStrategy acquisition_strategy = AcquisitionStrategy::SerialTdm;
   bool reset_shared_memory = true;
   std::uint32_t slot_count = kDefaultSlotCount;
   std::uint32_t frame_slot_size = kDefaultFrameSlotSize;
@@ -107,6 +102,5 @@ bool load_station_runtime_config(const std::string& path,
                                  std::string* error_message);
 bool validate_station_runtime_config(const StationRuntimeConfig& config,
                                      std::string* error_message);
-const char* acquisition_strategy_name(AcquisitionStrategy strategy);
 
 }  // namespace seat_aoi

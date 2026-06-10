@@ -20,7 +20,6 @@ namespace seat_aoi {
 struct StationConfig {
   HardwareMode hardware_mode = HardwareMode::Simulated;
   HardwareBackend camera_backend = HardwareBackend::Simulated;
-  AcquisitionStrategy acquisition_strategy = AcquisitionStrategy::SerialTdm;
   bool reset_shared_memory = true;
   std::uint32_t slot_count = kDefaultSlotCount;
   std::uint32_t frame_slot_size = kDefaultFrameSlotSize;
