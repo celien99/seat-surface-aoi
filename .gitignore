@@ -64,3 +64,6 @@ prompt.md
 
 outputs/
 sample_images/
+
+# Spec docs (local only)
+docs/superpowers/
