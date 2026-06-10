@@ -98,3 +98,32 @@ def test_evaluate_end_to_end_json(tmp_path: Path) -> None:
     )
     assert output.exists()
     assert "image_metrics" in report
+
+
+def test_collect_trace_dataset_filter_decision(tmp_path: Path) -> None:
+    """验证 --filter-decision 参数可筛选指定决策的样本。"""
+    from training_tools.collect_trace_dataset import collect_trace_dataset
+
+    for decision, seq_id in [("OK", 1), ("NG", 2)]:
+        trace_dir = tmp_path / "trace" / f"SIM_{seq_id}_{seq_id}"
+        images_dir = trace_dir / "images" / "TOP_BACK" / "full"
+        images_dir.mkdir(parents=True, exist_ok=True)
+        (images_dir / "DIFFUSE.pgm").write_bytes(b"P5\n1 1\n255\n\x80")
+        (trace_dir / "result.json").write_text(json.dumps({
+            "sequence_id": seq_id,
+            "seat_id": f"SIM_{seq_id}",
+            "decision": decision,
+            "quality_pass": decision == "OK",
+            "defects": [] if decision == "OK" else [
+                {"class_name": "scratch", "camera_id": "TOP_BACK", "roi_name": "full", "bbox_xyxy_pixel": [10, 10, 20, 20]}
+            ],
+        }), encoding="utf-8")
+
+    output = tmp_path / "filtered_dataset"
+    samples = collect_trace_dataset(
+        trace_roots=[tmp_path / "trace"],
+        output_dir=output,
+        filter_decision="OK",
+    )
+    assert len(samples) == 1
+    assert samples[0].decision == "OK"

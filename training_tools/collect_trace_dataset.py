@@ -60,6 +60,7 @@ def collect_trace_dataset(
     split: str = "unassigned",
     label_status: str = "unlabeled",
     write_summary: bool = True,
+    filter_decision: str | None = None,
 ) -> list[DatasetSample]:
     trace_dirs = _discover_trace_dirs(trace_roots)
     if not trace_dirs:
@@ -75,6 +76,8 @@ def collect_trace_dataset(
                 label_status=label_status,
             )
         )
+    if filter_decision is not None:
+        samples = [s for s in samples if s.decision == filter_decision]
     if not samples:
         raise TraceDatasetError("trace 中没有发现 ROI 图像样本")
 
@@ -104,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", required=True, type=Path, help="输出数据集目录")
     parser.add_argument("--split", default="unassigned", help="写入 manifest 的 split 字段")
     parser.add_argument("--label-status", default="unlabeled", help="写入 manifest 的 label_status 字段")
+    parser.add_argument("--filter-decision", default=None, help="仅收集指定决策的样本（如 OK、NG）")
     parser.add_argument("--no-summary", action="store_true", help="不生成 dataset_summary.json")
     args = parser.parse_args(argv)
 
@@ -114,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
             split=args.split,
             label_status=args.label_status,
             write_summary=not args.no_summary,
+            filter_decision=args.filter_decision,
         )
     except TraceDatasetError as exc:
         print(f"collect_trace_dataset_failed={exc}")
