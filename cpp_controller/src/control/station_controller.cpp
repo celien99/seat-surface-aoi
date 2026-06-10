@@ -4,15 +4,39 @@
 #include <sstream>
 
 #include "control/hardware_factory.hpp"
-#include "control/plc_client.hpp"
 
 #include "common/string_utils.hpp"
 
 namespace seat_aoi {
 
+namespace {
+
+PlcClientConfig make_plc_client_config(const RuntimePlcConfig& config) {
+  PlcClientConfig client_config;
+  client_config.host = config.host;
+  client_config.port = config.port;
+  client_config.station_id = config.station_id;
+  client_config.trigger_source = config.trigger_source;
+  client_config.trigger_id_source = config.trigger_id_source;
+  client_config.seat_id_source = config.seat_id_source;
+  client_config.sku_source = config.sku_source;
+  client_config.ok_output = config.ok_output;
+  client_config.ng_output = config.ng_output;
+  client_config.recheck_output = config.recheck_output;
+  client_config.ack_input = config.ack_input;
+  client_config.output_hold_ms = config.output_hold_ms;
+  client_config.simulate_output_fault = config.simulate_output_fault;
+  client_config.simulate_trigger_timeout = config.simulate_trigger_timeout;
+  return client_config;
+}
+
+}  // namespace
+
 bool StationController::initialize(const StationConfig& config) {
   config_ = config;
   StationRuntimeConfig runtime_config;
+  runtime_config.hardware_mode = config.hardware_mode;
+  runtime_config.camera_backend = config.camera_backend;
   runtime_config.reset_shared_memory = config.reset_shared_memory;
   runtime_config.slot_count = config.slot_count;
   runtime_config.frame_slot_size = config.frame_slot_size;
@@ -25,7 +49,10 @@ bool StationController::initialize(const StationConfig& config) {
   runtime_config.max_jobs = config.max_jobs;
   runtime_config.recipe_id = config.recipe_id;
   runtime_config.light_order = config.light_order;
+  runtime_config.cameras = config.cameras;
+  runtime_config.light = config.light;
   runtime_config.light_channels = config.light_channels;
+  runtime_config.plc = config.plc;
   runtime_config.trigger_sync_mode = config.trigger_sync_mode;
   runtime_config.light.simulate_fault = config.simulate_light_fault;
   runtime_config.plc.simulate_output_fault = config.simulate_plc_output_fault;
@@ -34,8 +61,11 @@ bool StationController::initialize(const StationConfig& config) {
     camera.simulate_missing_frame = config.simulate_missing_frame;
   }
   frame_assembler_.configure(runtime_config);
-  plc_client_ = create_plc_client(HardwareBackend::Simulated);
-  plc_client_->initialize(config.simulate_plc_output_fault, config.simulate_trigger_timeout);
+  plc_client_ = create_plc_client(config.plc.backend);
+  if (!plc_client_->initialize(make_plc_client_config(runtime_config.plc))) {
+    std::cerr << "PLC 初始化失败: " << plc_client_->get_health().message << std::endl;
+    return false;
+  }
   const bool frames_ok = frame_ring_.initialize(kFrameShmName,
                                                 config.slot_count,
                                                 config.frame_slot_size,

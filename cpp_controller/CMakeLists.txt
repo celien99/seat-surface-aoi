@@ -22,6 +22,7 @@ else()
 endif()
 
 add_library(seat_aoi_control
+  src/control/hardware_backend.cpp
   src/control/light_controller.cpp
   src/control/plc_client.cpp
   src/control/station_runtime_config.cpp

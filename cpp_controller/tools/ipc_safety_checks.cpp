@@ -6,6 +6,7 @@
 
 #include "common/string_utils.hpp"
 #include "common/time_utils.hpp"
+#include "control/hardware_factory.hpp"
 #include "control/plc_client.hpp"
 #include "control/station_controller.hpp"
 #include "control/station_runtime_config.hpp"
@@ -141,7 +142,9 @@ bool test_result_ring_returns_crc_error_immediately() {
 
 bool test_plc_trigger_timeout_fails_closed() {
   seat_aoi::SimPlcClient plc;
-  if (!plc.initialize(false, true)) {
+  seat_aoi::PlcClientConfig config;
+  config.simulate_trigger_timeout = true;
+  if (!plc.initialize(config)) {
     std::cerr << "PLC initialize failed\n";
     return false;
   }
@@ -285,6 +288,87 @@ bool test_runtime_light_channel_config_parses() {
   return passed;
 }
 
+bool test_production_template_rejects_todo_placeholders() {
+  seat_aoi::StationRuntimeConfig config;
+  std::string error;
+  bool ok = seat_aoi::load_station_runtime_config(
+      "cpp_controller/config/station_runtime.production.example.conf", &config, &error);
+  if (ok) {
+    std::cerr << "production template with TODO placeholders unexpectedly passed\n";
+    return false;
+  }
+  if (error.empty()) {
+    error.clear();
+    ok = seat_aoi::load_station_runtime_config(
+        "config/station_runtime.production.example.conf", &config, &error);
+    if (ok) {
+      std::cerr << "production template with TODO placeholders unexpectedly passed\n";
+      return false;
+    }
+  }
+  const bool passed = error.find("TODO") != std::string::npos ||
+                      error.find("占位") != std::string::npos;
+  if (!passed) {
+    std::cerr << "production template rejection did not mention placeholder: " << error << "\n";
+  }
+  return passed;
+}
+
+seat_aoi::StationRuntimeConfig make_filled_production_runtime_config() {
+  seat_aoi::StationRuntimeConfig config;
+  config.hardware_mode = seat_aoi::HardwareMode::Production;
+  config.plc.backend = seat_aoi::HardwareBackend::ModbusTcp;
+  config.camera_backend = seat_aoi::HardwareBackend::HikrobotMvs;
+  config.light.backend = seat_aoi::HardwareBackend::SerialAscii;
+  config.frame_slot_size = 64 * 1024 * 1024;
+  config.plc.host = "192.168.1.10";
+  config.plc.port = 502;
+  config.plc.station_id = "LINE1_AOI_01";
+  config.plc.trigger_source = "DI0";
+  config.plc.trigger_id_source = "HR100";
+  config.plc.seat_id_source = "HR120";
+  config.plc.sku_source = "HR160";
+  config.plc.ok_output = "DO0";
+  config.plc.ng_output = "DO1";
+  config.plc.recheck_output = "DO2";
+  config.plc.ack_input = "DI1";
+  config.light.device_id = "STROBE_01";
+  config.light.serial_port = "/dev/ttyUSB0";
+  config.light.baud_rate = 115200;
+  config.light.trigger_input_line = "TRIG_IN1";
+  for (auto& camera : config.cameras) {
+    camera.serial_number = "CAM_SN_" + std::to_string(camera.camera_index);
+    camera.trigger_line = "Line0";
+    camera.exposure_output_line = "Line1";
+  }
+  return config;
+}
+
+bool test_filled_production_config_validates() {
+  auto config = make_filled_production_runtime_config();
+  std::string error;
+  const bool ok = seat_aoi::validate_station_runtime_config(config, &error);
+  if (!ok) {
+    std::cerr << "filled production config did not validate: " << error << "\n";
+  }
+  return ok;
+}
+
+bool test_unsupported_production_backend_fails_fast() {
+  auto plc = seat_aoi::create_plc_client(seat_aoi::HardwareBackend::ModbusTcp);
+  seat_aoi::PlcClientConfig config;
+  const bool ok = plc->initialize(config);
+  const auto health = plc->get_health();
+  const bool passed = !ok && !health.ok &&
+                      health.message.find("尚未链接真实硬件驱动") != std::string::npos;
+  if (!passed) {
+    std::cerr << "unsupported production backend did not fail fast: "
+              << health.message << "\n";
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -307,6 +391,15 @@ int main() {
     return 1;
   }
   if (!test_runtime_light_channel_config_parses()) {
+    return 1;
+  }
+  if (!test_production_template_rejects_todo_placeholders()) {
+    return 1;
+  }
+  if (!test_filled_production_config_validates()) {
+    return 1;
+  }
+  if (!test_unsupported_production_backend_fails_fast()) {
     return 1;
   }
   std::cout << "ipc safety checks passed\n";

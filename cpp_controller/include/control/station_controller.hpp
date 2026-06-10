@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "control/frame_assembler.hpp"
+#include "control/hardware_backend.hpp"
 #include "control/iplc_client.hpp"
 #include "control/station_runtime_config.hpp"
 #include "control/trigger_scheduler.hpp"
@@ -15,6 +16,8 @@
 namespace seat_aoi {
 
 struct StationConfig {
+  HardwareMode hardware_mode = HardwareMode::Simulated;
+  HardwareBackend camera_backend = HardwareBackend::Simulated;
   bool reset_shared_memory = true;
   std::uint32_t slot_count = kDefaultSlotCount;
   std::uint32_t frame_slot_size = kDefaultFrameSlotSize;
@@ -27,12 +30,18 @@ struct StationConfig {
   int max_jobs = 0;
   std::string recipe_id = "seat_a_black_leather_v1";
   std::vector<std::uint32_t> light_order = {1, 2, 3, 4};
+  std::vector<RuntimeCameraConfig> cameras = {
+      RuntimeCameraConfig{0, "TOP_BACK", "", 64, 48, 1, "Mono8", "", "", 8, false},
+      RuntimeCameraConfig{1, "TOP_CUSHION", "", 64, 48, 1, "Mono8", "", "", 8, false},
+  };
+  RuntimeLightConfig light;
   std::vector<RuntimeLightChannelConfig> light_channels = {
       RuntimeLightChannelConfig{1, 1, 800, 800, 0, 1.0F, 60.0F},
       RuntimeLightChannelConfig{2, 2, 800, 800, 0, 1.0F, 60.0F},
       RuntimeLightChannelConfig{3, 3, 800, 800, 0, 1.0F, 60.0F},
       RuntimeLightChannelConfig{4, 4, 800, 800, 0, 1.0F, 60.0F},
   };
+  RuntimePlcConfig plc;
   TriggerSyncMode trigger_sync_mode = TriggerSyncMode::CameraExposureOutput;
   bool simulate_light_fault = false;
   bool simulate_plc_output_fault = false;

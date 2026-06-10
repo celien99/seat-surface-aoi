@@ -40,6 +40,8 @@ int int_arg(int argc, char** argv, const std::string& name, int fallback) {
 
 void apply_runtime_config(const seat_aoi::StationRuntimeConfig& runtime_config,
                           seat_aoi::StationConfig* config) {
+  config->hardware_mode = runtime_config.hardware_mode;
+  config->camera_backend = runtime_config.camera_backend;
   config->reset_shared_memory = runtime_config.reset_shared_memory;
   config->slot_count = runtime_config.slot_count;
   config->frame_slot_size = runtime_config.frame_slot_size;
@@ -52,7 +54,10 @@ void apply_runtime_config(const seat_aoi::StationRuntimeConfig& runtime_config,
   config->max_jobs = runtime_config.max_jobs;
   config->recipe_id = runtime_config.recipe_id;
   config->light_order = runtime_config.light_order;
+  config->cameras = runtime_config.cameras;
+  config->light = runtime_config.light;
   config->light_channels = runtime_config.light_channels;
+  config->plc = runtime_config.plc;
   config->trigger_sync_mode = runtime_config.trigger_sync_mode;
   config->simulate_light_fault = runtime_config.light.simulate_fault;
   config->simulate_trigger_timeout = runtime_config.plc.simulate_trigger_timeout;
@@ -66,15 +71,30 @@ void apply_runtime_config(const seat_aoi::StationRuntimeConfig& runtime_config,
 
 int main(int argc, char** argv) {
   seat_aoi::StationConfig config;
+  seat_aoi::StationRuntimeConfig runtime_config;
   const char* config_path = string_arg(argc, argv, "--config");
   if (config_path != nullptr) {
-    seat_aoi::StationRuntimeConfig runtime_config;
     std::string error;
     if (!seat_aoi::load_station_runtime_config(config_path, &runtime_config, &error)) {
       std::cerr << error << std::endl;
       return 2;
     }
     apply_runtime_config(runtime_config, &config);
+  }
+
+  if (has_arg(argc, argv, "--validate-config")) {
+    std::string error;
+    if (config_path == nullptr &&
+        !seat_aoi::validate_station_runtime_config(runtime_config, &error)) {
+      std::cerr << error << std::endl;
+      return 2;
+    }
+    std::cout << "C++ station runtime config OK";
+    if (config_path != nullptr) {
+      std::cout << ": " << config_path;
+    }
+    std::cout << std::endl;
+    return 0;
   }
 
   if (has_arg(argc, argv, "--no-reset")) {
@@ -106,7 +126,7 @@ int main(int argc, char** argv) {
 
   seat_aoi::StationController station;
   if (!station.initialize(config)) {
-    std::cerr << "failed to initialize station shared memory" << std::endl;
+    std::cerr << "failed to initialize station controller" << std::endl;
     return 2;
   }
 

@@ -103,19 +103,36 @@ seat_aoi_controller (依赖 seat_aoi_control)
 ipc_safety_checks   (依赖 seat_aoi_control)
 ```
 
-**外部依赖：零。** 仅依赖 C++17 标准库 + POSIX（`shm_open`, `mmap`, `pthread`）。无 OpenCV、gRPC、PLC SDK、相机 SDK 等任何第三方库。
+默认构建外部依赖为零，仅依赖 C++17 标准库 + POSIX（`shm_open`, `mmap`, `pthread`）。真实生产 backend 需要按现场硬件型号额外链接 PLC、相机或频闪厂商 SDK。
 
 ---
 
-## 硬件模拟说明
+## 硬件模式说明
 
-**所有硬件接口均采用模拟实现，无需任何真实硬件即可运行完整流程：**
+当前支持两种运行模式：
+
+| 模式 | 配置 | 用途 |
+|------|------|------|
+| 模拟模式 | `hardware_mode=simulated` | 不需要真实硬件，使用模拟 PLC、模拟相机、模拟频闪跑通端到端 IPC 和故障注入 |
+| 生产模式 | `hardware_mode=production` | 强制填写 PLC、相机、频闪现场参数，禁止误用 simulated backend；当前仓库提供配置校验和 fail-fast 保护，真实 SDK 需按型号接入 |
+
+模拟模式行为：
 
 | 模块 | 模拟行为 | 故障注入 |
 |------|---------|---------|
 | **PLC** (`plc_client.cpp`) | 自动生成虚拟触发信号（`SIM_SEAT_XXX`），递增 trigger_id | `--simulate-plc-output-fault` 模拟输出失败<br>`--simulate-trigger-timeout` 模拟触发超时 |
 | **相机** (`camera_device.cpp`) | 生成合成图像（纹理 + 梯度 + 伪随机数据），64×48 可配置分辨率 | `--simulate-missing-frame` 模拟丢帧 |
 | **光源** (`light_controller.cpp`) | 模拟频闪时序，1ms sleep 模拟硬件延迟 | `--simulate-light-fault` 模拟光源故障 |
+
+生产模式当前支持的配置 backend 名称：
+
+| 设备 | 可选 backend |
+|------|--------------|
+| PLC | `modbus_tcp`、`siemens_s7`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk` |
+| 相机 | `basler_pylon`、`hikrobot_mvs`、`daheng_galaxy`、`flir_spinnaker`、`vendor_sdk`、`custom_sdk` |
+| 频闪 | `serial_ascii`、`modbus_tcp`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk` |
+
+如果生产模式选择了非 simulated backend，但 C++ 尚未链接对应真实驱动，程序会在初始化阶段明确报错并退出，不会偷偷回退到模拟硬件。
 
 ---
 
@@ -197,6 +214,9 @@ cmake --build build
 # 使用配置文件
 ./build/seat_aoi_controller --config config/station_runtime.example.conf
 
+# 只校验生产配置，不启动 PLC/相机/频闪
+./build/seat_aoi_controller --config config/station_runtime.production.conf --validate-config
+
 # 故障注入测试
 ./build/seat_aoi_controller --simulate-light-fault
 ./build/seat_aoi_controller --simulate-missing-frame
@@ -225,6 +245,7 @@ cmake --build build
 | `--once` | 单次执行（覆盖 --loop） | 默认 |
 | `--no-reset` | 不重置共享内存 | false |
 | `--cleanup` | 仅清理共享内存后退出 | - |
+| `--validate-config` | 只校验运行配置后退出，不初始化共享内存和硬件 | false |
 | `--max-jobs <N>` | 最大检测任务数（0=不限） | 0 |
 | `--wait-ms <N>` | 检测结果等待超时(ms) | 5000 |
 | `--trigger-timeout-ms <N>` | PLC 触发等待超时(ms) | 1000 |
@@ -237,7 +258,14 @@ cmake --build build
 
 ```ini
 # key=value，支持 # 注释
+hardware_mode=simulated
+plc.backend=simulated
+camera.backend=simulated
+light.backend=simulated
 reset_shared_memory=true
+slot_count=4
+frame_slot_size=16777216
+result_slot_size=65536
 publish_timeout_ms=1000
 detector_timeout_ms=5000
 trigger_timeout_ms=1000
@@ -248,6 +276,14 @@ recipe_id=seat_a_black_leather_v1
 light_order=1,2,3,4
 trigger_sync_mode=camera_exposure_output
 trace_root=trace
+
+# 相机配置；生产模式需要补充 serial_number、trigger_line、exposure_output_line
+camera.0.camera_id=TOP_BACK
+camera.0.width=64
+camera.0.height=48
+camera.0.channels=1
+camera.0.pixel_format=Mono8
+camera.0.buffer_count=8
 
 # 逻辑光源到真实控制器物理通道和采集参数的映射
 light.1.physical_channel=1
@@ -263,6 +299,15 @@ simulate_missing_frame=false
 simulate_plc_output_fault=false
 simulate_trigger_timeout=false
 ```
+
+生产配置模板位于 `config/station_runtime.production.example.conf`。复制后替换所有 `TODO_*`：
+
+```bash
+cp config/station_runtime.production.example.conf config/station_runtime.production.conf
+./build/seat_aoi_controller --config config/station_runtime.production.conf --validate-config
+```
+
+配置字段逐项说明见 [C++ 主控生产配置快速上手](../docs/cpp_controller_production_config_quickstart.md)。
 
 ---
 
@@ -492,7 +537,14 @@ time ─────────────────────────
 
 ### 可行性
 
-✅ **当前代码已完全可独立部署。**所有硬件接口均为模拟实现，无需任何外部依赖。
+✅ **模拟模式可独立部署。**无需任何真实硬件即可在测试机运行共享内存和故障注入流程。
+
+生产模式部署前必须完成：
+
+1. 按 `config/station_runtime.production.example.conf` 填写现场 PLC、相机、频闪参数。
+2. 运行 `--validate-config`，确保没有 `TODO` 占位和缺失点位。
+3. 按现场硬件型号链接真实 PLC、相机、频闪 SDK 或协议适配器。
+4. 做 PLC 断线、相机缺帧、频闪故障、detector 超时等 fail-closed 验证。
 
 ### 部署步骤
 
@@ -506,7 +558,7 @@ cd /opt/seat-aoi/cpp_controller
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 
-# 3. 运行
+# 3. 运行模拟链路
 ./build/seat_aoi_controller --loop
 ```
 
@@ -529,8 +581,8 @@ SHM_NAME = "/seat_aoi_py_to_cpp_results_v1"
 
 ## 设计原则
 
-1. **零外部依赖** — 纯 C++17 + POSIX，任何 Linux/macOS 系统可直接编译运行
-2. **所有硬件模拟** — PLC/相机/光源均为软件模拟，便于开发调试和 CI 测试
+1. **默认零外部依赖** — 模拟模式使用纯 C++17 + POSIX，任何 Linux/macOS 系统可直接编译运行
+2. **生产配置先行** — 先通过配置模板和 `--validate-config` 固化现场参数，再按 backend 接入真实驱动
 3. **保守失败** — 任何异常路径均返回 Recheck，宁可复检不误判通过
 4. **CRC 校验** — 所有共享内存数据帧附带 CRC32，防止静默数据损坏
 5. **无锁环形缓冲区** — 使用 `std::atomic` CAS 操作，C++ 与 Python 侧无需额外同步原语

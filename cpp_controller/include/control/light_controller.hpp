@@ -8,7 +8,7 @@ namespace seat_aoi {
 
 class SimLightController : public ILightController {
 public:
-  bool initialize(bool simulate_fault = false) override;
+  bool initialize(const LightControllerConfig& config) override;
   bool prepare_sequence(const LightSequence& sequence,
                         std::uint64_t trigger_id,
                         int timeout_ms,

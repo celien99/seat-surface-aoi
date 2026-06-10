@@ -6,8 +6,7 @@ namespace seat_aoi {
 
 class SimPlcClient : public IPlcClient {
 public:
-  bool initialize(bool simulate_output_fault,
-                  bool simulate_trigger_timeout = false) override;
+  bool initialize(const PlcClientConfig& config) override;
   bool wait_trigger(PlcTrigger* out_trigger,
                     int timeout_ms,
                     std::string* error_message) override;

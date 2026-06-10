@@ -63,6 +63,14 @@ cpp_controller/build/seat_aoi_controller --loop --max-jobs 3 --wait-ms 8000
 cpp_controller/build/seat_aoi_controller --config cpp_controller/config/station_runtime.example.conf
 ```
 
+只校验生产配置，不启动共享内存、PLC、相机或频闪：
+
+```bash
+cpp_controller/build/seat_aoi_controller \
+  --config cpp_controller/config/station_runtime.production.conf \
+  --validate-config
+```
+
 端到端模拟 IPC：
 
 ```bash
@@ -73,13 +81,20 @@ bash tools/run_simulated_ipc.sh
 
 ## 3. 运行配置说明
 
-当前示例配置位于 `cpp_controller/config/station_runtime.example.conf`。
+当前模拟示例配置位于 `cpp_controller/config/station_runtime.example.conf`。生产配置模板位于 `cpp_controller/config/station_runtime.production.example.conf`，建议复制为 `station_runtime.production.conf` 后填写现场参数。
 
 关键字段：
 
 | 字段 | 说明 |
 | --- | --- |
+| `hardware_mode` | `simulated` 表示模拟硬件；`production` 表示生产硬件配置，必须填写真实 PLC、相机和频闪参数。 |
+| `plc.backend` | PLC 后端，例如 `modbus_tcp`、`siemens_s7`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk`。 |
+| `camera.backend` | 相机后端，例如 `hikrobot_mvs`、`basler_pylon`、`daheng_galaxy`、`flir_spinnaker`、`vendor_sdk`、`custom_sdk`。 |
+| `light.backend` | 频闪控制器后端，例如 `serial_ascii`、`modbus_tcp`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk`。 |
 | `reset_shared_memory` | 启动时是否重置共享内存。生产中主控首次启动通常为 `true`，热重启策略需结合 detector 状态确认。 |
+| `slot_count` | 共享内存环形缓冲槽位数。 |
+| `frame_slot_size` | 每个图像帧 slot 的字节数；真实分辨率提高后必须增大。 |
+| `result_slot_size` | 每个结果 slot 的字节数。 |
 | `publish_timeout_ms` | C++ 等待可用 frame slot 的超时。超时输出 `RECHECK`。 |
 | `detector_timeout_ms` | C++ 等待 Python 检测结果的超时。超时输出 `RECHECK`。 |
 | `trigger_timeout_ms` | C++ 等待 PLC/外部触发的超时。超时不能输出 `OK`。 |
@@ -95,10 +110,27 @@ bash tools/run_simulated_ipc.sh
 | `light.<N>.gain` | 逻辑光源 `N` 的相机增益。 |
 | `light.<N>.current_percent` | 逻辑光源 `N` 的频闪电流或亮度百分比。 |
 | `trigger_sync_mode` | 同步模式。推荐 `camera_exposure_output`；测试可用 `software`。 |
+| `camera.<N>.serial_number` | 第 N 个机位的相机序列号，必须来自厂商工具。 |
+| `camera.<N>.trigger_line` | 相机触发输入线。 |
+| `camera.<N>.exposure_output_line` | 相机曝光输出或 StrobeOut 线，通常接频闪 TriggerIn。 |
+| `plc.trigger_source` | PLC 触发输入点位或寄存器。 |
+| `plc.ok_output/ng_output/recheck_output` | PLC 结果输出点位。 |
+| `plc.ack_input` | PLC 已读取 C++ 输出的确认输入。 |
+| `light.serial_port/light.host/light.device_id` | 频闪控制器的串口、网口或设备 ID，按 backend 类型填写。 |
+| `light.trigger_input_line` | 频闪触发输入线。 |
 | `simulate_light_fault` | 模拟光源故障。 |
 | `simulate_missing_frame` | 模拟相机缺帧。 |
 | `simulate_plc_output_fault` | 模拟 PLC 输出失败。 |
 | `simulate_trigger_timeout` | 模拟 PLC 触发超时。 |
+
+生产配置校验规则：
+
+- `hardware_mode=production` 时，`plc.backend`、`camera.backend`、`light.backend` 不能是 `simulated`。
+- 生产必填字段不能留空，也不能保留 `TODO` 占位。
+- 配置校验通过只表示字段齐全，不表示真实驱动已经链接成功。
+- 如果未接入对应 SDK 就直接运行生产 backend，程序会 fail-fast 报“尚未链接真实硬件驱动”，不会回退到模拟硬件。
+
+更详细的逐项填写说明见 [C++ 主控生产配置快速上手](cpp_controller_production_config_quickstart.md)。
 
 ## 4. 真实硬件需要提供的参数
 

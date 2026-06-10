@@ -5,10 +5,10 @@
 
 namespace seat_aoi {
 
-bool SimPlcClient::initialize(bool simulate_output_fault, bool simulate_trigger_timeout) {
+bool SimPlcClient::initialize(const PlcClientConfig& config) {
   initialized_ = true;
-  simulate_output_fault_ = simulate_output_fault;
-  simulate_trigger_timeout_ = simulate_trigger_timeout;
+  simulate_output_fault_ = config.simulate_output_fault;
+  simulate_trigger_timeout_ = config.simulate_trigger_timeout;
   return true;
 }
 

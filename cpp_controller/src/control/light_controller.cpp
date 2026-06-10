@@ -16,9 +16,9 @@ bool valid_channel_param(const LightChannelParam& channel) {
 
 }  // namespace
 
-bool SimLightController::initialize(bool simulate_fault) {
+bool SimLightController::initialize(const LightControllerConfig& config) {
   initialized_ = true;
-  simulate_fault_ = simulate_fault;
+  simulate_fault_ = config.simulate_fault;
   hardware_trigger_armed_ = false;
   armed_light_index_ = 0;
   armed_physical_channel_ = 0;

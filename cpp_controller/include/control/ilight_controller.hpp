@@ -25,6 +25,16 @@ struct LightSequence {
   std::vector<LightChannelParam> channels;
 };
 
+struct LightControllerConfig {
+  std::string device_id;
+  std::string host;
+  std::uint32_t port = 0;
+  std::string serial_port;
+  std::uint32_t baud_rate = 0;
+  std::string trigger_input_line;
+  bool simulate_fault = false;
+};
+
 struct LightHealth {
   bool ok = true;
   bool ready = true;
@@ -40,7 +50,7 @@ struct LightHealth {
 class ILightController {
 public:
   virtual ~ILightController() = default;
-  virtual bool initialize(bool simulate_fault = false) = 0;
+  virtual bool initialize(const LightControllerConfig& config) = 0;
   virtual bool prepare_sequence(const LightSequence& sequence,
                                 std::uint64_t trigger_id,
                                 int timeout_ms,

@@ -11,9 +11,14 @@ namespace seat_aoi {
 struct CameraConfig {
   std::uint32_t camera_index = 0;
   std::string camera_id;
+  std::string serial_number;
   std::uint32_t width = 64;
   std::uint32_t height = 48;
   std::uint32_t channels = 1;
+  std::string pixel_format = "Mono8";
+  std::string trigger_line;
+  std::string exposure_output_line;
+  std::uint32_t buffer_count = 8;
   bool simulate_missing_frame = false;
 };
 

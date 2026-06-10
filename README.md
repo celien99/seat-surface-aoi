@@ -20,7 +20,7 @@
 | 模块 | 当前状态 |
 |---|---|
 | 光学采集抽象 | 支持多机位、多光源模拟采集；当前采用串行 TDM 频闪策略，按机位独立完成 `light_order` 后再切换机位；默认光源为 `DIFFUSE`、`POLAR_DIFFUSE`、`HIGH_LEFT`、`HIGH_RIGHT` |
-| C++ 主控 | 支持 PLC 抽象、相机/光源模拟驱动、`camera_exposure_output` 硬触发同步模式、逐机位/逐光源串行采集、逐光源曝光/脉宽/电流/物理通道配置、结构化采集错误码、故障注入和保守降级 |
+| C++ 主控 | 支持 PLC 抽象、相机/光源模拟驱动、生产硬件 backend 配置入口、`--validate-config` 启动前校验、`camera_exposure_output` 硬触发同步模式、逐机位/逐光源串行采集、逐光源曝光/脉宽/电流/物理通道配置、结构化采集错误码、故障注入和保守降级；真实厂商 SDK 需按现场型号接入 |
 | 共享内存 IPC | POSIX shared memory，固定布局结构体，frame/result ring buffer，CRC 与协议布局校验 |
 | Python 检测进程 | 支持共享内存读取、质量门禁、Dome ROI 定位接口、ROI 裁剪/透视展开、固定标定或 ECC 配准、特征构建、推理、融合、缺陷过滤和规则判定 |
 | 模型后端 | 支持 fake、ONNX detection rows、统计 embedding、ONNX WideResNet50 embedding、PCA 投影和 PatchCore safety net；PatchCore 优先尝试 FAISS，缺索引或缺依赖时回退 exact KNN 并写入 trace |
@@ -118,6 +118,9 @@ uv run python -m tools.validate_model_assets --recipe production_model_example
 # 模拟端到端 IPC
 bash tools/run_simulated_ipc.sh
 
+# 只校验 C++ 生产硬件配置，不启动 PLC/相机/频闪
+cpp_controller/build/seat_aoi_controller --config cpp_controller/config/station_runtime.production.conf --validate-config
+
 # 在线 Python detector 入口
 uv run python -m python_detector.detector_main --once --timeout-ms 8000
 uv run seat-aoi-detector --once --timeout-ms 8000
@@ -144,7 +147,7 @@ cpp_controller/build/seat_aoi_controller --simulate-trigger-timeout --trigger-ti
 
 ```text
 seat-surface-aoi/
-├── cpp_controller/      # C++ 主控、采集调度、共享内存 IPC、模拟硬件驱动
+├── cpp_controller/      # C++ 主控、采集调度、共享内存 IPC、模拟硬件驱动、生产硬件配置入口
 ├── model/               # 真实模型产物占位目录：YOLO、监督检测、WideResNet50、PCA、PatchCore、可选 FAISS
 ├── python_detector/     # 独立 Python 检测算法模块、V4 ROI/ECC/embedding/PCA/PatchCore 流水线、配方、测试
 ├── training_tools/      # 离线训练支撑：Trace 转样本、回放、benchmark、PatchCore memory bank 构建
@@ -163,6 +166,7 @@ seat-surface-aoi/
 - [共享内存协议](docs/shm_protocol.md)
 - [硬件对接说明](docs/hardware_integration.md)
 - [C++ 主控硬件集成与使用手册](docs/cpp_controller_hardware_manual.md)
+- [C++ 主控生产配置快速上手](docs/cpp_controller_production_config_quickstart.md)
 - [配方设计说明](docs/recipe_design.md)
 - [标定与 ROI 说明](docs/calibration_and_roi.md)
 - [模型后端说明](docs/model_backend.md)

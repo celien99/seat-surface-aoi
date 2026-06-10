@@ -42,6 +42,18 @@ void set_acquisition_error(AcquisitionError* error,
   error->message = message;
 }
 
+LightControllerConfig make_light_controller_config(const RuntimeLightConfig& config) {
+  LightControllerConfig controller_config;
+  controller_config.device_id = config.device_id;
+  controller_config.host = config.host;
+  controller_config.port = config.port;
+  controller_config.serial_port = config.serial_port;
+  controller_config.baud_rate = config.baud_rate;
+  controller_config.trigger_input_line = config.trigger_input_line;
+  controller_config.simulate_fault = config.simulate_fault;
+  return controller_config;
+}
+
 }  // namespace
 
 void FrameAssembler::configure(const StationRuntimeConfig& config) {
@@ -55,9 +67,9 @@ bool FrameAssembler::ensure_initialized() {
     return true;
   }
   if (!light_controller_) {
-    light_controller_ = create_light_controller(HardwareBackend::Simulated);
+    light_controller_ = create_light_controller(config_.light.backend);
   }
-  if (!light_controller_->initialize(config_.light.simulate_fault)) {
+  if (!light_controller_->initialize(make_light_controller_config(config_.light))) {
     return false;
   }
   cameras_.clear();
@@ -65,11 +77,16 @@ bool FrameAssembler::ensure_initialized() {
     CameraConfig config;
     config.camera_index = runtime_camera.camera_index;
     config.camera_id = runtime_camera.camera_id;
+    config.serial_number = runtime_camera.serial_number;
     config.width = runtime_camera.width;
     config.height = runtime_camera.height;
     config.channels = runtime_camera.channels;
+    config.pixel_format = runtime_camera.pixel_format;
+    config.trigger_line = runtime_camera.trigger_line;
+    config.exposure_output_line = runtime_camera.exposure_output_line;
+    config.buffer_count = runtime_camera.buffer_count;
     config.simulate_missing_frame = runtime_camera.simulate_missing_frame;
-    auto camera = create_camera(HardwareBackend::Simulated);
+    auto camera = create_camera(config_.camera_backend);
     if (!camera->initialize(config)) {
       return false;
     }
