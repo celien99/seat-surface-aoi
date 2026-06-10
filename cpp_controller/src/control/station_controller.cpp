@@ -1,6 +1,7 @@
 #include "control/station_controller.hpp"
 
 #include <iostream>
+#include <sstream>
 
 #include "control/hardware_factory.hpp"
 #include "control/plc_client.hpp"
@@ -24,6 +25,7 @@ bool StationController::initialize(const StationConfig& config) {
   runtime_config.max_jobs = config.max_jobs;
   runtime_config.recipe_id = config.recipe_id;
   runtime_config.light_order = config.light_order;
+  runtime_config.light_channels = config.light_channels;
   runtime_config.trigger_sync_mode = config.trigger_sync_mode;
   runtime_config.light.simulate_fault = config.simulate_light_fault;
   runtime_config.plc.simulate_output_fault = config.simulate_plc_output_fault;
@@ -54,8 +56,19 @@ InspectionResultPayload StationController::inspect_one_seat(const PlcTrigger& tr
   const Recipe recipe = load_recipe(trigger.sku);
   SeatImageBundle bundle;
   std::string error;
-  if (!frame_assembler_.acquire_bundles(recipe, trigger, sequence_id, &bundle, &error)) {
-    return make_and_send_recheck_result(trigger, sequence_id, ErrorCode::MissingFrame, error);
+  AcquisitionError acquisition_error;
+  if (!frame_assembler_.acquire_bundles(
+          recipe, trigger, sequence_id, &bundle, &acquisition_error)) {
+    std::ostringstream oss;
+    oss << acquisition_error.message << " stage="
+        << static_cast<std::uint32_t>(acquisition_error.stage)
+        << " camera_index=" << acquisition_error.camera_index
+        << " light_index=" << acquisition_error.light_index
+        << " light_seq_index=" << acquisition_error.light_seq_index;
+    const ErrorCode error_code = acquisition_error.code == ErrorCode::None
+                                     ? ErrorCode::InternalError
+                                     : acquisition_error.code;
+    return make_and_send_recheck_result(trigger, sequence_id, error_code, oss.str());
   }
 
   std::uint64_t published_sequence_id = 0;

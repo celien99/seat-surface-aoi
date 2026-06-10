@@ -20,7 +20,7 @@
 | 模块 | 当前状态 |
 |---|---|
 | 光学采集抽象 | 支持多机位、多光源模拟采集；当前采用串行 TDM 频闪策略，按机位独立完成 `light_order` 后再切换机位；默认光源为 `DIFFUSE`、`POLAR_DIFFUSE`、`HIGH_LEFT`、`HIGH_RIGHT` |
-| C++ 主控 | 支持 PLC 抽象、相机/光源模拟驱动、`camera_exposure_output` 硬触发同步模式、逐机位/逐光源串行采集、故障注入和保守降级 |
+| C++ 主控 | 支持 PLC 抽象、相机/光源模拟驱动、`camera_exposure_output` 硬触发同步模式、逐机位/逐光源串行采集、逐光源曝光/脉宽/电流/物理通道配置、结构化采集错误码、故障注入和保守降级 |
 | 共享内存 IPC | POSIX shared memory，固定布局结构体，frame/result ring buffer，CRC 与协议布局校验 |
 | Python 检测进程 | 支持共享内存读取、质量门禁、Dome ROI 定位接口、ROI 裁剪/透视展开、固定标定或 ECC 配准、特征构建、推理、融合、缺陷过滤和规则判定 |
 | 模型后端 | 支持 fake、ONNX detection rows、统计 embedding、ONNX WideResNet50 embedding、PCA 投影和 PatchCore safety net；PatchCore 优先尝试 FAISS，缺索引或缺依赖时回退 exact KNN 并写入 trace |
@@ -33,7 +33,7 @@
 
 | V4.0 架构模块 | 当前实现 |
 |---|---|
-| 1. 光学采集层 | 部分对齐：已有多光源/多机位模拟链路和 V4 语义光源映射；C++ 当前按串行 TDM 策略执行“机位A全光源→机位B全光源”的独立频闪采集，真实硬件 SDK 集成仍需项目化接入 |
+| 1. 光学采集层 | 部分对齐：已有多光源/多机位模拟链路、V4 语义光源映射和 C++ 逐光源参数配置；C++ 当前按串行 TDM 策略执行“机位A全光源→机位B全光源”的独立频闪采集，真实硬件 SDK 集成仍需项目化接入 |
 | 2. 控制与通信层 | 基本对齐：C++ 控制，Python 不控制 PLC/相机/频闪，在线链路使用共享内存 |
 | 3.1 ROI 定位 | 工程接入点对齐：支持 Dome 语义光源、模板/fake YOLO/ONNX YOLO 后端、真实 YOLO 占位目录和 YOLO row 到 ROI 模板坐标转换；真实权重和训练评估需现场产出 |
 | 3.2 ROI 裁剪与配准 | 基本对齐：已有 ROI 裁剪/透视展开、固定标定误差检查和 ECC 在线配准报告 |

@@ -13,7 +13,10 @@ enum class TriggerSyncMode : std::uint32_t {
 
 struct LightChannelParam {
   std::uint32_t light_index = 0;
+  std::uint32_t physical_channel = 0;
   std::uint32_t exposure_us = 0;
+  std::uint32_t strobe_width_us = 0;
+  std::uint32_t trigger_delay_us = 0;
   float gain = 1.0F;
   float current_percent = 0.0F;
 };
@@ -24,6 +27,13 @@ struct LightSequence {
 
 struct LightHealth {
   bool ok = true;
+  bool ready = true;
+  bool over_current = false;
+  bool over_temperature = false;
+  bool trigger_missed = false;
+  std::uint64_t trigger_count = 0;
+  std::uint32_t last_light_index = 0;
+  std::uint32_t last_physical_channel = 0;
   std::string message = "simulated";
 };
 

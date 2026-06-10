@@ -8,6 +8,7 @@
 #include "common/time_utils.hpp"
 #include "control/plc_client.hpp"
 #include "control/station_controller.hpp"
+#include "control/station_runtime_config.hpp"
 #include "ipc/crc32.hpp"
 #include "ipc/frame_ring_buffer.hpp"
 #include "ipc/result_ring_buffer.hpp"
@@ -168,6 +169,9 @@ bool test_station_fault_returns_recheck(const std::string& name,
   config.light_timeout_ms = 5;
   config.recipe_id = "seat_a_black_leather_v1";
   config.light_order = {1};
+  config.light_channels = {
+      seat_aoi::RuntimeLightChannelConfig{1, 1, 800, 800, 0, 1.0F, 60.0F},
+  };
 
   seat_aoi::StationController station;
   if (!station.initialize(config)) {
@@ -202,7 +206,7 @@ bool test_light_fault_returns_recheck() {
   config.simulate_light_fault = true;
   return test_station_fault_returns_recheck("light fault",
                                             config,
-                                            seat_aoi::ErrorCode::MissingFrame);
+                                            seat_aoi::ErrorCode::LightFault);
 }
 
 bool test_missing_frame_returns_recheck() {
@@ -251,6 +255,36 @@ bool test_frame_slot_unavailable_returns_recheck() {
   return passed;
 }
 
+bool test_runtime_light_channel_config_parses() {
+  seat_aoi::StationRuntimeConfig config;
+  std::string error;
+  if (!seat_aoi::load_station_runtime_config(
+          "cpp_controller/config/station_runtime.example.conf", &config, &error)) {
+    error.clear();
+    if (!seat_aoi::load_station_runtime_config(
+            "config/station_runtime.example.conf", &config, &error)) {
+      std::cerr << "runtime config parse failed: " << error << "\n";
+      return false;
+    }
+  }
+  const bool passed = config.light_channels.size() >= 4 &&
+                      config.light_channels[0].light_index == 1 &&
+                      config.light_channels[0].physical_channel == 1 &&
+                      config.light_channels[0].exposure_us == 800 &&
+                      config.light_channels[0].strobe_width_us == 700 &&
+                      config.light_channels[0].trigger_delay_us == 10 &&
+                      config.light_channels[0].gain == 1.0F &&
+                      config.light_channels[0].current_percent == 60.0F &&
+                      config.light_channels[2].light_index == 3 &&
+                      config.light_channels[2].physical_channel == 3 &&
+                      config.light_channels[2].strobe_width_us == 650 &&
+                      config.light_channels[2].current_percent == 55.0F;
+  if (!passed) {
+    std::cerr << "runtime light channel config did not parse expected values\n";
+  }
+  return passed;
+}
+
 }  // namespace
 
 int main() {
@@ -270,6 +304,9 @@ int main() {
     return 1;
   }
   if (!test_frame_slot_unavailable_returns_recheck()) {
+    return 1;
+  }
+  if (!test_runtime_light_channel_config_parses()) {
     return 1;
   }
   std::cout << "ipc safety checks passed\n";

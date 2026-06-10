@@ -2,7 +2,9 @@
 
 #include <exception>
 #include <fstream>
+#include <map>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 
 namespace seat_aoi {
@@ -77,6 +79,132 @@ bool parse_trigger_sync_mode(const std::string& value,
   return false;
 }
 
+RuntimeLightChannelConfig default_light_channel_config(std::uint32_t light_index) {
+  RuntimeLightChannelConfig config;
+  config.light_index = light_index;
+  config.physical_channel = light_index;
+  return config;
+}
+
+RuntimeLightChannelConfig* ensure_light_channel(
+    std::map<std::uint32_t, RuntimeLightChannelConfig>* channels,
+    std::uint32_t light_index) {
+  auto iter = channels->find(light_index);
+  if (iter == channels->end()) {
+    iter = channels->emplace(light_index, default_light_channel_config(light_index)).first;
+  }
+  return &iter->second;
+}
+
+bool parse_light_channel_key(const std::string& key,
+                             std::uint32_t* out_light_index,
+                             std::string* out_field) {
+  constexpr const char* kPrefix = "light.";
+  if (key.rfind(kPrefix, 0) != 0) {
+    return false;
+  }
+  const auto after_prefix = std::string(kPrefix).size();
+  const auto field_separator = key.find('.', after_prefix);
+  if (field_separator == std::string::npos) {
+    return false;
+  }
+  const std::string index_text = key.substr(after_prefix, field_separator - after_prefix);
+  try {
+    const int parsed = std::stoi(index_text);
+    if (parsed <= 0) {
+      return false;
+    }
+    *out_light_index = static_cast<std::uint32_t>(parsed);
+    *out_field = key.substr(field_separator + 1);
+    return !out_field->empty();
+  } catch (const std::exception&) {
+    return false;
+  }
+}
+
+bool apply_light_channel_value(RuntimeLightChannelConfig* channel,
+                               const std::string& field,
+                               const std::string& value,
+                               std::string* error_message) {
+  try {
+    if (field == "physical_channel") {
+      const int parsed = std::stoi(value);
+      if (parsed <= 0) {
+        throw std::invalid_argument("physical_channel");
+      }
+      channel->physical_channel = static_cast<std::uint32_t>(parsed);
+    } else if (field == "exposure_us") {
+      const int parsed = std::stoi(value);
+      if (parsed <= 0) {
+        throw std::invalid_argument("exposure_us");
+      }
+      channel->exposure_us = static_cast<std::uint32_t>(parsed);
+    } else if (field == "strobe_width_us") {
+      const int parsed = std::stoi(value);
+      if (parsed <= 0) {
+        throw std::invalid_argument("strobe_width_us");
+      }
+      channel->strobe_width_us = static_cast<std::uint32_t>(parsed);
+    } else if (field == "trigger_delay_us") {
+      const int parsed = std::stoi(value);
+      if (parsed < 0) {
+        throw std::invalid_argument("trigger_delay_us");
+      }
+      channel->trigger_delay_us = static_cast<std::uint32_t>(parsed);
+    } else if (field == "gain") {
+      const float parsed = std::stof(value);
+      if (parsed <= 0.0F) {
+        throw std::invalid_argument("gain");
+      }
+      channel->gain = parsed;
+    } else if (field == "current_percent") {
+      const float parsed = std::stof(value);
+      if (parsed <= 0.0F || parsed > 100.0F) {
+        throw std::invalid_argument("current_percent");
+      }
+      channel->current_percent = parsed;
+    } else {
+      if (error_message != nullptr) {
+        *error_message = "未知光源配置字段: light." + std::to_string(channel->light_index) +
+                         "." + field;
+      }
+      return false;
+    }
+  } catch (const std::exception&) {
+    if (error_message != nullptr) {
+      *error_message = "光源配置字段非法: light." + std::to_string(channel->light_index) +
+                       "." + field + "=" + value;
+    }
+    return false;
+  }
+  return true;
+}
+
+bool validate_light_channels(const std::vector<std::uint32_t>& light_order,
+                             const std::map<std::uint32_t, RuntimeLightChannelConfig>& channels,
+                             std::string* error_message) {
+  for (std::uint32_t light_index : light_order) {
+    const auto iter = channels.find(light_index);
+    if (iter == channels.end()) {
+      if (error_message != nullptr) {
+        *error_message = "light_order 中的光源缺少配置: light." +
+                         std::to_string(light_index);
+      }
+      return false;
+    }
+    const auto& channel = iter->second;
+    if (channel.physical_channel == 0 || channel.exposure_us == 0 ||
+        channel.strobe_width_us == 0 || channel.gain <= 0.0F ||
+        channel.current_percent <= 0.0F || channel.current_percent > 100.0F) {
+      if (error_message != nullptr) {
+        *error_message = "光源配置非法: light." + std::to_string(light_index);
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
 }  // namespace
 
 bool load_station_runtime_config(const std::string& path,
@@ -94,6 +222,10 @@ bool load_station_runtime_config(const std::string& path,
   }
 
   StationRuntimeConfig config;
+  std::map<std::uint32_t, RuntimeLightChannelConfig> light_channels;
+  for (const auto& channel : config.light_channels) {
+    light_channels[channel.light_index] = channel;
+  }
   std::string line;
   while (std::getline(input, line)) {
     const auto comment = line.find('#');
@@ -149,7 +281,24 @@ bool load_station_runtime_config(const std::string& path,
       }
     } else if (key == "trace_root") {
       config.trace_root = value;
+    } else {
+      std::uint32_t light_index = 0;
+      std::string light_field;
+      if (parse_light_channel_key(key, &light_index, &light_field)) {
+        auto* channel = ensure_light_channel(&light_channels, light_index);
+        if (!apply_light_channel_value(channel, light_field, value, error_message)) {
+          return false;
+        }
+      }
     }
+  }
+  if (!validate_light_channels(config.light_order, light_channels, error_message)) {
+    return false;
+  }
+  config.light_channels.clear();
+  for (const auto& [light_index, channel] : light_channels) {
+    (void)light_index;
+    config.light_channels.push_back(channel);
   }
   *out_config = config;
   return true;

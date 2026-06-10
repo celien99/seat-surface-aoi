@@ -249,6 +249,14 @@ light_order=1,2,3,4
 trigger_sync_mode=camera_exposure_output
 trace_root=trace
 
+# 逻辑光源到真实控制器物理通道和采集参数的映射
+light.1.physical_channel=1
+light.1.exposure_us=800
+light.1.strobe_width_us=700
+light.1.trigger_delay_us=10
+light.1.gain=1.0
+light.1.current_percent=60
+
 # 故障注入
 simulate_light_fault=false
 simulate_missing_frame=false
@@ -303,8 +311,11 @@ simulate_trigger_timeout=false
 
 | 故障场景 | ErrorCode | 决策 |
 |---------|-----------|------|
-| 光源故障 | MissingFrame | Recheck |
+| 光源故障/arm 失败 | LightFault | Recheck |
 | 相机丢帧 | MissingFrame | Recheck |
+| 相机 arm 失败 | CameraFault | Recheck |
+| 曝光输出或硬触发确认失败 | TriggerSyncFault | Recheck |
+| 频闪配置缺失或非法 | ConfigurationError | Recheck |
 | 槽位不可用 | SlotUnavailable | Recheck |
 | 检测超时 | DetectorTimeout | Recheck |
 | CRC 校验失败 | CrcMismatch | Recheck |
@@ -326,7 +337,7 @@ simulate_trigger_timeout=false
 
 ### 源码入口
 
-`StationController::inspect_one_seat()` → `frame_assembler_.acquire_bundles(recipe, trigger, sequence_id, &bundle, &error)`
+`StationController::inspect_one_seat()` → `frame_assembler_.acquire_bundles(recipe, trigger, sequence_id, &bundle, &acquisition_error)`
 
 ### 执行步骤
 
@@ -336,12 +347,19 @@ simulate_trigger_timeout=false
 // frame_assembler.cpp
 LightSequence sequence;
 for (std::uint32_t light_index : recipe.light_order) {
-    sequence.channels.push_back(
-        LightChannelParam{light_index, 800/*exposure_us*/, 1.0F/*gain*/, 60.0F/*current_percent*/});
+    const auto& configured = find_light_channel_config(light_index);
+    sequence.channels.push_back(LightChannelParam{
+        configured.light_index,
+        configured.physical_channel,
+        configured.exposure_us,
+        configured.strobe_width_us,
+        configured.trigger_delay_us,
+        configured.gain,
+        configured.current_percent});
 }
 ```
 
-根据 Recipe 中的 `light_order`（如 `[1,2,3,4]`）构建 4 个光源通道参数。
+根据 Recipe 中的 `light_order`（如 `[1,2,3,4]`）从运行配置构建光源通道参数；缺少配置或参数非法会返回 `ConfigurationError`。
 
 **Step 2 — 外层循环：逐机位串行**
 
@@ -441,16 +459,16 @@ time ─────────────────────────
 
 ```
 [trigger_id=1000] prepared light sequence channels=4         ← 机位A 开始
-[trigger_id=1000 light_index=1 light_seq_index=0] arm ...    ← 光源1
-[trigger_id=1000 light_index=1 light_seq_index=0] camera exposure output fired strobe
-[trigger_id=1000 light_index=2 light_seq_index=1] arm ...    ← 光源2
-[trigger_id=1000 light_index=2 light_seq_index=1] camera exposure output fired strobe
-[trigger_id=1000 light_index=3 light_seq_index=2] arm ...    ← 光源3
-[trigger_id=1000 light_index=3 light_seq_index=2] camera exposure output fired strobe
-[trigger_id=1000 light_index=4 light_seq_index=3] arm ...    ← 光源4
-[trigger_id=1000 light_index=4 light_seq_index=3] camera exposure output fired strobe
+[trigger_id=1000 light_index=1 physical_channel=1 light_seq_index=0] arm ...    ← 光源1
+[trigger_id=1000 light_index=1 physical_channel=1 light_seq_index=0] camera exposure output fired strobe
+[trigger_id=1000 light_index=2 physical_channel=2 light_seq_index=1] arm ...    ← 光源2
+[trigger_id=1000 light_index=2 physical_channel=2 light_seq_index=1] camera exposure output fired strobe
+[trigger_id=1000 light_index=3 physical_channel=3 light_seq_index=2] arm ...    ← 光源3
+[trigger_id=1000 light_index=3 physical_channel=3 light_seq_index=2] camera exposure output fired strobe
+[trigger_id=1000 light_index=4 physical_channel=4 light_seq_index=3] arm ...    ← 光源4
+[trigger_id=1000 light_index=4 physical_channel=4 light_seq_index=3] camera exposure output fired strobe
 [trigger_id=1000] prepared light sequence channels=4         ← 机位B 开始
-[trigger_id=1000 light_index=1 light_seq_index=0] arm ...    ← 光源1
+[trigger_id=1000 light_index=1 physical_channel=1 light_seq_index=0] arm ...    ← 光源1
 ...
 ```
 
@@ -464,6 +482,8 @@ time ─────────────────────────
 | **每机位重新 prepare** | 切换机位时重新调用 `prepare_sequence()`，确保光源状态正确 |
 | **Arm → 触发 → 确认** | 三阶段握手机制，模拟真实硬件的 GPIO 时序 |
 | **各机位独立曝光输出** | 每个机位的相机自行发出曝光输出信号，不再仅有相机0 负责 |
+| **参数配置化** | `LightChannelParam` 来自运行配置，包含 `physical_channel`、`exposure_us`、`strobe_width_us`、`trigger_delay_us`、`gain` 和 `current_percent` |
+| **结构化采集错误** | 采集失败返回 `AcquisitionError`，包含错误码、阶段、机位、光源和光源轮次 |
 | **故障即停** | 任何一步失败立即 `shutdown_all()`，清空相机列表，下次调用重新初始化 |
 
 ---

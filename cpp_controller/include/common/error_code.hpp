@@ -15,7 +15,10 @@ enum class ErrorCode : std::uint32_t {
   QualityFailed = 7,
   DeviceFault = 8,
   InternalError = 9,
+  LightFault = 10,
+  CameraFault = 11,
+  TriggerSyncFault = 12,
+  ConfigurationError = 13,
 };
 
 }  // namespace seat_aoi
-

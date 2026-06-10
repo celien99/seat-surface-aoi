@@ -19,6 +19,27 @@ EMPTY -> WRITING -> READY -> READING -> EMPTY
 
 C++ 主控不得覆盖 `READY` 或 `READING` 状态的 slot。检测超时、缺帧、CRC 不一致或协议不匹配必须输出 `RECHECK` 或 `ERROR`，不能输出 `OK`。
 
+## 错误码
+
+结果中的 `error_code` 是跨 C++ 与 Python 共享的枚举值。当前布局未改变，只扩展了枚举语义：
+
+| 值 | 名称 | 含义 |
+| ---: | --- | --- |
+| 0 | `None` | 无错误。 |
+| 1 | `ProtocolMismatch` | 协议 magic、version 或布局不匹配。 |
+| 2 | `InvalidPayload` | payload 边界、字段或结果校验失败。 |
+| 3 | `CrcMismatch` | header 或 payload CRC 校验失败。 |
+| 4 | `SlotUnavailable` | 共享内存 slot 在超时前不可用。 |
+| 5 | `DetectorTimeout` | C++ 等待 Python 检测结果超时。 |
+| 6 | `MissingFrame` | 相机缺帧或等待图像超时。 |
+| 7 | `QualityFailed` | Python 图像质量门禁失败。 |
+| 8 | `DeviceFault` | PLC 输出或通用设备故障。 |
+| 9 | `InternalError` | 进程内部异常。 |
+| 10 | `LightFault` | 频闪配置、prepare、软件触发或 arm 失败。 |
+| 11 | `CameraFault` | 相机 arm 或相机设备状态失败。 |
+| 12 | `TriggerSyncFault` | 曝光输出、硬触发确认或触发同步失败。 |
+| 13 | `ConfigurationError` | C++ 运行配置缺失、非法或不支持。 |
+
 ## 版本与布局
 
 第一版实现使用：

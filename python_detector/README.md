@@ -128,7 +128,7 @@ training_tools/
 - `tools.validate_protocol` 和相关测试。
 - `docs/shm_protocol.md`、README 和本文。
 
-`ShmClient` 对共享内存输入执行 header CRC、payload CRC、slot 状态、序列号、payload 边界、重复 camera/light 等安全校验。解析失败会发布保守错误结果并释放输入 slot。
+`ShmClient` 对共享内存输入执行 header CRC、payload CRC、slot 状态、序列号、payload 边界、重复 camera/light 等安全校验。解析失败会发布保守错误结果并释放输入 slot。`ErrorCode` 与 C++ `common/error_code.hpp` 保持枚举值一致，当前包含 `LIGHT_FAULT`、`CAMERA_FAULT`、`TRIGGER_SYNC_FAULT` 和 `CONFIGURATION_ERROR` 等 C++ 采集侧结构化失败码；这些枚举扩展不改变共享内存结构体大小。
 
 ### 质量门禁与预处理
 

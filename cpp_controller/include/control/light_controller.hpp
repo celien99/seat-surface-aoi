@@ -41,6 +41,10 @@ private:
   bool simulate_fault_ = false;
   bool hardware_trigger_armed_ = false;
   std::uint32_t armed_light_index_ = 0;
+  std::uint32_t armed_physical_channel_ = 0;
+  std::uint64_t trigger_count_ = 0;
+  std::uint32_t last_light_index_ = 0;
+  std::uint32_t last_physical_channel_ = 0;
 };
 
 }  // namespace seat_aoi

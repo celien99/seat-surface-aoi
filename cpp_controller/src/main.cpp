@@ -52,6 +52,7 @@ void apply_runtime_config(const seat_aoi::StationRuntimeConfig& runtime_config,
   config->max_jobs = runtime_config.max_jobs;
   config->recipe_id = runtime_config.recipe_id;
   config->light_order = runtime_config.light_order;
+  config->light_channels = runtime_config.light_channels;
   config->trigger_sync_mode = runtime_config.trigger_sync_mode;
   config->simulate_light_fault = runtime_config.light.simulate_fault;
   config->simulate_trigger_timeout = runtime_config.plc.simulate_trigger_timeout;

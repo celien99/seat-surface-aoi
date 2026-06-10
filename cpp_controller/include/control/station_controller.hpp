@@ -27,6 +27,12 @@ struct StationConfig {
   int max_jobs = 0;
   std::string recipe_id = "seat_a_black_leather_v1";
   std::vector<std::uint32_t> light_order = {1, 2, 3, 4};
+  std::vector<RuntimeLightChannelConfig> light_channels = {
+      RuntimeLightChannelConfig{1, 1, 800, 800, 0, 1.0F, 60.0F},
+      RuntimeLightChannelConfig{2, 2, 800, 800, 0, 1.0F, 60.0F},
+      RuntimeLightChannelConfig{3, 3, 800, 800, 0, 1.0F, 60.0F},
+      RuntimeLightChannelConfig{4, 4, 800, 800, 0, 1.0F, 60.0F},
+  };
   TriggerSyncMode trigger_sync_mode = TriggerSyncMode::CameraExposureOutput;
   bool simulate_light_fault = false;
   bool simulate_plc_output_fault = false;

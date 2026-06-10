@@ -23,6 +23,16 @@ struct RuntimeLightConfig {
   std::string message = "simulated";
 };
 
+struct RuntimeLightChannelConfig {
+  std::uint32_t light_index = 0;
+  std::uint32_t physical_channel = 0;
+  std::uint32_t exposure_us = 800;
+  std::uint32_t strobe_width_us = 800;
+  std::uint32_t trigger_delay_us = 0;
+  float gain = 1.0F;
+  float current_percent = 60.0F;
+};
+
 struct RuntimePlcConfig {
   bool simulate_output_fault = false;
   bool simulate_trigger_timeout = false;
@@ -48,6 +58,12 @@ struct StationRuntimeConfig {
       RuntimeCameraConfig{1, "TOP_CUSHION", 64, 48, 1, false},
   };
   RuntimeLightConfig light;
+  std::vector<RuntimeLightChannelConfig> light_channels = {
+      RuntimeLightChannelConfig{1, 1, 800, 800, 0, 1.0F, 60.0F},
+      RuntimeLightChannelConfig{2, 2, 800, 800, 0, 1.0F, 60.0F},
+      RuntimeLightChannelConfig{3, 3, 800, 800, 0, 1.0F, 60.0F},
+      RuntimeLightChannelConfig{4, 4, 800, 800, 0, 1.0F, 60.0F},
+  };
   RuntimePlcConfig plc;
 };
 

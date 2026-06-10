@@ -75,6 +75,10 @@ class ErrorCode(enum.IntEnum):
     QUALITY_FAILED = 7
     DEVICE_FAULT = 8
     INTERNAL_ERROR = 9
+    LIGHT_FAULT = 10
+    CAMERA_FAULT = 11
+    TRIGGER_SYNC_FAULT = 12
+    CONFIGURATION_ERROR = 13
 
 
 def crc32(data: bytes | bytearray | memoryview) -> int:
