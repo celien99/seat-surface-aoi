@@ -273,6 +273,7 @@ camera_timeout_ms=200
 light_timeout_ms=200
 max_jobs=1
 recipe_id=seat_a_black_leather_v1
+acquisition_strategy=serial_tdm
 light_order=1,2,3,4
 trigger_sync_mode=camera_exposure_output
 trace_root=trace
@@ -308,6 +309,13 @@ cp config/station_runtime.production.example.conf config/station_runtime.product
 ```
 
 配置字段逐项说明见 [C++ 主控生产配置快速上手](../docs/cpp_controller_production_config_quickstart.md)。
+
+新增生产校验要点：
+
+- `acquisition_strategy` 当前只允许 `serial_tdm`，表示“当前机位全光源采集完成后再切换下一机位”。
+- 生产模式必须使用 `camera_exposure_output` 或等价硬触发同步，`software` 仅用于模拟或低精度联调。
+- `strobe_width_us` 不能大于 `exposure_us`，`frame_slot_size` 必须能容纳 `camera_count x light_count` 的完整图像包。
+- `trace_root` 指定 C++ 生产事件日志目录，默认写入 `trace/cpp_controller_events.jsonl`。
 
 ---
 
@@ -367,6 +375,8 @@ cp config/station_runtime.production.example.conf config/station_runtime.product
 | 结果校验失败 | InvalidPayload | Recheck |
 | PLC 输出失败 | DeviceFault | Recheck |
 
+同时，C++ 主控会把 `inspection_start`、`inspection_complete`、`inspection_recheck`、`plc_output_failed` 等事件写入 `trace_root/cpp_controller_events.jsonl`。事件包含 `timestamp_us`、`sequence_id`、`trigger_id`、`seat_id`、`sku`、`decision`、`error_code` 和错误说明，用于现场复盘采集、IPC、detector 超时和 PLC 输出故障。
+
 ---
 
 ## 频闪时序控制
@@ -378,6 +388,7 @@ cp config/station_runtime.production.example.conf config/station_runtime.product
 ```
 实际产线约束：每个机位独立完成全部光源频闪序列，机位之间串行执行。
 即：机位A 依次完成 [光源1→光源2→光源3→光源4] 全部拍摄后，机位B 才开始。
+这是硬规则，不是性能优化选项；多机位并行频闪会造成光源互相污染，当前配置和采集包校验都会拒绝偏离 `serial_tdm` 的路径。
 ```
 
 ### 源码入口
@@ -524,6 +535,7 @@ time ─────────────────────────
 | **逐机位串行** | 外层循环按 camera_index 串行，每个机位独立完成全部光源序列后再切换 |
 | **逐光源串行** | 内层循环按 light_seq_index 串行，一次只有一个光源频闪 |
 | **单相机采集** | 每次频闪仅当前机位的相机拍摄，不再使用 `std::async` 并行 |
+| **采集包完整性校验** | 发布共享内存前校验 `frame_count == camera_count x light_count`，并确认帧顺序为“当前机位全光源→下一机位” |
 | **每机位重新 prepare** | 切换机位时重新调用 `prepare_sequence()`，确保光源状态正确 |
 | **Arm → 触发 → 确认** | 三阶段握手机制，模拟真实硬件的 GPIO 时序 |
 | **各机位独立曝光输出** | 每个机位的相机自行发出曝光输出信号，不再仅有相机0 负责 |
@@ -545,6 +557,7 @@ time ─────────────────────────
 2. 运行 `--validate-config`，确保没有 `TODO` 占位和缺失点位。
 3. 按现场硬件型号链接真实 PLC、相机、频闪 SDK 或协议适配器。
 4. 做 PLC 断线、相机缺帧、频闪故障、detector 超时等 fail-closed 验证。
+5. 确认 `trace/cpp_controller_events.jsonl` 能按 `sequence_id` 和 `trigger_id` 记录复检原因。
 
 ### 部署步骤
 
@@ -587,3 +600,4 @@ SHM_NAME = "/seat_aoi_py_to_cpp_results_v1"
 4. **CRC 校验** — 所有共享内存数据帧附带 CRC32，防止静默数据损坏
 5. **无锁环形缓冲区** — 使用 `std::atomic` CAS 操作，C++ 与 Python 侧无需额外同步原语
 6. **故障注入支持** — 命令行和配置文件均支持故障注入，便于验证容错路径
+7. **生产事件可追溯** — C++ 写出 JSONL 事件日志，现场可按 `sequence_id` 和 `trigger_id` 追踪 RECHECK 来源

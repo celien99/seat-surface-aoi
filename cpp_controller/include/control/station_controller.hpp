@@ -8,6 +8,7 @@
 #include "control/frame_assembler.hpp"
 #include "control/hardware_backend.hpp"
 #include "control/iplc_client.hpp"
+#include "control/production_event_log.hpp"
 #include "control/station_runtime_config.hpp"
 #include "control/trigger_scheduler.hpp"
 #include "ipc/frame_ring_buffer.hpp"
@@ -18,6 +19,7 @@ namespace seat_aoi {
 struct StationConfig {
   HardwareMode hardware_mode = HardwareMode::Simulated;
   HardwareBackend camera_backend = HardwareBackend::Simulated;
+  AcquisitionStrategy acquisition_strategy = AcquisitionStrategy::SerialTdm;
   bool reset_shared_memory = true;
   std::uint32_t slot_count = kDefaultSlotCount;
   std::uint32_t frame_slot_size = kDefaultFrameSlotSize;
@@ -29,6 +31,7 @@ struct StationConfig {
   int light_timeout_ms = 200;
   int max_jobs = 0;
   std::string recipe_id = "seat_a_black_leather_v1";
+  std::string trace_root = "trace";
   std::vector<std::uint32_t> light_order = {1, 2, 3, 4};
   std::vector<RuntimeCameraConfig> cameras = {
       RuntimeCameraConfig{0, "TOP_BACK", "", 64, 48, 1, "Mono8", "", "", 8, false},
@@ -71,12 +74,19 @@ private:
                                 const InspectionResultPayload& result,
                                 std::string* error_message) const;
   void log_result(const InspectionResultPayload& result) const;
+  void record_event(const std::string& name,
+                    const PlcTrigger& trigger,
+                    std::uint64_t sequence_id,
+                    InspectionDecision decision,
+                    ErrorCode error_code,
+                    const std::string& message);
 
   StationConfig config_{};
   FrameRingBuffer frame_ring_;
   ResultRingBuffer result_ring_;
   FrameAssembler frame_assembler_;
   std::unique_ptr<IPlcClient> plc_client_;
+  ProductionEventLog event_log_;
   std::uint64_t next_sequence_id_ = 1;
 };
 

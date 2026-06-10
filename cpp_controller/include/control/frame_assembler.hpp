@@ -55,6 +55,9 @@ private:
   bool build_light_sequence(const Recipe& recipe,
                             LightSequence* out_sequence,
                             AcquisitionError* error) const;
+  bool validate_serial_tdm_bundle(const SeatImageBundle& bundle,
+                                  const LightSequence& sequence,
+                                  AcquisitionError* error) const;
 
   bool initialized_ = false;
   StationRuntimeConfig config_{};

@@ -1,5 +1,6 @@
 #include <array>
 #include <cstring>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -163,7 +164,7 @@ bool test_station_fault_returns_recheck(const std::string& name,
                                         seat_aoi::ErrorCode expected_error) {
   config.reset_shared_memory = true;
   config.slot_count = 1;
-  config.frame_slot_size = 4096;
+  config.frame_slot_size = 8192;
   config.result_slot_size = 4096;
   config.publish_timeout_ms = 5;
   config.detector_timeout_ms = 5;
@@ -354,6 +355,86 @@ bool test_filled_production_config_validates() {
   return ok;
 }
 
+bool test_parallel_acquisition_strategy_rejected() {
+  auto config = make_filled_production_runtime_config();
+  config.acquisition_strategy = static_cast<seat_aoi::AcquisitionStrategy>(999U);
+  std::string error;
+  const bool ok = seat_aoi::validate_station_runtime_config(config, &error);
+  const bool passed = !ok && error.find("serial_tdm") != std::string::npos;
+  if (!passed) {
+    std::cerr << "parallel acquisition strategy was not rejected: " << error << "\n";
+  }
+  return passed;
+}
+
+bool test_strobe_width_larger_than_exposure_rejected() {
+  auto config = make_filled_production_runtime_config();
+  config.light_channels[0].strobe_width_us = config.light_channels[0].exposure_us + 1U;
+  std::string error;
+  const bool ok = seat_aoi::validate_station_runtime_config(config, &error);
+  const bool passed = !ok && error.find("脉宽") != std::string::npos;
+  if (!passed) {
+    std::cerr << "invalid strobe width was not rejected: " << error << "\n";
+  }
+  return passed;
+}
+
+bool test_station_writes_detector_timeout_event_log() {
+  seat_aoi::StationConfig config;
+  config.reset_shared_memory = true;
+  config.slot_count = 1;
+  config.frame_slot_size = 8192;
+  config.result_slot_size = 4096;
+  config.publish_timeout_ms = 5;
+  config.detector_timeout_ms = 5;
+  config.trigger_timeout_ms = 5;
+  config.camera_timeout_ms = 5;
+  config.light_timeout_ms = 5;
+  config.recipe_id = "seat_a_black_leather_v1";
+  config.light_order = {1};
+  config.light_channels = {
+      seat_aoi::RuntimeLightChannelConfig{1, 1, 800, 800, 0, 1.0F, 60.0F},
+  };
+  config.trace_root = "/tmp/seat_aoi_cpp_event_log_test_" +
+                      std::to_string(seat_aoi::now_us());
+
+  seat_aoi::StationController station;
+  if (!station.initialize(config)) {
+    std::cerr << "event log station initialize failed\n";
+    return false;
+  }
+
+  seat_aoi::PlcTrigger trigger;
+  trigger.trigger_id = 7010;
+  trigger.seat_id = "SIM_TIMEOUT";
+  trigger.sku = "seat_a_black_leather";
+  const auto result = station.inspect_one_seat(trigger);
+  station.cleanup_shared_memory();
+
+  std::ifstream input(config.trace_root + "/cpp_controller_events.jsonl");
+  std::string line;
+  bool saw_timeout = false;
+  while (std::getline(input, line)) {
+    if (line.find("\"event\":\"inspection_recheck\"") != std::string::npos &&
+        line.find("\"error\":\"DetectorTimeout\"") != std::string::npos &&
+        line.find("\"trigger_id\":7010") != std::string::npos) {
+      saw_timeout = true;
+      break;
+    }
+  }
+
+  const bool passed =
+      static_cast<seat_aoi::InspectionDecision>(result.meta.decision) ==
+          seat_aoi::InspectionDecision::Recheck &&
+      static_cast<seat_aoi::ErrorCode>(result.meta.error_code) ==
+          seat_aoi::ErrorCode::DetectorTimeout &&
+      saw_timeout;
+  if (!passed) {
+    std::cerr << "detector timeout event log was not written\n";
+  }
+  return passed;
+}
+
 bool test_unsupported_production_backend_fails_fast() {
   auto plc = seat_aoi::create_plc_client(seat_aoi::HardwareBackend::ModbusTcp);
   seat_aoi::PlcClientConfig config;
@@ -397,6 +478,15 @@ int main() {
     return 1;
   }
   if (!test_filled_production_config_validates()) {
+    return 1;
+  }
+  if (!test_parallel_acquisition_strategy_rejected()) {
+    return 1;
+  }
+  if (!test_strobe_width_larger_than_exposure_rejected()) {
+    return 1;
+  }
+  if (!test_station_writes_detector_timeout_event_log()) {
     return 1;
   }
   if (!test_unsupported_production_backend_fails_fast()) {

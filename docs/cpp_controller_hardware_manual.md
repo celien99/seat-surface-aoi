@@ -102,6 +102,7 @@ bash tools/run_simulated_ipc.sh
 | `light_timeout_ms` | 配置、arm、确认频闪状态的超时。失败输出 `RECHECK`。 |
 | `max_jobs` | 模拟运行批次数。`0` 表示 loop 模式无限运行。 |
 | `recipe_id` | 写入共享内存任务的配方 ID，Python detector 用它加载配方。 |
+| `acquisition_strategy` | 当前只允许 `serial_tdm`。逐机位串行完成全部光源后再进入下一机位，禁止多机位并行频闪。 |
 | `light_order` | 光源轮次顺序，例如 `1,2,3,4`。它决定每个座椅任务采图顺序。 |
 | `light.<N>.physical_channel` | 逻辑光源 `N` 对应的真实频闪控制器物理通道。 |
 | `light.<N>.exposure_us` | 逻辑光源 `N` 的相机曝光时间，写入图像元数据。 |
@@ -118,6 +119,7 @@ bash tools/run_simulated_ipc.sh
 | `plc.ack_input` | PLC 已读取 C++ 输出的确认输入。 |
 | `light.serial_port/light.host/light.device_id` | 频闪控制器的串口、网口或设备 ID，按 backend 类型填写。 |
 | `light.trigger_input_line` | 频闪触发输入线。 |
+| `trace_root` | C++ 生产事件日志目录，默认写入 `trace/cpp_controller_events.jsonl`。 |
 | `simulate_light_fault` | 模拟光源故障。 |
 | `simulate_missing_frame` | 模拟相机缺帧。 |
 | `simulate_plc_output_fault` | 模拟 PLC 输出失败。 |
@@ -126,6 +128,8 @@ bash tools/run_simulated_ipc.sh
 生产配置校验规则：
 
 - `hardware_mode=production` 时，`plc.backend`、`camera.backend`、`light.backend` 不能是 `simulated`。
+- `acquisition_strategy` 只能是 `serial_tdm`；生产模式必须使用 `camera_exposure_output` 或等价硬触发同步。
+- `strobe_width_us <= exposure_us`，且 `frame_slot_size` 必须足够容纳完整串行 TDM 图像包。
 - 生产必填字段不能留空，也不能保留 `TODO` 占位。
 - 配置校验通过只表示字段齐全，不表示真实驱动已经链接成功。
 - 如果未接入对应 SDK 就直接运行生产 backend，程序会 fail-fast 报“尚未链接真实硬件驱动”，不会回退到模拟硬件。
@@ -231,11 +235,13 @@ bash tools/run_simulated_ipc.sh
    f. C++ 收当前机位在 CH1 下的图
 5. 对 light_index=2/3/4 重复第 4 步
 6. 当前机位完成全部光源后切换到下一个机位
-7. C++ 校验 frame_count == camera_count * light_count
+7. C++ 校验 frame_count == camera_count * light_count，且帧顺序必须符合“当前机位全光源→下一机位”
 8. C++ 写共享内存
 9. Python detector 检测
 10. C++ 输出 PLC 决策
 ```
+
+C++ 主控还会记录 `trace_root/cpp_controller_events.jsonl`，用于按 `sequence_id` 和 `trigger_id` 复盘采集失败、detector 超时、结果校验失败和 PLC 输出失败。
 
 当前模拟代码中，`camera_exposure_output` 模式按以下顺序执行：
 

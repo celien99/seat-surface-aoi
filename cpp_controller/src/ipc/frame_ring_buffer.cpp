@@ -165,6 +165,12 @@ bool FrameRingBuffer::validate_bundle(const SeatImageBundle& bundle,
     }
     return false;
   }
+  if (bundle.job_meta.frame_count != bundle.frames.size()) {
+    if (error_message != nullptr) {
+      *error_message = "job_meta.frame_count does not match frames";
+    }
+    return false;
+  }
 
   std::size_t size = frame_slot_image_offset(static_cast<std::uint32_t>(bundle.frames.size()));
   for (const auto& frame : bundle.frames) {

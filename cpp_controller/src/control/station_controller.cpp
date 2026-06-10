@@ -37,6 +37,7 @@ bool StationController::initialize(const StationConfig& config) {
   StationRuntimeConfig runtime_config;
   runtime_config.hardware_mode = config.hardware_mode;
   runtime_config.camera_backend = config.camera_backend;
+  runtime_config.acquisition_strategy = config.acquisition_strategy;
   runtime_config.reset_shared_memory = config.reset_shared_memory;
   runtime_config.slot_count = config.slot_count;
   runtime_config.frame_slot_size = config.frame_slot_size;
@@ -48,6 +49,7 @@ bool StationController::initialize(const StationConfig& config) {
   runtime_config.light_timeout_ms = config.light_timeout_ms;
   runtime_config.max_jobs = config.max_jobs;
   runtime_config.recipe_id = config.recipe_id;
+  runtime_config.trace_root = config.trace_root;
   runtime_config.light_order = config.light_order;
   runtime_config.cameras = config.cameras;
   runtime_config.light = config.light;
@@ -59,6 +61,11 @@ bool StationController::initialize(const StationConfig& config) {
   runtime_config.plc.simulate_trigger_timeout = config.simulate_trigger_timeout;
   for (auto& camera : runtime_config.cameras) {
     camera.simulate_missing_frame = config.simulate_missing_frame;
+  }
+  std::string trace_error;
+  if (!event_log_.initialize(config.trace_root, &trace_error)) {
+    std::cerr << "C++ 生产事件日志初始化失败: " << trace_error << std::endl;
+    return false;
   }
   frame_assembler_.configure(runtime_config);
   plc_client_ = create_plc_client(config.plc.backend);
@@ -84,6 +91,12 @@ bool StationController::wait_for_trigger(PlcTrigger* out_trigger, std::string* e
 InspectionResultPayload StationController::inspect_one_seat(const PlcTrigger& trigger) {
   const std::uint64_t sequence_id = next_sequence_id_++;
   const Recipe recipe = load_recipe(trigger.sku);
+  record_event("inspection_start",
+               trigger,
+               sequence_id,
+               InspectionDecision::Recheck,
+               ErrorCode::None,
+               "start serial_tdm inspection");
   SeatImageBundle bundle;
   std::string error;
   AcquisitionError acquisition_error;
@@ -126,8 +139,21 @@ InspectionResultPayload StationController::inspect_one_seat(const PlcTrigger& tr
   }
   const auto decision = static_cast<InspectionDecision>(result.meta.decision);
   if (!plc_client_->send_decision(trigger, sequence_id, decision, 200, &error)) {
-    return make_recheck_result(trigger, sequence_id, ErrorCode::DeviceFault, error);
+    auto recheck = make_recheck_result(trigger, sequence_id, ErrorCode::DeviceFault, error);
+    record_event("plc_output_failed",
+                 trigger,
+                 sequence_id,
+                 InspectionDecision::Recheck,
+                 ErrorCode::DeviceFault,
+                 error);
+    return recheck;
   }
+  record_event("inspection_complete",
+               trigger,
+               sequence_id,
+               decision,
+               static_cast<ErrorCode>(result.meta.error_code),
+               "detector result accepted and PLC output sent");
   log_result(result);
   return result;
 }
@@ -173,7 +199,20 @@ InspectionResultPayload StationController::make_and_send_recheck_result(
     result.meta.error_code = static_cast<std::uint32_t>(ErrorCode::DeviceFault);
     std::cerr << "[sequence_id=" << sequence_id << " trigger_id=" << trigger.trigger_id
               << "] PLC RECHECK output failed: " << plc_error << std::endl;
+    record_event("recheck_output_failed",
+                 trigger,
+                 sequence_id,
+                 InspectionDecision::Recheck,
+                 ErrorCode::DeviceFault,
+                 message + "; plc_error=" + plc_error);
+    return result;
   }
+  record_event("inspection_recheck",
+               trigger,
+               sequence_id,
+               InspectionDecision::Recheck,
+               static_cast<ErrorCode>(result.meta.error_code),
+               message);
   return result;
 }
 
@@ -234,11 +273,31 @@ bool StationController::validate_detector_result(const PlcTrigger& trigger,
 void StationController::log_result(const InspectionResultPayload& result) const {
   std::cout << "[sequence_id=" << result.meta.sequence_id
             << " trigger_id=" << result.meta.trigger_id
-            << "] decision=" << result.meta.decision
+            << "] decision=" << inspection_decision_name(
+                   static_cast<InspectionDecision>(result.meta.decision))
             << " quality_pass=" << result.meta.quality_pass
             << " defects=" << result.meta.defect_count
-            << " error_code=" << result.meta.error_code
+            << " error_code=" << error_code_name(
+                   static_cast<ErrorCode>(result.meta.error_code))
             << " elapsed_ms=" << result.meta.elapsed_ms << std::endl;
+}
+
+void StationController::record_event(const std::string& name,
+                                     const PlcTrigger& trigger,
+                                     std::uint64_t sequence_id,
+                                     InspectionDecision decision,
+                                     ErrorCode error_code,
+                                     const std::string& message) {
+  ProductionEvent event;
+  event.name = name;
+  event.sequence_id = sequence_id;
+  event.trigger_id = trigger.trigger_id;
+  event.seat_id = trigger.seat_id;
+  event.sku = trigger.sku;
+  event.decision = decision;
+  event.error_code = error_code;
+  event.message = message;
+  event_log_.record(event);
 }
 
 }  // namespace seat_aoi

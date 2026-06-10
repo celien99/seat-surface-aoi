@@ -328,6 +328,12 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
   job.frame_count = static_cast<std::uint32_t>(frames.size());
   out_bundle->job_meta = job;
   out_bundle->frames = std::move(frames);
+  if (!validate_serial_tdm_bundle(*out_bundle, sequence, error)) {
+    light_controller_->shutdown_all();
+    initialized_ = false;
+    cameras_.clear();
+    return false;
+  }
   return true;
 }
 
@@ -385,6 +391,88 @@ bool FrameAssembler::build_light_sequence(const Recipe& recipe,
     param.gain = configured.gain;
     param.current_percent = configured.current_percent;
     out_sequence->channels.push_back(param);
+  }
+  return true;
+}
+
+bool FrameAssembler::validate_serial_tdm_bundle(const SeatImageBundle& bundle,
+                                                const LightSequence& sequence,
+                                                AcquisitionError* error) const {
+  const std::uint32_t expected_frames =
+      static_cast<std::uint32_t>(config_.cameras.size() * sequence.channels.size());
+  if (bundle.job_meta.camera_count != config_.cameras.size() ||
+      bundle.job_meta.frame_count != expected_frames ||
+      bundle.frames.size() != expected_frames) {
+    set_acquisition_error(error,
+                          ErrorCode::MissingFrame,
+                          AcquisitionStage::Configuration,
+                          0,
+                          0,
+                          0,
+                          "serial TDM bundle frame_count mismatch");
+    return false;
+  }
+
+  std::size_t frame_index = 0;
+  for (const auto& camera : config_.cameras) {
+    for (std::uint32_t light_seq_index = 0; light_seq_index < sequence.channels.size();
+         ++light_seq_index) {
+      const auto& expected_light = sequence.channels[light_seq_index];
+      const auto& frame = bundle.frames[frame_index];
+      const auto& meta = frame.meta;
+      if (meta.camera_index != camera.camera_index ||
+          meta.light_index != expected_light.light_index ||
+          meta.light_seq_index != light_seq_index) {
+        std::ostringstream oss;
+        oss << "serial TDM order mismatch expected camera_index="
+            << camera.camera_index << " light_index=" << expected_light.light_index
+            << " light_seq_index=" << light_seq_index
+            << " actual camera_index=" << meta.camera_index
+            << " light_index=" << meta.light_index
+            << " light_seq_index=" << meta.light_seq_index;
+        set_acquisition_error(error,
+                              ErrorCode::InvalidPayload,
+                              AcquisitionStage::Configuration,
+                              camera.camera_index,
+                              expected_light.light_index,
+                              light_seq_index,
+                              oss.str());
+        return false;
+      }
+      if (frame.bytes.empty() ||
+          meta.width != camera.width ||
+          meta.height != camera.height ||
+          meta.channels != camera.channels ||
+          meta.stride_bytes < meta.width * meta.channels) {
+        std::ostringstream oss;
+        oss << "serial TDM frame metadata invalid camera_index="
+            << camera.camera_index << " light_index=" << expected_light.light_index;
+        set_acquisition_error(error,
+                              ErrorCode::InvalidPayload,
+                              AcquisitionStage::Configuration,
+                              camera.camera_index,
+                              expected_light.light_index,
+                              light_seq_index,
+                              oss.str());
+        return false;
+      }
+      const std::uint64_t minimum_size =
+          static_cast<std::uint64_t>(meta.stride_bytes) * meta.height;
+      if (frame.bytes.size() < minimum_size) {
+        std::ostringstream oss;
+        oss << "serial TDM frame payload too small camera_index="
+            << camera.camera_index << " light_index=" << expected_light.light_index;
+        set_acquisition_error(error,
+                              ErrorCode::InvalidPayload,
+                              AcquisitionStage::Configuration,
+                              camera.camera_index,
+                              expected_light.light_index,
+                              light_seq_index,
+                              oss.str());
+        return false;
+      }
+      ++frame_index;
+    }
   }
   return true;
 }

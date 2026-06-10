@@ -79,6 +79,21 @@ bool parse_trigger_sync_mode(const std::string& value,
   return false;
 }
 
+bool parse_acquisition_strategy(const std::string& value,
+                                AcquisitionStrategy* out_strategy,
+                                std::string* error_message) {
+  if (value == "serial_tdm" || value == "serial" ||
+      value == "camera_serial_tdm" || value == "per_camera_serial") {
+    *out_strategy = AcquisitionStrategy::SerialTdm;
+    return true;
+  }
+  if (error_message != nullptr) {
+    *error_message = "acquisition_strategy 只能是 serial_tdm；"
+                     "禁止多机位并行频闪采集，避免光源互相污染: " + value;
+  }
+  return false;
+}
+
 bool parse_uint32_field(const std::string& field_name,
                         const std::string& value,
                         bool allow_zero,
@@ -336,6 +351,13 @@ bool validate_light_channels(const std::vector<std::uint32_t>& light_order,
       }
       return false;
     }
+    if (channel.strobe_width_us > channel.exposure_us) {
+      if (error_message != nullptr) {
+        *error_message = "光源频闪脉宽不能大于曝光时间: light." +
+                         std::to_string(light_index);
+      }
+      return false;
+    }
   }
   return true;
 }
@@ -550,6 +572,10 @@ bool load_station_runtime_config(const std::string& path,
       if (!parse_trigger_sync_mode(value, &config.trigger_sync_mode, error_message)) {
         return false;
       }
+    } else if (key == "acquisition_strategy") {
+      if (!parse_acquisition_strategy(value, &config.acquisition_strategy, error_message)) {
+        return false;
+      }
     } else if (key == "reset_shared_memory") {
       config.reset_shared_memory = parse_bool(value);
     } else if (key == "simulate_light_fault") {
@@ -621,6 +647,12 @@ bool load_station_runtime_config(const std::string& path,
 
 bool validate_station_runtime_config(const StationRuntimeConfig& config,
                                      std::string* error_message) {
+  if (config.acquisition_strategy != AcquisitionStrategy::SerialTdm) {
+    if (error_message != nullptr) {
+      *error_message = "当前只允许 serial_tdm 采集策略";
+    }
+    return false;
+  }
   if (config.slot_count == 0) {
     if (error_message != nullptr) {
       *error_message = "slot_count 必须大于 0";
@@ -666,6 +698,41 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
       return false;
     }
   }
+  const std::uint64_t expected_frame_count =
+      static_cast<std::uint64_t>(config.cameras.size()) * config.light_order.size();
+  if (expected_frame_count == 0 || expected_frame_count > kMaxFramesPerJob) {
+    if (error_message != nullptr) {
+      *error_message = "相机数量 x 光源数量超过单任务最大帧数或为空";
+    }
+    return false;
+  }
+  std::map<std::uint32_t, RuntimeLightChannelConfig> configured_light_channels;
+  for (const auto& channel : config.light_channels) {
+    if (channel.light_index == 0 ||
+        configured_light_channels[channel.light_index].light_index != 0) {
+      if (error_message != nullptr) {
+        *error_message = "光源 light_index 为空或重复";
+      }
+      return false;
+    }
+    configured_light_channels[channel.light_index] = channel;
+  }
+  if (!validate_light_channels(config.light_order, configured_light_channels, error_message)) {
+    return false;
+  }
+  std::uint64_t estimated_payload_size =
+      frame_slot_image_offset(static_cast<std::uint32_t>(expected_frame_count));
+  for (const auto& camera : config.cameras) {
+    estimated_payload_size += static_cast<std::uint64_t>(camera.width) *
+                              camera.height * camera.channels *
+                              config.light_order.size();
+  }
+  if (estimated_payload_size > config.frame_slot_size) {
+    if (error_message != nullptr) {
+      *error_message = "frame_slot_size 太小，无法容纳串行 TDM 采集图像包";
+    }
+    return false;
+  }
 
   if (config.hardware_mode == HardwareMode::Simulated) {
     if (!is_simulated_backend(config.plc.backend) ||
@@ -678,6 +745,13 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
       return false;
     }
     return true;
+  }
+
+  if (config.trigger_sync_mode != TriggerSyncMode::CameraExposureOutput) {
+    if (error_message != nullptr) {
+      *error_message = "生产模式必须使用 camera_exposure_output 或等价硬触发同步";
+    }
+    return false;
   }
 
   if (is_simulated_backend(config.plc.backend) ||
@@ -764,6 +838,14 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
     return false;
   }
   return true;
+}
+
+const char* acquisition_strategy_name(AcquisitionStrategy strategy) {
+  switch (strategy) {
+    case AcquisitionStrategy::SerialTdm:
+      return "serial_tdm";
+  }
+  return "unknown";
 }
 
 }  // namespace seat_aoi

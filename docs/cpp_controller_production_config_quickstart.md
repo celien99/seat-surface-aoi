@@ -160,6 +160,8 @@ light.trigger_input_line=TriggerIn1
 
 ## 7. 填光源通道映射
 
+`acquisition_strategy=serial_tdm` 是当前唯一允许的采集策略，表示每个机位按 1、2、3、4 的逻辑光源顺序完成全部拍摄后，再切换到下一机位。不要配置或实现多机位并行频闪采集，否则会造成光源互相污染。
+
 `light_order=1,2,3,4` 表示每个机位按 1、2、3、4 的逻辑光源顺序采图。每个逻辑光源必须映射到真实控制器物理通道：
 
 ```ini
@@ -205,7 +207,7 @@ cpp_controller/build/seat_aoi_controller \
 C++ station runtime config OK: cpp_controller/config/station_runtime.production.conf
 ```
 
-如果还看到 `TODO`、空字段、端口为 0、生产模式仍使用 simulated backend，校验会失败并指出具体字段。
+如果还看到 `TODO`、空字段、端口为 0、生产模式仍使用 simulated backend，校验会失败并指出具体字段。如果把 `acquisition_strategy` 写成并行策略、把 `trigger_sync_mode` 改成生产不推荐的软件触发，或把 `strobe_width_us` 配得大于 `exposure_us`，校验也会失败。
 
 ## 9. 真实驱动接入点
 
@@ -226,5 +228,7 @@ C++ station runtime config OK: cpp_controller/config/station_runtime.production.
 - 每个光源逻辑编号和物理通道接线一致。
 - 相机 ExposureOut 到频闪 TriggerIn 的线已接好，极性正确。
 - `strobe_width_us <= exposure_us`，电流不超过光源规格。
+- `acquisition_strategy=serial_tdm`，并确认现场接线不会在同一时刻触发多个机位光源。
+- C++ 事件日志 `trace/cpp_controller_events.jsonl` 能记录 detector 超时、采集失败和 PLC 输出失败。
 - Python detector 常驻运行，C++ 和 Python 协议校验通过。
 - 故障注入和断线测试都不会输出 OK。
