@@ -6,10 +6,13 @@ from pathlib import Path
 
 import pytest
 
+from python_detector.config.calibration_manager import Calibration
 from python_detector.config.recipe_schema import ModelConfig, RecipeManager, RecipeValidationError, recipe_from_dict
+from python_detector.ipc.data_types import LightFrame, SeatInspectionJob
 from python_detector.models.inference_engine import InferenceEngine, ModelRegistry
 from python_detector.pipeline.pipeline import InspectionPipeline
-from python_detector.pipeline.preprocessor import Preprocessor
+from python_detector.pipeline.preprocessor import PreparedBundle, Preprocessor
+from python_detector.pipeline.reflectance_cube import ReflectanceCubeBuilder
 from python_detector.pipeline.roi_locator import RoiLocator
 from training_tools.build_patchcore_memory_bank import build_memory_bank
 from training_tools.job_fixture import make_simulated_job
@@ -112,6 +115,69 @@ def test_ecc_registration_details_are_in_pipeline_context() -> None:
     assert {"light_id", "matrix_3x3", "correlation", "iterations", "converged"}.issubset(first_report.details[0])
 
 
+def test_ecc_registration_applies_translation_before_feature_building() -> None:
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    recipe = replace(
+        recipe,
+        cameras=(replace(recipe.cameras[0], base_light_id="DIFFUSE"),),
+        quality=replace(recipe.quality, max_registration_error_px=2.0),
+        registration=replace(
+            recipe.registration,
+            method="ecc",
+            base_light_id="DIFFUSE",
+            base_light_fallback="DIFFUSE",
+            min_correlation=0.05,
+            search_radius_px=1,
+        ),
+    )
+    width = 8
+    height = 6
+    base_pixels = bytearray(40 + ((x * 17 + y * 29 + ((x * y) % 11)) % 170) for y in range(height) for x in range(width))
+    shifted_pixels = _shift_image_right(base_pixels, width, height, 1)
+    frames = {
+        "DIFFUSE": _ecc_test_frame("DIFFUSE", base_pixels, width, height),
+        "POLAR_DIFFUSE": _ecc_test_frame("POLAR_DIFFUSE", shifted_pixels, width, height),
+        "HIGH_LEFT": _ecc_test_frame("HIGH_LEFT", shifted_pixels, width, height),
+        "HIGH_RIGHT": _ecc_test_frame("HIGH_RIGHT", shifted_pixels, width, height),
+    }
+    calibration = Calibration(
+        calibration_id="calib/simulated_v1",
+        camera_id="TOP_BACK",
+        image_size=(width, height),
+        pixel_size_mm=0.12,
+        base_light_id="DIFFUSE",
+        light_alignment={},
+        roi_templates={},
+    )
+    prepared = [
+        PreparedBundle(
+            camera_id="TOP_BACK",
+            calibration=calibration,
+            rois={"full": frames},
+            roi_templates={},
+        )
+    ]
+    job = SeatInspectionJob(
+        sequence_id=1,
+        trigger_id=1001,
+        seat_id="SIM",
+        recipe_id=recipe.recipe_id,
+        sku=recipe.sku,
+        camera_bundles=[],
+    )
+
+    cube = ReflectanceCubeBuilder().build(job, prepared, recipe)[0]
+    high_left = cube.frames["HIGH_LEFT"]
+
+    assert cube.registration.is_pass is True
+    assert cube.registration.details[1]["light_id"] == "HIGH_LEFT"
+    assert cube.registration.details[1]["shift_xy"] == [1, 0]
+    assert cube.registration.details[1]["applied"] is True
+    for y in range(height):
+        for x in range(width - 1):
+            assert high_left.image[y * high_left.stride_bytes + x] == base_pixels[y * width + x]
+
+
 def test_patchcore_knn_backend_emits_unknown_anomaly_and_trace(tmp_path: Path) -> None:
     bank_path = tmp_path / "memory_bank.json"
     bank_path.write_text(
@@ -157,6 +223,38 @@ def test_patchcore_knn_backend_emits_unknown_anomaly_and_trace(tmp_path: Path) -
     assert summaries[0]["embedding_summary"]["backend"] == "statistical"
     assert summaries[0]["anomaly_summary"]["memory_bank_version"] == "bank_v1"
     assert summaries[0]["anomaly_summary"]["backend"] == "exact_knn"
+
+
+def _shift_image_right(data: bytearray, width: int, height: int, shift_px: int) -> bytearray:
+    shifted = bytearray(width * height)
+    for y in range(height):
+        for x in range(width):
+            source_x = max(0, x - shift_px)
+            shifted[y * width + x] = data[y * width + source_x]
+    return shifted
+
+
+def _ecc_test_frame(light_id: str, data: bytearray, width: int, height: int) -> LightFrame:
+    return LightFrame(
+        camera_id="TOP_BACK",
+        light_id=light_id,
+        frame_index=1,
+        light_seq_index=0,
+        width=width,
+        height=height,
+        channels=1,
+        stride_bytes=width,
+        pixel_format="MONO8",
+        bit_depth=8,
+        color_order="MONO",
+        dtype="UINT8",
+        timestamp_us=1_000,
+        exposure_us=800,
+        gain=1.0,
+        calibration_id="calib/simulated_v1",
+        image_crc32=0,
+        image=memoryview(data),
+    )
 
 
 def test_patchcore_knn_backend_applies_pca_projection(tmp_path: Path) -> None:

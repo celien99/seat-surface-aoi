@@ -72,8 +72,49 @@ class EccRegistration:
             message="ECC translation pass" if converged else "ECC correlation below threshold",
         )
 
+    def apply_translation(self, moving: LightFrame, shift_xy: tuple[int, int]) -> LightFrame:
+        dx, dy = shift_xy
+        if dx == 0 and dy == 0:
+            return moving
+        aligned = bytearray(moving.width * moving.height)
+        for y in range(moving.height):
+            source_y = max(0, min(moving.height - 1, y + dy))
+            for x in range(moving.width):
+                source_x = max(0, min(moving.width - 1, x + dx))
+                aligned[y * moving.width + x] = moving.image[source_y * moving.stride_bytes + source_x]
+        return LightFrame(
+            camera_id=moving.camera_id,
+            light_id=moving.light_id,
+            frame_index=moving.frame_index,
+            light_seq_index=moving.light_seq_index,
+            width=moving.width,
+            height=moving.height,
+            channels=moving.channels,
+            stride_bytes=moving.width,
+            pixel_format=moving.pixel_format,
+            bit_depth=moving.bit_depth,
+            color_order=moving.color_order,
+            dtype=moving.dtype,
+            timestamp_us=moving.timestamp_us,
+            exposure_us=moving.exposure_us,
+            gain=moving.gain,
+            calibration_id=moving.calibration_id,
+            image_crc32=moving.image_crc32,
+            image=memoryview(aligned),
+            origin_xy=moving.origin_xy,
+            source_width=moving.source_width,
+            source_height=moving.source_height,
+            roi_to_source_matrix=moving.roi_to_source_matrix,
+            source_to_roi_matrix=moving.source_to_roi_matrix,
+        )
+
     def _normalized_correlation(self, base: LightFrame, moving: LightFrame, dx: int, dy: int) -> float:
-        pairs: list[tuple[int, int]] = []
+        count = 0
+        sum_a = 0.0
+        sum_b = 0.0
+        sum_aa = 0.0
+        sum_bb = 0.0
+        sum_ab = 0.0
         for y in range(base.height):
             moving_y = y + dy
             if moving_y < 0 or moving_y >= moving.height:
@@ -84,20 +125,19 @@ class EccRegistration:
                 moving_x = x + dx
                 if moving_x < 0 or moving_x >= moving.width:
                     continue
-                pairs.append((int(base.image[base_row + x]), int(moving.image[moving_row + moving_x])))
-        if len(pairs) < 4:
+                a = float(base.image[base_row + x])
+                b = float(moving.image[moving_row + moving_x])
+                count += 1
+                sum_a += a
+                sum_b += b
+                sum_aa += a * a
+                sum_bb += b * b
+                sum_ab += a * b
+        if count < 4:
             return -1.0
-        mean_a = sum(a for a, _b in pairs) / len(pairs)
-        mean_b = sum(b for _a, b in pairs) / len(pairs)
-        numerator = 0.0
-        denom_a = 0.0
-        denom_b = 0.0
-        for a, b in pairs:
-            da = float(a) - mean_a
-            db = float(b) - mean_b
-            numerator += da * db
-            denom_a += da * da
-            denom_b += db * db
+        numerator = sum_ab - (sum_a * sum_b / count)
+        denom_a = sum_aa - (sum_a * sum_a / count)
+        denom_b = sum_bb - (sum_b * sum_b / count)
         denom = math.sqrt(denom_a * denom_b)
         if denom <= 1e-9:
             return -1.0

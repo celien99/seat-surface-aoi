@@ -70,7 +70,7 @@ python_detector/
 │   ├── preprocessor.py         # 元数据断言、标定匹配、ROI 裁剪和透视展开
 │   ├── roi_locator.py          # Dome 语义光源 ROI 定位，支持 template/fake_yolo/onnx_yolo
 │   ├── reflectance_cube.py     # 多光源 ROI 对齐后的 ReflectanceCube 构建
-│   ├── ecc_registration.py     # 轻量 ECC 风格平移搜索配准报告
+│   ├── ecc_registration.py     # ECC 风格平移搜索和非基准光源 ROI 重采样
 │   ├── feature_builder.py      # 多光源特征和 NCHW tensor 构建
 │   ├── fusion_engine.py        # 候选框融合、NMS、候选数量限制
 │   ├── defect_filter.py        # 类别阈值、面积阈值等缺陷过滤
@@ -138,7 +138,9 @@ training_tools/
 
 ### 多光源特征
 
-`ReflectanceCubeBuilder` 将同一 ROI 下多个光源图组织成 cube，并应用固定标定或 ECC 风格配准报告。`FeatureBuilder` 构建当前标准通道：
+`ReflectanceCubeBuilder` 将同一 ROI 下多个光源图组织成 cube。`fixed_calibration` 模式检查标定矩阵角点误差；`ecc` 模式以 `base_light_id` ROI 为基准，对其余光源做整数像素平移搜索，记录相关系数、位移和误差，并在配准通过时把非基准光源 ROI 重采样到基准坐标后再进入特征构建。配准失败、相关性不足或位移超过阈值时仍走质量失败结果，不输出 `OK`。
+
+`FeatureBuilder` 构建当前标准通道：
 
 - `ch0_diffuse`
 - `ch1_polar_diffuse`

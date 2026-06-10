@@ -69,7 +69,7 @@ class ReflectanceCubeBuilder:
         if base_light_id not in frames:
             base_light_id = recipe.registration.base_light_fallback
         base = frames.get(base_light_id)
-        registration = self._registration_report(
+        registration, registered_frames = self._registration_report(
             camera_id=camera_id,
             roi_name=roi_name,
             base_light_id=base_light_id,
@@ -90,7 +90,7 @@ class ReflectanceCubeBuilder:
             roi_name=roi_name,
             base_light_id=base_light_id,
             light_order=light_order,
-            frames={light_id: frames[light_id] for light_id in light_order if light_id in frames},
+            frames={light_id: registered_frames[light_id] for light_id in light_order if light_id in registered_frames},
             registration=registration,
             pixel_size_mm=bundle.calibration.pixel_size_mm,
             calibration_id=bundle.calibration.calibration_id,
@@ -108,7 +108,7 @@ class ReflectanceCubeBuilder:
         light_order: tuple[str, ...],
         bundle: PreparedBundle,
         recipe: Recipe,
-    ) -> RegistrationReport:
+    ) -> tuple[RegistrationReport, dict[str, LightFrame]]:
         base = frames.get(base_light_id)
         if recipe.registration.method == "ecc":
             return self._ecc_registration_report(
@@ -120,16 +120,19 @@ class ReflectanceCubeBuilder:
                 recipe=recipe,
             )
         if base is None:
-            return RegistrationReport(
-                camera_id=camera_id,
-                roi_name=roi_name,
-                base_light_id=base_light_id,
-                calibration_id="",
-                max_error_px=999.0,
-                mean_error_px=999.0,
-                method=recipe.registration.method,
-                is_pass=False,
-                message="missing base light",
+            return (
+                RegistrationReport(
+                    camera_id=camera_id,
+                    roi_name=roi_name,
+                    base_light_id=base_light_id,
+                    calibration_id="",
+                    max_error_px=999.0,
+                    mean_error_px=999.0,
+                    method=recipe.registration.method,
+                    is_pass=False,
+                    message="missing base light",
+                ),
+                frames,
             )
 
         errors: list[float] = []
@@ -138,44 +141,53 @@ class ReflectanceCubeBuilder:
                 continue
             matrix = bundle.calibration.light_alignment.get(light_id)
             if matrix is None:
-                return RegistrationReport(
-                    camera_id=camera_id,
-                    roi_name=roi_name,
-                    base_light_id=base_light_id,
-                    calibration_id=base.calibration_id,
-                    max_error_px=999.0,
-                    mean_error_px=999.0,
-                    method=recipe.registration.method,
-                    is_pass=False,
-                    message=f"missing alignment matrix for {light_id}",
+                return (
+                    RegistrationReport(
+                        camera_id=camera_id,
+                        roi_name=roi_name,
+                        base_light_id=base_light_id,
+                        calibration_id=base.calibration_id,
+                        max_error_px=999.0,
+                        mean_error_px=999.0,
+                        method=recipe.registration.method,
+                        is_pass=False,
+                        message=f"missing alignment matrix for {light_id}",
+                    ),
+                    frames,
                 )
             if len(matrix) != 9:
-                return RegistrationReport(
-                    camera_id=camera_id,
-                    roi_name=roi_name,
-                    base_light_id=base_light_id,
-                    calibration_id=base.calibration_id,
-                    max_error_px=999.0,
-                    mean_error_px=999.0,
-                    method=recipe.registration.method,
-                    is_pass=False,
-                    message=f"invalid alignment matrix for {light_id}",
+                return (
+                    RegistrationReport(
+                        camera_id=camera_id,
+                        roi_name=roi_name,
+                        base_light_id=base_light_id,
+                        calibration_id=base.calibration_id,
+                        max_error_px=999.0,
+                        mean_error_px=999.0,
+                        method=recipe.registration.method,
+                        is_pass=False,
+                        message=f"invalid alignment matrix for {light_id}",
+                    ),
+                    frames,
                 )
             errors.extend(self._corner_errors(frames[light_id], matrix))
 
         max_error = max(errors, default=0.0)
         mean_error = sum(errors) / max(len(errors), 1)
         is_pass = max_error <= recipe.quality.max_registration_error_px
-        return RegistrationReport(
-            camera_id=camera_id,
-            roi_name=roi_name,
-            base_light_id=base_light_id,
-            calibration_id=base.calibration_id,
-            max_error_px=max_error,
-            mean_error_px=mean_error,
-            method=recipe.registration.method,
-            is_pass=is_pass,
-            message="fixed calibration alignment pass" if is_pass else "registration error exceeds threshold",
+        return (
+            RegistrationReport(
+                camera_id=camera_id,
+                roi_name=roi_name,
+                base_light_id=base_light_id,
+                calibration_id=base.calibration_id,
+                max_error_px=max_error,
+                mean_error_px=mean_error,
+                method=recipe.registration.method,
+                is_pass=is_pass,
+                message="fixed calibration alignment pass" if is_pass else "registration error exceeds threshold",
+            ),
+            frames,
         )
 
     def _ecc_registration_report(
@@ -186,19 +198,22 @@ class ReflectanceCubeBuilder:
         frames: dict[str, LightFrame],
         light_order: tuple[str, ...],
         recipe: Recipe,
-    ) -> RegistrationReport:
+    ) -> tuple[RegistrationReport, dict[str, LightFrame]]:
         base = frames.get(base_light_id)
         if base is None:
-            return RegistrationReport(
-                camera_id=camera_id,
-                roi_name=roi_name,
-                base_light_id=base_light_id,
-                calibration_id="",
-                max_error_px=999.0,
-                mean_error_px=999.0,
-                method="ecc",
-                is_pass=False,
-                message="missing base light",
+            return (
+                RegistrationReport(
+                    camera_id=camera_id,
+                    roi_name=roi_name,
+                    base_light_id=base_light_id,
+                    calibration_id="",
+                    max_error_px=999.0,
+                    mean_error_px=999.0,
+                    method="ecc",
+                    is_pass=False,
+                    message="missing base light",
+                ),
+                frames,
             )
 
         alignments: list[EccAlignmentResult] = []
@@ -220,7 +235,7 @@ class ReflectanceCubeBuilder:
         max_error = max((result.mean_error_px for result in alignments), default=0.0)
         mean_error = sum(result.mean_error_px for result in alignments) / max(len(alignments), 1)
         is_pass = not failed and max_error <= recipe.quality.max_registration_error_px
-        return RegistrationReport(
+        report = RegistrationReport(
             camera_id=camera_id,
             roi_name=roi_name,
             base_light_id=base_light_id,
@@ -240,10 +255,27 @@ class ReflectanceCubeBuilder:
                     "converged": result.converged,
                     "mean_error_px": result.mean_error_px,
                     "message": result.message,
+                    "applied": is_pass and result.converged,
                 }
                 for result in alignments
             ],
         )
+        if not is_pass:
+            return report, frames
+        return report, self._apply_ecc_alignments(frames, alignments)
+
+    def _apply_ecc_alignments(
+        self,
+        frames: dict[str, LightFrame],
+        alignments: list[EccAlignmentResult],
+    ) -> dict[str, LightFrame]:
+        aligned = dict(frames)
+        for result in alignments:
+            frame = frames.get(result.light_id)
+            if frame is None or not result.converged:
+                continue
+            aligned[result.light_id] = self.ecc_registration.apply_translation(frame, result.shift_xy)
+        return aligned
 
     def _corner_errors(self, frame: LightFrame, matrix: tuple[float, ...]) -> list[float]:
         x0, y0, x1, y1 = frame.bbox_xyxy_pixel

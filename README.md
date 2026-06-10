@@ -22,7 +22,7 @@
 | 光学采集抽象 | 支持多机位、多光源模拟采集；当前采用串行 TDM 频闪策略，按机位独立完成 `light_order` 后再切换机位；默认光源为 `DIFFUSE`、`POLAR_DIFFUSE`、`HIGH_LEFT`、`HIGH_RIGHT` |
 | C++ 主控 | 支持 PLC 抽象、相机/光源模拟驱动、生产硬件 backend 配置入口、`--validate-config` 启动前校验、`serial_tdm` 采集策略校验、`camera_exposure_output` 硬触发同步模式、逐机位/逐光源串行采集、采集包完整性校验、工位状态机、连续复检健康报警、C++ 生产事件 JSONL、长稳压测脚本、逐光源曝光/脉宽/电流/物理通道配置、结构化采集错误码、故障注入和保守降级；真实厂商 SDK 需按现场型号接入 |
 | 共享内存 IPC | POSIX shared memory，固定布局结构体，frame/result ring buffer，CRC 与协议布局校验 |
-| Python 检测进程 | 支持共享内存读取、质量门禁、Dome ROI 定位接口、ROI 裁剪/透视展开、固定标定或 ECC 配准、特征构建、推理、融合、缺陷过滤和规则判定 |
+| Python 检测进程 | 支持共享内存读取、质量门禁、Dome ROI 定位接口、ROI 裁剪/透视展开、固定标定误差检查、ECC 平移配准与非基准光源 ROI 对齐、特征构建、推理、融合、缺陷过滤和规则判定 |
 | 模型后端 | 支持 fake、ONNX detection rows、统计 embedding、ONNX WideResNet50 embedding、PCA 投影和 PatchCore safety net；PatchCore 优先尝试 FAISS，缺索引或缺依赖时回退 exact KNN 并写入 trace |
 | 模型产物 | 根目录 `model/` 提供 YOLO、监督检测、WideResNet50、PCA、PatchCore memory bank 和可选 FAISS 索引占位；`production_model.example.yaml` 展示真实模型配方 |
 | 追溯与工具 | 支持 trace、ROI 定位报告、ECC 报告、embedding/PCA/anomaly summary、ROI 图落盘、overlay、Trace 转训练样本、回放、benchmark、PatchCore memory bank 构建、模型资产校验和模拟 IPC 验证 |
@@ -36,7 +36,7 @@
 | 1. 光学采集层 | 部分对齐：已有多光源/多机位模拟链路、V4 语义光源映射和 C++ 逐光源参数配置；C++ 当前固定按串行 TDM 策略执行“机位A全光源→机位B全光源”的独立频闪采集，并在配置和采集包校验中拒绝并行频闪路径，真实硬件 SDK 集成仍需项目化接入 |
 | 2. 控制与通信层 | 基本对齐：C++ 控制，Python 不控制 PLC/相机/频闪，在线链路使用共享内存 |
 | 3.1 ROI 定位 | 工程接入点对齐：支持 Dome 语义光源、模板/fake YOLO/ONNX YOLO 后端、真实 YOLO 占位目录和 YOLO row 到 ROI 模板坐标转换；真实权重和训练评估需现场产出 |
-| 3.2 ROI 裁剪与配准 | 基本对齐：已有 ROI 裁剪/透视展开、固定标定误差检查和 ECC 在线配准报告 |
+| 3.2 ROI 裁剪与配准 | 基本对齐：已有 ROI 裁剪/透视展开、固定标定误差检查和 ECC 在线平移配准；ECC 成功时会将非基准光源 ROI 重采样到基准光源坐标后再构建多光源特征，失败时保守返回复检 |
 | 3.3 特征提取 | 工程接入点对齐：已有多光源手工特征、统计 embedding、ONNX WideResNet50 embedding 入口和占位产物路径；真实权重和层选择需按模型接入 |
 | 3.4 特征融合与降维 | 基本对齐：支持 unified embedding summary、PCA 参数加载、版本校验和投影 |
 | 3.5 PatchCore 异常检测 | 工程接入点对齐：支持 memory bank JSON、coreset 工具、PCA、可选 FAISS 索引、exact KNN 回退、anomaly score 和规则阈值 |

@@ -47,7 +47,7 @@ python_detector/config/roi/default_roi.yaml
 
 `registration.method: fixed_calibration` 使用标定矩阵检查角点误差。
 
-`registration.method: ecc` 使用在线 ROI 平移搜索参考实现，输出每个光源相对 `base_light_id` 的矩阵、平移量、相关系数、迭代次数、收敛状态和误差。相关系数低于 `min_correlation`、ROI 尺寸不一致或误差超过 `quality.max_registration_error_px` 时返回 `RECHECK`。
+`registration.method: ecc` 使用在线 ROI 平移搜索参考实现，输出每个光源相对 `base_light_id` 的矩阵、平移量、相关系数、迭代次数、收敛状态和误差。配准通过时，非基准光源 ROI 会按估计平移重采样到基准光源坐标，再进入多光源特征构建；trace 详情中的 `applied` 标记会记录该位移是否已应用。相关系数低于 `min_correlation`、ROI 尺寸不一致或误差超过 `quality.max_registration_error_px` 时返回 `RECHECK`。
 
 ## 测试机更新标定流程
 
