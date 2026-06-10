@@ -171,6 +171,17 @@ void ProductionEventLog::record(const ProductionEvent& event) {
           << "\"decision_code\":" << static_cast<std::uint32_t>(event.decision) << ","
           << "\"error\":\"" << error_code_name(event.error_code) << "\","
           << "\"error_code\":" << static_cast<std::uint32_t>(event.error_code) << ","
+          << "\"station_state\":\"" << station_state_name(event.health.state) << "\","
+          << "\"alarm_level\":\"" << alarm_level_name(event.health.alarm_level) << "\","
+          << "\"total_jobs\":" << event.health.total_jobs << ","
+          << "\"ok_count\":" << event.health.ok_count << ","
+          << "\"ng_count\":" << event.health.ng_count << ","
+          << "\"recheck_count\":" << event.health.recheck_count << ","
+          << "\"error_count\":" << event.health.error_count << ","
+          << "\"detector_timeout_count\":" << event.health.detector_timeout_count << ","
+          << "\"device_fault_count\":" << event.health.device_fault_count << ","
+          << "\"consecutive_recheck_count\":" << event.health.consecutive_recheck_count << ","
+          << "\"health_message\":\"" << json_escape(event.health.alarm_message) << "\","
           << "\"message\":\"" << json_escape(event.message) << "\""
           << "}\n";
   output_.flush();

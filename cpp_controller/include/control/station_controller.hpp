@@ -9,6 +9,7 @@
 #include "control/hardware_backend.hpp"
 #include "control/iplc_client.hpp"
 #include "control/production_event_log.hpp"
+#include "control/station_health.hpp"
 #include "control/station_runtime_config.hpp"
 #include "control/trigger_scheduler.hpp"
 #include "ipc/frame_ring_buffer.hpp"
@@ -29,6 +30,8 @@ struct StationConfig {
   int trigger_timeout_ms = 1000;
   int camera_timeout_ms = 200;
   int light_timeout_ms = 200;
+  std::uint32_t warning_recheck_threshold = 3;
+  std::uint32_t critical_recheck_threshold = 5;
   int max_jobs = 0;
   std::string recipe_id = "seat_a_black_leather_v1";
   std::string trace_root = "trace";
@@ -57,6 +60,7 @@ public:
   bool initialize(const StationConfig& config);
   bool wait_for_trigger(PlcTrigger* out_trigger, std::string* error_message);
   InspectionResultPayload inspect_one_seat(const PlcTrigger& trigger);
+  StationHealthSnapshot health_snapshot() const;
   void cleanup_shared_memory();
 
 private:
@@ -80,6 +84,11 @@ private:
                     InspectionDecision decision,
                     ErrorCode error_code,
                     const std::string& message);
+  void record_system_event(const std::string& name,
+                           ErrorCode error_code,
+                           const std::string& message);
+  void record_result_health(const InspectionResultPayload& result,
+                            const std::string& message);
 
   StationConfig config_{};
   FrameRingBuffer frame_ring_;
@@ -87,6 +96,7 @@ private:
   FrameAssembler frame_assembler_;
   std::unique_ptr<IPlcClient> plc_client_;
   ProductionEventLog event_log_;
+  StationHealthMonitor health_;
   std::uint64_t next_sequence_id_ = 1;
 };
 

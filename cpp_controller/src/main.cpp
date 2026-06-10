@@ -52,6 +52,8 @@ void apply_runtime_config(const seat_aoi::StationRuntimeConfig& runtime_config,
   config->trigger_timeout_ms = runtime_config.trigger_timeout_ms;
   config->camera_timeout_ms = runtime_config.camera_timeout_ms;
   config->light_timeout_ms = runtime_config.light_timeout_ms;
+  config->warning_recheck_threshold = runtime_config.warning_recheck_threshold;
+  config->critical_recheck_threshold = runtime_config.critical_recheck_threshold;
   config->max_jobs = runtime_config.max_jobs;
   config->recipe_id = runtime_config.recipe_id;
   config->trace_root = runtime_config.trace_root;
@@ -112,6 +114,9 @@ int main(int argc, char** argv) {
   if (has_value_arg(argc, argv, "--max-jobs")) {
     config.max_jobs = int_arg(argc, argv, "--max-jobs", config.max_jobs);
   }
+  if (has_value_arg(argc, argv, "--trace-root")) {
+    config.trace_root = string_arg(argc, argv, "--trace-root");
+  }
   config.simulate_light_fault =
       config.simulate_light_fault || has_arg(argc, argv, "--simulate-light-fault");
   config.simulate_missing_frame =
@@ -154,5 +159,12 @@ int main(int argc, char** argv) {
     }
     ++processed_jobs;
   }
+  const auto health = station.health_snapshot();
+  std::cout << "station_state=" << seat_aoi::station_state_name(health.state)
+            << " alarm_level=" << seat_aoi::alarm_level_name(health.alarm_level)
+            << " total_jobs=" << health.total_jobs
+            << " recheck_count=" << health.recheck_count
+            << " consecutive_recheck_count=" << health.consecutive_recheck_count
+            << std::endl;
   return 0;
 }

@@ -100,6 +100,8 @@ bash tools/run_simulated_ipc.sh
 | `trigger_timeout_ms` | C++ 等待 PLC/外部触发的超时。超时不能输出 `OK`。 |
 | `camera_timeout_ms` | 每个光源轮次下等待相机图像的超时。任一相机缺帧输出 `RECHECK`。 |
 | `light_timeout_ms` | 配置、arm、确认频闪状态的超时。失败输出 `RECHECK`。 |
+| `warning_recheck_threshold` | 连续复检达到该次数后进入 `Warning`。 |
+| `critical_recheck_threshold` | 连续复检达到该次数后进入 `Fault/Critical`，必须大于 warning 阈值。 |
 | `max_jobs` | 模拟运行批次数。`0` 表示 loop 模式无限运行。 |
 | `recipe_id` | 写入共享内存任务的配方 ID，Python detector 用它加载配方。 |
 | `acquisition_strategy` | 当前只允许 `serial_tdm`。逐机位串行完成全部光源后再进入下一机位，禁止多机位并行频闪。 |

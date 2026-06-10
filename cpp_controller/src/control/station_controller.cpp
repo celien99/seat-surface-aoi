@@ -47,6 +47,8 @@ bool StationController::initialize(const StationConfig& config) {
   runtime_config.trigger_timeout_ms = config.trigger_timeout_ms;
   runtime_config.camera_timeout_ms = config.camera_timeout_ms;
   runtime_config.light_timeout_ms = config.light_timeout_ms;
+  runtime_config.warning_recheck_threshold = config.warning_recheck_threshold;
+  runtime_config.critical_recheck_threshold = config.critical_recheck_threshold;
   runtime_config.max_jobs = config.max_jobs;
   runtime_config.recipe_id = config.recipe_id;
   runtime_config.trace_root = config.trace_root;
@@ -67,10 +69,18 @@ bool StationController::initialize(const StationConfig& config) {
     std::cerr << "C++ 生产事件日志初始化失败: " << trace_error << std::endl;
     return false;
   }
+  health_.configure(config.warning_recheck_threshold, config.critical_recheck_threshold);
+  health_.transition_to(StationState::Initialized, "station controller initialized");
+  record_system_event("station_initialized", ErrorCode::None, "station controller initialized");
   frame_assembler_.configure(runtime_config);
   plc_client_ = create_plc_client(config.plc.backend);
   if (!plc_client_->initialize(make_plc_client_config(runtime_config.plc))) {
     std::cerr << "PLC 初始化失败: " << plc_client_->get_health().message << std::endl;
+    health_.record_fault(ErrorCode::DeviceFault, plc_client_->get_health().message);
+    health_.transition_to(StationState::Fault, plc_client_->get_health().message);
+    record_system_event("station_initialize_failed",
+                        ErrorCode::DeviceFault,
+                        plc_client_->get_health().message);
     return false;
   }
   const bool frames_ok = frame_ring_.initialize(kFrameShmName,
@@ -81,11 +91,30 @@ bool StationController::initialize(const StationConfig& config) {
                                                   config.slot_count,
                                                   config.result_slot_size,
                                                   config.reset_shared_memory);
-  return frames_ok && results_ok;
+  if (!frames_ok || !results_ok) {
+    health_.record_fault(ErrorCode::ProtocolMismatch, "shared memory initialize failed");
+    health_.transition_to(StationState::Fault, "shared memory initialize failed");
+    record_system_event("station_initialize_failed",
+                        ErrorCode::ProtocolMismatch,
+                        "shared memory initialize failed");
+    return false;
+  }
+  health_.transition_to(StationState::Ready, "station ready");
+  record_system_event("station_ready", ErrorCode::None, "station ready");
+  return true;
 }
 
 bool StationController::wait_for_trigger(PlcTrigger* out_trigger, std::string* error_message) {
-  return plc_client_->wait_trigger(out_trigger, config_.trigger_timeout_ms, error_message);
+  if (!plc_client_->wait_trigger(out_trigger, config_.trigger_timeout_ms, error_message)) {
+    const std::string message =
+        error_message != nullptr ? *error_message : "PLC trigger wait failed";
+    health_.record_fault(ErrorCode::DeviceFault, message);
+    health_.transition_to(StationState::Fault, message);
+    record_system_event("trigger_wait_failed", ErrorCode::DeviceFault, message);
+    return false;
+  }
+  health_.transition_to(StationState::Running, "trigger accepted");
+  return true;
 }
 
 InspectionResultPayload StationController::inspect_one_seat(const PlcTrigger& trigger) {
@@ -140,6 +169,7 @@ InspectionResultPayload StationController::inspect_one_seat(const PlcTrigger& tr
   const auto decision = static_cast<InspectionDecision>(result.meta.decision);
   if (!plc_client_->send_decision(trigger, sequence_id, decision, 200, &error)) {
     auto recheck = make_recheck_result(trigger, sequence_id, ErrorCode::DeviceFault, error);
+    record_result_health(recheck, error);
     record_event("plc_output_failed",
                  trigger,
                  sequence_id,
@@ -148,6 +178,7 @@ InspectionResultPayload StationController::inspect_one_seat(const PlcTrigger& tr
                  error);
     return recheck;
   }
+  record_result_health(result, "detector result accepted and PLC output sent");
   record_event("inspection_complete",
                trigger,
                sequence_id,
@@ -159,8 +190,14 @@ InspectionResultPayload StationController::inspect_one_seat(const PlcTrigger& tr
 }
 
 void StationController::cleanup_shared_memory() {
+  health_.transition_to(StationState::Stopped, "shared memory cleanup requested");
+  record_system_event("station_stopped", ErrorCode::None, "shared memory cleanup requested");
   frame_ring_.unlink_name();
   result_ring_.unlink_name();
+}
+
+StationHealthSnapshot StationController::health_snapshot() const {
+  return health_.snapshot();
 }
 
 Recipe StationController::load_recipe(const std::string& /*sku*/) const {
@@ -197,6 +234,7 @@ InspectionResultPayload StationController::make_and_send_recheck_result(
   std::string plc_error;
   if (!plc_client_->send_decision(trigger, sequence_id, InspectionDecision::Recheck, 200, &plc_error)) {
     result.meta.error_code = static_cast<std::uint32_t>(ErrorCode::DeviceFault);
+    record_result_health(result, message + "; plc_error=" + plc_error);
     std::cerr << "[sequence_id=" << sequence_id << " trigger_id=" << trigger.trigger_id
               << "] PLC RECHECK output failed: " << plc_error << std::endl;
     record_event("recheck_output_failed",
@@ -207,6 +245,7 @@ InspectionResultPayload StationController::make_and_send_recheck_result(
                  message + "; plc_error=" + plc_error);
     return result;
   }
+  record_result_health(result, message);
   record_event("inspection_recheck",
                trigger,
                sequence_id,
@@ -296,8 +335,29 @@ void StationController::record_event(const std::string& name,
   event.sku = trigger.sku;
   event.decision = decision;
   event.error_code = error_code;
+  event.health = health_.snapshot();
   event.message = message;
   event_log_.record(event);
+}
+
+void StationController::record_system_event(const std::string& name,
+                                            ErrorCode error_code,
+                                            const std::string& message) {
+  PlcTrigger trigger;
+  trigger.trigger_id = 0;
+  trigger.seat_id = "";
+  trigger.sku = "";
+  record_event(name, trigger, 0, InspectionDecision::Recheck, error_code, message);
+}
+
+void StationController::record_result_health(const InspectionResultPayload& result,
+                                             const std::string& message) {
+  const auto decision = static_cast<InspectionDecision>(result.meta.decision);
+  const auto error_code = static_cast<ErrorCode>(result.meta.error_code);
+  health_.record_result(decision, error_code, message);
+  if (health_.snapshot().state != StationState::Fault) {
+    health_.transition_to(StationState::Ready, "station ready");
+  }
 }
 
 }  // namespace seat_aoi

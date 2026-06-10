@@ -9,6 +9,7 @@
 #include "common/time_utils.hpp"
 #include "control/hardware_factory.hpp"
 #include "control/plc_client.hpp"
+#include "control/station_health.hpp"
 #include "control/station_controller.hpp"
 #include "control/station_runtime_config.hpp"
 #include "ipc/crc32.hpp"
@@ -379,6 +380,44 @@ bool test_strobe_width_larger_than_exposure_rejected() {
   return passed;
 }
 
+bool test_invalid_health_threshold_rejected() {
+  auto config = make_filled_production_runtime_config();
+  config.warning_recheck_threshold = 3;
+  config.critical_recheck_threshold = 3;
+  std::string error;
+  const bool ok = seat_aoi::validate_station_runtime_config(config, &error);
+  const bool passed = !ok && error.find("critical_recheck_threshold") != std::string::npos;
+  if (!passed) {
+    std::cerr << "invalid health threshold was not rejected: " << error << "\n";
+  }
+  return passed;
+}
+
+bool test_health_monitor_escalates_after_consecutive_rechecks() {
+  seat_aoi::StationHealthMonitor health;
+  health.configure(2, 3);
+  health.transition_to(seat_aoi::StationState::Ready, "ready");
+  health.record_result(seat_aoi::InspectionDecision::Recheck,
+                       seat_aoi::ErrorCode::DetectorTimeout,
+                       "timeout 1");
+  const auto warning = health.snapshot();
+  health.record_result(seat_aoi::InspectionDecision::Recheck,
+                       seat_aoi::ErrorCode::DetectorTimeout,
+                       "timeout 2");
+  health.record_result(seat_aoi::InspectionDecision::Recheck,
+                       seat_aoi::ErrorCode::DetectorTimeout,
+                       "timeout 3");
+  const auto critical = health.snapshot();
+  const bool passed = warning.alarm_level == seat_aoi::AlarmLevel::Warning &&
+                      critical.alarm_level == seat_aoi::AlarmLevel::Critical &&
+                      critical.state == seat_aoi::StationState::Fault &&
+                      critical.consecutive_recheck_count == 3;
+  if (!passed) {
+    std::cerr << "health monitor did not escalate after consecutive rechecks\n";
+  }
+  return passed;
+}
+
 bool test_station_writes_detector_timeout_event_log() {
   seat_aoi::StationConfig config;
   config.reset_shared_memory = true;
@@ -484,6 +523,12 @@ int main() {
     return 1;
   }
   if (!test_strobe_width_larger_than_exposure_rejected()) {
+    return 1;
+  }
+  if (!test_invalid_health_threshold_rejected()) {
+    return 1;
+  }
+  if (!test_health_monitor_escalates_after_consecutive_rechecks()) {
     return 1;
   }
   if (!test_station_writes_detector_timeout_event_log()) {

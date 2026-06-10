@@ -26,6 +26,7 @@ add_library(seat_aoi_control
   src/control/light_controller.cpp
   src/control/plc_client.cpp
   src/control/production_event_log.cpp
+  src/control/station_health.cpp
   src/control/station_runtime_config.cpp
   src/camera/camera_device.cpp
   src/camera/camera_worker.cpp

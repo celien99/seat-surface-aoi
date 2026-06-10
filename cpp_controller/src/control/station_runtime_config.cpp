@@ -558,6 +558,22 @@ bool load_station_runtime_config(const std::string& path,
                            error_message)) {
         return false;
       }
+    } else if (key == "warning_recheck_threshold") {
+      if (!parse_uint32_field("warning_recheck_threshold",
+                              value,
+                              false,
+                              &config.warning_recheck_threshold,
+                              error_message)) {
+        return false;
+      }
+    } else if (key == "critical_recheck_threshold") {
+      if (!parse_uint32_field("critical_recheck_threshold",
+                              value,
+                              false,
+                              &config.critical_recheck_threshold,
+                              error_message)) {
+        return false;
+      }
     } else if (key == "recipe_id") {
       config.recipe_id = value;
     } else if (key == "max_jobs") {
@@ -671,6 +687,13 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
       config.light_timeout_ms <= 0) {
     if (error_message != nullptr) {
       *error_message = "所有 timeout_ms 配置都必须大于 0";
+    }
+    return false;
+  }
+  if (config.warning_recheck_threshold == 0 ||
+      config.critical_recheck_threshold <= config.warning_recheck_threshold) {
+    if (error_message != nullptr) {
+      *error_message = "critical_recheck_threshold 必须大于 warning_recheck_threshold";
     }
     return false;
   }

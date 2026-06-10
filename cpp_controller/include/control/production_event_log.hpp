@@ -7,6 +7,7 @@
 
 #include "common/error_code.hpp"
 #include "common/inspection_types.hpp"
+#include "control/station_health.hpp"
 
 namespace seat_aoi {
 
@@ -18,6 +19,7 @@ struct ProductionEvent {
   std::string sku;
   InspectionDecision decision = InspectionDecision::Recheck;
   ErrorCode error_code = ErrorCode::None;
+  StationHealthSnapshot health;
   std::string message;
 };
 

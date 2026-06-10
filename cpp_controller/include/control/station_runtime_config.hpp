@@ -81,6 +81,8 @@ struct StationRuntimeConfig {
   int trigger_timeout_ms = 1000;
   int camera_timeout_ms = 200;
   int light_timeout_ms = 200;
+  std::uint32_t warning_recheck_threshold = 3;
+  std::uint32_t critical_recheck_threshold = 5;
   int max_jobs = 0;
   std::string recipe_id = "seat_a_black_leather_v1";
   std::vector<std::uint32_t> light_order = {1, 2, 3, 4};

@@ -249,6 +249,7 @@ cmake --build build
 | `--max-jobs <N>` | 最大检测任务数（0=不限） | 0 |
 | `--wait-ms <N>` | 检测结果等待超时(ms) | 5000 |
 | `--trigger-timeout-ms <N>` | PLC 触发等待超时(ms) | 1000 |
+| `--trace-root <path>` | C++ 生产事件日志目录 | trace |
 | `--simulate-light-fault` | 模拟光源故障 | false |
 | `--simulate-missing-frame` | 模拟相机丢帧 | false |
 | `--simulate-plc-output-fault` | 模拟 PLC 输出失败 | false |
@@ -271,6 +272,8 @@ detector_timeout_ms=5000
 trigger_timeout_ms=1000
 camera_timeout_ms=200
 light_timeout_ms=200
+warning_recheck_threshold=3
+critical_recheck_threshold=5
 max_jobs=1
 recipe_id=seat_a_black_leather_v1
 acquisition_strategy=serial_tdm
@@ -315,6 +318,7 @@ cp config/station_runtime.production.example.conf config/station_runtime.product
 - `acquisition_strategy` 当前只允许 `serial_tdm`，表示“当前机位全光源采集完成后再切换下一机位”。
 - 生产模式必须使用 `camera_exposure_output` 或等价硬触发同步，`software` 仅用于模拟或低精度联调。
 - `strobe_width_us` 不能大于 `exposure_us`，`frame_slot_size` 必须能容纳 `camera_count x light_count` 的完整图像包。
+- `warning_recheck_threshold` 和 `critical_recheck_threshold` 控制连续复检报警升级，后者必须大于前者。
 - `trace_root` 指定 C++ 生产事件日志目录，默认写入 `trace/cpp_controller_events.jsonl`。
 
 ---
@@ -558,6 +562,7 @@ time ─────────────────────────
 3. 按现场硬件型号链接真实 PLC、相机、频闪 SDK 或协议适配器。
 4. 做 PLC 断线、相机缺帧、频闪故障、detector 超时等 fail-closed 验证。
 5. 确认 `trace/cpp_controller_events.jsonl` 能按 `sequence_id` 和 `trigger_id` 记录复检原因。
+6. 运行 `bash tools/run_cpp_soak.sh --jobs 20 --wait-ms 8000` 做短时长稳压测，上线前按现场节拍扩大到 8h/24h。
 
 ### 部署步骤
 
