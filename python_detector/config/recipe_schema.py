@@ -69,6 +69,7 @@ class RegistrationConfig:
 @dataclass(frozen=True)
 class CameraRecipe:
     camera_id: str
+    pose_id: str = ""
     enabled: bool = True
     model_key: str = "default"
     safety_net_model_key: str | None = None
@@ -152,20 +153,27 @@ class Recipe:
     models: dict[str, ModelConfig] = field(default_factory=lambda: {"default": ModelConfig()})
     trace: TraceConfig = field(default_factory=TraceConfig)
 
-    def camera(self, camera_id: str) -> CameraRecipe | None:
+    def camera(self, camera_id: str, pose_id: str | None = None) -> CameraRecipe | None:
+        if pose_id:
+            for camera in self.cameras:
+                if camera.camera_id == camera_id and camera.pose_id == pose_id:
+                    return camera
+        for camera in self.cameras:
+            if camera.camera_id == camera_id and camera.pose_id in ("", camera_id):
+                return camera
         for camera in self.cameras:
             if camera.camera_id == camera_id:
                 return camera
         return None
 
-    def model_key_for(self, camera_id: str, roi_name: str) -> str:
-        camera = self.camera(camera_id)
+    def model_key_for(self, camera_id: str, roi_name: str, pose_id: str | None = None) -> str:
+        camera = self.camera(camera_id, pose_id)
         if camera is None:
             return "default"
         return camera.roi_models.get(roi_name, camera.model_key)
 
-    def safety_net_model_keys_for(self, camera_id: str, roi_name: str) -> tuple[str, ...]:
-        camera = self.camera(camera_id)
+    def safety_net_model_keys_for(self, camera_id: str, roi_name: str, pose_id: str | None = None) -> tuple[str, ...]:
+        camera = self.camera(camera_id, pose_id)
         if camera is None:
             return ()
         model_key = camera.roi_safety_net_models.get(roi_name, camera.safety_net_model_key)
@@ -355,6 +363,7 @@ def _cameras_from_dict(data: Any, default_light_order: tuple[str, ...], default_
         cameras.append(
             CameraRecipe(
                 camera_id=_str(raw.get("camera_id", camera_id), f"cameras.{camera_id}.camera_id"),
+                pose_id=_str(raw.get("pose_id", raw.get("camera_id", camera_id)), f"cameras.{camera_id}.pose_id"),
                 enabled=enabled,
                 model_key=_str(raw.get("model_key", "default"), f"cameras.{camera_id}.model_key"),
                 safety_net_model_key=_optional_str(raw.get("safety_net_model_key"), f"cameras.{camera_id}.safety_net_model_key"),
@@ -533,7 +542,12 @@ def _validate_camera_lights(
     required_lights: tuple[str, ...],
     registration: RegistrationConfig,
 ) -> None:
+    seen_views: set[tuple[str, str]] = set()
     for camera in cameras:
+        key = (camera.camera_id, camera.pose_id)
+        if key in seen_views:
+            raise RecipeValidationError(f"重复视角配置: camera_id={camera.camera_id} pose_id={camera.pose_id}")
+        seen_views.add(key)
         missing = [light_id for light_id in required_lights if light_id not in camera.light_order]
         if missing:
             raise RecipeValidationError(f"cameras.{camera.camera_id}.light_order 缺少 required_lights: {missing}")

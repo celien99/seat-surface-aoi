@@ -1,10 +1,12 @@
 import mmap
 import struct
 
+from python_detector.ipc.data_types import DefectResult, InspectionResult
 from python_detector.ipc.shm_client import ShmClient
 from python_detector.ipc.shm_protocol import (
     ColorOrder,
     DEFAULT_RESULT_SLOT_SIZE,
+    DEFECT_RESULT_META,
     DTypeCode,
     ErrorCode,
     FRAME_SLOT_HEADER_PREFIX,
@@ -13,6 +15,7 @@ from python_detector.ipc.shm_protocol import (
     LIGHT_FRAME_META,
     PixelFormat,
     RESULT_SLOT_HEADER_PREFIX,
+    RESULT_SLOT_HEADER_SIZE,
     SEAT_JOB_META,
     SHM_HEADER,
     SlotState,
@@ -22,6 +25,76 @@ from python_detector.ipc.shm_protocol import (
     frame_slot_image_offset,
     frame_slot_meta_offset,
 )
+
+
+def _pack_light_frame_meta(
+    mm,
+    offset: int,
+    *,
+    camera_index: int = 0,
+    pose_index: int = 0,
+    light_index: int = 1,
+    frame_index: int = 1,
+    light_seq_index: int = 0,
+    pixel_format: int = PixelFormat.MONO8,
+    timestamp_us: int = 1,
+    camera_id: str = "TOP_BACK",
+    pose_id: str = "TOP_BACK",
+    image_offset: int,
+    image: bytes,
+) -> None:
+    LIGHT_FRAME_META.pack_into(
+        mm,
+        offset,
+        camera_index,
+        pose_index,
+        light_index,
+        frame_index,
+        light_seq_index,
+        2,
+        2,
+        1,
+        2,
+        int(pixel_format),
+        8,
+        ColorOrder.MONO,
+        DTypeCode.UINT8,
+        timestamp_us,
+        10_000 + pose_index,
+        timestamp_us,
+        800,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        encode_cstr(camera_id),
+        encode_cstr(pose_id),
+        encode_cstr("calib/simulated_v1"),
+        image_offset,
+        len(image),
+        crc32(image),
+        0,
+    )
+
+
+def _pack_job_meta(mm, offset: int, *, sequence_id: int, frame_count: int, view_count: int = 1) -> None:
+    SEAT_JOB_META.pack_into(
+        mm,
+        offset,
+        sequence_id,
+        8,
+        encode_cstr("SIM"),
+        encode_cstr("seat_a_black_leather"),
+        encode_cstr("seat_a_black_leather_v1"),
+        view_count,
+        frame_count,
+        1,
+        0,
+        1,
+    )
 
 
 def _client_with_single_frame_and_result_slot(frame_slot_size: int = 1024) -> ShmClient:
@@ -45,6 +118,8 @@ def _write_single_frame_slot(
     slot_sequence_id: int = 7,
     job_sequence_id: int = 7,
     pixel_format: int = PixelFormat.MONO8,
+    camera_id: str = "TOP_BACK",
+    pose_id: str = "TOP_BACK",
     corrupt_payload_crc: bool = False,
     corrupt_header_crc: bool = False,
 ) -> tuple[int, int]:
@@ -56,41 +131,20 @@ def _write_single_frame_slot(
     payload_size = image_offset + len(image)
     client.frames.mm[base + image_offset : base + image_offset + len(image)] = image
 
-    LIGHT_FRAME_META.pack_into(
+    _pack_light_frame_meta(
         client.frames.mm,
         base + frame_slot_meta_offset(),
-        0,
-        1,
-        1,
-        0,
-        2,
-        2,
-        1,
-        2,
-        int(pixel_format),
-        8,
-        ColorOrder.MONO,
-        DTypeCode.UINT8,
-        1,
-        800,
-        1.0,
-        encode_cstr("calib/simulated_v1"),
-        image_offset,
-        len(image),
-        crc32(image),
-        0,
+        pixel_format=int(pixel_format),
+        camera_id=camera_id,
+        pose_id=pose_id,
+        image_offset=image_offset,
+        image=image,
     )
-    SEAT_JOB_META.pack_into(
+    _pack_job_meta(
         client.frames.mm,
         base + FRAME_SLOT_HEADER_PREFIX.size,
-        job_sequence_id,
-        8,
-        encode_cstr("SIM"),
-        encode_cstr("seat_a_black_leather"),
-        encode_cstr("seat_a_black_leather_v1"),
-        1,
-        frame_count,
-        1,
+        sequence_id=job_sequence_id,
+        frame_count=frame_count,
     )
     payload_crc = crc32(memoryview(client.frames.mm)[base + frame_slot_meta_offset() : base + payload_size])
     if corrupt_payload_crc:
@@ -128,42 +182,21 @@ def _write_duplicate_light_frame_slot(client: ShmClient) -> tuple[int, int]:
     next_image_offset = image_offset
     for index, image in enumerate(images):
         client.frames.mm[base + next_image_offset : base + next_image_offset + len(image)] = image
-        LIGHT_FRAME_META.pack_into(
+        _pack_light_frame_meta(
             client.frames.mm,
             base + frame_slot_meta_offset() + index * LIGHT_FRAME_META.size,
-            0,
-            1,
-            index + 1,
-            index,
-            2,
-            2,
-            1,
-            2,
-            PixelFormat.MONO8,
-            8,
-            ColorOrder.MONO,
-            DTypeCode.UINT8,
-            1_000 + index,
-            800,
-            1.0,
-            encode_cstr("calib/simulated_v1"),
-            next_image_offset,
-            len(image),
-            crc32(image),
-            0,
+            frame_index=index + 1,
+            light_seq_index=index,
+            timestamp_us=1_000 + index,
+            image_offset=next_image_offset,
+            image=image,
         )
         next_image_offset += len(image)
-    SEAT_JOB_META.pack_into(
+    _pack_job_meta(
         client.frames.mm,
         base + FRAME_SLOT_HEADER_PREFIX.size,
-        7,
-        8,
-        encode_cstr("SIM"),
-        encode_cstr("seat_a_black_leather"),
-        encode_cstr("seat_a_black_leather_v1"),
-        1,
-        frame_count,
-        1,
+        sequence_id=7,
+        frame_count=frame_count,
     )
     payload_crc = crc32(memoryview(client.frames.mm)[base + frame_slot_meta_offset() : base + payload_size])
     FRAME_SLOT_HEADER_PREFIX.pack_into(
@@ -199,41 +232,18 @@ def test_invalid_frame_slot_is_released_after_parse_failure() -> None:
     payload_size = image_offset + len(image)
     client.frames.mm[base + image_offset : base + image_offset + len(image)] = image
 
-    LIGHT_FRAME_META.pack_into(
+    _pack_light_frame_meta(
         client.frames.mm,
         base + frame_slot_meta_offset(),
-        0,
-        1,
-        1,
-        0,
-        2,
-        2,
-        1,
-        2,
-        999,
-        8,
-        ColorOrder.MONO,
-        DTypeCode.UINT8,
-        1,
-        800,
-        1.0,
-        encode_cstr("calib/simulated_v1"),
-        image_offset,
-        len(image),
-        crc32(image),
-        0,
+        pixel_format=999,
+        image_offset=image_offset,
+        image=image,
     )
-    SEAT_JOB_META.pack_into(
+    _pack_job_meta(
         client.frames.mm,
         base + FRAME_SLOT_HEADER_PREFIX.size,
-        7,
-        8,
-        encode_cstr("SIM"),
-        encode_cstr("seat_a_black_leather"),
-        encode_cstr("seat_a_black_leather_v1"),
-        1,
-        frame_count,
-        1,
+        sequence_id=7,
+        frame_count=frame_count,
     )
     payload_crc = crc32(memoryview(client.frames.mm)[base + frame_slot_meta_offset() : base + payload_size])
     FRAME_SLOT_HEADER_PREFIX.pack_into(
@@ -293,6 +303,54 @@ def test_sequence_mismatch_error_result_uses_slot_sequence_id() -> None:
     assert sequence_id == 7
     assert result_meta[0] == 7
     assert result_meta[6] == ErrorCode.INVALID_PAYLOAD
+
+
+def test_robot_flyshot_camera_index_from_frame_meta_is_used_for_result_serialization() -> None:
+    client = _client_with_single_frame_and_result_slot()
+    frame_base, result_base = _write_single_frame_slot(
+        client,
+        camera_id="EYE_IN_HAND",
+        pose_id="T1_BACKREST",
+    )
+
+    job = client._read_frame_slot(0)
+
+    assert job is not None
+    assert AtomicU32.load(client.frames.mm, frame_base) == SlotState.READING
+    defect = DefectResult(
+        defect_id="D1",
+        class_name="scratch",
+        severity="critical",
+        camera_id="EYE_IN_HAND",
+        pose_id="T1_BACKREST",
+        roi_name="full",
+        bbox_xyxy_pixel=(0, 0, 1, 1),
+        score=0.9,
+        area_px=4,
+        evidence_lights=["DIFFUSE"],
+        mask_offset=None,
+        decision="NG",
+    )
+    client._write_result_slot(
+        result_base,
+        InspectionResult(
+            sequence_id=7,
+            trigger_id=8,
+            seat_id="SIM",
+            decision="NG",
+            defects=[defect],
+            quality_pass=True,
+            error_code=0,
+            elapsed_ms=1.0,
+        ),
+        [defect],
+        RESULT_SLOT_HEADER_SIZE + DEFECT_RESULT_META.size,
+    )
+
+    unpacked = DEFECT_RESULT_META.unpack_from(client.results.mm, result_base + RESULT_SLOT_HEADER_SIZE)
+    assert unpacked[3] == 0
+    assert unpacked[4].split(b"\0", 1)[0].decode() == "EYE_IN_HAND"
+    assert unpacked[5].split(b"\0", 1)[0].decode() == "T1_BACKREST"
 
 
 def test_duplicate_camera_light_frame_publishes_invalid_payload_error() -> None:

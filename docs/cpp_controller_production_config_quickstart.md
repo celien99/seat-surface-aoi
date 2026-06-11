@@ -7,21 +7,39 @@
 当前仓库已经具备：
 
 - C++ 主控流程、共享内存 IPC、相机/频闪/PLC 抽象接口。
-- 模拟链路，可用 `station_runtime.example.conf` 跑通端到端验证。
-- 生产配置模板 `cpp_controller/config/station_runtime.production.example.conf`。
+- 固定机位模拟链路，可用 `station_runtime.example.conf` 跑通端到端验证。
+- 机器人飞拍模拟链路，可用 `station_runtime.robot_flyshot.example.conf` 跑通端到端验证。
+- 固定机位生产配置模板 `cpp_controller/config/station_runtime.production.example.conf`。
+- 机器人飞拍生产配置模板 `cpp_controller/config/station_runtime.robot_flyshot.production.example.conf`。
 - 生产配置校验命令 `--validate-config`。
 - 非模拟 backend 的 fail-fast 保护：如果还没有链接真实 SDK，程序会明确报错，不会偷偷用模拟硬件跑生产。
 
 当前仓库还没有内置任何具体厂商 SDK，例如海康 MVS、Basler pylon、西门子 S7、某品牌频闪控制器串口协议等。拿到现场型号和 SDK 后，需要 C++ 工程师在 `cpp_controller/include/control/hardware_factory.hpp` 对应 backend 下接入真实驱动。
 
-## 2. 复制生产模板
+## 2. 选择采集方案并复制生产模板
+
+当前项目支持两种方案，二者共用 C++ 主控、共享内存协议和 Python detector：
+
+| 方案 | `capture_mode` | 模板 |
+| --- | --- | --- |
+| 固定机位多光源 | `fixed_camera` | `cpp_controller/config/station_runtime.production.example.conf` |
+| 机器人飞拍多光源 | `robot_flyshot` | `cpp_controller/config/station_runtime.robot_flyshot.production.example.conf` |
+
+固定机位方案：
 
 ```bash
 cp cpp_controller/config/station_runtime.production.example.conf \
    cpp_controller/config/station_runtime.production.conf
 ```
 
-不要直接改 `station_runtime.production.example.conf`。以后升级仓库时，示例文件可能会变化。
+机器人飞拍方案：
+
+```bash
+cp cpp_controller/config/station_runtime.robot_flyshot.production.example.conf \
+   cpp_controller/config/station_runtime.robot_flyshot.production.conf
+```
+
+不要直接改 `*.production.example.conf`。以后升级仓库时，示例文件可能会变化。
 
 ## 3. 填写硬件模式
 
@@ -37,6 +55,12 @@ hardware_mode=production
 plc.backend=modbus_tcp
 camera.backend=hikrobot_mvs
 light.backend=serial_ascii
+```
+
+机器人飞拍方案还必须选择机器人 backend：
+
+```ini
+robot.backend=vendor_sdk
 ```
 
 常用选择：
@@ -55,6 +79,8 @@ light.backend=serial_ascii
 | 频闪 | `modbus_tcp` | 网口 Modbus TCP 控制器 |
 | 频闪 | `ethercat_io` | EtherCAT 控制器或 IO 模块 |
 | 频闪 | `digital_io` | 只用 IO 线选择/触发通道 |
+| 机器人 | `vendor_sdk` / `custom_sdk` | FANUC 或现场机器人/IO 网关 SDK |
+| 机器人 | `modbus_tcp` / `digital_io` | 通过 PLC 或 IO 网关读取 READY/FAULT/SHOT_ID |
 | 任意 | `vendor_sdk` / `custom_sdk` | 供应商私有 SDK 或现场定制协议 |
 
 ## 4. 填 PLC 信息
@@ -97,7 +123,7 @@ plc.output_hold_ms=200
 
 ## 5. 填相机信息
 
-每台相机一组 `camera.<N>.*`。`N` 是 C++ 写入共享内存的机位编号，Python 会用它映射到检测配方。
+每台相机一组 `camera.<N>.*`。`N` 是 C++ 写入共享内存的 `camera_index`。固定机位方案中，一个 `camera.<N>` 通常就是一个检测视角；机器人飞拍方案中，多个 `pose.<N>` 可以共享同一台末端相机，例如 `EYE_IN_HAND`。
 
 ```ini
 camera.0.camera_id=TOP_BACK
@@ -126,7 +152,52 @@ camera.0.buffer_count=8
 
 如果有 4 台相机，就继续增加 `camera.2.*`、`camera.3.*`。
 
-## 6. 填频闪控制器信息
+## 6. 填机器人信息和 pose 计划（仅机器人飞拍）
+
+固定机位方案可以跳过本节。机器人飞拍方案必须配置：
+
+```ini
+capture_mode=robot_flyshot
+robot.backend=vendor_sdk
+robot.controller_id=FANUC_M20ID25_AOI
+robot.host=192.168.1.30
+robot.port=8193
+robot.ready_input=ROBOT_READY
+robot.fault_input=ROBOT_FAULT
+robot.start_output=AOI_START
+```
+
+每个拍照点配置一组 `pose.<N>.*`：
+
+```ini
+pose.0.pose_id=T1_BACKREST
+pose.0.camera_index=0
+pose.0.camera_id=EYE_IN_HAND
+pose.0.calibration_id=calib/t1_robot_v1
+pose.0.shot_id_source=SHOT_ID_T1
+pose.0.robot_ready_input=READY_T1
+pose.0.robot_fault_input=ROBOT_FAULT
+pose.0.photo_trigger_input=PHOTO_TRIGGER_T1
+pose.0.robot_tcp_xyz_mm=350.0,120.0,220.0
+pose.0.robot_rpy_deg=180.0,0.0,90.0
+```
+
+字段说明：
+
+| 字段 | 含义 |
+| --- | --- |
+| `pose_id` | 机器人轨迹点/检测视角 ID，必须与 Python 配方中的 `pose_id` 对齐。 |
+| `camera_index` / `camera_id` | 该 pose 使用的相机；末端相机通常多个 pose 都指向同一个 `camera_index=0`。 |
+| `calibration_id` | 该 pose 使用的标定版本，Python 用它做 ROI 和光源配准。 |
+| `shot_id_source` | 机器人或 IO 网关输出的拍照流水号来源。 |
+| `robot_ready_input` | 当前 pose 到位或过点 ready 信号。 |
+| `robot_fault_input` | 机器人故障信号。 |
+| `photo_trigger_input` | 位置触发/拍照触发信号。 |
+| `robot_tcp_xyz_mm` / `robot_rpy_deg` | 规划 TCP 位姿，写入共享内存用于追溯和标定核对。 |
+
+生产要求：机器人未到位、FAULT、SHOT_ID 异常、位置触发超时都不能输出 OK，必须进入 `RECHECK` 或 `ERROR`。
+
+## 7. 填频闪控制器信息
 
 串口控制器示例：
 
@@ -158,9 +229,9 @@ light.trigger_input_line=TriggerIn1
 | `light.host` / `light.port` | 网口控制器地址 |
 | `light.trigger_input_line` | 频闪触发输入线，通常来自相机 ExposureOut |
 
-## 7. 填光源通道映射
+## 8. 填光源通道映射
 
-C++ 主控固定采用串行 TDM 采集路径：每个机位按 1、2、3、4 的逻辑光源顺序完成全部拍摄后，再切换到下一机位。该策略不再暴露为运行配置字段；不要配置或实现多机位并行频闪采集，否则会造成光源互相污染。
+C++ 主控固定采用视角级串行 TDM 采集路径：每个检测视角按 1、2、3、4 的逻辑光源顺序完成全部拍摄后，再切换到下一视角。固定机位方案中检测视角等同于相机机位；机器人飞拍方案中检测视角等同于 `pose_id`。该策略不再暴露为运行配置字段；不要配置或实现多视角并行频闪采集，否则会造成光源互相污染。
 
 `light_order=1,2,3,4` 表示每个机位按 1、2、3、4 的逻辑光源顺序采图。每个逻辑光源必须映射到真实控制器物理通道：
 
@@ -184,7 +255,7 @@ light.1.current_percent=60
 | `gain` | 相机增益 | 过高会放大噪声 |
 | `current_percent` | 光源电流/亮度百分比 | 不得超过控制器和光源规格 |
 
-## 8. 校验配置
+## 9. 校验配置
 
 构建 C++：
 
@@ -201,6 +272,14 @@ cpp_controller/build/seat_aoi_controller \
   --validate-config
 ```
 
+机器人飞拍方案：
+
+```bash
+cpp_controller/build/seat_aoi_controller \
+  --config cpp_controller/config/station_runtime.robot_flyshot.production.conf \
+  --validate-config
+```
+
 看到下面输出，说明配置字段齐全：
 
 ```text
@@ -209,26 +288,28 @@ C++ station runtime config OK: cpp_controller/config/station_runtime.production.
 
 如果还看到 `TODO`、空字段、端口为 0、生产模式仍使用 simulated backend，校验会失败并指出具体字段。如果配置文件仍包含已移除的 `acquisition_strategy` 字段、把 `trigger_sync_mode` 改成生产不推荐的软件触发，或把 `strobe_width_us` 配得大于 `exposure_us`，校验也会失败。
 
-## 9. 真实驱动接入点
+## 10. 真实驱动接入点
 
 配置校验通过后，还需要 C++ 工程师实现真实驱动：
 
 - PLC：`cpp_controller/include/control/iplc_client.hpp`
+- 机器人：`cpp_controller/include/control/irobot_client.hpp`
 - 相机：`cpp_controller/include/camera/icamera.hpp`
 - 频闪：`cpp_controller/include/control/ilight_controller.hpp`
 - backend 工厂：`cpp_controller/include/control/hardware_factory.hpp`
 
 接入前，运行非 simulated backend 会失败并提示“尚未链接真实硬件驱动”。这是保护机制，避免误上线。
 
-## 10. 上线前检查清单
+## 11. 上线前检查清单
 
 - `--validate-config` 通过。
 - PLC 触发点位、输出点位、ack 点位在手动 IO 测试中正确。
-- 相机序列号和 `camera_index` 对应现场机位。
+- 相机序列号和 `camera_index` 对应现场物理相机；固定机位再对应现场机位，机器人飞拍再通过 `pose_id` 对应轨迹视角。
 - 每个光源逻辑编号和物理通道接线一致。
 - 相机 ExposureOut 到频闪 TriggerIn 的线已接好，极性正确。
 - `strobe_width_us <= exposure_us`，电流不超过光源规格。
 - C++ 主控固定串行 TDM 采集，确认现场接线不会在同一时刻触发多个机位光源。
+- 机器人飞拍方案确认 `pose_id`、SHOT_ID、READY/FAULT/PHOTO_TRIGGER 与 Python 配方、标定文件一致。
 - C++ 事件日志 `trace/cpp_controller_events.jsonl` 能记录 detector 超时、采集失败和 PLC 输出失败。
 - Python detector 常驻运行，C++ 和 Python 协议校验通过。
 - 故障注入和断线测试都不会输出 OK。

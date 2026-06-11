@@ -21,6 +21,7 @@ class DefectCandidate:
     bbox_xyxy_pixel: tuple[int, int, int, int]
     area_px: int
     evidence_lights: list[str]
+    pose_id: str = ""
 
 
 class ModelInferenceError(RuntimeError):
@@ -87,6 +88,7 @@ class FakeModel:
             bbox = _map_roi_bbox_to_source((0.0, 0.0, float(box_width - 1), float(box_height - 1)), feature_group)
         return DefectCandidate(
             camera_id=feature_group.camera_id,
+            pose_id=feature_group.pose_id,
             roi_name=feature_group.roi_name,
             class_name="scratch",
             score=score,
@@ -147,6 +149,7 @@ class OnnxModel:
             candidates.append(
                 DefectCandidate(
                     camera_id=feature_group.camera_id,
+                    pose_id=feature_group.pose_id,
                     roi_name=feature_group.roi_name,
                     class_name=self.config.class_names[class_id],
                     score=score,
@@ -260,6 +263,7 @@ class PatchCoreModel:
         return [
             DefectCandidate(
                 camera_id=feature_group.camera_id,
+                pose_id=feature_group.pose_id,
                 roi_name=feature_group.roi_name,
                 class_name=class_name,
                 score=score.anomaly_score,

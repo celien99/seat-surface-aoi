@@ -32,17 +32,22 @@ class ImageQualityGate:
         if job.sku != recipe.sku:
             messages.append(f"sku mismatch: job={job.sku} recipe={recipe.sku}")
 
-        expected_cameras = {camera.camera_id for camera in recipe.cameras}
-        seen_cameras: set[str] = set()
+        expected_views = {(camera.camera_id, camera.pose_id or camera.camera_id) for camera in recipe.cameras}
+        seen_views: set[tuple[str, str]] = set()
         for bundle in job.camera_bundles:
-            if bundle.camera_id in seen_cameras:
-                messages.append(f"{bundle.camera_id}: duplicate camera bundle")
-            seen_cameras.add(bundle.camera_id)
-            if bundle.camera_id not in expected_cameras:
-                messages.append(f"{bundle.camera_id}: camera not enabled by recipe")
+            pose_id = bundle.pose_id or bundle.camera_id
+            view_key = (bundle.camera_id, pose_id)
+            if view_key in seen_views:
+                messages.append(f"{bundle.camera_id}/{pose_id}: duplicate camera pose bundle")
+            seen_views.add(view_key)
+            if view_key not in expected_views:
+                messages.append(f"{bundle.camera_id}/{pose_id}: camera pose not enabled by recipe")
             reports.extend(self._check_camera_bundle(bundle, recipe, messages))
-        for camera_id in sorted(expected_cameras - seen_cameras):
-            messages.append(f"{camera_id}: missing configured camera bundle")
+        for camera_id, pose_id in sorted(expected_views - seen_views):
+            if pose_id == camera_id:
+                messages.append(f"{camera_id}: missing configured camera bundle")
+            else:
+                messages.append(f"{camera_id}/{pose_id}: missing configured camera pose bundle")
         is_pass = not messages and all(report.is_pass for report in reports)
         return QualityReport(is_pass=is_pass, frame_reports=reports, messages=messages)
 
@@ -96,7 +101,7 @@ class ImageQualityGate:
         light_seq_indices = [frame.light_seq_index for frame in frames]
         if len(set(light_seq_indices)) != len(light_seq_indices):
             messages.append(f"{bundle.camera_id}: duplicate light_seq_index in required lights")
-        camera_recipe = recipe.camera(bundle.camera_id)
+        camera_recipe = recipe.camera(bundle.camera_id, bundle.pose_id)
         light_order = camera_recipe.light_order if camera_recipe is not None else recipe.light_order
         light_seq_by_id = {light_id: index for index, light_id in enumerate(light_order)}
         for frame in frames:

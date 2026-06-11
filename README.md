@@ -1,6 +1,6 @@
 # Seat Surface AOI
 
-汽车座椅表面缺陷检测系统参考实现。项目以生产线在线 AOI 场景为目标，采用 **C++ 实时主控 + Python 独立检测进程 + 共享内存 IPC** 的架构，覆盖多机位、多光源频闪采集、质量门禁、ROI 处理、多光源特征、模型推理、融合决策和追溯验证链路。
+汽车座椅表面缺陷检测系统参考实现。项目以生产线在线 AOI 场景为目标，采用 **C++ 实时主控 + Python 独立检测进程 + 共享内存 IPC** 的架构，覆盖固定机位多光源与机器人飞拍多光源两类采集方案，以及质量门禁、ROI 处理、多光源特征、模型推理、融合决策和追溯验证链路。
 
 > 当前项目以 V4.0 集成 ONNX + FAISS 方案架构图作为目标架构与后续验收口径。已有实现覆盖控制通信骨架、基础检测流水线、V4 光源语义映射、Dome ROI 定位接口、ECC 配准、ONNX/WideResNet50/PCA/PatchCore 工程接入点、模型资产校验、全链路 trace 和离线训练样本支撑工具；真实硬件 SDK、真实模型权重、MES/报警和平台化监控仍需按现场项目接入。
 
@@ -9,7 +9,7 @@
 ## 核心原则
 
 - **C++ 负责实时控制**：PLC、相机、频闪、触发调度、共享内存写入、结果读取和节拍控制。
-- **C++ 采集策略固定为串行 TDM**：当前主控按“逐机位串行、逐光源串行”执行频闪采集；每个机位独立完成全部光源序列后才切换到下一个机位，单次频闪只采当前机位图像，禁止多机位并行频闪采集，避免光源互相污染。
+- **C++ 采集策略固定为视角级串行 TDM**：当前主控按“逐检测视角、逐光源串行”执行频闪采集；固定机位模式下检测视角等同于相机机位，机器人飞拍模式下检测视角等同于机器人 `pose_id`；单次频闪只采当前视角图像，禁止多视角并行频闪采集，避免光源互相污染。
 - **Python 负责检测算法**：质量门禁、预处理、ROI、配准、特征、模型推理、融合和规则判定。
 - **在线图像与结果只走共享内存**：C++ 与 Python 主链路不使用 TCP。
 - **不确定结果保守处理**：超时、缺帧、协议错误、CRC 错误、质量失败和模型异常不能输出 `OK`，必须输出 `RECHECK` 或 `ERROR`。
@@ -19,10 +19,10 @@
 
 | 模块 | 当前状态 |
 |---|---|
-| 光学采集抽象 | 支持多机位、多光源模拟采集；当前采用串行 TDM 频闪策略，按机位独立完成 `light_order` 后再切换机位；默认光源为 `DIFFUSE`、`POLAR_DIFFUSE`、`HIGH_LEFT`、`HIGH_RIGHT` |
-| C++ 主控 | 支持 PLC 抽象、相机/光源模拟驱动、生产硬件 backend 配置入口、`--validate-config` 启动前校验、固定串行 TDM 采集包校验、`camera_exposure_output` 硬触发同步模式、逐机位/逐光源串行采集、采集包完整性校验、工位状态机、连续复检健康报警、C++ 生产事件 JSONL、长稳压测脚本、逐光源曝光/脉宽/电流/物理通道配置、结构化采集错误码、故障注入和保守降级；真实厂商 SDK 需按现场型号接入 |
-| 共享内存 IPC | POSIX shared memory，固定布局结构体，frame/result ring buffer，CRC 与协议布局校验 |
-| Python 检测进程 | 支持共享内存读取、质量门禁、Dome ROI 定位接口、ROI 裁剪/透视展开、固定标定误差检查、ECC 平移配准与非基准光源 ROI 对齐、特征构建、推理、融合、缺陷过滤和规则判定 |
+| 光学采集抽象 | 支持固定机位多光源与机器人飞拍多光源两种模式；当前采用视角级串行 TDM 频闪策略，按 `capture_view/pose_id` 独立完成 `light_order` 后再切换视角；默认光源为 `DIFFUSE`、`POLAR_DIFFUSE`、`HIGH_LEFT`、`HIGH_RIGHT` |
+| C++ 主控 | 支持 PLC 抽象、RobotClient 抽象、相机/光源模拟驱动、生产硬件 backend 配置入口、`--validate-config` 启动前校验、固定机位/机器人飞拍 capture plan、`camera_exposure_output` 硬触发同步模式、逐视角/逐光源串行采集、采集包完整性校验、工位状态机、连续复检健康报警、C++ 生产事件 JSONL、逐光源曝光/脉宽/电流/物理通道配置、结构化采集错误码、故障注入和保守降级；真实厂商 SDK 需按现场型号接入 |
+| 共享内存 IPC | POSIX shared memory，协议 v2 固定布局结构体，frame/result ring buffer，CRC 与协议布局校验；每帧携带 `camera_id`、`pose_id`、`shot_id`、机器人时间戳和 TCP 位姿 |
+| Python 检测进程 | 支持共享内存读取、按 `(camera_id, pose_id)` 组包、动态记录共享内存中的 `camera_id -> camera_index` 映射并回写缺陷结果、质量门禁、Dome ROI 定位接口、ROI 裁剪/透视展开、固定标定误差检查、ECC 平移配准与非基准光源 ROI 对齐、特征构建、推理、融合、缺陷过滤和规则判定 |
 | 模型后端 | 支持 fake、ONNX detection rows、统计 embedding、ONNX WideResNet50 embedding、PCA 投影和 PatchCore safety net；PatchCore 优先尝试 FAISS，缺索引或缺依赖时回退 exact KNN 并写入 trace |
 | 模型产物 | 根目录 `model/` 提供 YOLO、监督检测、WideResNet50、PCA、PatchCore memory bank 和可选 FAISS 索引占位；`production_model.example.yaml` 展示真实模型配方 |
 | 追溯与工具 | 支持 trace、ROI 定位报告、ECC 报告、embedding/PCA/anomaly summary、ROI 图落盘、overlay、Trace 转训练样本、回放、benchmark、PatchCore memory bank 构建、模型资产校验和模拟 IPC 验证 |
@@ -33,7 +33,7 @@
 
 | V4.0 架构模块 | 当前实现 |
 |---|---|
-| 1. 光学采集层 | 部分对齐：已有多光源/多机位模拟链路、V4 语义光源映射和 C++ 逐光源参数配置；C++ 当前固定按串行 TDM 策略执行“机位A全光源→机位B全光源”的独立频闪采集，不开放外部采集策略配置，并在采集包校验中拒绝并行频闪路径，真实硬件 SDK 集成仍需项目化接入 |
+| 1. 光学采集层 | 部分对齐：已有固定机位与机器人飞拍两类 capture plan、多光源/多视角模拟链路、V4 语义光源映射和 C++ 逐光源参数配置；C++ 当前固定按串行 TDM 策略执行“视角A全光源→视角B全光源”的独立频闪采集，不开放并行频闪路径，真实硬件 SDK 集成仍需项目化接入 |
 | 2. 控制与通信层 | 基本对齐：C++ 控制，Python 不控制 PLC/相机/频闪，在线链路使用共享内存 |
 | 3.1 ROI 定位 | 工程接入点对齐：支持 Dome 语义光源、模板/fake YOLO/ONNX YOLO 后端、真实 YOLO 占位目录和 YOLO row 到 ROI 模板坐标转换；真实权重和训练评估需现场产出 |
 | 3.2 ROI 裁剪与配准 | 基本对齐：已有 ROI 裁剪/透视展开、固定标定误差检查和 ECC 在线平移配准；ECC 成功时会将非基准光源 ROI 重采样到基准光源坐标后再构建多光源特征，失败时保守返回复检 |
@@ -118,6 +118,9 @@ uv run python -m tools.validate_model_assets --recipe production_model_example
 # 模拟端到端 IPC
 bash tools/run_simulated_ipc.sh
 
+# 机器人飞拍模拟端到端 IPC
+bash tools/run_simulated_ipc.sh --config cpp_controller/config/station_runtime.robot_flyshot.example.conf
+
 # C++ 主控短时长稳压测
 bash tools/run_cpp_soak.sh --jobs 20 --wait-ms 8000
 
@@ -150,7 +153,7 @@ cpp_controller/build/seat_aoi_controller --simulate-trigger-timeout --trigger-ti
 
 ```text
 seat-surface-aoi/
-├── cpp_controller/      # C++ 主控、采集调度、共享内存 IPC、模拟硬件驱动、生产硬件配置入口
+├── cpp_controller/      # C++ 主控、固定机位/机器人飞拍采集调度、共享内存 IPC、模拟硬件驱动、生产硬件配置入口
 ├── model/               # 真实模型产物占位目录：YOLO、监督检测、WideResNet50、PCA、PatchCore、可选 FAISS
 ├── python_detector/     # 独立 Python 检测算法模块、V4 ROI/ECC/embedding/PCA/PatchCore 流水线、配方、测试
 ├── training_tools/      # 离线训练支撑：Trace 转样本、回放、benchmark、PatchCore memory bank 构建

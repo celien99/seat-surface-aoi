@@ -54,11 +54,12 @@ python_detector/
 ├── paths.py                    # 包内配置、标定、ROI 模板路径解析，兼容仓库相对路径
 ├── py.typed                    # 标记该包提供类型信息
 ├── config/
-│   ├── default_recipe.yaml     # 默认检测配方
+│   ├── default_recipe.yaml     # 默认固定机位检测配方
+│   ├── robot_flyshot_recipe.yaml # 机器人飞拍示例配方，同一末端相机对应多个 pose_id
 │   ├── production_model.example.yaml # 真实模型接入配方模板，不参与默认加载
 │   ├── recipe_schema.py        # 配方 dataclass、YAML 加载、字段校验和模型引用校验
 │   ├── calibration_manager.py  # 标定文件、ROI 模板加载和几何合法性校验
-│   ├── calibration/            # 按 camera_id 存放模拟标定
+│   ├── calibration/            # 按 camera_id 存放模拟标定，机器人飞拍按 pose 使用不同 calibration_id
 │   └── roi/                    # ROI 模板
 ├── ipc/
 │   ├── data_types.py           # LightFrame、CameraBundle、SeatInspectionJob、InspectionResult 等数据结构
@@ -110,6 +111,8 @@ training_tools/
 
 `RecipeManager` 默认从包内 `python_detector/config` 加载 YAML，不依赖当前工作目录。`CalibrationManager` 通过 `paths.resolve_package_path()` 同时兼容包内路径和历史仓库相对路径，例如 `python_detector/config/roi/default_roi.yaml`。
 
+配方中的 `cameras` 实际表示检测视角配置。固定机位模式下 `pose_id` 默认等于 `camera_id`；机器人飞拍模式下允许多个视角共享同一 `camera_id`，并用 `pose_id` 区分轨迹点、ROI、标定和模型配置，例如 `EYE_IN_HAND/T1_BACKREST`、`EYE_IN_HAND/T2_CUSHION`。
+
 配方 schema 会校验：
 
 - `light_order` 与 `quality.required_lights` 一致性。
@@ -121,14 +124,14 @@ training_tools/
 
 ### IPC 与协议
 
-`ipc/shm_protocol.py` 必须与 `cpp_controller/include/ipc/shm_protocol.hpp` 保持二进制布局一致。`tools.validate_protocol` 用于校验 Python 结构体大小；修改协议时必须同步：
+`ipc/shm_protocol.py` 必须与 `cpp_controller/include/ipc/shm_protocol.hpp` 保持二进制布局一致。当前协议为 v2，每帧携带 `camera_id`、`pose_id`、`shot_id`、机器人时间戳和 TCP 位姿；Python 按 `(camera_id, pose_id)` 组包为 `CameraBundle`。`tools.validate_protocol` 用于校验 Python 结构体大小；修改协议时必须同步：
 
 - C++ 协议结构体和 ring buffer。
 - Python `shm_protocol.py`、`shm_client.py`、`data_types.py`。
 - `tools.validate_protocol` 和相关测试。
 - `docs/shm_protocol.md`、README 和本文。
 
-`ShmClient` 对共享内存输入执行 header CRC、payload CRC、slot 状态、序列号、payload 边界、重复 camera/light 等安全校验。解析失败会发布保守错误结果并释放输入 slot。`ErrorCode` 与 C++ `common/error_code.hpp` 保持枚举值一致，当前包含 `LIGHT_FAULT`、`CAMERA_FAULT`、`TRIGGER_SYNC_FAULT` 和 `CONFIGURATION_ERROR` 等 C++ 采集侧结构化失败码；这些枚举扩展不改变共享内存结构体大小。
+`ShmClient` 对共享内存输入执行 header CRC、payload CRC、slot 状态、序列号、payload 边界、重复 camera/pose/light 等安全校验。解析失败会发布保守错误结果并释放输入 slot。解析成功时会记录当前任务中的 `camera_id/pose_id -> camera_index` 动态映射，确保机器人飞拍末端相机（例如 `EYE_IN_HAND`）在 NG/RECHECK 缺陷结果回写时也能使用正确的 `camera_index`，不依赖固定静态表。`ErrorCode` 与 C++ `common/error_code.hpp` 保持枚举值一致，当前包含 `LIGHT_FAULT`、`CAMERA_FAULT`、`TRIGGER_SYNC_FAULT`、`CONFIGURATION_ERROR` 和 `ROBOT_FAULT` 等 C++ 采集侧结构化失败码。
 
 ### 质量门禁与预处理
 
@@ -164,7 +167,7 @@ training_tools/
 
 ### 融合、规则和追溯
 
-`FusionEngine` 对同一 camera/ROI/class 执行 IoU NMS，合并 evidence lights，并限制每个 ROI 候选数。`DefectFilter` 和 `RuleEngine` 根据类别阈值、面积阈值和候选分数输出 `OK`、`NG`、`RECHECK` 或 `ERROR`。
+`FusionEngine` 对同一 camera/pose/ROI/class 执行 IoU NMS，合并 evidence lights，并限制每个 ROI 候选数。`DefectFilter` 和 `RuleEngine` 根据类别阈值、面积阈值和候选分数输出 `OK`、`NG`、`RECHECK` 或 `ERROR`。
 
 `TraceWriter` 按配方 trace 策略保存：
 
@@ -201,6 +204,7 @@ uv run python -m tools.validate_protocol
 uv run python -m tools.validate_model_assets --recipe production_model_example
 uv run python -m training_tools.replay_dataset --count 3 --write-trace
 bash tools/run_simulated_ipc.sh
+bash tools/run_simulated_ipc.sh --config cpp_controller/config/station_runtime.robot_flyshot.example.conf
 ```
 
 有 trace 数据后再执行离线样本生成：

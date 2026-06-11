@@ -19,6 +19,7 @@ class PreparedBundle:
     rois: dict[str, dict[str, LightFrame]]
     roi_templates: dict[str, RoiTemplate]
     roi_location_report: RoiLocationReport | None = None
+    pose_id: str = ""
 
 
 class Preprocessor:
@@ -33,7 +34,7 @@ class Preprocessor:
     def run(self, job: SeatInspectionJob, recipe: Recipe) -> list[PreparedBundle]:
         prepared: list[PreparedBundle] = []
         for bundle in job.camera_bundles:
-            camera_recipe = recipe.camera(bundle.camera_id)
+            camera_recipe = recipe.camera(bundle.camera_id, bundle.pose_id)
             if camera_recipe is None:
                 raise ValueError(f"{bundle.camera_id}: 配方未启用该机位")
             calibration = self.calibration_manager.load(
@@ -61,6 +62,7 @@ class Preprocessor:
             prepared.append(
                 PreparedBundle(
                     camera_id=bundle.camera_id,
+                    pose_id=bundle.pose_id,
                     calibration=calibration,
                     rois=rois,
                     roi_templates=roi_templates,
@@ -153,6 +155,7 @@ class Preprocessor:
             )
         return LightFrame(
             camera_id=frame.camera_id,
+            pose_id=frame.pose_id,
             light_id=frame.light_id,
             frame_index=frame.frame_index,
             light_seq_index=frame.light_seq_index,
@@ -165,6 +168,10 @@ class Preprocessor:
             color_order=frame.color_order,
             dtype=frame.dtype,
             timestamp_us=frame.timestamp_us,
+            shot_id=frame.shot_id,
+            robot_timestamp_us=frame.robot_timestamp_us,
+            robot_tcp_xyz_mm=frame.robot_tcp_xyz_mm,
+            robot_rpy_deg=frame.robot_rpy_deg,
             exposure_us=frame.exposure_us,
             gain=frame.gain,
             calibration_id=frame.calibration_id,

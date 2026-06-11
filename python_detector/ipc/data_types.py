@@ -24,6 +24,11 @@ class LightFrame:
     calibration_id: str
     image_crc32: int
     image: memoryview
+    pose_id: str = ""
+    shot_id: int = 0
+    robot_timestamp_us: int = 0
+    robot_tcp_xyz_mm: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    robot_rpy_deg: tuple[float, float, float] = (0.0, 0.0, 0.0)
     origin_xy: tuple[int, int] = (0, 0)
     source_width: int | None = None
     source_height: int | None = None
@@ -89,6 +94,7 @@ class DefectResult:
     evidence_lights: list[str]
     mask_offset: int | None
     decision: str
+    pose_id: str = ""
 
 
 @dataclass

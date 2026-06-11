@@ -57,12 +57,16 @@ void apply_runtime_config(const seat_aoi::StationRuntimeConfig& runtime_config,
   config->recipe_id = runtime_config.recipe_id;
   config->trace_root = runtime_config.trace_root;
   config->light_order = runtime_config.light_order;
+  config->capture_mode = runtime_config.capture_mode;
   config->cameras = runtime_config.cameras;
   config->light = runtime_config.light;
   config->light_channels = runtime_config.light_channels;
+  config->capture_views = runtime_config.capture_views;
   config->plc = runtime_config.plc;
+  config->robot = runtime_config.robot;
   config->trigger_sync_mode = runtime_config.trigger_sync_mode;
   config->simulate_light_fault = runtime_config.light.simulate_fault;
+  config->robot.simulate_fault = runtime_config.robot.simulate_fault;
   config->simulate_trigger_timeout = runtime_config.plc.simulate_trigger_timeout;
   config->simulate_plc_output_fault = runtime_config.plc.simulate_output_fault;
   for (const auto& camera : runtime_config.cameras) {

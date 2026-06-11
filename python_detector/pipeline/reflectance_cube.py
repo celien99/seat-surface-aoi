@@ -20,6 +20,7 @@ class RegistrationReport:
     is_pass: bool
     message: str
     details: list[dict[str, object]] = field(default_factory=list)
+    pose_id: str = ""
 
 
 @dataclass
@@ -38,6 +39,7 @@ class ReflectanceCube:
     roi_bbox_xyxy_pixel: tuple[int, int, int, int]
     roi_to_source_matrix: tuple[float, ...] | None = None
     source_to_roi_matrix: tuple[float, ...] | None = None
+    pose_id: str = ""
 
     def get(self, light_id: str) -> LightFrame | None:
         return self.frames.get(light_id)
@@ -63,7 +65,7 @@ class ReflectanceCubeBuilder:
         recipe: Recipe,
     ) -> ReflectanceCube:
         camera_id = bundle.camera_id
-        camera_recipe = recipe.camera(camera_id)
+        camera_recipe = recipe.camera(camera_id, bundle.pose_id)
         light_order = camera_recipe.light_order if camera_recipe is not None else recipe.light_order
         base_light_id = camera_recipe.base_light_id if camera_recipe is not None else recipe.registration.base_light_id
         if base_light_id not in frames:
@@ -97,6 +99,7 @@ class ReflectanceCubeBuilder:
             roi_bbox_xyxy_pixel=roi_bbox,
             roi_to_source_matrix=transform_frame.roi_to_source_matrix if transform_frame is not None else None,
             source_to_roi_matrix=transform_frame.source_to_roi_matrix if transform_frame is not None else None,
+            pose_id=bundle.pose_id,
         )
 
     def _registration_report(
@@ -113,6 +116,7 @@ class ReflectanceCubeBuilder:
         if recipe.registration.method == "ecc":
             return self._ecc_registration_report(
                 camera_id=camera_id,
+                pose_id=bundle.pose_id,
                 roi_name=roi_name,
                 base_light_id=base_light_id,
                 frames=frames,
@@ -124,6 +128,7 @@ class ReflectanceCubeBuilder:
                 RegistrationReport(
                     camera_id=camera_id,
                     roi_name=roi_name,
+                    pose_id=bundle.pose_id,
                     base_light_id=base_light_id,
                     calibration_id="",
                     max_error_px=999.0,
@@ -145,6 +150,7 @@ class ReflectanceCubeBuilder:
                     RegistrationReport(
                         camera_id=camera_id,
                         roi_name=roi_name,
+                        pose_id=bundle.pose_id,
                         base_light_id=base_light_id,
                         calibration_id=base.calibration_id,
                         max_error_px=999.0,
@@ -160,6 +166,7 @@ class ReflectanceCubeBuilder:
                     RegistrationReport(
                         camera_id=camera_id,
                         roi_name=roi_name,
+                        pose_id=bundle.pose_id,
                         base_light_id=base_light_id,
                         calibration_id=base.calibration_id,
                         max_error_px=999.0,
@@ -179,6 +186,7 @@ class ReflectanceCubeBuilder:
             RegistrationReport(
                 camera_id=camera_id,
                 roi_name=roi_name,
+                pose_id=bundle.pose_id,
                 base_light_id=base_light_id,
                 calibration_id=base.calibration_id,
                 max_error_px=max_error,
@@ -193,6 +201,7 @@ class ReflectanceCubeBuilder:
     def _ecc_registration_report(
         self,
         camera_id: str,
+        pose_id: str,
         roi_name: str,
         base_light_id: str,
         frames: dict[str, LightFrame],
@@ -205,6 +214,7 @@ class ReflectanceCubeBuilder:
                 RegistrationReport(
                     camera_id=camera_id,
                     roi_name=roi_name,
+                    pose_id=pose_id,
                     base_light_id=base_light_id,
                     calibration_id="",
                     max_error_px=999.0,
@@ -238,6 +248,7 @@ class ReflectanceCubeBuilder:
         report = RegistrationReport(
             camera_id=camera_id,
             roi_name=roi_name,
+            pose_id=pose_id,
             base_light_id=base_light_id,
             calibration_id=base.calibration_id,
             max_error_px=max_error,

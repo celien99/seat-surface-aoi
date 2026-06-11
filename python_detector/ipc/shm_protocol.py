@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 SHM_PROTOCOL_MAGIC = 0x53414F49
-SHM_PROTOCOL_VERSION = 1
+SHM_PROTOCOL_VERSION = 2
 DEFAULT_SLOT_COUNT = 4
 DEFAULT_FRAME_SLOT_SIZE = 16 * 1024 * 1024
 DEFAULT_RESULT_SLOT_SIZE = 64 * 1024
@@ -79,6 +79,7 @@ class ErrorCode(enum.IntEnum):
     CAMERA_FAULT = 11
     TRIGGER_SYNC_FAULT = 12
     CONFIGURATION_ERROR = 13
+    ROBOT_FAULT = 14
 
 
 def crc32(data: bytes | bytearray | memoryview) -> int:
@@ -116,9 +117,9 @@ class StructSpec:
 
 
 SHM_HEADER = StructSpec.from_format("<IIIIQQQ")
-LIGHT_FRAME_META = StructSpec.from_format("<IIIIIIIIIIIIQI f 64s QQII".replace(" ", ""))
-SEAT_JOB_META = StructSpec.from_format("<QQ64s64s64sIIQ")
-DEFECT_RESULT_META = StructSpec.from_format("<64s64s64sI64s4ifII8iqII")
+LIGHT_FRAME_META = StructSpec.from_format("<IIIIIIIIIIIIIQQQIf3f3f64s64s64sQQII")
+SEAT_JOB_META = StructSpec.from_format("<QQ64s64s64sIIIIQ")
+DEFECT_RESULT_META = StructSpec.from_format("<64s64s64sI64s64s64s4ifII8iqII")
 INSPECTION_RESULT_META = StructSpec.from_format("<QQ64sIIIIfI")
 FRAME_SLOT_HEADER_PREFIX = StructSpec.from_format("<IQQIIII")
 RESULT_SLOT_HEADER_PREFIX = StructSpec.from_format("<IQQIIII")
@@ -128,12 +129,12 @@ RESULT_SLOT_HEADER_SIZE = RESULT_SLOT_HEADER_PREFIX.size + INSPECTION_RESULT_MET
 
 EXPECTED_SIZES = {
     "ShmHeader": 40,
-    "FrameSlotHeader": 260,
+    "FrameSlotHeader": 268,
     "ResultSlotHeader": 140,
-    "LightFrameMeta": 152,
-    "SeatJobMeta": 224,
+    "LightFrameMeta": 324,
+    "SeatJobMeta": 232,
     "InspectionResultMeta": 104,
-    "DefectResultMeta": 336,
+    "DefectResultMeta": 464,
 }
 
 

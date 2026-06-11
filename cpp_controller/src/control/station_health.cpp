@@ -10,7 +10,8 @@ bool is_device_fault(ErrorCode error_code) {
   return error_code == ErrorCode::DeviceFault ||
          error_code == ErrorCode::LightFault ||
          error_code == ErrorCode::CameraFault ||
-         error_code == ErrorCode::TriggerSyncFault;
+         error_code == ErrorCode::TriggerSyncFault ||
+         error_code == ErrorCode::RobotFault;
 }
 
 }  // namespace

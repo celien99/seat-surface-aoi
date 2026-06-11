@@ -52,12 +52,16 @@ bool StationController::initialize(const StationConfig& config) {
   runtime_config.recipe_id = config.recipe_id;
   runtime_config.trace_root = config.trace_root;
   runtime_config.light_order = config.light_order;
+  runtime_config.capture_mode = config.capture_mode;
   runtime_config.cameras = config.cameras;
   runtime_config.light = config.light;
   runtime_config.light_channels = config.light_channels;
+  runtime_config.capture_views = config.capture_views;
   runtime_config.plc = config.plc;
+  runtime_config.robot = config.robot;
   runtime_config.trigger_sync_mode = config.trigger_sync_mode;
   runtime_config.light.simulate_fault = config.simulate_light_fault;
+  runtime_config.robot.simulate_fault = config.robot.simulate_fault;
   runtime_config.plc.simulate_output_fault = config.simulate_plc_output_fault;
   runtime_config.plc.simulate_trigger_timeout = config.simulate_trigger_timeout;
   for (auto& camera : runtime_config.cameras) {

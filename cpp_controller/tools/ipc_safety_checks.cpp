@@ -39,13 +39,15 @@ seat_aoi::SeatImageBundle make_bundle(std::uint64_t sequence_id) {
   seat_aoi::copy_cstr(bundle.job_meta.seat_id, "SIM");
   seat_aoi::copy_cstr(bundle.job_meta.sku, "seat_a_black_leather");
   seat_aoi::copy_cstr(bundle.job_meta.recipe_id, "seat_a_black_leather_v1");
-  bundle.job_meta.camera_count = 1;
+  bundle.job_meta.view_count = 1;
   bundle.job_meta.frame_count = 1;
+  bundle.job_meta.capture_mode = static_cast<std::uint32_t>(seat_aoi::CaptureMode::FixedCamera);
   bundle.job_meta.created_at_us = seat_aoi::now_us();
 
   seat_aoi::CapturedFrame frame;
   frame.bytes = {80, 81, 82, 83};
   frame.meta.camera_index = 0;
+  frame.meta.pose_index = 0;
   frame.meta.light_index = 1;
   frame.meta.frame_index = 1;
   frame.meta.light_seq_index = 0;
@@ -58,8 +60,12 @@ seat_aoi::SeatImageBundle make_bundle(std::uint64_t sequence_id) {
   frame.meta.color_order = static_cast<std::uint32_t>(seat_aoi::ColorOrder::Mono);
   frame.meta.dtype_code = static_cast<std::uint32_t>(seat_aoi::DTypeCode::UInt8);
   frame.meta.timestamp_us = seat_aoi::now_us();
+  frame.meta.shot_id = 1000 + sequence_id;
+  frame.meta.robot_timestamp_us = frame.meta.timestamp_us;
   frame.meta.exposure_us = 800;
   frame.meta.gain = 1.0F;
+  seat_aoi::copy_cstr(frame.meta.camera_id, "TOP_BACK");
+  seat_aoi::copy_cstr(frame.meta.pose_id, "TOP_BACK");
   seat_aoi::copy_cstr(frame.meta.calibration_id, "calib/simulated_v1");
   bundle.frames.push_back(frame);
   return bundle;
@@ -357,23 +363,53 @@ bool test_filled_production_config_validates() {
   return ok;
 }
 
-bool test_acquisition_strategy_config_field_rejected() {
-  constexpr const char* kConfigPath = "/tmp/seat_aoi_acquisition_strategy_rejected.conf";
-  {
-    std::ofstream file(kConfigPath);
-    file << "hardware_mode=simulated\n"
-         << "plc.backend=simulated\n"
-         << "camera.backend=simulated\n"
-         << "light.backend=simulated\n"
-         << "acquisition_strategy=serial_tdm\n";
-  }
+bool test_robot_flyshot_runtime_config_parses() {
   seat_aoi::StationRuntimeConfig config;
   std::string error;
-  const bool ok = seat_aoi::load_station_runtime_config(kConfigPath, &config, &error);
-  std::remove(kConfigPath);
-  const bool passed = !ok && error.find("未知运行配置字段: acquisition_strategy") != std::string::npos;
+  bool ok = seat_aoi::load_station_runtime_config(
+      "cpp_controller/config/station_runtime.robot_flyshot.example.conf", &config, &error);
+  if (!ok) {
+    error.clear();
+    ok = seat_aoi::load_station_runtime_config(
+        "config/station_runtime.robot_flyshot.example.conf", &config, &error);
+  }
+  const bool passed = ok &&
+                      config.capture_mode == seat_aoi::CaptureMode::RobotFlyshot &&
+                      config.cameras.size() >= 1 &&
+                      config.capture_views.size() == 2 &&
+                      config.capture_views[0].pose_id == "T1_BACKREST" &&
+                      config.capture_views[1].pose_id == "T2_CUSHION" &&
+                      config.capture_views[0].camera_index == 0 &&
+                      config.capture_views[1].camera_id == "EYE_IN_HAND";
   if (!passed) {
-    std::cerr << "acquisition_strategy config field was not rejected: " << error << "\n";
+    std::cerr << "robot_flyshot runtime config did not parse expected values: " << error << "\n";
+  }
+  return passed;
+}
+
+bool test_robot_flyshot_production_template_rejects_todo_placeholders() {
+  seat_aoi::StationRuntimeConfig config;
+  std::string error;
+  bool ok = seat_aoi::load_station_runtime_config(
+      "cpp_controller/config/station_runtime.robot_flyshot.production.example.conf", &config, &error);
+  if (ok) {
+    std::cerr << "robot flyshot production template with TODO placeholders unexpectedly passed\n";
+    return false;
+  }
+  if (error.empty()) {
+    error.clear();
+    ok = seat_aoi::load_station_runtime_config(
+        "config/station_runtime.robot_flyshot.production.example.conf", &config, &error);
+    if (ok) {
+      std::cerr << "robot flyshot production template with TODO placeholders unexpectedly passed\n";
+      return false;
+    }
+  }
+  const bool passed = error.find("TODO") != std::string::npos ||
+                      error.find("占位") != std::string::npos;
+  if (!passed) {
+    std::cerr << "robot flyshot production template rejection did not mention placeholder: "
+              << error << "\n";
   }
   return passed;
 }
@@ -529,7 +565,10 @@ int main() {
   if (!test_filled_production_config_validates()) {
     return 1;
   }
-  if (!test_acquisition_strategy_config_field_rejected()) {
+  if (!test_robot_flyshot_runtime_config_parses()) {
+    return 1;
+  }
+  if (!test_robot_flyshot_production_template_rejects_todo_placeholders()) {
     return 1;
   }
   if (!test_strobe_width_larger_than_exposure_rejected()) {

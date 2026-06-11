@@ -9,7 +9,7 @@
 namespace seat_aoi {
 
 inline constexpr std::uint32_t kShmProtocolMagic = 0x53414F49;  // "SAOI"
-inline constexpr std::uint32_t kShmProtocolVersion = 1;
+inline constexpr std::uint32_t kShmProtocolVersion = 2;
 inline constexpr std::uint32_t kDefaultSlotCount = 4;
 inline constexpr std::uint32_t kDefaultFrameSlotSize = 16 * 1024 * 1024;
 inline constexpr std::uint32_t kDefaultResultSlotSize = 64 * 1024;
@@ -63,7 +63,7 @@ struct ResultSlotHeader {
 #pragma pack(pop)
 
 static_assert(sizeof(ShmHeader) == 40, "Unexpected ShmHeader size");
-static_assert(sizeof(FrameSlotHeader) == 260, "Unexpected FrameSlotHeader size");
+static_assert(sizeof(FrameSlotHeader) == 268, "Unexpected FrameSlotHeader size");
 static_assert(sizeof(ResultSlotHeader) == 140, "Unexpected ResultSlotHeader size");
 
 inline std::size_t frame_slot_meta_offset() {

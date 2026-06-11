@@ -10,10 +10,31 @@
 
 namespace seat_aoi {
 
+enum class CaptureMode : std::uint32_t {
+  FixedCamera = 1,
+  RobotFlyshot = 2,
+};
+
+struct RuntimeCaptureViewConfig {
+  std::uint32_t pose_index = 0;
+  std::string pose_id = "TOP_BACK";
+  std::uint32_t camera_index = 0;
+  std::string camera_id = "TOP_BACK";
+  std::string calibration_id = "calib/simulated_v1";
+  std::string shot_id_source;
+  std::string robot_ready_input;
+  std::string robot_fault_input;
+  std::string photo_trigger_input;
+  std::uint64_t simulated_shot_id = 0;
+  float robot_tcp_xyz_mm[3] = {0.0F, 0.0F, 0.0F};
+  float robot_rpy_deg[3] = {0.0F, 0.0F, 0.0F};
+};
+
 struct RuntimeCameraConfig {
   std::uint32_t camera_index = 0;
   std::string camera_id = "TOP_BACK";
   std::string serial_number;
+  std::string calibration_id = "calib/simulated_v1";
   std::uint32_t width = 64;
   std::uint32_t height = 48;
   std::uint32_t channels = 1;
@@ -64,6 +85,17 @@ struct RuntimePlcConfig {
   bool simulate_trigger_timeout = false;
 };
 
+struct RuntimeRobotConfig {
+  HardwareBackend backend = HardwareBackend::Simulated;
+  std::string controller_id;
+  std::string host;
+  std::uint32_t port = 0;
+  std::string ready_input;
+  std::string fault_input;
+  std::string start_output;
+  bool simulate_fault = false;
+};
+
 struct StationRuntimeConfig {
   HardwareMode hardware_mode = HardwareMode::Simulated;
   HardwareBackend camera_backend = HardwareBackend::Simulated;
@@ -81,11 +113,12 @@ struct StationRuntimeConfig {
   int max_jobs = 0;
   std::string recipe_id = "seat_a_black_leather_v1";
   std::vector<std::uint32_t> light_order = {1, 2, 3, 4};
+  CaptureMode capture_mode = CaptureMode::FixedCamera;
   TriggerSyncMode trigger_sync_mode = TriggerSyncMode::CameraExposureOutput;
   std::string trace_root = "trace";
   std::vector<RuntimeCameraConfig> cameras = {
-      RuntimeCameraConfig{0, "TOP_BACK", "", 64, 48, 1, "Mono8", "", "", 8, false},
-      RuntimeCameraConfig{1, "TOP_CUSHION", "", 64, 48, 1, "Mono8", "", "", 8, false},
+      RuntimeCameraConfig{0, "TOP_BACK", "", "calib/simulated_v1", 64, 48, 1, "Mono8", "", "", 8, false},
+      RuntimeCameraConfig{1, "TOP_CUSHION", "", "calib/simulated_v1", 64, 48, 1, "Mono8", "", "", 8, false},
   };
   RuntimeLightConfig light;
   std::vector<RuntimeLightChannelConfig> light_channels = {
@@ -94,9 +127,15 @@ struct StationRuntimeConfig {
       RuntimeLightChannelConfig{3, 3, 800, 800, 0, 1.0F, 60.0F},
       RuntimeLightChannelConfig{4, 4, 800, 800, 0, 1.0F, 60.0F},
   };
+  std::vector<RuntimeCaptureViewConfig> capture_views;
   RuntimePlcConfig plc;
+  RuntimeRobotConfig robot;
 };
 
+const char* capture_mode_name(CaptureMode mode);
+bool parse_capture_mode(const std::string& value,
+                        CaptureMode* out_mode,
+                        std::string* error_message);
 bool load_station_runtime_config(const std::string& path,
                                  StationRuntimeConfig* out_config,
                                  std::string* error_message);

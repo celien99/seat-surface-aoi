@@ -87,6 +87,7 @@ class InspectionPipeline:
                 "feature_summary": [
                     {
                         "camera_id": group.camera_id,
+                        "pose_id": group.pose_id,
                         "roi_name": group.roi_name,
                         "model_key": group.model_key,
                         "feature_names": sorted(group.features),

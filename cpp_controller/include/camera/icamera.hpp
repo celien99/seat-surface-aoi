@@ -12,6 +12,7 @@ struct CameraConfig {
   std::uint32_t camera_index = 0;
   std::string camera_id;
   std::string serial_number;
+  std::string calibration_id = "calib/simulated_v1";
   std::uint32_t width = 64;
   std::uint32_t height = 48;
   std::uint32_t channels = 1;

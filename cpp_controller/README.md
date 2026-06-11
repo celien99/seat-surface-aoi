@@ -2,7 +2,7 @@
 
 ## 概述
 
-`cpp_controller` 是座椅表面 AOI 检测系统的 C++ 主控程序，负责工位流程编排、图像采集调度、PLC 信号交互，以及通过 POSIX 共享内存与 Python 检测引擎进行 IPC 通信。
+`cpp_controller` 是座椅表面 AOI 检测系统的 C++ 主控程序，负责工位流程编排、固定机位/机器人飞拍采集调度、PLC/Robot 信号交互，以及通过 POSIX 共享内存与 Python 检测引擎进行 IPC 通信。
 
 ### 核心定位
 
@@ -10,13 +10,13 @@
 ┌──────────────────────────────────────────────────────────────────┐
 │                     C++ Controller (本工程)                       │
 │                                                                  │
-│   PLC 触发 ─→ 光源时序 ─→ 相机采图 ─→ FrameRingBuffer (SHM)       │
+│   PLC/Robot 触发 ─→ 光源时序 ─→ 相机采图 ─→ FrameRingBuffer (SHM) │
 │                                          │                       │
 │                                          ↓                       │
 │                                   [Python 检测器]                 │
 │                                          │                       │
 │                                          ↓                       │
-│   PLC 输出 ←─────────────── ResultRingBuffer (SHM)               │
+│   PLC 输出 ←────────────── ResultRingBuffer (SHM)                │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -39,9 +39,13 @@ cpp_controller/
 │   │
 │   ├── control/                            # 工位控制逻辑层
 │   │   ├── plc_client.cpp                  # PLC 客户端（模拟实现）
+│   │   ├── robot_client.cpp                # 机器人位姿/SHOT_ID 客户端（模拟实现）
 │   │   ├── light_controller.cpp            # 光源控制器（模拟实现）
+│   │   ├── hardware_backend.cpp            # 硬件模式和 backend 解析
 │   │   ├── station_controller.cpp          # 工位主控协调器（核心编排）
-│   │   ├── frame_assembler.cpp             # 多相机图像采集编排器
+│   │   ├── station_health.cpp              # 连续复检和健康报警状态
+│   │   ├── production_event_log.cpp        # C++ 生产事件 JSONL
+│   │   ├── frame_assembler.cpp             # 固定机位/机器人飞拍采集编排器
 │   │   ├── trigger_scheduler.cpp           # 触发信号调度器
 │   │   └── station_runtime_config.cpp      # 运行时配置文件解析
 │   │
@@ -63,21 +67,31 @@ cpp_controller/
 │   │   └── crc32.hpp                       # CRC32 函数声明
 │   └── control/
 │       ├── station_controller.hpp          # StationController + StationConfig
+│       ├── iplc_client.hpp                 # PLC 抽象接口
 │       ├── plc_client.hpp                  # PlcClient + PlcHealth
+│       ├── irobot_client.hpp               # Robot 抽象接口
+│       ├── robot_client.hpp                # SimRobotClient
+│       ├── hardware_factory.hpp            # 模拟/生产 backend 工厂
+│       ├── hardware_backend.hpp            # 硬件模式和 backend 枚举
 │       ├── light_controller.hpp            # LightController + 光源类型定义
 │       ├── frame_assembler.hpp             # FrameAssembler + Recipe
 │       ├── trigger_scheduler.hpp           # TriggerScheduler + PlcTrigger
 │       ├── station_runtime_config.hpp      # StationRuntimeConfig + 配置解析
-│       └── camera/                         # 相机相关头文件
-│           ├── camera_device.hpp           # CameraDevice + CameraConfig/CameraHealth
-│           └── camera_worker.hpp           # CameraWorker
+│       └── station_health.hpp              # 工位健康状态
+│   └── camera/                             # 相机相关头文件
+│       ├── icamera.hpp                     # 相机抽象接口
+│       ├── camera_device.hpp               # CameraDevice + CameraConfig/CameraHealth
+│       └── camera_worker.hpp               # CameraWorker
 │
 ├── tools/
 │   ├── protocol_layout.cpp                 # 打印所有协议结构体大小的诊断工具
 │   └── ipc_safety_checks.cpp               # IPC 故障注入与安全测试套件
 │
 └── config/
-    └── station_runtime.example.conf        # 运行时配置模板
+    ├── station_runtime.example.conf        # 固定机位模拟配置模板
+    ├── station_runtime.production.example.conf # 固定机位生产配置模板
+    ├── station_runtime.robot_flyshot.example.conf # 机器人飞拍模拟配置模板
+    └── station_runtime.robot_flyshot.production.example.conf # 机器人飞拍生产配置模板
 ```
 
 ---
@@ -121,6 +135,7 @@ ipc_safety_checks   (依赖 seat_aoi_control)
 | 模块 | 模拟行为 | 故障注入 |
 |------|---------|---------|
 | **PLC** (`plc_client.cpp`) | 自动生成虚拟触发信号（`SIM_SEAT_XXX`），递增 trigger_id | `--simulate-plc-output-fault` 模拟输出失败<br>`--simulate-trigger-timeout` 模拟触发超时 |
+| **Robot** (`robot_client.cpp`) | 在机器人飞拍模式下模拟 pose ready、SHOT_ID、TCP 位姿和机器人时间戳 | `simulate_robot_fault=true` 模拟机器人 FAULT |
 | **相机** (`camera_device.cpp`) | 生成合成图像（纹理 + 梯度 + 伪随机数据），64×48 可配置分辨率 | `--simulate-missing-frame` 模拟丢帧 |
 | **光源** (`light_controller.cpp`) | 模拟频闪时序，1ms sleep 模拟硬件延迟 | `--simulate-light-fault` 模拟光源故障 |
 
@@ -131,8 +146,20 @@ ipc_safety_checks   (依赖 seat_aoi_control)
 | PLC | `modbus_tcp`、`siemens_s7`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk` |
 | 相机 | `basler_pylon`、`hikrobot_mvs`、`daheng_galaxy`、`flir_spinnaker`、`vendor_sdk`、`custom_sdk` |
 | 频闪 | `serial_ascii`、`modbus_tcp`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk` |
+| Robot | `modbus_tcp`、`siemens_s7`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk` |
 
 如果生产模式选择了非 simulated backend，但 C++ 尚未链接对应真实驱动，程序会在初始化阶段明确报错并退出，不会偷偷回退到模拟硬件。
+
+## 采集方案模式
+
+当前主控通过 `capture_mode` 支持两类采集方案，二者共用相同的 C++ 控制边界、共享内存协议和 Python 检测链路：
+
+| 模式 | 配置值 | 视角定义 | 典型配置 |
+|------|--------|----------|----------|
+| 固定机位多光源 | `capture_mode=fixed_camera` | 每个 `camera.<N>` 自动生成一个检测视角，`pose_id` 默认等于 `camera_id` | `config/station_runtime.example.conf`、`config/station_runtime.production.example.conf` |
+| 机器人飞拍多光源 | `capture_mode=robot_flyshot` | 每个 `pose.<N>` 是一个检测视角，可共享同一末端相机 `EYE_IN_HAND` | `config/station_runtime.robot_flyshot.example.conf`、`config/station_runtime.robot_flyshot.production.example.conf` |
+
+机器人飞拍模式会在采集每个 pose 前调用 `RobotClient::wait_pose_ready()`，校验 READY/FAULT/SHOT_ID，并把 `pose_id`、`shot_id`、机器人时间戳和 TCP 位姿写入 `LightFrameMeta`。任何机器人未到位、FAULT、触发错序或超时都返回 `RobotFault`，不会输出 `OK`。
 
 ---
 
@@ -151,7 +178,7 @@ ipc_safety_checks   (依赖 seat_aoi_control)
 ┌─────────────────────────────────────────────────────┐
 │ ShmHeader (40 bytes)                                │
 │   magic: 0x53414F49 ("SAOI")                        │
-│   version: 1                                        │
+│   version: 2                                        │
 │   slot_count / slot_size                            │
 │   write_index / read_index / heartbeat              │
 ├─────────────────────────────────────────────────────┤
@@ -177,12 +204,12 @@ Empty ─→ Writing ─→ Ready ─→ Reading ─→ Empty
 | 结构体 | 大小 | 说明 |
 |--------|------|------|
 | `ShmHeader` | 40 bytes | 共享内存文件头 |
-| `FrameSlotHeader` | 260 bytes | 帧槽位头（含 SeatJobMeta） |
+| `FrameSlotHeader` | 268 bytes | 帧槽位头（含 SeatJobMeta） |
 | `ResultSlotHeader` | 140 bytes | 结果槽位头（含 InspectionResultMeta） |
-| `LightFrameMeta` | 152 bytes | 单帧图像元数据 |
-| `SeatJobMeta` | 224 bytes | 作业元数据 |
+| `LightFrameMeta` | 324 bytes | 单帧图像元数据，含 `camera_id`、`pose_id`、`shot_id` 和机器人位姿 |
+| `SeatJobMeta` | 232 bytes | 作业元数据，含 `view_count` 与 `capture_mode` |
 | `InspectionResultMeta` | 104 bytes | 检测结果元数据 |
-| `DefectResultMeta` | 336 bytes | 单个缺陷描述 |
+| `DefectResultMeta` | 464 bytes | 单个缺陷描述，含 `camera_id` 与 `pose_id` |
 
 ---
 
@@ -213,6 +240,9 @@ cmake --build build
 
 # 使用配置文件
 ./build/seat_aoi_controller --config config/station_runtime.example.conf
+
+# 使用机器人飞拍模拟配置
+./build/seat_aoi_controller --config config/station_runtime.robot_flyshot.example.conf
 
 # 只校验生产配置，不启动 PLC/相机/频闪
 ./build/seat_aoi_controller --config config/station_runtime.production.conf --validate-config
@@ -276,6 +306,7 @@ warning_recheck_threshold=3
 critical_recheck_threshold=5
 max_jobs=1
 recipe_id=seat_a_black_leather_v1
+capture_mode=fixed_camera
 light_order=1,2,3,4
 trigger_sync_mode=camera_exposure_output
 trace_root=trace
@@ -310,13 +341,23 @@ cp config/station_runtime.production.example.conf config/station_runtime.product
 ./build/seat_aoi_controller --config config/station_runtime.production.conf --validate-config
 ```
 
+机器人飞拍生产模板位于 `config/station_runtime.robot_flyshot.production.example.conf`，复制后需要补齐 `robot.*`、`pose.<N>.*`、末端相机和光源控制器参数：
+
+```bash
+cp config/station_runtime.robot_flyshot.production.example.conf \
+   config/station_runtime.robot_flyshot.production.conf
+./build/seat_aoi_controller --config config/station_runtime.robot_flyshot.production.conf --validate-config
+```
+
 配置字段逐项说明见 [C++ 主控生产配置快速上手](../docs/cpp_controller_production_config_quickstart.md)。
 
 新增生产校验要点：
 
-- C++ 主控固定采用串行 TDM 采集路径，不再支持通过运行配置覆盖采集策略；配置文件中出现 `acquisition_strategy` 会被拒绝。
+- C++ 主控固定采用视角级串行 TDM 采集路径，不再支持通过运行配置覆盖采集策略；配置文件中出现 `acquisition_strategy` 会被拒绝。
+- `capture_mode=fixed_camera` 时检测视角默认由 `camera.<N>` 自动生成；`capture_mode=robot_flyshot` 时必须显式配置 `pose.<N>.*` 采集计划。
+- 机器人飞拍模式必须配置非 simulated 的 `robot.backend`、Robot READY/FAULT/START 点位以及每个 pose 的 `shot_id_source`、`photo_trigger_input` 和标定位姿信息。
 - 生产模式必须使用 `camera_exposure_output` 或等价硬触发同步，`software` 仅用于模拟或低精度联调。
-- `strobe_width_us` 不能大于 `exposure_us`，`frame_slot_size` 必须能容纳 `camera_count x light_count` 的完整图像包。
+- `strobe_width_us` 不能大于 `exposure_us`，`frame_slot_size` 必须能容纳 `view_count x light_count` 的完整图像包。
 - `warning_recheck_threshold` 和 `critical_recheck_threshold` 控制连续复检报警升级，后者必须大于前者。
 - `trace_root` 指定 C++ 生产事件日志目录，默认写入 `trace/cpp_controller_events.jsonl`。
 
@@ -338,7 +379,9 @@ cp config/station_runtime.production.example.conf config/station_runtime.product
    ├─ load_recipe(sku)           → Recipe (打光顺序)
    │
    ├─ frame_assembler_.acquire_bundles()
-   │   ├─ LightController::prepare_sequence()    (光源准备)
+   │   ├─ build_capture_plan()                   (固定机位或机器人 pose 计划)
+   │   ├─ wait_robot_pose_ready()                (固定机位为模拟 ready，机器人飞拍读取 READY/SHOT_ID)
+   │   ├─ LightController::prepare_sequence()    (每个检测视角重新准备光源)
    │   ├─ 按 light_order 遍历每个光源通道:
    │   │   ├─ LightController::trigger_channel() 或 arm_hardware_trigger()
    │   │   ├─ CameraWorker::arm()                 (相机进入就绪)
@@ -371,6 +414,7 @@ cp config/station_runtime.production.example.conf config/station_runtime.product
 | 相机丢帧 | MissingFrame | Recheck |
 | 相机 arm 失败 | CameraFault | Recheck |
 | 曝光输出或硬触发确认失败 | TriggerSyncFault | Recheck |
+| 机器人未到位、FAULT 或 SHOT_ID 异常 | RobotFault | Recheck |
 | 频闪配置缺失或非法 | ConfigurationError | Recheck |
 | 槽位不可用 | SlotUnavailable | Recheck |
 | 检测超时 | DetectorTimeout | Recheck |
@@ -384,14 +428,15 @@ cp config/station_runtime.production.example.conf config/station_runtime.product
 
 ## 频闪时序控制
 
-核心逻辑在 `src/control/frame_assembler.cpp` 的 `acquire_bundles()` 方法中，采用 **时分频闪（TDM）方案："逐机位串行、逐光源串行"**。
+核心逻辑在 `src/control/frame_assembler.cpp` 的 `acquire_bundles()` 方法中，采用 **视角级时分频闪（TDM）方案："逐检测视角串行、逐光源串行"**。
 
 ### 设计原则
 
 ```
-实际产线约束：每个机位独立完成全部光源频闪序列，机位之间串行执行。
-即：机位A 依次完成 [光源1→光源2→光源3→光源4] 全部拍摄后，机位B 才开始。
-这是硬规则，不是性能优化选项；多机位并行频闪会造成光源互相污染，当前实现不开放外部采集策略配置，并通过采集包校验拒绝偏离串行 TDM 的路径。
+实际产线约束：每个检测视角独立完成全部光源频闪序列，视角之间串行执行。
+固定机位模式下，检测视角等同于相机机位；机器人飞拍模式下，检测视角等同于机器人 pose。
+即：视角A 依次完成 [光源1→光源2→光源3→光源4] 全部拍摄后，视角B 才开始。
+这是硬规则，不是性能优化选项；多视角并行频闪会造成光源互相污染，当前实现不开放外部采集策略配置，并通过采集包校验拒绝偏离串行 TDM 的路径。
 ```
 
 ### 源码入口
@@ -420,28 +465,38 @@ for (std::uint32_t light_index : recipe.light_order) {
 
 根据 Recipe 中的 `light_order`（如 `[1,2,3,4]`）从运行配置构建光源通道参数；缺少配置或参数非法会返回 `ConfigurationError`。
 
-**Step 2 — 外层循环：逐机位串行**
+**Step 2 — 构建检测视角计划**
 
 ```cpp
-for (std::uint32_t camera_index = 0; camera_index < cameras_.size(); ++camera_index) {
-    auto& camera = cameras_[camera_index];
-    // 当前机位完成全部光源序列后，才进入下一个机位
+std::vector<RuntimeCaptureViewConfig> capture_plan;
+build_capture_plan(&capture_plan, error);
 ```
 
-**Step 3 — 每个机位重新 prepare_sequence**
+`capture_mode=fixed_camera` 且未显式配置 `pose.<N>` 时，会按 `camera.<N>` 自动生成视角；`capture_mode=robot_flyshot` 必须配置 `pose.<N>`，每个 pose 可以引用同一个末端相机或不同相机。
+
+**Step 3 — 外层循环：逐视角串行**
+
+```cpp
+for (const auto& view : capture_plan) {
+    auto& camera = *camera_for_index(view.camera_index);
+    wait_robot_pose_ready(trigger, view, &pose_status, error);
+    // 当前视角完成全部光源序列后，才进入下一个视角
+```
+
+**Step 4 — 每个视角重新 prepare_sequence**
 
 ```cpp
     light_controller_.prepare_sequence(sequence, trigger.trigger_id, ...);
 ```
 
-**Step 4 — 内层循环：逐光源串行**
+**Step 5 — 内层循环：逐光源串行**
 
 ```cpp
     for (std::uint32_t light_seq_index = 0;
          light_seq_index < sequence.channels.size();
          ++light_seq_index) {
         const auto light_param = sequence.channels[light_seq_index];
-        // 当前光源频闪 → 当前机位相机拍摄 → 下一个光源
+        // 当前光源频闪 → 当前视角相机拍摄 → 下一个光源
     }
 }
 ```
@@ -458,10 +513,10 @@ C++ 程序
   ├──①──→ light_controller_.trigger_channel(光源N)
   │        └─ 模拟频闪脉冲 (simulated strobe, sleep 1ms)
   │
-  ├──②──→ camera.wait_frame()    ← 单相机串行采集
+  ├──②──→ camera.wait_frame()    ← 单视角串行采集
   │        └─ CameraDevice::capture() → 生成合成图像 (sleep 2ms)
   │
-  └──③──→ 下一个光源 (light_seq_index++) 或下一个机位 (camera_index++)
+  └──③──→ 下一个光源 (light_seq_index++) 或下一个视角
 ```
 
 #### 模式 B：CameraExposureOutput（相机曝光输出硬触发，默认模式）
@@ -469,16 +524,16 @@ C++ 程序
 模拟真实硬件的 GPIO 联动——相机开始曝光时通过 Strobe Out 引脚发出脉冲信号，触发光源频闪：
 
 ```
-C++ 程序 (单机位单光源)
+C++ 程序 (单视角单光源)
   │
   ├──①──→ light_controller_.arm_hardware_trigger(光源N)
   │        └─ 光源进入"预就绪"状态，等待曝光输出信号
   │
-  ├──②──→ camera.arm(光源N)      ← 仅当前机位相机 arm
+  ├──②──→ camera.arm(光源N)      ← 仅当前视角对应相机 arm
   │        └─ CameraDevice 记录 armed_trigger_id / armed_light_index
   │
   ├──③──→ camera.simulate_exposure_output(光源N)
-  │        └─ 当前机位相机模拟曝光输出信号 (sleep 1ms)
+  │        └─ 当前视角相机模拟曝光输出信号 (sleep 1ms)
   │        └─ 真实场景：相机开始曝光 → GPIO Strobe Out → 光源频闪
   │
   ├──④──→ light_controller_.notify_hardware_triggered(光源N)
@@ -487,37 +542,37 @@ C++ 程序 (单机位单光源)
   ├──⑤──→ camera.wait_frame(光源N)   ← 单相机串行采集
   │        └─ CameraDevice::capture() → 生成合成图像 (sleep 2ms)
   │
-  └──⑥──→ 下一个光源 或 下一个机位
+  └──⑥──→ 下一个光源 或 下一个视角
 ```
 
 ### 完整时序图（时分频闪）
 
 ```
-假设: 2台相机 (A, B), light_order = [1, 2, 3, 4], 模式 = CameraExposureOutput
+假设: 2个检测视角 (A, B), light_order = [1, 2, 3, 4], 模式 = CameraExposureOutput
 
 time ────────────────────────────────────────────────────────────────────────→
 
-  ═══════════ 机位A (Camera 0) ═══════════
+  ═══════════ 视角A (固定机位 Camera 0 或机器人 pose T1) ═══════════
   prepare_sequence ─→
     Light 1 arm ─→ Cam A arm ─→ Cam A 曝光输出 ─→ Light 1 频闪 ─→ Cam A 采图
     Light 2 arm ─→ Cam A arm ─→ Cam A 曝光输出 ─→ Light 2 频闪 ─→ Cam A 采图
     Light 3 arm ─→ Cam A arm ─→ Cam A 曝光输出 ─→ Light 3 频闪 ─→ Cam A 采图
     Light 4 arm ─→ Cam A arm ─→ Cam A 曝光输出 ─→ Light 4 频闪 ─→ Cam A 采图
 
-  ═══════════ 机位B (Camera 1) ═══════════
+  ═══════════ 视角B (固定机位 Camera 1 或机器人 pose T2) ═══════════
   prepare_sequence ─→
     Light 1 arm ─→ Cam B arm ─→ Cam B 曝光输出 ─→ Light 1 频闪 ─→ Cam B 采图
     Light 2 arm ─→ Cam B arm ─→ Cam B 曝光输出 ─→ Light 2 频闪 ─→ Cam B 采图
     Light 3 arm ─→ Cam B arm ─→ Cam B 曝光输出 ─→ Light 3 频闪 ─→ Cam B 采图
     Light 4 arm ─→ Cam B arm ─→ Cam B 曝光输出 ─→ Light 4 频闪 ─→ Cam B 采图
 
-最终产出: 2机位 × 4光源 = 8 张图像 → SeatImageBundle → FrameRingBuffer
+最终产出: 2视角 × 4光源 = 8 张图像 → SeatImageBundle → FrameRingBuffer
 ```
 
 ### 实际运行日志
 
 ```
-[trigger_id=1000] prepared light sequence channels=4         ← 机位A 开始
+[trigger_id=1000] prepared light sequence channels=4         ← 视角A 开始
 [trigger_id=1000 light_index=1 physical_channel=1 light_seq_index=0] arm ...    ← 光源1
 [trigger_id=1000 light_index=1 physical_channel=1 light_seq_index=0] camera exposure output fired strobe
 [trigger_id=1000 light_index=2 physical_channel=2 light_seq_index=1] arm ...    ← 光源2
@@ -526,7 +581,7 @@ time ─────────────────────────
 [trigger_id=1000 light_index=3 physical_channel=3 light_seq_index=2] camera exposure output fired strobe
 [trigger_id=1000 light_index=4 physical_channel=4 light_seq_index=3] arm ...    ← 光源4
 [trigger_id=1000 light_index=4 physical_channel=4 light_seq_index=3] camera exposure output fired strobe
-[trigger_id=1000] prepared light sequence channels=4         ← 机位B 开始
+[trigger_id=1000] prepared light sequence channels=4         ← 视角B 开始
 [trigger_id=1000 light_index=1 physical_channel=1 light_seq_index=0] arm ...    ← 光源1
 ...
 ```
@@ -535,13 +590,13 @@ time ─────────────────────────
 
 | 特性 | 说明 |
 |------|------|
-| **逐机位串行** | 外层循环按 camera_index 串行，每个机位独立完成全部光源序列后再切换 |
+| **逐视角串行** | 外层循环按 capture plan 串行；固定机位模式下视角等同于 `camera_id`，机器人飞拍模式下视角等同于 `pose_id` |
 | **逐光源串行** | 内层循环按 light_seq_index 串行，一次只有一个光源频闪 |
-| **单相机采集** | 每次频闪仅当前机位的相机拍摄，不再使用 `std::async` 并行 |
-| **采集包完整性校验** | 发布共享内存前校验 `frame_count == camera_count x light_count`，并确认帧顺序为“当前机位全光源→下一机位” |
-| **每机位重新 prepare** | 切换机位时重新调用 `prepare_sequence()`，确保光源状态正确 |
+| **单视角采集** | 每次频闪仅当前视角对应相机拍摄，不再使用 `std::async` 并行 |
+| **采集包完整性校验** | 发布共享内存前校验 `frame_count == view_count x light_count`，并确认帧顺序为“当前视角全光源→下一视角” |
+| **每视角重新 prepare** | 切换视角时重新调用 `prepare_sequence()`，确保光源状态正确 |
 | **Arm → 触发 → 确认** | 三阶段握手机制，模拟真实硬件的 GPIO 时序 |
-| **各机位独立曝光输出** | 每个机位的相机自行发出曝光输出信号，不再仅有相机0 负责 |
+| **各视角独立曝光输出** | 每个视角的相机自行发出曝光输出信号；机器人飞拍会同时记录 `shot_id`、`pose_id` 和 TCP 位姿 |
 | **参数配置化** | `LightChannelParam` 来自运行配置，包含 `physical_channel`、`exposure_us`、`strobe_width_us`、`trigger_delay_us`、`gain` 和 `current_percent` |
 | **结构化采集错误** | 采集失败返回 `AcquisitionError`，包含错误码、阶段、机位、光源和光源轮次 |
 | **故障即停** | 任何一步失败立即 `shutdown_all()`，清空相机列表，下次调用重新初始化 |

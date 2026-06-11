@@ -18,6 +18,10 @@
 - `models`
 - `trace`
 
+`cameras` 在当前 schema 中表示“检测视角配置”，不是只能表示物理相机。固定机位多光源方案通常让 `pose_id == camera_id`；机器人飞拍方案允许多个视角共享同一个末端相机 `camera_id=EYE_IN_HAND`，并通过不同 `pose_id` 选择 ROI、标定、模型和阈值。
+
+机器人飞拍示例位于 `python_detector/config/robot_flyshot_recipe.yaml`，对应 C++ 配置 `cpp_controller/config/station_runtime.robot_flyshot.example.conf`。两侧必须同时对齐 `recipe_id`、`camera_id`、`pose_id`、`calibration_id` 和 `light_order`。
+
 ## V2 光源与模型标准
 
 默认生产主链路使用 4 个必需光源：

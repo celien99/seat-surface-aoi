@@ -39,18 +39,53 @@ C++ 主控不得覆盖 `READY` 或 `READING` 状态的 slot。检测超时、缺
 | 11 | `CameraFault` | 相机 arm 或相机设备状态失败。 |
 | 12 | `TriggerSyncFault` | 曝光输出、硬触发确认或触发同步失败。 |
 | 13 | `ConfigurationError` | C++ 运行配置缺失、非法或不支持。 |
+| 14 | `RobotFault` | 机器人未到位、SHOT_ID/位置触发异常或机器人 FAULT。 |
 
 ## 版本与布局
 
-第一版实现使用：
+当前第二版实现使用：
 
 - `SHM_PROTOCOL_MAGIC = 0x53414F49`
-- `SHM_PROTOCOL_VERSION = 1`
+- `SHM_PROTOCOL_VERSION = 2`
 - 小端字段
 - 固定大小 IPC 结构体
 - 对 payload 和稳定 header 字段做 CRC32 校验
 
 header CRC 特意排除了可变的 `state` 和 `header_crc32` 字段。原因是 slot 会从 `READY` 切到 `READING`，但 payload 仍然有效。
+
+## V2 视角与机器人飞拍字段
+
+V2 协议把原先的“机位包”扩展为“检测视角包”：
+
+- 固定机位多光源：`pose_id == camera_id`，每个固定相机就是一个检测视角。
+- 机器人飞拍多光源：同一末端相机可以在多个 `pose_id` 下采图，例如 `T1_BACKREST`、`T2_CUSHION`。
+
+`SeatJobMeta` 中的 `view_count` 表示本次任务包含的检测视角数量，`capture_mode` 表示固定机位或机器人飞拍模式。`LightFrameMeta` 每帧都携带：
+
+- `camera_index` / `camera_id`
+- `pose_index` / `pose_id`
+- `light_index` / `light_seq_index`
+- `shot_id`
+- `robot_timestamp_us`
+- `robot_tcp_xyz_mm[3]`
+- `robot_rpy_deg[3]`
+- `calibration_id`
+
+Python detector 按 `(camera_id, pose_id)` 组包为 `CameraBundle`，质量门禁、预处理、ROI、配准、特征、融合和结果 trace 都保留 `pose_id`。缺少关键 pose、机器人未到位、触发错序、缺帧或 CRC 错误必须返回 `RECHECK` 或 `ERROR`。
+
+## 结构体大小
+
+当前协议布局：
+
+| 结构体 | 大小 |
+| --- | ---: |
+| `ShmHeader` | 40 |
+| `FrameSlotHeader` | 268 |
+| `ResultSlotHeader` | 140 |
+| `LightFrameMeta` | 324 |
+| `SeatJobMeta` | 232 |
+| `InspectionResultMeta` | 104 |
+| `DefectResultMeta` | 464 |
 
 ## 首次集成路径
 

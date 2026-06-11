@@ -7,6 +7,7 @@
 #include "control/hardware_backend.hpp"
 #include "control/light_controller.hpp"
 #include "control/plc_client.hpp"
+#include "control/robot_client.hpp"
 
 namespace seat_aoi {
 
@@ -172,6 +173,33 @@ private:
   HardwareBackend backend_;
 };
 
+class UnsupportedRobotClient final : public IRobotClient {
+public:
+  explicit UnsupportedRobotClient(HardwareBackend backend) : backend_(backend) {}
+
+  bool initialize(const RobotClientConfig& /*config*/) override {
+    return false;
+  }
+
+  bool wait_pose_ready(const PlcTrigger& /*trigger*/,
+                       const RobotPoseRequest& /*request*/,
+                       int /*timeout_ms*/,
+                       RobotPoseStatus* /*out_status*/,
+                       std::string* error_message) override {
+    if (error_message != nullptr) {
+      *error_message = unsupported_driver_message("Robot", backend_);
+    }
+    return false;
+  }
+
+  RobotHealth get_health() const override {
+    return RobotHealth{false, unsupported_driver_message("Robot", backend_)};
+  }
+
+private:
+  HardwareBackend backend_;
+};
+
 }  // namespace detail
 
 inline std::unique_ptr<IPlcClient> create_plc_client(HardwareBackend backend) {
@@ -193,6 +221,13 @@ inline std::unique_ptr<ICamera> create_camera(HardwareBackend backend) {
     return std::make_unique<detail::UnsupportedCamera>(backend);
   }
   return std::make_unique<SimCamera>();
+}
+
+inline std::unique_ptr<IRobotClient> create_robot_client(HardwareBackend backend) {
+  if (!is_simulated_backend(backend)) {
+    return std::make_unique<detail::UnsupportedRobotClient>(backend);
+  }
+  return std::make_unique<SimRobotClient>();
 }
 
 }  // namespace seat_aoi

@@ -125,6 +125,8 @@ class ShmClient:
         self._validate_header(self.frames.mm, frame_slot_size)
         self._validate_header(self.results.mm, result_slot_size)
         self._pending_frame_slots: dict[int, int] = {}
+        self._camera_index_by_id = dict(CAMERA_INDEX_BY_ID)
+        self._camera_index_by_view: dict[tuple[str, str], int] = {}
 
     def close(self) -> None:
         self.frames.close()
@@ -146,7 +148,7 @@ class ShmClient:
 
     def publish_result(self, result: InspectionResult) -> None:
         defects = result.defects[:MAX_DEFECTS_PER_RESULT]
-        payload_size = RESULT_SLOT_HEADER_SIZE + len(defects) * struct.calcsize("<64s64s64sI64s4ifII8iqII")
+        payload_size = RESULT_SLOT_HEADER_SIZE + len(defects) * struct.calcsize("<64s64s64sI64s64s64s4ifII8iqII")
 
         deadline = time.monotonic() + 1.0
         while time.monotonic() < deadline:
@@ -196,8 +198,10 @@ class ShmClient:
                 seat_id_raw,
                 sku_raw,
                 recipe_id_raw,
-                camera_count,
+                view_count,
                 frame_count,
+                _capture_mode,
+                _job_reserved,
                 _created_at_us,
             ) = job_values
             identity = _FrameSlotIdentity(
@@ -216,23 +220,24 @@ class ShmClient:
             if crc32(payload) != payload_crc32:
                 raise _FrameSlotReadError("frame payload CRC mismatch", ErrorCode.CRC_MISMATCH)
 
-            bundles: dict[str, CameraBundle] = {}
+            bundles: dict[tuple[str, str], CameraBundle] = {}
             meta_offset = base + frame_slot_meta_offset()
             for i in range(frame_meta_count):
                 values = LIGHT_FRAME_META.unpack_from(self.frames.mm, meta_offset + i * LIGHT_FRAME_META.size)
                 frame = self._make_light_frame(values, base, payload_size)
-                if frame.camera_id not in bundles:
-                    bundles[frame.camera_id] = CameraBundle(
+                bundle_key = (frame.camera_id, frame.pose_id)
+                if bundle_key not in bundles:
+                    bundles[bundle_key] = CameraBundle(
                         camera_id=frame.camera_id,
-                        pose_id=frame.camera_id,
+                        pose_id=frame.pose_id,
                         light_frames={},
                     )
-                if frame.light_id in bundles[frame.camera_id].light_frames:
+                if frame.light_id in bundles[bundle_key].light_frames:
                     raise _FrameSlotReadError(
-                        f"duplicate frame for camera/light: {frame.camera_id}/{frame.light_id}",
+                        f"duplicate frame for camera/pose/light: {frame.camera_id}/{frame.pose_id}/{frame.light_id}",
                         ErrorCode.INVALID_PAYLOAD,
                     )
-                bundles[frame.camera_id].light_frames[frame.light_id] = frame
+                bundles[bundle_key].light_frames[frame.light_id] = frame
 
             job = SeatInspectionJob(
                 sequence_id=sequence_id,
@@ -242,8 +247,8 @@ class ShmClient:
                 sku=decode_cstr(sku_raw),
                 camera_bundles=list(bundles.values()),
             )
-            if len(job.camera_bundles) != camera_count:
-                raise _FrameSlotReadError("frame slot camera count mismatch", ErrorCode.INVALID_PAYLOAD)
+            if len(job.camera_bundles) != view_count:
+                raise _FrameSlotReadError("frame slot view count mismatch", ErrorCode.INVALID_PAYLOAD)
             return job
         except _FrameSlotReadError as exc:
             if identity is None:
@@ -300,6 +305,7 @@ class ShmClient:
     def _make_light_frame(self, values: tuple, slot_base: int, payload_size: int) -> LightFrame:
         (
             camera_index,
+            pose_index,
             light_index,
             frame_index,
             light_seq_index,
@@ -312,8 +318,18 @@ class ShmClient:
             color_order,
             dtype_code,
             timestamp_us,
+            shot_id,
+            robot_timestamp_us,
             exposure_us,
             gain,
+            robot_x_mm,
+            robot_y_mm,
+            robot_z_mm,
+            robot_roll_deg,
+            robot_pitch_deg,
+            robot_yaw_deg,
+            camera_id_raw,
+            pose_id_raw,
             calibration_id_raw,
             image_offset,
             image_size,
@@ -333,8 +349,12 @@ class ShmClient:
             dtype_name = DTypeCode(dtype_code).name
         except ValueError as exc:
             raise _FrameSlotReadError("unknown frame metadata enum value", ErrorCode.INVALID_PAYLOAD) from exc
+        camera_id = decode_cstr(camera_id_raw) or CAMERA_ID_BY_INDEX.get(camera_index, f"CAMERA_{camera_index}")
+        pose_id = decode_cstr(pose_id_raw) or f"POSE_{pose_index}"
+        self._remember_camera_index(camera_id, pose_id, camera_index)
         return LightFrame(
-            camera_id=CAMERA_ID_BY_INDEX.get(camera_index, f"CAMERA_{camera_index}"),
+            camera_id=camera_id,
+            pose_id=pose_id,
             light_id=LIGHT_ID_BY_INDEX.get(light_index, f"LIGHT_{light_index}"),
             frame_index=frame_index,
             light_seq_index=light_seq_index,
@@ -347,6 +367,10 @@ class ShmClient:
             color_order=color_order_name,
             dtype=dtype_name,
             timestamp_us=timestamp_us,
+            shot_id=shot_id,
+            robot_timestamp_us=robot_timestamp_us,
+            robot_tcp_xyz_mm=(robot_x_mm, robot_y_mm, robot_z_mm),
+            robot_rpy_deg=(robot_roll_deg, robot_pitch_deg, robot_yaw_deg),
             exposure_us=exposure_us,
             gain=gain,
             calibration_id=decode_cstr(calibration_id_raw),
@@ -407,11 +431,13 @@ class ShmClient:
         evidence = [self._light_index(light) for light in defect.evidence_lights]
         evidence = (evidence + [0] * MAX_EVIDENCE_LIGHTS)[:MAX_EVIDENCE_LIGHTS]
         return struct.pack(
-            "<64s64s64sI64s4ifII8iqII",
+            "<64s64s64sI64s64s64s4ifII8iqII",
             encode_cstr(defect.defect_id),
             encode_cstr(defect.class_name),
             encode_cstr(defect.severity),
-            self._camera_index(defect.camera_id),
+            self._camera_index_for_defect(defect),
+            encode_cstr(defect.camera_id),
+            encode_cstr(defect.pose_id),
             encode_cstr(defect.roi_name),
             *bbox,
             float(defect.score),
@@ -424,13 +450,30 @@ class ShmClient:
         )
 
     def _camera_index(self, camera_id: str) -> int:
-        if camera_id in CAMERA_INDEX_BY_ID:
-            return CAMERA_INDEX_BY_ID[camera_id]
+        camera_index_by_id = getattr(self, "_camera_index_by_id", CAMERA_INDEX_BY_ID)
+        if camera_id in camera_index_by_id:
+            return camera_index_by_id[camera_id]
         if camera_id.startswith("CAMERA_"):
             suffix = camera_id.removeprefix("CAMERA_")
             if suffix.isdigit():
                 return int(suffix)
         raise ValueError(f"unknown camera_id for result serialization: {camera_id}")
+
+    def _camera_index_for_defect(self, defect: DefectResult) -> int:
+        camera_index_by_view = getattr(self, "_camera_index_by_view", {})
+        pose_id = defect.pose_id or defect.camera_id
+        view_key = (defect.camera_id, pose_id)
+        if view_key in camera_index_by_view:
+            return camera_index_by_view[view_key]
+        return self._camera_index(defect.camera_id)
+
+    def _remember_camera_index(self, camera_id: str, pose_id: str, camera_index: int) -> None:
+        if not hasattr(self, "_camera_index_by_id"):
+            self._camera_index_by_id = dict(CAMERA_INDEX_BY_ID)
+        if not hasattr(self, "_camera_index_by_view"):
+            self._camera_index_by_view = {}
+        self._camera_index_by_id[camera_id] = camera_index
+        self._camera_index_by_view[(camera_id, pose_id or camera_id)] = camera_index
 
     def _light_index(self, light_id: str) -> int:
         if light_id in LIGHT_INDEX_BY_ID:

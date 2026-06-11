@@ -19,6 +19,7 @@ enum class ErrorCode : std::uint32_t {
   CameraFault = 11,
   TriggerSyncFault = 12,
   ConfigurationError = 13,
+  RobotFault = 14,
 };
 
 }  // namespace seat_aoi

@@ -14,6 +14,7 @@ class FeatureGroup:
     roi_name: str
     model_key: str
     features: dict[str, list[int]]
+    pose_id: str = ""
     roi_bbox_xyxy_pixel: tuple[int, int, int, int] = (0, 0, 0, 0)
     feature_shape_hw: tuple[int, int] = (0, 0)
     tensor_nchw: list[list[list[list[float]]]] | None = None
@@ -31,9 +32,9 @@ class FeatureBuilder:
         feature_groups: list[FeatureGroup] = []
         for cube in reflectance_cubes:
             features = self._build_feature_dict(cube)
-            primary_model_key = recipe.model_key_for(cube.camera_id, cube.roi_name)
+            primary_model_key = recipe.model_key_for(cube.camera_id, cube.roi_name, cube.pose_id)
             feature_groups.append(self._make_feature_group(cube, primary_model_key, recipe.models[primary_model_key], features))
-            for model_key in recipe.safety_net_model_keys_for(cube.camera_id, cube.roi_name):
+            for model_key in recipe.safety_net_model_keys_for(cube.camera_id, cube.roi_name, cube.pose_id):
                 feature_groups.append(self._make_feature_group(cube, model_key, recipe.models[model_key], features))
         return feature_groups
 
@@ -75,6 +76,7 @@ class FeatureBuilder:
         return FeatureGroup(
             sequence_id=cube.sequence_id,
             camera_id=cube.camera_id,
+            pose_id=cube.pose_id,
             roi_name=cube.roi_name,
             model_key=model_key,
             features=features,

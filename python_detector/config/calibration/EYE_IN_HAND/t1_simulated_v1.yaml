@@ -1,0 +1,24 @@
+calibration_id: calib/t1_simulated_v1
+camera_id: EYE_IN_HAND
+image_size:
+  width: 64
+  height: 48
+pixel_size_mm: 0.12
+base_light_id: POLAR_DIFFUSE
+light_alignment:
+  DIFFUSE:
+    matrix_3x3: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+  POLAR_DIFFUSE:
+    matrix_3x3: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+  HIGH_LEFT:
+    matrix_3x3: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+  HIGH_RIGHT:
+    matrix_3x3: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+roi_templates:
+  full:
+    polygon_xy:
+      - [0, 0]
+      - [63, 0]
+      - [63, 47]
+      - [0, 47]
+    output_size: [64, 48]

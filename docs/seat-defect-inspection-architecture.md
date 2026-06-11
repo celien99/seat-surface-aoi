@@ -238,8 +238,14 @@ struct LightFrameMeta {
   uint32_t color_order;       // 颜色顺序枚举，例如 Mono、BGR、RGB、BayerRG
   uint32_t dtype_code;        // 数据类型枚举，例如 uint8、uint16、float32
   uint64_t timestamp_us;      // 相机采集时间戳，单位微秒
+  uint64_t shot_id;           // 机器人飞拍/位置触发流水号；固定机位可为模拟值
+  uint64_t robot_timestamp_us;// 机器人控制器时间戳
   uint32_t exposure_us;       // 曝光时间，单位微秒
   float gain;                 // 相机增益
+  float robot_tcp_xyz_mm[3];  // 机器人 TCP xyz，单位 mm
+  float robot_rpy_deg[3];     // 机器人 TCP 姿态，单位 deg
+  char camera_id[64];         // 相机 ID
+  char pose_id[64];           // 检测视角/机器人 pose ID
   char calibration_id[64];    // 本图像使用的标定版本 ID
   uint64_t image_offset;      // 图像数据在 slot 图像区中的偏移
   uint64_t image_size;        // 图像数据字节数
@@ -254,8 +260,10 @@ struct SeatJobMeta {
   char seat_id[64];           // 座椅唯一编号，可来自扫码或 PLC
   char sku[64];               // 座椅 SKU，用于选择配方和模型
   char recipe_id[64];         // 当前使用的检测配方
-  uint32_t camera_count;      // 本次任务包含的机位数量
+  uint32_t view_count;        // 本次任务包含的检测视角数量
   uint32_t frame_count;       // 本次任务包含的总图像张数
+  uint32_t capture_mode;      // 1=fixed_camera, 2=robot_flyshot
+  uint32_t reserved;          // 保留
   uint64_t created_at_us;     // 任务创建时间戳
 };
 ```

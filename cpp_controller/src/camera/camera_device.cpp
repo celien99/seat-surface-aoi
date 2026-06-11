@@ -90,7 +90,9 @@ bool CameraDevice::capture(std::uint64_t trigger_id,
   meta.timestamp_us = now_us();
   meta.exposure_us = light_param.exposure_us;
   meta.gain = light_param.gain;
-  copy_cstr(meta.calibration_id, "calib/simulated_v1");
+  copy_cstr(meta.camera_id, config_.camera_id);
+  copy_cstr(meta.pose_id, config_.camera_id);
+  copy_cstr(meta.calibration_id, config_.calibration_id);
   out_frame->meta = meta;
   armed_ = false;
   return true;

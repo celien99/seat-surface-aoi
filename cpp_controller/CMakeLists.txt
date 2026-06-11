@@ -25,6 +25,7 @@ add_library(seat_aoi_control
   src/control/hardware_backend.cpp
   src/control/light_controller.cpp
   src/control/plc_client.cpp
+  src/control/robot_client.cpp
   src/control/production_event_log.cpp
   src/control/station_health.cpp
   src/control/station_runtime_config.cpp

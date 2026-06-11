@@ -21,6 +21,7 @@ class FusionEngine:
             self._validate_candidate(candidate)
             key = (
                 candidate.camera_id,
+                candidate.pose_id,
                 candidate.roi_name,
                 candidate.class_name if config.class_aware else "*",
             )
@@ -67,6 +68,7 @@ class FusionEngine:
         if secondary.score > primary.score:
             return DefectCandidate(
                 camera_id=secondary.camera_id,
+                pose_id=secondary.pose_id,
                 roi_name=secondary.roi_name,
                 class_name=secondary.class_name,
                 score=secondary.score,
@@ -76,6 +78,7 @@ class FusionEngine:
             )
         return DefectCandidate(
             camera_id=primary.camera_id,
+            pose_id=primary.pose_id,
             roi_name=primary.roi_name,
             class_name=primary.class_name,
             score=primary.score,

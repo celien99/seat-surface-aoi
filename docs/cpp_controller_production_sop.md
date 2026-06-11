@@ -1,15 +1,16 @@
 # C++ 主控生产上线 SOP
 
-本文只覆盖 `cpp_controller` 生产上线流程。真实 PLC、相机和频闪驱动当前仍为空置占位；在未接入现场 SDK/协议适配器前，非 simulated backend 会 fail-fast，不能作为真实产线运行。
+本文只覆盖 `cpp_controller` 生产上线流程。真实 PLC、机器人、相机和频闪驱动当前仍为空置占位；在未接入现场 SDK/协议适配器前，非 simulated backend 会 fail-fast，不能作为真实产线运行。
 
 ## 1. 上线前置条件
 
-1. 复制并填写 `cpp_controller/config/station_runtime.production.example.conf`。
-2. C++ 主控固定串行 TDM 采集，现场接线确认不会同时触发多个机位光源。
+1. 固定机位方案复制并填写 `cpp_controller/config/station_runtime.production.example.conf`；机器人飞拍方案复制并填写 `cpp_controller/config/station_runtime.robot_flyshot.production.example.conf`。
+2. C++ 主控固定视角级串行 TDM 采集，现场接线确认不会同时触发多个视角光源。
 3. `trigger_sync_mode=camera_exposure_output` 或等价硬触发同步。
 4. `strobe_width_us <= exposure_us`，电流、脉宽和触发延时不超过频闪控制器规格。
-5. `frame_slot_size` 能容纳 `camera_count x light_count` 的完整图像包。
+5. `frame_slot_size` 能容纳 `view_count x light_count` 的完整图像包。
 6. Python detector 常驻运行，C++ 与 Python 协议校验通过。
+7. 机器人飞拍方案必须冻结 `pose_id`、SHOT_ID、READY/FAULT/PHOTO_TRIGGER 点位、TCP 位姿和对应 Python 标定/配方。
 
 ## 2. 配置验收
 
@@ -18,6 +19,14 @@ cmake -S cpp_controller -B cpp_controller/build
 cmake --build cpp_controller/build
 cpp_controller/build/seat_aoi_controller \
   --config cpp_controller/config/station_runtime.production.conf \
+  --validate-config
+```
+
+机器人飞拍方案：
+
+```bash
+cpp_controller/build/seat_aoi_controller \
+  --config cpp_controller/config/station_runtime.robot_flyshot.production.conf \
   --validate-config
 ```
 
@@ -32,12 +41,13 @@ cpp_controller/build/seat_aoi_controller \
 ```bash
 uv run python -m tools.validate_protocol
 bash tools/run_simulated_ipc.sh
+bash tools/run_simulated_ipc.sh --config cpp_controller/config/station_runtime.robot_flyshot.example.conf
 ```
 
 验收标准：
 
 - 协议结构体大小与 Python 侧一致。
-- 模拟 IPC 返回 `OK`。
+- 固定机位和机器人飞拍模拟 IPC 返回 `OK`。
 - 故障注入路径返回 `RECHECK` 或 `ERROR`，不能返回 `OK`。
 
 ## 4. 健康报警验收
@@ -87,11 +97,12 @@ bash tools/run_cpp_soak.sh --jobs 1000 --wait-ms 8000 \
 
 1. PLC 触发去重、trigger_id 递增、seat_id/sku 读取正确。
 2. OK/NG/RECHECK 输出点位和 PLC ack/复位逻辑正确。
-3. 相机序列号与 `camera_index` 对应现场机位。
-4. 当前机位完成全部光源后才切换下一机位。
-5. 单次频闪只触发当前机位光源，不污染其它机位。
-6. 任一相机缺帧、频闪故障、PLC 断线都返回 `RECHECK` 或 `ERROR`。
-7. 真实 8h/24h 长稳压测通过。
+3. 相机序列号与 `camera_index` 对应现场物理相机；固定机位再对应现场机位，机器人飞拍再通过 `pose_id` 对应轨迹视角。
+4. 机器人飞拍方案中 `pose_id`、SHOT_ID、READY/FAULT/PHOTO_TRIGGER 与轨迹和 Python 配方一致。
+5. 当前检测视角完成全部光源后才切换下一视角。
+6. 单次频闪只触发当前视角光源，不污染其它视角。
+7. 任一相机缺帧、频闪故障、机器人未到位/FAULT、PLC 断线都返回 `RECHECK` 或 `ERROR`。
+8. 真实 8h/24h 长稳压测通过。
 
 ## 7. 放行规则
 

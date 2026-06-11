@@ -48,6 +48,7 @@ enum class InspectionDecision : std::uint32_t {
 
 struct LightFrameMeta {
   std::uint32_t camera_index;
+  std::uint32_t pose_index;
   std::uint32_t light_index;
   std::uint32_t frame_index;
   std::uint32_t light_seq_index;
@@ -60,8 +61,14 @@ struct LightFrameMeta {
   std::uint32_t color_order;
   std::uint32_t dtype_code;
   std::uint64_t timestamp_us;
+  std::uint64_t shot_id;
+  std::uint64_t robot_timestamp_us;
   std::uint32_t exposure_us;
   float gain;
+  float robot_tcp_xyz_mm[3];
+  float robot_rpy_deg[3];
+  char camera_id[kStringIdSize];
+  char pose_id[kStringIdSize];
   char calibration_id[kStringIdSize];
   std::uint64_t image_offset;
   std::uint64_t image_size;
@@ -75,8 +82,10 @@ struct SeatJobMeta {
   char seat_id[kStringIdSize];
   char sku[kStringIdSize];
   char recipe_id[kStringIdSize];
-  std::uint32_t camera_count;
+  std::uint32_t view_count;
   std::uint32_t frame_count;
+  std::uint32_t capture_mode;
+  std::uint32_t reserved;
   std::uint64_t created_at_us;
 };
 
@@ -85,6 +94,8 @@ struct DefectResultMeta {
   char class_name[kStringIdSize];
   char severity[kStringIdSize];
   std::uint32_t camera_index;
+  char camera_id[kStringIdSize];
+  char pose_id[kStringIdSize];
   char roi_name[kStringIdSize];
   std::int32_t bbox_xyxy[4];
   float score;
@@ -110,9 +121,9 @@ struct InspectionResultMeta {
 
 #pragma pack(pop)
 
-static_assert(sizeof(LightFrameMeta) == 152, "Unexpected LightFrameMeta size");
-static_assert(sizeof(SeatJobMeta) == 224, "Unexpected SeatJobMeta size");
-static_assert(sizeof(DefectResultMeta) == 336, "Unexpected DefectResultMeta size");
+static_assert(sizeof(LightFrameMeta) == 324, "Unexpected LightFrameMeta size");
+static_assert(sizeof(SeatJobMeta) == 232, "Unexpected SeatJobMeta size");
+static_assert(sizeof(DefectResultMeta) == 464, "Unexpected DefectResultMeta size");
 static_assert(sizeof(InspectionResultMeta) == 104, "Unexpected InspectionResultMeta size");
 
 }  // namespace seat_aoi

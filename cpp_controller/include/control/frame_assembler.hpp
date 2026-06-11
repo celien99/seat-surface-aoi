@@ -8,6 +8,7 @@
 #include "camera/icamera.hpp"
 #include "common/error_code.hpp"
 #include "control/ilight_controller.hpp"
+#include "control/irobot_client.hpp"
 #include "control/station_runtime_config.hpp"
 #include "control/trigger_scheduler.hpp"
 #include "ipc/frame_ring_buffer.hpp"
@@ -55,13 +56,22 @@ private:
   bool build_light_sequence(const Recipe& recipe,
                             LightSequence* out_sequence,
                             AcquisitionError* error) const;
+  bool build_capture_plan(std::vector<RuntimeCaptureViewConfig>* out_views,
+                          AcquisitionError* error) const;
   bool validate_serial_tdm_bundle(const SeatImageBundle& bundle,
                                   const LightSequence& sequence,
+                                  const std::vector<RuntimeCaptureViewConfig>& views,
                                   AcquisitionError* error) const;
+  ICamera* camera_for_index(std::uint32_t camera_index) const;
+  bool wait_robot_pose_ready(const PlcTrigger& trigger,
+                             const RuntimeCaptureViewConfig& view,
+                             RobotPoseStatus* out_status,
+                             AcquisitionError* error);
 
   bool initialized_ = false;
   StationRuntimeConfig config_{};
   std::unique_ptr<ILightController> light_controller_;
+  std::unique_ptr<IRobotClient> robot_client_;
   std::vector<std::unique_ptr<ICamera>> cameras_;
 };
 

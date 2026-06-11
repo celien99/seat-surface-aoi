@@ -38,6 +38,7 @@ class RuleEngine:
                     class_name=candidate.class_name,
                     severity=filtered.severity,
                     camera_id=candidate.camera_id,
+                    pose_id=candidate.pose_id or candidate.camera_id,
                     roi_name=candidate.roi_name,
                     bbox_xyxy_pixel=candidate.bbox_xyxy_pixel,
                     score=candidate.score,
