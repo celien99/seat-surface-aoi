@@ -36,3 +36,30 @@ model/
 ```bash
 uv run python -m tools.validate_model_assets --recipe production_model_example
 ```
+
+## 训练资产生成入口
+
+当前仓库可生成 `python_detector` 直接消费的模型资产，Filter 模型训练除外：
+
+```bash
+# Dome ROI YOLO
+uv run python -m training_tools.train_roi_yolo \
+  --data datasets/roi_yolo/dataset.yaml \
+  --output model/roi_yolo/seat_roi_yolo.onnx
+
+# 已知缺陷监督 YOLO
+uv run python -m training_tools.train_supervised_yolo \
+  --data datasets/supervised_defect_yolo/dataset.yaml \
+  --output model/supervised_defect/seat_defect_detector.onnx
+
+# PatchCore PCA、memory bank、可选 FAISS
+uv run python -m training_tools.train_patchcore_assets \
+  --manifest datasets/seat_trace_v1/dataset_manifest.jsonl \
+  --output-dir model/patchcore \
+  --split train \
+  --pca-components 3 \
+  --coreset-ratio 0.1 \
+  --build-faiss
+```
+
+`train_patchcore_assets` 从 trace manifest 的真实 ROI 多光源 PGM 图提取 embedding，确保 PCA 和 memory bank 与在线 `FeatureBuilder` 的输入通道一致。

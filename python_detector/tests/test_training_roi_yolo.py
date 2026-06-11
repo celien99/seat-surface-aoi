@@ -90,3 +90,33 @@ def test_train_yolo_onnx_valid(tmp_path: Path, yolo_dataset: Path) -> None:
 
     model = _onnx.load(str(output))
     _onnx.checker.check_model(model)
+
+
+def test_train_supervised_yolo_delegates_to_shared_export(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """监督缺陷 YOLO 训练入口复用同一套 ONNX 导出逻辑，但默认输出到 supervised_defect。"""
+    from training_tools import train_supervised_yolo
+
+    data = tmp_path / "dataset.yaml"
+    data.write_text("names: {0: scratch}\n", encoding="utf-8")
+    output = tmp_path / "seat_defect_detector.onnx"
+    calls = {}
+
+    def fake_train_roi_yolo(**kwargs):
+        calls.update(kwargs)
+        return {"metrics/mAP50(B)": 0.7}
+
+    monkeypatch.setattr(train_supervised_yolo, "train_roi_yolo", fake_train_roi_yolo)
+
+    metrics = train_supervised_yolo.train_supervised_yolo(
+        data_path=data,
+        model="yolov8n.pt",
+        epochs=2,
+        imgsz=128,
+        batch=4,
+        output=output,
+        opset=17,
+    )
+
+    assert metrics["metrics/mAP50(B)"] == 0.7
+    assert calls["data_path"] == data
+    assert calls["output"] == output

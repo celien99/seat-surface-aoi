@@ -61,6 +61,34 @@ python3 -m training_tools.collect_trace_dataset --trace-root trace --output data
 
 manifest 固定包含 `sample_id`、`source_trace_dir`、`recipe_id`、`seat_id`、`sequence_id`、`decision`、`quality_pass`、`camera_id`、`roi_name`、`light_id`、`image_path`、`has_defect`、`defect_classes`、`bbox_xyxy_pixel`、`split` 和 `label_status`。默认 `label_status` 为 `unlabeled`；trace 中已有 defect 只作为弱标签来源，不代表人工标注结论。
 
+## manifest 训练与评估
+
+`training_tools.dataset_manifest` 会把 manifest 中同一 trace/camera/ROI 的多光源单图重新聚合为一个训练样本，并读取 `P5` PGM ROI 图。下游工具复用在线检测层的 `FeatureBuilder`、`EmbeddingExtractor` 和 `InferenceEngine`，训练输入与在线推理输入保持一致：
+
+```bash
+# 从真实 ROI 多光源样本提取 embedding
+python3 -m training_tools.extract_embeddings \
+  --manifest datasets/seat_trace_v1/dataset_manifest.jsonl \
+  --output datasets/seat_trace_v1/embeddings.jsonl \
+  --backend statistical
+
+# 训练 PatchCore 所需 PCA、memory bank 和可选 FAISS
+python3 -m training_tools.train_patchcore_assets \
+  --manifest datasets/seat_trace_v1/dataset_manifest.jsonl \
+  --output-dir model/patchcore \
+  --split train \
+  --pca-components 3 \
+  --coreset-ratio 0.1
+
+# 使用 manifest 标注评估当前配方模型
+python3 -m training_tools.evaluate_pipeline \
+  --manifest datasets/seat_trace_v1/dataset_manifest.jsonl \
+  --output reports/evaluation_report.json \
+  --split test
+```
+
+评估报告包含整体 precision/recall、逐样本指标，以及按 class、ROI、camera、split 的 breakdown。生产阈值必须基于人工确认标注和按缺陷类别/ROI/材质/颜色分层的数据验证；弱标签 trace 只能用于闭环排查和预训练资产准备。
+
 ## Benchmark 工具
 
 ```bash

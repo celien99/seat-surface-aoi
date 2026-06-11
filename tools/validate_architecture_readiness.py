@@ -461,9 +461,15 @@ def _check_trace_training_and_ops(scope: ReadinessScope) -> list[ReadinessItem]:
     required_paths = [
         "python_detector/trace/trace_writer.py",
         "training_tools/collect_trace_dataset.py",
+        "training_tools/dataset_manifest.py",
+        "training_tools/extract_embeddings.py",
+        "training_tools/evaluate_pipeline.py",
+        "training_tools/train_patchcore_assets.py",
         "training_tools/benchmark_pipeline.py",
         "training_tools/build_patchcore_memory_bank.py",
         "training_tools/build_faiss_index.py",
+        "training_tools/train_roi_yolo.py",
+        "training_tools/train_supervised_yolo.py",
         "docs/trace_and_replay.md",
     ]
     missing = [path for path in required_paths if not (REPO_ROOT / path).exists()]
@@ -480,8 +486,8 @@ def _check_trace_training_and_ops(scope: ReadinessScope) -> list[ReadinessItem]:
         items.append(
             _ok(
                 "追溯与训练闭环",
-                "NG/RECHECK trace 应能转训练样本，并支持回放和性能 benchmark。",
-                "trace_writer、collect_trace_dataset、benchmark_pipeline、PatchCore/FAISS 构建工具均存在。",
+                "NG/RECHECK trace 应能转训练样本，并支持真实 ROI 图 embedding、评估、PatchCore/FAISS 资产训练、YOLO 导出、回放和性能 benchmark。",
+                "trace_writer、manifest、embedding、evaluate、PatchCore/FAISS、YOLO、benchmark 工具均存在。",
             )
         )
 

@@ -124,6 +124,52 @@ uv run python -m tools.validate_model_assets --recipe production_model_example
 
 仓库提交的 `model/` 下目标文件是空置占位。占位文件会被校验工具判定为失败，必须由真实训练产物替换后才能作为生产配方上线。
 
+## 离线训练工具链
+
+`training_tools/` 能准备当前 `python_detector` 直接消费的模型资产，边界如下：
+
+- ROI YOLO：训练 Dome ROI 定位模型，导出 `model/roi_yolo/seat_roi_yolo.onnx`。
+- 已知缺陷监督 YOLO：训练主检测 ONNX，导出 `model/supervised_defect/seat_defect_detector.onnx`。
+- WideResNet50/PatchCore：从 trace manifest 的真实 ROI 多光源 PGM 图提取 embedding，训练 PCA、PatchCore memory bank 和可选 FAISS 索引。
+- FilterClassifier：本仓库只预留 ONNX 接入和数据消费格式，不实现 Filter 模型训练项目。
+
+典型命令：
+
+```bash
+uv run python -m training_tools.collect_trace_dataset \
+  --trace-root trace \
+  --output datasets/seat_trace_v1 \
+  --split train \
+  --label-status unlabeled
+
+uv run python -m training_tools.extract_embeddings \
+  --manifest datasets/seat_trace_v1/dataset_manifest.jsonl \
+  --output datasets/seat_trace_v1/embeddings.jsonl \
+  --backend statistical
+
+uv run python -m training_tools.train_patchcore_assets \
+  --manifest datasets/seat_trace_v1/dataset_manifest.jsonl \
+  --output-dir model/patchcore \
+  --split train \
+  --pca-components 3 \
+  --coreset-ratio 0.1
+
+uv run python -m training_tools.evaluate_pipeline \
+  --manifest datasets/seat_trace_v1/dataset_manifest.jsonl \
+  --output reports/evaluation_report.json \
+  --split test
+
+uv run python -m training_tools.train_roi_yolo \
+  --data datasets/roi_yolo/dataset.yaml \
+  --output model/roi_yolo/seat_roi_yolo.onnx
+
+uv run python -m training_tools.train_supervised_yolo \
+  --data datasets/supervised_defect_yolo/dataset.yaml \
+  --output model/supervised_defect/seat_defect_detector.onnx
+```
+
+`extract_embeddings` 和 `evaluate_pipeline` 复用在线 `FeatureBuilder`、`EmbeddingExtractor` 和 `InferenceEngine`，因此输入通道、归一化、bbox decode 和异常处理与在线检测保持一致。
+
 ## PatchCore memory bank
 
 离线构建命令：
@@ -137,6 +183,8 @@ uv run python -m training_tools.build_patchcore_memory_bank \
   --pca-version pca_seat_v1 \
   --faiss-enabled
 ```
+
+更推荐的完整链路是 `training_tools.train_patchcore_assets`，它会从 manifest 真实 ROI 图直接生成 embedding、PCA、memory bank 和可选 FAISS 索引。
 
 旧入口 `uv run python -m tools.build_patchcore_memory_bank` 保留为兼容包装；新增离线训练支撑能力统一放在 `training_tools/`。
 
