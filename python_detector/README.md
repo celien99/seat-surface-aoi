@@ -39,6 +39,7 @@ uv sync --group dev
 uv run pytest
 uv run python -m tools.validate_protocol
 uv run python -m tools.validate_model_assets --recipe production_model_example
+uv run python -m tools.validate_architecture_readiness --scope reference
 uv run python -m python_detector.detector_main --once --timeout-ms 8000
 ```
 
@@ -84,7 +85,7 @@ python_detector/
 │   └── patchcore.py            # PatchCore memory bank exact KNN 参考实现
 ├── trace/
 │   └── trace_writer.py         # trace JSON、ROI PGM 图、缺陷 overlay PPM 写入
-└── tests/                      # 协议、配方、质量门禁、ROI、模型、融合、trace、IPC 安全测试
+└── tests/                      # 协议、配方、质量门禁、ROI、模型、融合、trace、IPC 安全和架构就绪度测试
 ```
 
 根目录 `training_tools/` 不是在线检测包的一部分，当前包含：
@@ -98,6 +99,11 @@ training_tools/
 ├── job_fixture.py              # 离线测试和回放使用的模拟 SeatInspectionJob
 └── pipeline_report.py          # 回放和 benchmark 报告格式化
 ```
+
+根目录 `tools/validate_architecture_readiness.py` 用于把 V4/PPT 架构要求固化成静态检查项：
+
+- `--scope reference` 校验参考实现是否具备固定机位、机器人飞拍、共享内存 v2、质量门禁、trace、ROI/ECC/ONNX/PatchCore/FAISS 接入点等能力。
+- `--scope production` 校验上线阻塞项，真实模型资产、正式生产配置仍是占位值时会返回 `BLOCKED`。
 
 ## 关键实现说明
 
@@ -194,6 +200,7 @@ training_tools/
 - 新增真实模型产物：放入根目录 `model/`，同步 `model/README.md`、生产配方模板和 `tools.validate_model_assets`。
 - 新增 trace 字段：改 `trace/trace_writer.py`、测试和本文。
 - 新增离线样本或训练支撑能力：放入根目录 `training_tools/`，只能消费 `python_detector` 公开入口和 trace 产物。
+- 新增或调整架构要求：同步 `tools.validate_architecture_readiness`、相关测试、根 README 和本文。
 - 修改在线共享内存协议：必须同步 C++、Python、校验工具、协议文档和测试。
 
 ## 验证命令
@@ -202,6 +209,7 @@ training_tools/
 uv run pytest
 uv run python -m tools.validate_protocol
 uv run python -m tools.validate_model_assets --recipe production_model_example
+uv run python -m tools.validate_architecture_readiness --scope reference
 uv run python -m training_tools.replay_dataset --count 3 --write-trace
 bash tools/run_simulated_ipc.sh
 bash tools/run_simulated_ipc.sh --config cpp_controller/config/station_runtime.robot_flyshot.example.conf

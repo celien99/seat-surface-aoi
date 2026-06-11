@@ -25,7 +25,7 @@
 | Python 检测进程 | 支持共享内存读取、按 `(camera_id, pose_id)` 组包、动态记录共享内存中的 `camera_id -> camera_index` 映射并回写缺陷结果、质量门禁、Dome ROI 定位接口、ROI 裁剪/透视展开、固定标定误差检查、ECC 平移配准与非基准光源 ROI 对齐、特征构建、推理、融合、缺陷过滤和规则判定 |
 | 模型后端 | 支持 fake、ONNX detection rows、统计 embedding、ONNX WideResNet50 embedding、PCA 投影和 PatchCore safety net；PatchCore 优先尝试 FAISS，缺索引或缺依赖时回退 exact KNN 并写入 trace |
 | 模型产物 | 根目录 `model/` 提供 YOLO、监督检测、WideResNet50、PCA、PatchCore memory bank 和可选 FAISS 索引占位；`production_model.example.yaml` 展示真实模型配方 |
-| 追溯与工具 | 支持 trace、ROI 定位报告、ECC 报告、embedding/PCA/anomaly summary、ROI 图落盘、overlay、Trace 转训练样本、回放、benchmark、PatchCore memory bank 构建、模型资产校验和模拟 IPC 验证 |
+| 追溯与工具 | 支持 trace、ROI 定位报告、ECC 报告、embedding/PCA/anomaly summary、ROI 图落盘、overlay、Trace 转训练样本、回放、benchmark、PatchCore memory bank 构建、模型资产校验、架构就绪度检查和模拟 IPC 验证 |
 
 ## V4.0 对齐状态
 
@@ -115,6 +115,12 @@ uv run python -m tools.validate_protocol
 # 校验真实模型产物是否已替换占位文件
 uv run python -m tools.validate_model_assets --recipe production_model_example
 
+# 按 V4/PPT 架构要求检查参考实现闭环
+uv run python -m tools.validate_architecture_readiness --scope reference
+
+# 生产上线前检查；真实模型资产和现场生产配置未替换时应失败
+uv run python -m tools.validate_architecture_readiness --scope production
+
 # 模拟端到端 IPC
 bash tools/run_simulated_ipc.sh
 
@@ -158,7 +164,7 @@ seat-surface-aoi/
 ├── python_detector/     # 独立 Python 检测算法模块、V4 ROI/ECC/embedding/PCA/PatchCore 流水线、配方、测试
 ├── training_tools/      # 离线训练支撑：Trace 转样本、回放、benchmark、PatchCore memory bank 构建
 ├── docs/                # 架构、协议、部署、硬件和模型文档
-├── tools/               # 协议校验、模型资产校验、模拟 IPC 和旧离线命令兼容包装
+├── tools/               # 协议校验、模型资产/架构就绪度校验、模拟 IPC 和旧离线命令兼容包装
 ├── pyproject.toml       # Python 算法模块包元数据、依赖分组、测试和 lint 配置
 ├── uv.lock              # Python 依赖锁文件
 ├── .python-version      # uv/pyenv 默认 Python 版本
@@ -182,6 +188,15 @@ seat-surface-aoi/
 - [追溯与回放说明](docs/trace_and_replay.md)
 - [测试机集成清单](docs/test_machine_integration.md)
 - [部署说明](docs/deployment.md)
+
+## 架构就绪度检查
+
+`tools.validate_architecture_readiness` 把 V4/PPT 架构要求拆成可检查项，避免只停留在文档描述：
+
+- `--scope reference`：检查当前参考实现是否闭合，包含共享内存 v2、固定机位配置、机器人飞拍配置、V4 语义光源、质量门禁、trace、ROI/ONNX/ECC/PatchCore/FAISS 接入点等。该范围允许真实模型资产和生产参数仍是占位值，但会给出 `WARN`。
+- `--scope production`：检查生产上线阻塞项。真实模型、PCA、memory bank、FAISS 索引、正式 PLC/相机/光源/机器人配置仍是占位时会返回 `BLOCKED` 并以非 0 退出。
+
+当前项目要发挥最佳生产效果，除了接真实硬件 SDK、现场参数和真实模型外，还必须完成：现场光学节拍/抖动压测、真实 ROI/标定/ECC 验证、按缺陷类别和 ROI 的阈值曲线、Trace 到训练样本闭环、MES/报警/监控平台对接，以及固定机位与机器人飞拍两套生产配置的上线验收。
 
 ## 开发约束
 
