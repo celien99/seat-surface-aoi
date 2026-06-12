@@ -24,8 +24,8 @@ model/
 
 ## 产物要求
 
-- `seat_roi_yolo.onnx`：输入 Dome 语义光源图，输出 `[x1, y1, x2, y2, score, class_id]` 行表，类别需与 `roi_locator.class_names` 一致。
-- `seat_defect_detector.onnx`：输入 ROI 多光源特征 `NCHW` tensor，输出 `[x1, y1, x2, y2, score, class_id]` 行表，类别需与配方 `class_names` 和 `thresholds` 一致。
+- `seat_roi_yolo.onnx`：输入 Dome 语义光源图，输出 `[x1, y1, x2, y2, score, class_id]` 行表，或使用 `output_decode: ultralytics_yolo` 直接接 Ultralytics ONNX 输出；类别需与 `roi_locator.class_names` 一致。
+- `seat_defect_detector.onnx`：输入 ROI 多光源特征 `NCHW` tensor，输出 `[x1, y1, x2, y2, score, class_id]` 行表，或使用 `output_decode: ultralytics_yolo` 直接接 Ultralytics ONNX 输出；类别需与配方 `class_names` 和 `thresholds` 一致。
 - `seat_wrn50_embedding.onnx`：输出一维 embedding，维度需与 `embedding_dim` 一致。
 - `seat_pca.json`：包含 `version`、`mean`、`components`，版本需与 `pca_version` 一致。
 - `seat_patchcore_bank.json`：包含 `version`、`model_family: patchcore`、`embedding_dim`、`coreset_ratio`、`pca_version`、`faiss_enabled` 和 `vectors`。
@@ -39,7 +39,7 @@ uv run python -m tools.validate_model_assets --recipe production_model_example
 
 ## 训练资产生成入口
 
-当前仓库可生成 `python_detector` 直接消费的模型资产，Filter 模型训练除外：
+当前仓库可生成 `python_detector` 生产配方直接消费的模型资产：
 
 ```bash
 # Dome ROI YOLO
@@ -51,6 +51,11 @@ uv run python -m training_tools.train_roi_yolo \
 uv run python -m training_tools.train_supervised_yolo \
   --data datasets/supervised_defect_yolo/dataset.yaml \
   --output model/supervised_defect/seat_defect_detector.onnx
+
+# WideResNet50 embedding
+uv run python -m training_tools.export_wideresnet_embedding \
+  --output model/wideresnet50/seat_wrn50_embedding.onnx \
+  --embedding-dim 1024
 
 # PatchCore PCA、memory bank、可选 FAISS
 uv run python -m training_tools.train_patchcore_assets \

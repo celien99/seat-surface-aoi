@@ -303,8 +303,8 @@ def _roi_locator_from_dict(data: dict[str, Any]) -> RoiLocatorConfig:
     if backend not in {"template", "fake_yolo", "onnx_yolo"}:
         raise RecipeValidationError(f"roi_locator.backend 不支持: {backend}")
     output_decode = _str(data.get("output_decode", "yolo_xyxy_rows"), "roi_locator.output_decode")
-    if output_decode not in {"yolo_xyxy_rows"}:
-        raise RecipeValidationError("roi_locator.output_decode 必须是 yolo_xyxy_rows")
+    if output_decode not in {"yolo_xyxy_rows", "ultralytics_yolo"}:
+        raise RecipeValidationError("roi_locator.output_decode 必须是 yolo_xyxy_rows 或 ultralytics_yolo")
     bbox_format = _bbox_format(data.get("bbox_format", "xyxy_pixel"), "roi_locator.bbox_format")
     return RoiLocatorConfig(
         backend=backend,
@@ -634,8 +634,8 @@ def _decision(value: Any, name: str) -> str:
 
 def _output_decode(value: Any, name: str) -> str:
     value = _str(value, name)
-    if value not in {"none", "detection_rows"}:
-        raise RecipeValidationError(f"{name} 必须是 none 或 detection_rows")
+    if value not in {"none", "detection_rows", "ultralytics_yolo"}:
+        raise RecipeValidationError(f"{name} 必须是 none、detection_rows 或 ultralytics_yolo")
     return value
 
 

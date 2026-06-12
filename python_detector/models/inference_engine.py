@@ -9,6 +9,7 @@ from python_detector.models.embedding import EmbeddingExtractor
 from python_detector.models.onnx_runtime import create_onnx_session, numpy_module, run_first_input
 from python_detector.models.patchcore import PatchCoreKnnIndex
 from python_detector.models.pca import PcaProjector
+from python_detector.models.yolo_decode import decode_yolo_rows
 from python_detector.pipeline.feature_builder import FeatureGroup
 
 
@@ -114,7 +115,7 @@ class OnnxModel:
         np = numpy_module("ONNX detection")
         tensor = np.asarray(feature_group.tensor_nchw, dtype=np.float32)
         outputs = run_first_input(self.session, tensor, "ONNX detection")
-        if self.config.output_decode == "detection_rows":
+        if self.config.output_decode in {"detection_rows", "ultralytics_yolo"}:
             return self._decode_detection_rows(outputs, feature_group)
         raise RuntimeError(f"不支持的 ONNX 输出解码方式: {self.config.output_decode}")
 
@@ -125,11 +126,11 @@ class OnnxModel:
             raise RuntimeError("numpy 未安装，无法解析 ONNX 输出") from exc
         if not outputs:
             raise RuntimeError("ONNX 输出为空")
-        rows = np.asarray(outputs[0], dtype=np.float32)
-        if rows.ndim == 3 and rows.shape[0] == 1:
-            rows = rows[0]
-        if rows.ndim != 2 or rows.shape[1] < 6:
-            raise RuntimeError(f"ONNX detection_rows 输出形状无效: {tuple(rows.shape)}")
+        rows = decode_yolo_rows(
+            outputs[0],
+            confidence_threshold=self.config.score_threshold,
+            output_decode=self.config.output_decode,
+        )
 
         candidates: list[DefectCandidate] = []
         for row in rows:

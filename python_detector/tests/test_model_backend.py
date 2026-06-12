@@ -140,6 +140,37 @@ def test_onnx_detection_rows_decode_maps_normalized_roi_bbox() -> None:
     assert model.session.last_inputs["input"][0][0][0][0] == pytest.approx(0.1)
 
 
+def test_onnx_ultralytics_yolo_decode_maps_transposed_output() -> None:
+    model = object.__new__(OnnxModel)
+    model.config = ModelConfig(
+        backend="onnx",
+        model_path="unused.onnx",
+        output_decode="ultralytics_yolo",
+        bbox_format="xyxy_pixel",
+        class_names=("scratch", "dent"),
+        score_threshold=0.3,
+    )
+    model.session = _Session(
+        [
+            [
+                [32.0, 20.0],
+                [24.0, 10.0],
+                [10.0, 8.0],
+                [12.0, 6.0],
+                [0.91, 0.10],
+                [0.05, 0.86],
+            ]
+        ]
+    )
+
+    candidates = model.run(_feature_group())
+
+    assert len(candidates) == 2
+    assert candidates[0].class_name == "scratch"
+    assert candidates[0].bbox_xyxy_pixel == (37, 38, 47, 50)
+    assert candidates[1].class_name == "dent"
+
+
 def test_onnx_detection_rows_maps_full_normalized_bbox_inside_roi() -> None:
     model = object.__new__(OnnxModel)
     model.config = ModelConfig(

@@ -231,12 +231,13 @@ Python 侧只处理检测链路。任意输入不可信、配方不一致、模�
 典型离线闭环：
 
 ```text
-trace/
-  -> training_tools.collect_trace_dataset
+共享内存多光源图像或 trace/
+  -> training_tools.collect_shm_dataset / training_tools.collect_trace_dataset
   -> dataset_manifest.jsonl
+  -> training_tools.export_wideresnet_embedding
   -> training_tools.extract_embeddings
   -> training_tools.train_patchcore_assets
-  -> model/patchcore/*
+  -> model/*
   -> training_tools.evaluate_pipeline
 ```
 

@@ -120,3 +120,22 @@ def test_train_supervised_yolo_delegates_to_shared_export(monkeypatch: pytest.Mo
     assert metrics["metrics/mAP50(B)"] == 0.7
     assert calls["data_path"] == data
     assert calls["output"] == output
+
+
+def test_export_wideresnet_embedding_reports_missing_dependencies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import builtins
+
+    from training_tools.export_wideresnet_embedding import export_wideresnet_embedding
+    from training_tools.training_errors import OnnxExportError
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name in {"onnx", "torch"} or name.startswith("torchvision"):
+            raise ImportError("missing training dependency")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    with pytest.raises(OnnxExportError, match="导出依赖未安装"):
+        export_wideresnet_embedding(tmp_path / "embedding.onnx")

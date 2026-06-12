@@ -6,7 +6,9 @@ from pathlib import Path
 import pytest
 
 from training_tools.build_patchcore_memory_bank import build_memory_bank
+from training_tools.collect_shm_dataset import collect_shm_dataset
 from training_tools.collect_trace_dataset import TraceDatasetError, collect_trace_dataset, main as collect_main
+from training_tools.job_fixture import make_simulated_job
 
 
 def test_collect_trace_dataset_generates_manifest_and_images(tmp_path: Path) -> None:
@@ -84,6 +86,54 @@ def test_patchcore_memory_bank_builder_is_available_from_training_tools(tmp_path
 
     assert bank["embedding_dim"] == 2
     assert len(bank["vectors"]) == 2
+
+
+def test_collect_shm_dataset_reuses_detector_trace_and_manifest(tmp_path: Path) -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.jobs = [make_simulated_job()]
+            self.published = []
+            self.released = []
+            self.closed = False
+
+        def wait_next_job(self, _timeout_ms: int):
+            return self.jobs.pop(0) if self.jobs else None
+
+        def publish_result(self, result):
+            self.published.append(result)
+
+        def release_frame_slot(self, sequence_id: int) -> None:
+            self.released.append(sequence_id)
+
+        def close(self) -> None:
+            self.closed = True
+
+    client = FakeClient()
+    output = tmp_path / "dataset"
+
+    result = collect_shm_dataset(
+        output,
+        max_jobs=1,
+        trace_root=tmp_path / "trace",
+        split="train",
+        label_status="raw_shm",
+        shm_client=client,
+    )
+
+    assert result.processed_jobs == 1
+    assert len(result.trace_dirs) == 1
+    assert result.manifest_path.exists()
+    assert result.raw_frame_manifest_path.exists()
+    assert len(result.samples) == 8
+    assert client.published[0].decision == "OK"
+    assert client.closed is True
+    rows = [json.loads(line) for line in result.manifest_path.read_text(encoding="utf-8").splitlines()]
+    assert {row["camera_id"] for row in rows} == {"TOP_BACK", "TOP_CUSHION"}
+    assert {row["light_id"] for row in rows} == {"DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"}
+    raw_rows = [json.loads(line) for line in result.raw_frame_manifest_path.read_text(encoding="utf-8").splitlines()]
+    assert len(raw_rows) == 8
+    assert {row["camera_id"] for row in raw_rows} == {"TOP_BACK", "TOP_CUSHION"}
+    assert (output / raw_rows[0]["image_path"]).read_bytes().startswith(b"P5\n")
 
 
 def _write_trace(trace_dir: Path) -> Path:

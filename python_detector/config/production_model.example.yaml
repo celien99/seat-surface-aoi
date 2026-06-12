@@ -58,7 +58,7 @@ roi_locator:
   model_path: model/roi_yolo/seat_roi_yolo.onnx
   min_confidence: 0.50
   max_pose_error_px: 4.0
-  output_decode: yolo_xyxy_rows
+  output_decode: ultralytics_yolo
   bbox_format: xyxy_pixel
   class_names: [full]
   fail_policy: RECHECK
@@ -107,7 +107,7 @@ models:
       - ch4_high_max_min
     input_scale: 255.0
     class_names: [scratch, dent]
-    output_decode: detection_rows
+    output_decode: ultralytics_yolo
     bbox_format: xyxy_pixel
     score_threshold: 0.20
   patchcore_unknown_safety_net:

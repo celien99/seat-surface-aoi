@@ -230,6 +230,7 @@ quality:
 
 - `fake`：测试用固定候选。
 - `onnx_detection_rows`：通用 ONNX 检测行输出。
+- `ultralytics_yolo`：Ultralytics 检测 ONNX 输出，在线解码为 `[x1, y1, x2, y2, score, class_id]` 行表。
 - `onnx_yolo`：Dome ROI 定位。
 - `statistical_embedding`：参考 embedding 后端。
 - `onnx_wideresnet50`：WideResNet50 embedding 入口。
@@ -298,6 +299,25 @@ uv run python -m training_tools.collect_trace_dataset \
 ```
 
 输出包括 `dataset_manifest.jsonl`、`dataset_summary.json` 和 ROI 图像副本。manifest 中已有 defect 只作为弱标签来源，不代表人工标注结论。
+
+从 C++ 共享内存任务直接生成离线样本：
+
+```bash
+uv run python -m training_tools.collect_shm_dataset \
+  --output datasets/seat_shm_v1 \
+  --max-jobs 10 \
+  --trace-root trace/training_shm
+```
+
+该入口只复用 Python detector 的 `ShmClient`、算法流水线和 trace 写入能力，消费 C++ 已采集并写入共享内存的多相机多光源图像；它会保存 `raw_images/`、`raw_frame_manifest.jsonl` 和可训练 ROI manifest，不控制 PLC、相机、机器人或频闪。
+
+导出 PatchCore 所需 WideResNet50 embedding ONNX：
+
+```bash
+uv run python -m training_tools.export_wideresnet_embedding \
+  --output model/wideresnet50/seat_wrn50_embedding.onnx \
+  --embedding-dim 1024
+```
 
 从真实 ROI 多光源样本提取 embedding：
 

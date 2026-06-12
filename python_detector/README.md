@@ -92,6 +92,7 @@ python_detector/
 
 ```text
 training_tools/
+├── collect_shm_dataset.py      # 复用 ShmClient/算法/trace，从共享内存多光源图生成 raw 图、trace 和训练 manifest
 ├── collect_trace_dataset.py    # 从 trace 生成训练样本 manifest 和 ROI 图像副本
 ├── dataset_manifest.py         # 读取 manifest、PGM ROI 图并聚合多光源训练样本
 ├── extract_embeddings.py       # 复用在线 FeatureBuilder/EmbeddingExtractor 从真实 ROI 图提取 embedding
@@ -100,7 +101,8 @@ training_tools/
 ├── build_faiss_index.py        # 从 PatchCore memory bank 构建 FAISS 索引
 ├── evaluate_pipeline.py        # 用 manifest 标注和真实 ROI 图评估当前配方模型
 ├── train_roi_yolo.py           # 训练 Dome ROI YOLO 并导出 ONNX
-├── train_supervised_yolo.py    # 训练已知缺陷监督 YOLO 并导出 ONNX，不包含 Filter 模型
+├── train_supervised_yolo.py    # 训练已知缺陷监督 YOLO 并导出 ONNX
+├── export_wideresnet_embedding.py # 导出 PatchCore 所需 WideResNet50 embedding ONNX
 ├── replay_dataset.py           # 调用检测流水线做模拟回放
 ├── benchmark_pipeline.py       # 检测流水线耗时统计和阈值失败
 ├── build_patchcore_memory_bank.py # 从 JSONL embedding 构建 PatchCore memory bank
@@ -184,7 +186,8 @@ training_tools/
 - `training_tools.dataset_manifest` 读取 `dataset_manifest.jsonl` 和 ROI `P5` PGM 图，将同一 trace/camera/ROI 下的多光源样本聚合。
 - `training_tools.extract_embeddings` 调用在线 `FeatureBuilder` 和 `EmbeddingExtractor`，确保训练出的 PCA/PatchCore 资产与在线 `NCHW` 输入通道一致。
 - `training_tools.evaluate_pipeline` 调用在线 `InferenceEngine`，按 manifest 中的人工标注或弱标签计算整体、类别、ROI、camera 和 split 指标。
-- `training_tools.train_patchcore_assets` 只训练 PatchCore safety net 所需的 embedding/PCA/memory bank/FAISS 资产；FilterClassifier 训练不在本仓库实现。
+- `training_tools.collect_shm_dataset` 调用在线 `ShmClient`、`SeatSurfaceAoiAlgorithm` 和 `TraceWriter`，从 C++ 共享内存任务获取多相机多光源图像，保存 `raw_images/`、`raw_frame_manifest.jsonl`，并生成 trace/训练 manifest；它不控制 PLC、相机或频闪。
+- `training_tools.train_patchcore_assets` 训练 PatchCore safety net 所需的 embedding/PCA/memory bank/FAISS 资产；`training_tools.export_wideresnet_embedding` 生成生产配方引用的 WideResNet50 embedding ONNX。
 
 ### 融合、规则和追溯
 
@@ -235,6 +238,8 @@ bash tools/run_simulated_ipc.sh --config cpp_controller/config/station_runtime.r
 
 ```bash
 uv run python -m training_tools.collect_trace_dataset --trace-root trace --output datasets/seat_trace_v1
+uv run python -m training_tools.collect_shm_dataset --output datasets/seat_shm_v1 --max-jobs 10 --trace-root trace/training_shm
+uv run python -m training_tools.export_wideresnet_embedding --output model/wideresnet50/seat_wrn50_embedding.onnx --embedding-dim 1024
 uv run python -m training_tools.extract_embeddings --manifest datasets/seat_trace_v1/dataset_manifest.jsonl --output datasets/seat_trace_v1/embeddings.jsonl --backend statistical
 uv run python -m training_tools.train_patchcore_assets --manifest datasets/seat_trace_v1/dataset_manifest.jsonl --output-dir model/patchcore --split train --pca-components 3 --coreset-ratio 0.1
 uv run python -m training_tools.evaluate_pipeline --manifest datasets/seat_trace_v1/dataset_manifest.jsonl --output reports/evaluation_report.json --split test

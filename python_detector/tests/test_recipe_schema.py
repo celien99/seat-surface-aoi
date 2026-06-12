@@ -174,6 +174,35 @@ def test_recipe_parses_onnx_model_io_contract() -> None:
     assert model.score_threshold == 0.25
 
 
+def test_recipe_accepts_ultralytics_yolo_decode_for_training_exports() -> None:
+    recipe = recipe_from_dict(
+        {
+            "recipe_id": "ultralytics_recipe",
+            "sku": "sku",
+            "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+            "roi_locator": {
+                "backend": "onnx_yolo",
+                "model_path": "model/roi_yolo/seat_roi_yolo.onnx",
+                "output_decode": "ultralytics_yolo",
+            },
+            "cameras": {"TOP": {"model_key": "detector"}},
+            "thresholds": {"scratch": {"ng_score": 0.35, "recheck_score": 0.2}},
+            "models": {
+                "detector": {
+                    "backend": "onnx",
+                    "model_path": "model/supervised_defect/seat_defect_detector.onnx",
+                    "role": "primary",
+                    "class_names": ["scratch"],
+                    "output_decode": "ultralytics_yolo",
+                }
+            },
+        }
+    )
+
+    assert recipe.roi_locator.output_decode == "ultralytics_yolo"
+    assert recipe.models["detector"].output_decode == "ultralytics_yolo"
+
+
 def test_recipe_parses_patchcore_faiss_index_path() -> None:
     recipe = recipe_from_dict(
         {

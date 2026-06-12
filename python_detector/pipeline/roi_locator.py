@@ -8,6 +8,7 @@ from python_detector.config.calibration_manager import RoiTemplate
 from python_detector.config.recipe_schema import Recipe
 from python_detector.ipc.data_types import LightFrame
 from python_detector.models.onnx_runtime import create_onnx_session, numpy_module, run_first_input
+from python_detector.models.yolo_decode import decode_yolo_rows
 
 
 @dataclass(frozen=True)
@@ -107,12 +108,11 @@ class RoiLocator:
         session = create_onnx_session(model_path, "YOLO ROI")
         tensor = self._frame_to_nchw(dome_frame, np)
         outputs = run_first_input(session, tensor, "YOLO ROI")
-        rows = np.asarray(outputs[0], dtype=np.float32)
-        if rows.ndim == 3 and rows.shape[0] == 1:
-            rows = rows[0]
-        if rows.ndim != 2 or rows.shape[1] < 6:
-            raise RuntimeError(f"YOLO ROI 输出形状无效: {tuple(rows.shape)}")
-        return rows.tolist()
+        return decode_yolo_rows(
+            outputs[0],
+            confidence_threshold=recipe.roi_locator.min_confidence,
+            output_decode=recipe.roi_locator.output_decode,
+        )
 
     def _frame_to_nchw(self, frame: LightFrame, np: Any) -> Any:
         rows = []

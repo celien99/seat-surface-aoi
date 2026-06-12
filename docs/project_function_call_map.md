@@ -130,19 +130,22 @@ Python 不能控制 PLC、相机或频闪；算法和模型运维细节见 [Pyth
 ## 离线闭环
 
 ```text
-trace/
-  -> training_tools.collect_trace_dataset
+共享内存多光源图像或 trace/
+  -> training_tools.collect_shm_dataset / training_tools.collect_trace_dataset
   -> dataset_manifest.jsonl
+  -> training_tools.export_wideresnet_embedding
   -> training_tools.extract_embeddings
   -> training_tools.train_patchcore_assets
-  -> model/patchcore/*
+  -> model/*
   -> training_tools.evaluate_pipeline
 ```
 
-YOLO 训练导出入口：
+模型资产生成入口：
 
 - `training_tools.train_roi_yolo`
 - `training_tools.train_supervised_yolo`
+- `training_tools.export_wideresnet_embedding`
+- `training_tools.train_patchcore_assets`
 
 离线工具只消费 Python 检测层公开入口和 trace 产物，不反向耦合在线 detector，也不控制 PLC、相机或频闪。
 
