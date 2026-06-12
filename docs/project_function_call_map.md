@@ -158,7 +158,7 @@ YOLO 训练导出入口：
 
 1. [README](../README.md)
 2. [docs 总览](README.md)
-3. [V4.0 架构对齐说明](v4_architecture_alignment.md)
+3. [V4.0 双采集模式架构对齐说明](v4_architecture_alignment.md)
 4. [共享内存协议](shm_protocol.md)
 5. [C++ 主控部署与硬件运维](cpp_controller_operations.md)
 6. [Python 检测算法与模型运维](python_detector_operations.md)

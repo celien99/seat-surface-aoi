@@ -2,9 +2,9 @@
 
 汽车座椅表面缺陷检测系统参考实现。项目以生产线在线 AOI 场景为目标，采用 **C++ 实时主控 + Python 独立检测进程 + 共享内存 IPC** 的架构，覆盖固定机位多光源与机器人飞拍多光源两类采集方案，以及质量门禁、ROI 处理、多光源特征、模型推理、融合决策和追溯验证链路。
 
-> 当前项目以 V4.0 集成 ONNX + FAISS 方案架构图作为目标架构与后续验收口径。已有实现覆盖控制通信骨架、基础检测流水线、V4 光源语义映射、Dome ROI 定位接口、ECC 配准、ONNX/WideResNet50/PCA/PatchCore 工程接入点、模型资产校验、全链路 trace 和离线训练样本支撑工具；真实硬件 SDK、真实模型权重、MES/报警和平台化监控仍需按现场项目接入。
+> 当前项目以 V4.0 双采集模式统一架构作为目标架构与后续验收口径：固定机位多光源和机器人飞拍多光源在 C++ Capture Plan 层统一为检测视角序列，再通过共享内存进入 Python ONNX + FAISS 检测链路。已有实现覆盖控制通信骨架、基础检测流水线、V4 光源语义映射、Dome ROI 定位接口、ECC 配准、ONNX/WideResNet50/PCA/PatchCore 工程接入点、模型资产校验、全链路 trace 和离线训练样本支撑工具；真实硬件 SDK、真实模型权重、MES/报警和平台化监控仍需按现场项目接入。
 
-![汽车座椅表面缺陷检测系统整体架构图 V4.0 集成 ONNX + FAISS 方案](docs/assets/architecture-v4.png)
+![汽车座椅表面缺陷检测系统 V4.0 双采集模式统一架构](docs/assets/architecture-v4.png)
 
 ## 核心原则
 
@@ -27,11 +27,11 @@
 | 模型产物 | 根目录 `model/` 提供 YOLO、监督检测、WideResNet50、PCA、PatchCore memory bank 和可选 FAISS 索引占位；`production_model.example.yaml` 展示真实模型配方 |
 | 追溯与工具 | 支持 trace、ROI 定位报告、ECC 报告、embedding/PCA/anomaly summary、ROI 图落盘、overlay、Trace 转训练样本、真实 ROI 图 embedding 提取、PCA/PatchCore/FAISS 资产训练、ROI/监督 YOLO ONNX 导出、manifest 评估、回放、benchmark、模型资产校验、架构就绪度检查和模拟 IPC 验证 |
 
-## V4.0 对齐状态
+## V4.0 双采集模式对齐状态
 
-当前代码已经对齐 V4.0 的进程边界、共享内存通信、安全降级要求和主要算法接口；生产落地仍需要接入真实权重、真实硬件和现场平台服务。
+当前代码已经对齐 V4.0 双采集模式的进程边界、共享内存通信、安全降级要求和主要算法接口；生产落地仍需要接入真实权重、真实硬件和现场平台服务。
 
-| V4.0 架构模块 | 当前实现 |
+| V4.0 双采集模式模块 | 当前实现 |
 |---|---|
 | 1. 光学采集层 | 部分对齐：已有固定机位与机器人飞拍两类 capture plan、多光源/多视角模拟链路、V4 语义光源映射和 C++ 逐光源参数配置；C++ 当前固定按串行 TDM 策略执行“视角A全光源→视角B全光源”的独立频闪采集，不开放并行频闪路径，真实硬件 SDK 集成仍需项目化接入 |
 | 2. 控制与通信层 | 基本对齐：C++ 控制，Python 不控制 PLC/相机/频闪，在线链路使用共享内存 |
@@ -44,7 +44,7 @@
 | 5. 系统管理维护 | 部分对齐：已有配置、模型、trace 和工具文档，完整数据/模型/监控平台不在当前实现范围内 |
 | 6. AI Runtime 与依赖 | 工程接入点对齐：ONNX Runtime 适配、YOLO/WideResNet50/FilterClassifier ONNX 路径、FAISS 可选索引、OpenCV/NumPy 等基础依赖按部署环境安装 |
 
-详见 [V4.0 架构对齐说明](docs/v4_architecture_alignment.md)。
+详见 [V4.0 双采集模式架构对齐说明](docs/v4_architecture_alignment.md)。
 
 ## 快速开始
 
@@ -189,7 +189,7 @@ seat-surface-aoi/
 ## 关键文档
 
 - [docs 文档总览](docs/README.md)
-- [V4.0 架构对齐说明](docs/v4_architecture_alignment.md)
+- [V4.0 双采集模式架构对齐说明](docs/v4_architecture_alignment.md)
 - [共享内存协议](docs/shm_protocol.md)
 - [项目调用关系摘要](docs/project_function_call_map.md)
 - [C++ 主控部署与硬件运维](docs/cpp_controller_operations.md)

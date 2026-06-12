@@ -412,7 +412,7 @@ def _check_v4_algorithm_contract(scope: ReadinessScope) -> list[ReadinessItem]:
         items.append(
             _ok(
                 "V4 AI Runtime",
-                "架构图要求 ONNX 监督模型 + WideResNet50/PCA/PatchCore/FAISS safety net 接入点。",
+                "V4.0 双采集模式统一架构要求 ONNX 监督模型 + WideResNet50/PCA/PatchCore/FAISS safety net 接入点。",
                 f"primary_onnx={primary_onnx}; patchcore_safety_net={patchcore}",
             )
         )
@@ -477,7 +477,7 @@ def _check_trace_training_and_ops(scope: ReadinessScope) -> list[ReadinessItem]:
         items.append(
             _blocked(
                 "追溯与训练闭环",
-                "架构图的数据管理与模型闭环需要 trace、回放、benchmark 和训练样本导出入口。",
+                "V4.0 双采集模式统一架构的数据管理与模型闭环需要 trace、回放、benchmark 和训练样本导出入口。",
                 f"缺少: {missing}",
                 "补齐 trace/training_tools 工程入口。",
             )
@@ -501,7 +501,7 @@ def _check_trace_training_and_ops(scope: ReadinessScope) -> list[ReadinessItem]:
         items.append(
             _blocked(
                 "部署运维闭环",
-                "架构图的系统监控、上线验收和异常恢复需要精简后的运维文档。",
+                "V4.0 双采集模式统一架构的系统监控、上线验收和异常恢复需要精简后的运维文档。",
                 f"缺少: {missing_ops_docs}",
                 "补齐 docs 总览、C++ 运维和 Python 算法运维文档。",
             )
@@ -518,7 +518,7 @@ def _check_trace_training_and_ops(scope: ReadinessScope) -> list[ReadinessItem]:
     items.append(
         _warn(
             "MES/报警/监控平台",
-            "架构图中的 MES、报警输出面板和系统监控平台属于现场平台集成，不由模拟链路证明。",
+            "V4.0 双采集模式统一架构中的 MES、报警输出面板和系统监控平台属于现场平台集成，不由模拟链路证明。",
             "当前仓库提供 C++ 事件日志、SOP 和接口边界，但没有完整 MES/监控服务实现。",
             "按现场平台协议扩展 PLC/MES/报警/监控适配器，并做端到端验收。"
             if scope == "production"

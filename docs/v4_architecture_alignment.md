@@ -1,73 +1,78 @@
-# V4.0 架构对齐说明
+# V4.0 双采集模式架构对齐说明
 
-本文以 `docs/assets/architecture-v4.png` 中的「汽车座椅表面缺陷检测系统整体架构图（V4.0 集成 ONNX + FAISS 方案）」作为目标架构，说明当前仓库已经实现的能力、已验证的边界和后续需要补齐的模块。
+本文以 `docs/assets/architecture-v4.png` 中的「汽车座椅表面缺陷检测系统 V4.0 双采集模式统一架构」作为目标架构，说明当前仓库已经实现的能力、已验证的边界和后续需要补齐的模块。
 
-![汽车座椅表面缺陷检测系统整体架构图 V4.0 集成 ONNX + FAISS 方案](assets/architecture-v4.png)
+![汽车座椅表面缺陷检测系统 V4.0 双采集模式统一架构](assets/architecture-v4.png)
 
 ## 总体判断
 
-当前项目已经具备 V4.0 架构的主干工程骨架：
+当前项目已经具备 V4.0 双采集模式架构的主干工程骨架：
 
-- C++ 作为实时主控，负责 PLC、相机、光源、触发同步、共享内存写入、结果读取和保守降级。
-- Python 作为独立检测进程，负责检测链路，不参与 PLC、相机和频闪控制。
+- C++ 作为实时主控，负责 PLC、相机、光源、机器人 pose/shot 读取、触发同步、共享内存写入、结果读取和保守降级。
+- 固定机位多光源和机器人飞拍多光源在 C++ Capture Plan 层统一抽象为 `capture_view` / `pose_id` 检测视角序列。
+- Python 作为独立检测进程，按 `(camera_id, pose_id)` 组装 `CameraBundle`，不参与 PLC、相机、频闪或机器人控制。
 - 在线图像与结果通过 POSIX 共享内存传输，不使用 TCP。
 - Python AI Runtime 以 ONNX Runtime 作为 YOLO/WideResNet50/FilterClassifier 等模型的推理底座，PatchCore 向量检索优先使用 FAISS，缺索引或缺依赖时回退 exact KNN。
-- 协议错误、CRC 错误、缺帧、超时、质量门禁失败和模型异常都不会输出 `OK`。
+- 协议错误、CRC 错误、缺帧、超时、机器人 FAULT、质量门禁失败和模型异常都不会输出 `OK`。
 
-当前实现已经从「工业 AOI 参考骨架 + 基础算法流水线」推进到「V4.0 主要算法接口可验证参考链路 + 真实模型工程接入点 + 离线训练样本支撑入口」。真实产线仍需要接入设备 SDK、替换 `model/` 下的真实 YOLO/WideResNet50/PatchCore 产物、完成真实标注与训练评估、MES/报警和监控平台。
+当前实现已经从「工业 AOI 参考骨架 + 基础算法流水线」推进到「固定机位/机器人飞拍双模式可验证参考链路 + V4.0 主要算法接口 + 真实模型工程接入点 + 离线训练样本支撑入口」。真实产线仍需要接入设备 SDK、替换 `model/` 下的真实 YOLO/WideResNet50/PatchCore 产物、完成真实标注与训练评估、MES/报警和监控平台。
 
 ## 分层对齐
 
-### 1. 光学采集层
+### 1. 双模式光学采集层
 
-架构图要求：
+统一架构要求：
 
-- Dome 主光源。
-- DarkField-L / DarkField-R。
-- BrightField 可选。
-- 其它光源可扩展。
-- PLC -> C++ -> 相机/光源控制。
-- GPIO/TTL 硬件触发，微秒级曝光，触发抖动小于 10 微秒。
+- 支持固定机位多光源和机器人飞拍多光源两种采集入口。
+- 两类采集入口在 C++ Capture Plan 层统一为检测视角列表。
+- Dome 主光源、DarkField-L、DarkField-R、BrightField 可选，其它光源可扩展。
+- PLC -> C++ -> 相机/光源控制；机器人飞拍模式下 C++ 还需读取 READY、FAULT、SHOT_ID、PHOTO_TRIGGER、机器人时间戳和 TCP 位姿。
+- GPIO/TTL 或相机曝光输出硬触发，微秒级曝光，触发抖动小于 10 微秒。
 
 当前状态：
 
-- 已在 C++ 配置和 Python 配方中支持多光源顺序。
+- 已在 C++ 配置和 Python 配方中支持固定机位和机器人飞拍两类采集方案。
+- 固定机位配置通过 `capture_mode=fixed_camera` 生成相机视角；机器人飞拍配置通过 `capture_mode=robot_flyshot` 显式声明 `pose.<N>`。
+- C++ 主控固定采用视角级串行 TDM：当前视角完成全部 `light_order` 后再切换下一视角，避免多视角并行频闪污染。
 - 默认主链路使用 `DIFFUSE`、`POLAR_DIFFUSE`、`HIGH_LEFT`、`HIGH_RIGHT`。
 - Python 配方通过 `v4_lights.semantic_to_light_id` 统一 V4 语义光源，默认映射为 `DOME -> DIFFUSE`、`DARKFIELD_L -> HIGH_LEFT`、`DARKFIELD_R -> HIGH_RIGHT`、`BRIGHTFIELD -> POLAR_DIFFUSE`。
+- Python 检测层把 `cameras` 视为检测视角配置，固定机位通常 `pose_id == camera_id`；机器人飞拍允许多个 `pose_id` 共享同一个末端相机 `camera_id=EYE_IN_HAND`。
 - C++ 模拟链路支持 `camera_exposure_output` 硬触发同步模式。
-- 当前硬件 SDK 接入仍是可替换接口和模拟驱动，不是完整真实产线驱动。
 
 差距：
 
-- 真实光源控制器、工业相机 SDK、PLC/编码器现场协议仍需按设备型号接入。
+- 真实光源控制器、工业相机 SDK、PLC/编码器现场协议和机器人/IO 网关仍需按设备型号接入。
 - 微秒级抖动指标需要真实硬件压测证明。
+- 两种采集模式都必须验证 `camera_id`、`pose_id`、`shot_id`、`calibration_id`、光源通道和 Python 配方完全一致。
 
 ### 2. 控制与通信层
 
-架构图要求：
+统一架构要求：
 
-- C++ 实时系统负责设备控制、触发管理、相机采集、光源切换、状态监控和日志记录。
-- 通信机制使用共享内存传输多光源图像数据、触发信号/状态信息、时间戳和系统状态。
+- C++ 实时系统负责设备控制、触发管理、相机采集、光源切换、机器人 pose 状态、状态监控和日志记录。
+- C++ 在共享内存中写入 `camera_id`、`pose_id`、`shot_id`、机器人时间戳、TCP 位姿、采集参数和多光源图像数据。
+- 通信机制使用共享内存传输在线图像和检测结果。
 
 当前状态：
 
-- `cpp_controller` 已实现 C++ 主控、PLC 抽象、相机 worker、光源控制器、触发调度、frame/result ring buffer。
-- `python_detector` 通过共享内存读取任务并写回检测结果。
+- `cpp_controller` 已实现 C++ 主控、PLC 抽象、RobotClient 抽象、相机 worker、光源控制器、触发调度、frame/result ring buffer。
+- `python_detector` 通过共享内存读取任务并写回检测结果，按 `(camera_id, pose_id)` 组包。
 - C++ 侧会校验 `sequence_id`、`trigger_id`、`seat_id`、decision、质量状态、错误码和缺陷数量。
-- detector 超时、slot 不可用、缺帧和协议异常会保守返回 `RECHECK` 或 `ERROR`。
+- detector 超时、slot 不可用、缺帧、机器人异常和协议异常会保守返回 `RECHECK` 或 `ERROR`。
 
 结论：
 
-- 该层与 V4.0 主体要求基本对齐。
+- 该层与 V4.0 双采集模式主体要求基本对齐。
 
 ### 3. 算法处理层
 
 #### 3.1 ROI 定位
 
-架构图要求：
+统一架构要求：
 
-- 仅使用 Dome 光源图。
+- 仅使用 Dome 语义光源图。
 - 通过 YOLO 目标检测模型输出座椅 ROI 检测结果。
+- 固定机位和机器人飞拍都通过 `camera_id + pose_id + calibration_id` 选择对应 ROI、标定和阈值。
 
 当前状态：
 
@@ -79,16 +84,17 @@
 
 差距：
 
-- 真实 YOLO ROI 权重、输入尺寸、类别训练集和评估报告仍需按现场数据产出；工程路径和校验入口已补齐。
+- 真实 YOLO ROI 权重、输入尺寸、类别训练集和评估报告仍需按现场数据产出。
+- 机器人飞拍 pose 的 ROI 类别、姿态误差和标定版本必须单独用现场样本验证。
 
 #### 3.2 ROI 裁剪与图像配准
 
-架构图要求：
+统一架构要求：
 
 - 输入所有光源图像。
 - 以 Dome ROI 为参考图。
 - DarkField-L/R、BrightField 等 ROI 与参考图对齐。
-- 使用 ECC 图像配准，输出配准后 ROI。
+- 使用 ECC 图像配准或等价高精度配准，输出配准后 ROI。
 
 当前状态：
 
@@ -100,10 +106,11 @@
 差距：
 
 - 当前 ECC 为轻量参考实现，真实产线可替换为 OpenCV ECC 或设备侧高精度配准并继续复用相同报告字段。
+- 固定机位和机器人飞拍应分别验证多光源对齐误差，不能共享未经验证的阈值。
 
 #### 3.3 特征提取
 
-架构图要求：
+统一架构要求：
 
 - 使用共享特征提取网络，例如 WideResNet50。
 - 分别提取 Dome、DarkField-L、DarkField-R、BrightField 等特征。
@@ -117,11 +124,12 @@
 
 差距：
 
-- 真实 WideResNet50 权重、输入归一化、特征层选择和批处理策略仍需按训练产物确认；工程路径和运行时校验已补齐。
+- 真实 WideResNet50 权重、输入归一化、特征层选择和批处理策略仍需按训练产物确认。
+- 训练和评估报告需要按采集模式、ROI、材质、颜色和光源条件分层。
 
 #### 3.4 特征融合与降维
 
-架构图要求：
+统一架构要求：
 
 - 多光源特征 concat。
 - 使用 PCA 降维。
@@ -140,7 +148,7 @@
 
 #### 3.5 PatchCore 异常检测
 
-架构图要求：
+统一架构要求：
 
 - 训练阶段构建 memory bank。
 - 使用正常样本特征，执行 coreset subsampling。
@@ -160,11 +168,11 @@
 差距：
 
 - FAISS 索引文件仍需由部署环境基于真实 memory bank 生成并验证延迟、内存占用和回退行为。
-- 正常样本库、coreset 策略和阈值曲线仍需通过现场数据训练与验证；本仓库提供样本与资产准备入口，不重复实现外部 Filter 模型训练项目。
+- 正常样本库、coreset 策略和阈值曲线仍需通过现场数据训练与验证。
 
 ### 4. 后处理与决策层
 
-架构图要求：
+统一架构要求：
 
 - 缺陷过滤与分类。
 - 规则引擎。
@@ -184,17 +192,18 @@
 
 ### 5. 系统管理与维护
 
-架构图要求：
+统一架构要求：
 
 - 数据管理。
 - 模型管理。
 - 系统监控。
+- 固定机位和机器人飞拍两类 trace 都能进入同一训练样本和评估闭环。
 
 当前状态：
 
-- 已有配方、标定、模型配置、trace、Trace 转训练样本、回放和 benchmark 文档。
+- 已有配方、标定、模型配置、trace、Trace 转训练样本、回放、benchmark 和双采集模式运维文档。
 - 已有根目录 `model/` 模型产物占位、真实模型配方模板和 `tools.validate_model_assets` 上线前资产校验。
-- 已有模型缓存隔离、trace 保存策略和测试机集成清单。
+- 已有模型缓存隔离、trace 保存策略、固定机位/机器人飞拍配置模板和测试机集成说明。
 - trace 已扩展 ROI 定位、ECC、embedding、PCA、KNN 和 anomaly score 摘要。
 - 已将离线训练支撑剥离到 `training_tools/`，只消费 Python 检测层公开入口和 trace 产物，不反向耦合在线 detector。
 
@@ -205,7 +214,7 @@
 
 ### 6. AI Runtime 与依赖
 
-架构图要求：
+统一架构要求：
 
 - AI Runtime 使用 ONNX 作为推理底座，承载 YOLOvX ROI 定位、WideResNet50 特征提取和 FilterClassifier 缺陷过滤分类等模型。
 - 向量检索引擎使用 FAISS，支持 CPU/GPU、IndexFlatL2、IVF、PQ 等部署选择。
@@ -217,7 +226,7 @@
 - 已在 `model/` 目录预留 YOLO ROI、监督缺陷检测、WideResNet50 embedding、PCA、PatchCore memory bank 和 FAISS 索引产物路径。
 - `pyproject.toml` 已提供 `onnx` 和 `faiss` optional extras；默认模拟链路不强制安装 ONNX Runtime 或 FAISS。
 - PatchCore 在线链路配置 `faiss_index_path` 后优先尝试 FAISS，失败时回退 exact KNN，并在 trace 中记录 `backend` 与 `fallback_reason`。
-- Python 层当前只负责检测算法，不控制 PLC、相机或频闪。
+- Python 层当前只负责检测算法，不控制 PLC、相机、机器人或频闪。
 
 差距：
 
@@ -226,23 +235,25 @@
 
 ## 推荐补齐顺序
 
-1. 接入真实相机、频闪、PLC/编码器和光源控制器 SDK，并做节拍、稳定性和故障注入压测。
-2. 训练并接入真实 Dome YOLO ROI 定位权重，固化 ROI 类别、置信度、姿态误差和复检阈值。
-3. 用现场数据验证 ECC 参数，必要时替换为 OpenCV ECC 或更高精度配准后端。
-4. 接入真实 WideResNet50 embedding 权重，固化输入归一化、特征层、embedding 维度和批处理策略。
-5. 使用 `training_tools.collect_trace_dataset` 从现场 trace 生成训练样本 manifest，完成真实人工标注和数据分层。
-6. 基于正常样本训练 PCA 与 PatchCore memory bank，替换 `model/patchcore/` 占位产物，产出阈值曲线和按缺陷类别/ROI/材质/颜色的评估报告。
-7. 在部署环境生成并接入 FAISS 加速索引，验证 KNN 延迟、内存占用和 exact KNN 回退。
-8. 按现场硬件规格固化 ONNX Runtime、FAISS、OpenCV 和 NumPy 版本，完成 AI Runtime 性能基准。
-9. 按现场工艺扩展多 ROI 关联规则、MES/报警接口、数据平台、模型版本平台和系统监控服务。
+1. 分别接入固定机位和机器人飞拍生产配置的真实 PLC/编码器、相机、频闪、机器人/IO 网关 SDK，并做节拍、稳定性和故障注入压测。
+2. 验证两种采集模式的 `camera_id`、`pose_id`、`shot_id`、`calibration_id`、光源通道和 Python 配方完全一致。
+3. 训练并接入真实 Dome YOLO ROI 定位权重，固化 ROI 类别、置信度、姿态误差和复检阈值。
+4. 用现场数据验证 ECC 参数，必要时替换为 OpenCV ECC 或更高精度配准后端。
+5. 接入真实 WideResNet50 embedding 权重，固化输入归一化、特征层、embedding 维度和批处理策略。
+6. 使用 `training_tools.collect_trace_dataset` 从两类采集模式的现场 trace 生成训练样本 manifest，完成真实人工标注和数据分层。
+7. 基于正常样本训练 PCA 与 PatchCore memory bank，替换 `model/patchcore/` 占位产物，产出阈值曲线和按缺陷类别/ROI/材质/颜色/采集模式的评估报告。
+8. 在部署环境生成并接入 FAISS 加速索引，验证 KNN 延迟、内存占用和 exact KNN 回退。
+9. 按现场硬件规格固化 ONNX Runtime、FAISS、OpenCV 和 NumPy 版本，完成 AI Runtime 性能基准。
+10. 按现场工艺扩展多 ROI 关联规则、MES/报警接口、数据平台、模型版本平台和系统监控服务。
 
 ## 当前验证命令
 
 ```bash
-python3 -m pytest python_detector/tests
-python3 -m tools.validate_protocol
-python3 -m tools.validate_model_assets --recipe production_model_example
+uv run pytest
+uv run python -m tools.validate_protocol
+uv run python -m tools.validate_model_assets --recipe production_model_example
+uv run python -m tools.validate_architecture_readiness --scope reference
 bash tools/run_simulated_ipc.sh
 ```
 
-默认模拟链路要求测试、协议校验和模拟 IPC 通过；`validate_model_assets --recipe production_model_example` 在占位文件未替换时应失败，并列出需要替换的真实模型产物。
+默认模拟链路要求测试、协议校验、架构就绪度检查和模拟 IPC 通过；`validate_model_assets --recipe production_model_example` 在占位文件未替换时应失败，并列出需要替换的真实模型产物。
