@@ -189,6 +189,7 @@ seat-surface-aoi/
 ## 关键文档
 
 - [V4.0 架构对齐说明](docs/v4_architecture_alignment.md)
+- [项目功能调用关系与封装逻辑深度分析](docs/project_function_call_map.md)
 - [模型产物目录说明](model/README.md)
 - [共享内存协议](docs/shm_protocol.md)
 - [硬件对接说明](docs/hardware_integration.md)
