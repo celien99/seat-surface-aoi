@@ -347,13 +347,19 @@ def _fusion_from_dict(data: dict[str, Any]) -> FusionConfig:
 
 def _cameras_from_dict(data: Any, default_light_order: tuple[str, ...], default_base_light_id: str) -> tuple[CameraRecipe, ...]:
     if isinstance(data, list):
-        items = {str(item.get("camera_id", "")): item for item in data if isinstance(item, dict)}
+        items = []
+        for index, item in enumerate(data):
+            raw = _dict(item, f"cameras[{index}]")
+            camera_id = _str(raw.get("camera_id"), f"cameras[{index}].camera_id")
+            pose_id = raw.get("pose_id", camera_id)
+            pose_label = pose_id if isinstance(pose_id, str) and pose_id else camera_id
+            items.append((f"{camera_id}/{pose_label}", raw))
     elif isinstance(data, dict):
-        items = data
+        items = [(str(camera_id), raw) for camera_id, raw in data.items()]
     else:
         raise RecipeValidationError("cameras 必须是字典或列表")
     cameras: list[CameraRecipe] = []
-    for camera_id, raw in items.items():
+    for camera_id, raw in items:
         raw = _dict(raw, f"cameras.{camera_id}")
         enabled = bool(raw.get("enabled", True))
         if not enabled:

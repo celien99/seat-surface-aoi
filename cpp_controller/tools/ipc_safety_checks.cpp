@@ -149,6 +149,178 @@ bool test_result_ring_returns_crc_error_immediately() {
   return passed;
 }
 
+bool test_result_ring_rejects_payload_size_mismatch() {
+  constexpr const char* kName = "/seat_aoi_res_size";
+  constexpr std::uint32_t kSlotCount = 1;
+  constexpr std::uint32_t kSlotSize = 4096;
+  seat_aoi::ResultRingBuffer ring;
+  if (!ring.initialize(kName, kSlotCount, kSlotSize, true)) {
+    std::cerr << "result ring initialize failed\n";
+    return false;
+  }
+
+  auto* base = slot_base(ring.header(), 0, kSlotSize);
+  auto* slot = reinterpret_cast<seat_aoi::ResultSlotHeader*>(base);
+  slot->sequence_id = 19;
+  slot->payload_size = seat_aoi::result_slot_defects_offset();
+  slot->payload_crc32 = seat_aoi::crc32(base + seat_aoi::result_slot_defects_offset(), 0);
+  slot->defect_count = 1;
+  slot->reserved = 0;
+  slot->result_meta.sequence_id = 19;
+  slot->result_meta.trigger_id = 1019;
+  seat_aoi::copy_cstr(slot->result_meta.seat_id, "SIM");
+  slot->result_meta.decision = static_cast<std::uint32_t>(seat_aoi::InspectionDecision::NG);
+  slot->result_meta.defect_count = 1;
+  slot->result_meta.quality_pass = 1;
+  slot->result_meta.error_code = 0;
+  slot->result_meta.elapsed_ms = 1.0F;
+  slot->result_meta.reserved = 0;
+  slot->header_crc32 = 0;
+  slot->header_crc32 = result_header_crc(slot);
+  slot->state.store(static_cast<std::uint32_t>(seat_aoi::SlotState::Ready),
+                    std::memory_order_release);
+
+  seat_aoi::InspectionResultPayload result;
+  seat_aoi::ErrorCode error_code = seat_aoi::ErrorCode::None;
+  std::string error;
+  const bool ok = ring.wait_for_result(19, 200, &result, &error_code, &error);
+  const bool passed = !ok && error_code == seat_aoi::ErrorCode::InvalidPayload &&
+                      error == "invalid result payload size or defect count" &&
+                      slot->state.load(std::memory_order_acquire) ==
+                          static_cast<std::uint32_t>(seat_aoi::SlotState::Empty);
+  ring.unlink_name();
+  ring.close();
+  if (!passed) {
+    std::cerr << "result ring accepted mismatched payload size: " << error << "\n";
+  }
+  return passed;
+}
+
+bool test_result_ring_reclaims_stale_and_bad_slots() {
+  constexpr const char* kName = "/seat_aoi_res_reclaim";
+  constexpr std::uint32_t kSlotCount = 3;
+  constexpr std::uint32_t kSlotSize = 4096;
+  seat_aoi::ResultRingBuffer ring;
+  if (!ring.initialize(kName, kSlotCount, kSlotSize, true)) {
+    std::cerr << "result ring initialize failed\n";
+    return false;
+  }
+
+  auto* stale_base = slot_base(ring.header(), 0, kSlotSize);
+  auto* stale_slot = reinterpret_cast<seat_aoi::ResultSlotHeader*>(stale_base);
+  stale_slot->sequence_id = 3;
+  stale_slot->payload_size = seat_aoi::result_slot_defects_offset();
+  stale_slot->payload_crc32 = seat_aoi::crc32(stale_base + seat_aoi::result_slot_defects_offset(), 0);
+  stale_slot->defect_count = 0;
+  stale_slot->result_meta.sequence_id = 3;
+  stale_slot->result_meta.trigger_id = 1003;
+  seat_aoi::copy_cstr(stale_slot->result_meta.seat_id, "SIM");
+  stale_slot->result_meta.decision = static_cast<std::uint32_t>(seat_aoi::InspectionDecision::OK);
+  stale_slot->result_meta.quality_pass = 1;
+  stale_slot->header_crc32 = 0;
+  stale_slot->header_crc32 = result_header_crc(stale_slot);
+  stale_slot->state.store(static_cast<std::uint32_t>(seat_aoi::SlotState::Ready),
+                          std::memory_order_release);
+
+  auto* bad_base = slot_base(ring.header(), 1, kSlotSize);
+  auto* bad_slot = reinterpret_cast<seat_aoi::ResultSlotHeader*>(bad_base);
+  bad_slot->sequence_id = 4;
+  bad_slot->state.store(static_cast<std::uint32_t>(seat_aoi::SlotState::Corrupted),
+                        std::memory_order_release);
+
+  auto* current_base = slot_base(ring.header(), 2, kSlotSize);
+  auto* current_slot = reinterpret_cast<seat_aoi::ResultSlotHeader*>(current_base);
+  current_slot->sequence_id = 5;
+  current_slot->payload_size = seat_aoi::result_slot_defects_offset();
+  current_slot->payload_crc32 = seat_aoi::crc32(current_base + seat_aoi::result_slot_defects_offset(), 0);
+  current_slot->defect_count = 0;
+  current_slot->result_meta.sequence_id = 5;
+  current_slot->result_meta.trigger_id = 1005;
+  seat_aoi::copy_cstr(current_slot->result_meta.seat_id, "SIM");
+  current_slot->result_meta.decision = static_cast<std::uint32_t>(seat_aoi::InspectionDecision::OK);
+  current_slot->result_meta.defect_count = 0;
+  current_slot->result_meta.quality_pass = 1;
+  current_slot->result_meta.error_code = 0;
+  current_slot->result_meta.elapsed_ms = 1.0F;
+  current_slot->result_meta.reserved = 0;
+  current_slot->header_crc32 = 0;
+  current_slot->header_crc32 = result_header_crc(current_slot);
+  current_slot->state.store(static_cast<std::uint32_t>(seat_aoi::SlotState::Ready),
+                            std::memory_order_release);
+
+  seat_aoi::InspectionResultPayload result;
+  seat_aoi::ErrorCode error_code = seat_aoi::ErrorCode::None;
+  std::string error;
+  const bool ok = ring.wait_for_result(5, 200, &result, &error_code, &error);
+  const bool passed = ok && result.meta.sequence_id == 5 &&
+                      error_code == seat_aoi::ErrorCode::None &&
+                      stale_slot->state.load(std::memory_order_acquire) ==
+                          static_cast<std::uint32_t>(seat_aoi::SlotState::Empty) &&
+                      bad_slot->state.load(std::memory_order_acquire) ==
+                          static_cast<std::uint32_t>(seat_aoi::SlotState::Empty) &&
+                      current_slot->state.load(std::memory_order_acquire) ==
+                          static_cast<std::uint32_t>(seat_aoi::SlotState::Empty);
+  ring.unlink_name();
+  ring.close();
+  if (!passed) {
+    std::cerr << "result ring let stale/bad slots block current result: " << error << "\n";
+  }
+  return passed;
+}
+
+bool test_result_ring_returns_current_bad_slot_error() {
+  constexpr const char* kName = "/seat_aoi_res_badcur";
+  constexpr std::uint32_t kSlotCount = 1;
+  constexpr std::uint32_t kSlotSize = 4096;
+  seat_aoi::ResultRingBuffer ring;
+  if (!ring.initialize(kName, kSlotCount, kSlotSize, true)) {
+    std::cerr << "result ring initialize failed\n";
+    return false;
+  }
+
+  auto* base = slot_base(ring.header(), 0, kSlotSize);
+  auto* slot = reinterpret_cast<seat_aoi::ResultSlotHeader*>(base);
+  slot->sequence_id = 5;
+  slot->state.store(static_cast<std::uint32_t>(seat_aoi::SlotState::Corrupted),
+                    std::memory_order_release);
+
+  seat_aoi::InspectionResultPayload result;
+  seat_aoi::ErrorCode error_code = seat_aoi::ErrorCode::None;
+  std::string error;
+  const bool ok = ring.wait_for_result(5, 200, &result, &error_code, &error);
+  const bool passed = !ok && error_code == seat_aoi::ErrorCode::CrcMismatch &&
+                      error == "result slot marked corrupted" &&
+                      slot->state.load(std::memory_order_acquire) ==
+                          static_cast<std::uint32_t>(seat_aoi::SlotState::Empty) &&
+                      ring.header()->read_index == 1;
+  ring.unlink_name();
+  ring.close();
+  if (!passed) {
+    std::cerr << "result ring did not return current bad slot error: " << error << "\n";
+  }
+  return passed;
+}
+
+bool test_ring_layout_mismatch_fails_without_reset() {
+  constexpr const char* kName = "/seat_aoi_layout";
+  seat_aoi::FrameRingBuffer first;
+  if (!first.initialize(kName, 1, 4096, true)) {
+    std::cerr << "initial frame ring initialize failed\n";
+    return false;
+  }
+  first.close();
+
+  seat_aoi::FrameRingBuffer second;
+  const bool ok = second.initialize(kName, 1, 8192, false);
+  second.unlink_name();
+  second.close();
+  const bool passed = !ok;
+  if (!passed) {
+    std::cerr << "frame ring layout mismatch did not fail without reset\n";
+  }
+  return passed;
+}
+
 bool test_plc_trigger_timeout_fails_closed() {
   seat_aoi::SimPlcClient plc;
   seat_aoi::PlcClientConfig config;
@@ -439,20 +611,40 @@ bool test_invalid_health_threshold_rejected() {
   return passed;
 }
 
+bool test_frame_slot_size_accounts_for_pixel_format_bytes() {
+  seat_aoi::StationRuntimeConfig config;
+  config.cameras = {
+      seat_aoi::RuntimeCameraConfig{0, "TOP_BACK", "", "calib/simulated_v1", 64, 48, 1, "Mono16", "", "", 8, false},
+  };
+  config.light_order = {1};
+  config.light_channels = {
+      seat_aoi::RuntimeLightChannelConfig{1, 1, 800, 800, 0, 1.0F, 60.0F},
+  };
+  config.frame_slot_size =
+      static_cast<std::uint32_t>(seat_aoi::frame_slot_image_offset(1) + 64U * 48U);
+  std::string error;
+  const bool ok = seat_aoi::validate_station_runtime_config(config, &error);
+  const bool passed = !ok && error.find("frame_slot_size") != std::string::npos;
+  if (!passed) {
+    std::cerr << "frame slot size did not account for Mono16 bytes: " << error << "\n";
+  }
+  return passed;
+}
+
 bool test_health_monitor_escalates_after_consecutive_rechecks() {
   seat_aoi::StationHealthMonitor health;
   health.configure(2, 3);
   health.transition_to(seat_aoi::StationState::Ready, "ready");
   health.record_result(seat_aoi::InspectionDecision::Recheck,
-                       seat_aoi::ErrorCode::DetectorTimeout,
-                       "timeout 1");
+                       seat_aoi::ErrorCode::QualityFailed,
+                       "quality 1");
   const auto warning = health.snapshot();
   health.record_result(seat_aoi::InspectionDecision::Recheck,
-                       seat_aoi::ErrorCode::DetectorTimeout,
-                       "timeout 2");
+                       seat_aoi::ErrorCode::QualityFailed,
+                       "quality 2");
   health.record_result(seat_aoi::InspectionDecision::Recheck,
-                       seat_aoi::ErrorCode::DetectorTimeout,
-                       "timeout 3");
+                       seat_aoi::ErrorCode::QualityFailed,
+                       "quality 3");
   const auto critical = health.snapshot();
   const bool passed = warning.alarm_level == seat_aoi::AlarmLevel::Warning &&
                       critical.alarm_level == seat_aoi::AlarmLevel::Critical &&
@@ -460,6 +652,54 @@ bool test_health_monitor_escalates_after_consecutive_rechecks() {
                       critical.consecutive_recheck_count == 3;
   if (!passed) {
     std::cerr << "health monitor did not escalate after consecutive rechecks\n";
+  }
+  return passed;
+}
+
+bool test_detector_timeout_fault_blocks_next_trigger() {
+  seat_aoi::StationConfig config;
+  config.reset_shared_memory = true;
+  config.slot_count = 1;
+  config.frame_slot_size = 8192;
+  config.result_slot_size = 4096;
+  config.publish_timeout_ms = 5;
+  config.detector_timeout_ms = 5;
+  config.trigger_timeout_ms = 5;
+  config.camera_timeout_ms = 5;
+  config.light_timeout_ms = 5;
+  config.recipe_id = "seat_a_black_leather_v1";
+  config.light_order = {1};
+  config.light_channels = {
+      seat_aoi::RuntimeLightChannelConfig{1, 1, 800, 800, 0, 1.0F, 60.0F},
+  };
+
+  seat_aoi::StationController station;
+  if (!station.initialize(config)) {
+    std::cerr << "detector timeout station initialize failed\n";
+    return false;
+  }
+
+  seat_aoi::PlcTrigger trigger;
+  trigger.trigger_id = 7011;
+  trigger.seat_id = "SIM_TIMEOUT_BLOCK";
+  trigger.sku = "seat_a_black_leather";
+  const auto result = station.inspect_one_seat(trigger);
+  const auto fault_snapshot = station.health_snapshot();
+  seat_aoi::PlcTrigger next_trigger;
+  std::string error;
+  const bool can_wait = station.wait_for_trigger(&next_trigger, &error);
+  station.cleanup_shared_memory();
+
+  const bool passed =
+      static_cast<seat_aoi::InspectionDecision>(result.meta.decision) ==
+          seat_aoi::InspectionDecision::Recheck &&
+      static_cast<seat_aoi::ErrorCode>(result.meta.error_code) ==
+          seat_aoi::ErrorCode::DetectorTimeout &&
+      fault_snapshot.state == seat_aoi::StationState::Fault &&
+      !can_wait &&
+      error.find("detector result timeout") != std::string::npos;
+  if (!passed) {
+    std::cerr << "detector timeout did not block next trigger: " << error << "\n";
   }
   return passed;
 }
@@ -544,6 +784,18 @@ int main() {
   if (!test_result_ring_returns_crc_error_immediately()) {
     return 1;
   }
+  if (!test_result_ring_rejects_payload_size_mismatch()) {
+    return 1;
+  }
+  if (!test_result_ring_reclaims_stale_and_bad_slots()) {
+    return 1;
+  }
+  if (!test_result_ring_returns_current_bad_slot_error()) {
+    return 1;
+  }
+  if (!test_ring_layout_mismatch_fails_without_reset()) {
+    return 1;
+  }
   if (!test_plc_trigger_timeout_fails_closed()) {
     return 1;
   }
@@ -577,7 +829,13 @@ int main() {
   if (!test_invalid_health_threshold_rejected()) {
     return 1;
   }
+  if (!test_frame_slot_size_accounts_for_pixel_format_bytes()) {
+    return 1;
+  }
   if (!test_health_monitor_escalates_after_consecutive_rechecks()) {
+    return 1;
+  }
+  if (!test_detector_timeout_fault_blocks_next_trigger()) {
     return 1;
   }
   if (!test_station_writes_detector_timeout_event_log()) {

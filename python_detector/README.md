@@ -93,8 +93,8 @@ python_detector/
 ```text
 training_tools/
 ├── collect_shm_dataset.py      # 复用 ShmClient/算法/trace，从共享内存多光源图生成 raw 图、trace 和训练 manifest
-├── collect_trace_dataset.py    # 从 trace 生成训练样本 manifest 和 ROI 图像副本
-├── dataset_manifest.py         # 读取 manifest、PGM ROI 图并聚合多光源训练样本
+├── collect_trace_dataset.py    # 从 trace 生成训练样本 manifest 和 ROI 图像副本，兼容 pose 目录
+├── dataset_manifest.py         # 读取 manifest、PGM ROI 图并按 camera/pose/ROI 聚合多光源训练样本
 ├── extract_embeddings.py       # 复用在线 FeatureBuilder/EmbeddingExtractor 从真实 ROI 图提取 embedding
 ├── compute_pca.py              # 从 embedding JSONL 计算 PCA 参数和可选降维 embedding
 ├── train_patchcore_assets.py   # 串联 embedding、PCA、PatchCore memory bank 和可选 FAISS 索引
@@ -127,7 +127,7 @@ training_tools/
 
 `RecipeManager` 默认从包内 `python_detector/config` 加载 YAML，不依赖当前工作目录。`CalibrationManager` 通过 `paths.resolve_package_path()` 同时兼容包内路径和历史仓库相对路径，例如 `python_detector/config/roi/default_roi.yaml`。
 
-配方中的 `cameras` 实际表示检测视角配置。固定机位模式下 `pose_id` 默认等于 `camera_id`；机器人飞拍模式下允许多个视角共享同一 `camera_id`，并用 `pose_id` 区分轨迹点、ROI、标定和模型配置，例如 `EYE_IN_HAND/T1_BACKREST`、`EYE_IN_HAND/T2_CUSHION`。
+配方中的 `cameras` 实际表示检测视角配置。固定机位模式下 `pose_id` 默认等于 `camera_id`；机器人飞拍模式下允许多个视角共享同一 `camera_id`，并用 `pose_id` 区分轨迹点、ROI、标定和模型配置，例如 `EYE_IN_HAND/T1_BACKREST`、`EYE_IN_HAND/T2_CUSHION`。`cameras` 支持字典和列表两种写法；列表写法会按条目保序解析，不会再把相同 `camera_id` 的不同 `pose_id` 折叠覆盖，重复 `(camera_id, pose_id)` 会报配方校验错误。
 
 配方 schema 会校验：
 
@@ -147,7 +147,7 @@ training_tools/
 - `tools.validate_protocol` 和相关测试。
 - `docs/shm_protocol.md`、README 和本文。
 
-`ShmClient` 对共享内存输入执行 header CRC、payload CRC、slot 状态、序列号、payload 边界、重复 camera/pose/light 等安全校验。解析失败会发布保守错误结果并释放输入 slot。解析成功时会记录当前任务中的 `camera_id/pose_id -> camera_index` 动态映射，确保机器人飞拍末端相机（例如 `EYE_IN_HAND`）在 NG/RECHECK 缺陷结果回写时也能使用正确的 `camera_index`，不依赖固定静态表。`ErrorCode` 与 C++ `common/error_code.hpp` 保持枚举值一致，当前包含 `LIGHT_FAULT`、`CAMERA_FAULT`、`TRIGGER_SYNC_FAULT`、`CONFIGURATION_ERROR` 和 `ROBOT_FAULT` 等 C++ 采集侧结构化失败码。
+`ShmClient` 对共享内存输入执行 header CRC、payload CRC、slot 状态、序列号、payload 边界、图像区域下界、图像 range 重叠、重复 camera/pose/light 等安全校验。解析失败会发布保守错误结果并释放输入 slot，图像偏移指向元数据区、图像大小小于 stride x height、越界或多图重叠都会返回 `INVALID_PAYLOAD`，CRC 不匹配返回 `CRC_MISMATCH`。解析成功时会记录当前任务中的 `camera_id/pose_id -> camera_index` 动态映射，确保机器人飞拍末端相机（例如 `EYE_IN_HAND`）在 NG/RECHECK 缺陷结果回写时也能使用正确的 `camera_index`，不依赖固定静态表。`ErrorCode` 与 C++ `common/error_code.hpp` 保持枚举值一致，当前包含 `LIGHT_FAULT`、`CAMERA_FAULT`、`TRIGGER_SYNC_FAULT`、`CONFIGURATION_ERROR` 和 `ROBOT_FAULT` 等 C++ 采集侧结构化失败码。
 
 ### 质量门禁与预处理
 
@@ -183,15 +183,16 @@ training_tools/
 
 离线训练工具复用同一套模型输入契约：
 
-- `training_tools.dataset_manifest` 读取 `dataset_manifest.jsonl` 和 ROI `P5` PGM 图，将同一 trace/camera/ROI 下的多光源样本聚合。
+- `training_tools.dataset_manifest` 读取 `dataset_manifest.jsonl` 和 ROI `P5` PGM 图，将同一 trace/camera/pose/ROI 下的多光源样本聚合；旧 manifest 没有 `pose_id` 时默认回退到 `camera_id`。
 - `training_tools.extract_embeddings` 调用在线 `FeatureBuilder` 和 `EmbeddingExtractor`，确保训练出的 PCA/PatchCore 资产与在线 `NCHW` 输入通道一致。
 - `training_tools.evaluate_pipeline` 调用在线 `InferenceEngine`，按 manifest 中的人工标注或弱标签计算整体、类别、ROI、camera 和 split 指标。
-- `training_tools.collect_shm_dataset` 调用在线 `ShmClient`、`SeatSurfaceAoiAlgorithm` 和 `TraceWriter`，从 C++ 共享内存任务获取多相机多光源图像，保存 `raw_images/`、`raw_frame_manifest.jsonl`，并生成 trace/训练 manifest；它不控制 PLC、相机或频闪。
+- `training_tools.collect_trace_dataset` 同时兼容旧 trace 目录 `images/<camera>/<roi>/<light>.pgm` 和新目录 `images/<camera>/<pose>/<roi>/<light>.pgm`，生成的样本路径与 manifest 都包含 `pose_id`，避免机器人飞拍同一末端相机下的不同 pose 互相覆盖。
+- `training_tools.collect_shm_dataset` 调用在线 `ShmClient`、`SeatSurfaceAoiAlgorithm` 和 `TraceWriter`，从 C++ 共享内存任务获取多相机多光源图像，保存按 `camera_id/pose_id` 分目录的 `raw_images/`、`raw_frame_manifest.jsonl`，并生成 trace/训练 manifest；它不控制 PLC、相机或频闪。
 - `training_tools.train_patchcore_assets` 训练 PatchCore safety net 所需的 embedding/PCA/memory bank/FAISS 资产；`training_tools.export_wideresnet_embedding` 生成生产配方引用的 WideResNet50 embedding ONNX。
 
 ### 融合、规则和追溯
 
-`FusionEngine` 对同一 camera/pose/ROI/class 执行 IoU NMS，合并 evidence lights，并限制每个 ROI 候选数。`DefectFilter` 和 `RuleEngine` 根据类别阈值、面积阈值和候选分数输出 `OK`、`NG`、`RECHECK` 或 `ERROR`。
+`FusionEngine` 对同一 camera/pose/ROI/class 执行 IoU NMS，合并 evidence lights，并限制每个 ROI 候选数。NMS 抑制数和候选容量溢出数分开统计；如果容量溢出隐藏了候选且规则原本会输出 `OK`，`RuleEngine` 会改为 `RECHECK` 并写入 `CONFIGURATION_ERROR`，避免用 `OK` 掩盖算法不确定性。`DefectFilter` 和 `RuleEngine` 根据类别阈值、面积阈值和候选分数输出 `OK`、`NG`、`RECHECK` 或 `ERROR`。
 
 `TraceWriter` 按配方 trace 策略保存：
 
@@ -204,7 +205,7 @@ training_tools/
 - `fusion_summary.json`
 - `timings.json`
 - `error.json`
-- ROI PGM 图和缺陷 overlay PPM 图
+- ROI PGM 图和缺陷 overlay PPM 图；ROI 图路径为 `images/<camera_id>/<pose_id>/<roi_name>/<light_id>.pgm`，overlay 文件名也包含 `pose_id`。
 
 ## 扩展规则
 

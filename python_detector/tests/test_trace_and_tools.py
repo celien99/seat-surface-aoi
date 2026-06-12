@@ -3,7 +3,7 @@ from pathlib import Path
 import json
 
 from python_detector.config.recipe_schema import ModelConfig, RecipeManager
-from python_detector.ipc.data_types import InspectionResult
+from python_detector.ipc.data_types import CameraBundle, InspectionResult, SeatInspectionJob
 from python_detector.pipeline.pipeline import InspectionPipeline
 from python_detector.pipeline.quality_gate import FrameQuality, QualityReport
 from python_detector.trace.trace_writer import TraceWriter
@@ -50,7 +50,7 @@ def test_trace_writer_generates_result_files(tmp_path: Path) -> None:
     assert (trace_dir / "fusion_summary.json").exists()
     assert (trace_dir / "timings.json").exists()
     assert (trace_dir / "error.json").exists()
-    assert (trace_dir / "images" / "TOP_BACK" / "full" / "DIFFUSE.pgm").exists()
+    assert (trace_dir / "images" / "TOP_BACK" / "TOP_BACK" / "full" / "DIFFUSE.pgm").exists()
 
 
 def test_trace_writer_generates_defect_overlay(tmp_path: Path) -> None:
@@ -65,6 +65,57 @@ def test_trace_writer_generates_defect_overlay(tmp_path: Path) -> None:
     overlays = list((trace_dir / "overlays").glob("*.ppm"))
     assert overlays
     assert overlays[0].read_bytes().startswith(b"P6\n")
+
+
+def test_trace_writer_separates_robot_flyshot_pose_images(tmp_path: Path) -> None:
+    recipe = _recipe(tmp_path, save_ok_ratio=1.0)
+    frame_a = make_simulated_job().camera_bundles[0].light_frames
+    frame_b = make_simulated_job().camera_bundles[0].light_frames
+    job = SeatInspectionJob(
+        sequence_id=11,
+        trigger_id=1011,
+        seat_id="SIM_ROBOT_TRACE",
+        recipe_id=recipe.recipe_id,
+        sku=recipe.sku,
+        camera_bundles=[
+            CameraBundle(camera_id="EYE_IN_HAND", pose_id="T1_BACKREST", light_frames=frame_a),
+            CameraBundle(camera_id="EYE_IN_HAND", pose_id="T2_CUSHION", light_frames=frame_b),
+        ],
+    )
+    prepared = [
+        type(
+            "Prepared",
+            (),
+            {
+                "camera_id": "EYE_IN_HAND",
+                "pose_id": "T1_BACKREST",
+                "rois": {"full": frame_a},
+            },
+        )(),
+        type(
+            "Prepared",
+            (),
+            {
+                "camera_id": "EYE_IN_HAND",
+                "pose_id": "T2_CUSHION",
+                "rois": {"full": frame_b},
+            },
+        )(),
+    ]
+    result = InspectionResult(
+        sequence_id=job.sequence_id,
+        trigger_id=job.trigger_id,
+        seat_id=job.seat_id,
+        decision="RECHECK",
+        quality_pass=False,
+        error_code=7,
+    )
+
+    trace_dir = TraceWriter(recipe.trace.root_dir).write(job, recipe, result, {"prepared_bundles": prepared})
+
+    assert trace_dir is not None
+    assert (trace_dir / "images" / "EYE_IN_HAND" / "T1_BACKREST" / "full" / "DIFFUSE.pgm").exists()
+    assert (trace_dir / "images" / "EYE_IN_HAND" / "T2_CUSHION" / "full" / "DIFFUSE.pgm").exists()
 
 
 def test_trace_writer_uses_deterministic_ok_sampling(tmp_path: Path) -> None:

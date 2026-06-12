@@ -108,6 +108,7 @@ class InspectionPipeline:
                     "input_count": len(candidates),
                     "output_count": len(fused.candidates),
                     "suppressed_count": fused.suppressed_count,
+                    "overflow_count": fused.overflow_count,
                 },
                 "timings": timings,
             }

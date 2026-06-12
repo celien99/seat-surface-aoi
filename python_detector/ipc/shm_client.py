@@ -221,10 +221,12 @@ class ShmClient:
                 raise _FrameSlotReadError("frame payload CRC mismatch", ErrorCode.CRC_MISMATCH)
 
             bundles: dict[tuple[str, str], CameraBundle] = {}
+            image_ranges: list[tuple[int, int]] = []
+            image_region_offset = frame_slot_image_offset(frame_meta_count)
             meta_offset = base + frame_slot_meta_offset()
             for i in range(frame_meta_count):
                 values = LIGHT_FRAME_META.unpack_from(self.frames.mm, meta_offset + i * LIGHT_FRAME_META.size)
-                frame = self._make_light_frame(values, base, payload_size)
+                frame = self._make_light_frame(values, base, payload_size, image_region_offset, image_ranges)
                 bundle_key = (frame.camera_id, frame.pose_id)
                 if bundle_key not in bundles:
                     bundles[bundle_key] = CameraBundle(
@@ -302,7 +304,14 @@ class ShmClient:
         except Exception:
             self._release_frame_slot(identity.sequence_id)
 
-    def _make_light_frame(self, values: tuple, slot_base: int, payload_size: int) -> LightFrame:
+    def _make_light_frame(
+        self,
+        values: tuple,
+        slot_base: int,
+        payload_size: int,
+        image_region_offset: int,
+        image_ranges: list[tuple[int, int]],
+    ) -> LightFrame:
         (
             camera_index,
             pose_index,
@@ -338,8 +347,19 @@ class ShmClient:
         ) = values
         image_start = slot_base + image_offset
         image_end = image_start + image_size
-        if image_offset + image_size > payload_size:
+        min_image_size = int(stride_bytes) * int(height)
+        image_range = (int(image_offset), int(image_offset + image_size))
+        if (
+            image_offset < image_region_offset
+            or image_size < min_image_size
+            or image_size <= 0
+            or image_offset + image_size > payload_size
+        ):
             raise _FrameSlotReadError("frame image range exceeds payload", ErrorCode.INVALID_PAYLOAD)
+        for existing_start, existing_end in image_ranges:
+            if image_range[0] < existing_end and image_range[1] > existing_start:
+                raise _FrameSlotReadError("frame image ranges overlap", ErrorCode.INVALID_PAYLOAD)
+        image_ranges.append(image_range)
         image = memoryview(self.frames.mm)[image_start:image_end]
         if crc32(image) != image_crc32:
             raise _FrameSlotReadError("frame image CRC mismatch", ErrorCode.CRC_MISMATCH)

@@ -75,7 +75,12 @@ class TraceWriter:
             for roi_name, frames in getattr(bundle, "rois", {}).items():
                 for light_id, frame in frames.items():
                     self._write_pgm(
-                        trace_dir / "images" / _safe_name(bundle.camera_id) / _safe_name(roi_name) / f"{_safe_name(light_id)}.pgm",
+                        trace_dir
+                        / "images"
+                        / _safe_name(bundle.camera_id)
+                        / _safe_name(getattr(bundle, "pose_id", "") or bundle.camera_id)
+                        / _safe_name(roi_name)
+                        / f"{_safe_name(light_id)}.pgm",
                         frame,
                     )
 
@@ -89,31 +94,44 @@ class TraceWriter:
             if frame is None:
                 continue
             self._write_overlay_ppm(
-                overlay_dir / f"{_safe_name(defect.defect_id)}_{_safe_name(defect.camera_id)}_{_safe_name(defect.roi_name)}.ppm",
+                overlay_dir
+                / (
+                    f"{_safe_name(defect.defect_id)}_{_safe_name(defect.camera_id)}_"
+                    f"{_safe_name(defect.pose_id or defect.camera_id)}_{_safe_name(defect.roi_name)}.ppm"
+                ),
                 frame,
                 defect,
             )
 
-    def _frame_index(self, prepared_bundles: Any) -> dict[tuple[str, str, str], LightFrame]:
-        index: dict[tuple[str, str, str], LightFrame] = {}
+    def _frame_index(self, prepared_bundles: Any) -> dict[tuple[str, str, str, str], LightFrame]:
+        index: dict[tuple[str, str, str, str], LightFrame] = {}
         for bundle in prepared_bundles or []:
             for roi_name, frames in getattr(bundle, "rois", {}).items():
                 for light_id, frame in frames.items():
-                    index[(bundle.camera_id, roi_name, light_id)] = frame
+                    pose_id = getattr(bundle, "pose_id", "") or bundle.camera_id
+                    index[(bundle.camera_id, pose_id, roi_name, light_id)] = frame
         return index
 
     def _frame_for_defect(
         self,
         defect: DefectResult,
-        frame_index: dict[tuple[str, str, str], LightFrame],
+        frame_index: dict[tuple[str, str, str, str], LightFrame],
     ) -> LightFrame | None:
+        pose_id = defect.pose_id or defect.camera_id
         for light_id in defect.evidence_lights:
-            frame = frame_index.get((defect.camera_id, defect.roi_name, light_id))
+            frame = frame_index.get((defect.camera_id, pose_id, defect.roi_name, light_id))
             if frame is not None:
                 return frame
         return (
-            frame_index.get((defect.camera_id, defect.roi_name, "DIFFUSE"))
-            or next((frame for (camera_id, roi_name, _light_id), frame in frame_index.items() if camera_id == defect.camera_id and roi_name == defect.roi_name), None)
+            frame_index.get((defect.camera_id, pose_id, defect.roi_name, "DIFFUSE"))
+            or next(
+                (
+                    frame
+                    for (camera_id, frame_pose_id, roi_name, _light_id), frame in frame_index.items()
+                    if camera_id == defect.camera_id and frame_pose_id == pose_id and roi_name == defect.roi_name
+                ),
+                None,
+            )
         )
 
     def _write_pgm(self, path: Path, frame: LightFrame) -> None:

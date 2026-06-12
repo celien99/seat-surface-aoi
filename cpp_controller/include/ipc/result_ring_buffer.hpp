@@ -41,6 +41,10 @@ private:
                        InspectionResultPayload* out_result,
                        ErrorCode* out_error_code,
                        std::string* error_message);
+  bool reclaim_stale_or_bad_slot(std::uint32_t slot_index,
+                                 std::uint64_t sequence_id,
+                                 ErrorCode* out_error_code,
+                                 std::string* error_message);
 
   SharedMemory shm_;
   std::uint32_t slot_count_ = 0;

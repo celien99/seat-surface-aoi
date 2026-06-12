@@ -170,6 +170,59 @@ def _write_single_frame_slot(
     return base, result_base
 
 
+def _write_invalid_image_range_slot(client: ShmClient, *, overlap: bool = False) -> tuple[int, int]:
+    base = SHM_HEADER.size
+    result_base = SHM_HEADER.size
+    frame_count = 2 if overlap else 1
+    image_offset = frame_slot_image_offset(frame_count)
+    image_a = bytes([80, 80, 80, 80]) if overlap else bytes([80, 81, 82, 83])
+    image_b = image_a if overlap else bytes([90, 91, 92, 93])
+    payload_size = image_offset + len(image_a) + (len(image_b) if overlap else 0)
+    client.frames.mm[base + image_offset : base + image_offset + len(image_a)] = image_a
+    if overlap:
+        client.frames.mm[base + image_offset + 2 : base + image_offset + 2 + len(image_b)] = image_b
+
+    _pack_light_frame_meta(
+        client.frames.mm,
+        base + frame_slot_meta_offset(),
+        image_offset=frame_slot_meta_offset() if not overlap else image_offset,
+        image=image_a,
+    )
+    if overlap:
+        _pack_light_frame_meta(
+            client.frames.mm,
+            base + frame_slot_meta_offset() + LIGHT_FRAME_META.size,
+            light_index=2,
+            light_seq_index=1,
+            frame_index=2,
+            image_offset=image_offset + 2,
+            image=image_b,
+        )
+    _pack_job_meta(
+        client.frames.mm,
+        base + FRAME_SLOT_HEADER_PREFIX.size,
+        sequence_id=7,
+        frame_count=frame_count,
+    )
+    payload_crc = crc32(memoryview(client.frames.mm)[base + frame_slot_meta_offset() : base + payload_size])
+    FRAME_SLOT_HEADER_PREFIX.pack_into(
+        client.frames.mm,
+        base,
+        SlotState.READY,
+        7,
+        payload_size,
+        0,
+        payload_crc,
+        frame_count,
+        0,
+    )
+    header_bytes = bytearray(client.frames.mm[base : base + FRAME_SLOT_HEADER_SIZE])
+    struct.pack_into("<I", header_bytes, 0, 0)
+    struct.pack_into("<I", header_bytes, 20, 0)
+    struct.pack_into("<I", client.frames.mm, base + 20, crc32(header_bytes))
+    return base, result_base
+
+
 def _write_duplicate_light_frame_slot(client: ShmClient) -> tuple[int, int]:
     base = SHM_HEADER.size
     result_base = SHM_HEADER.size
@@ -378,3 +431,37 @@ def test_header_crc_failure_releases_slot_without_untrusted_result() -> None:
     assert client._read_frame_slot(0) is None
     assert AtomicU32.load(client.frames.mm, frame_base) == SlotState.EMPTY
     assert AtomicU32.load(client.results.mm, result_base) == SlotState.EMPTY
+
+
+def test_image_offset_pointing_to_meta_publishes_invalid_payload_error() -> None:
+    client = _client_with_single_frame_and_result_slot(frame_slot_size=2048)
+    frame_base, result_base = _write_invalid_image_range_slot(client)
+
+    assert client._read_frame_slot(0) is None
+    assert AtomicU32.load(client.frames.mm, frame_base) == SlotState.EMPTY
+
+    state, sequence_id, *_rest = RESULT_SLOT_HEADER_PREFIX.unpack_from(client.results.mm, result_base)
+    result_meta = INSPECTION_RESULT_META.unpack_from(
+        client.results.mm,
+        result_base + RESULT_SLOT_HEADER_PREFIX.size,
+    )
+    assert state == SlotState.READY
+    assert sequence_id == 7
+    assert result_meta[6] == ErrorCode.INVALID_PAYLOAD
+
+
+def test_overlapping_image_ranges_publish_invalid_payload_error() -> None:
+    client = _client_with_single_frame_and_result_slot(frame_slot_size=2048)
+    frame_base, result_base = _write_invalid_image_range_slot(client, overlap=True)
+
+    assert client._read_frame_slot(0) is None
+    assert AtomicU32.load(client.frames.mm, frame_base) == SlotState.EMPTY
+
+    state, sequence_id, *_rest = RESULT_SLOT_HEADER_PREFIX.unpack_from(client.results.mm, result_base)
+    result_meta = INSPECTION_RESULT_META.unpack_from(
+        client.results.mm,
+        result_base + RESULT_SLOT_HEADER_PREFIX.size,
+    )
+    assert state == SlotState.READY
+    assert sequence_id == 7
+    assert result_meta[6] == ErrorCode.INVALID_PAYLOAD

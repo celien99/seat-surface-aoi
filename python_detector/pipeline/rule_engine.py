@@ -48,6 +48,11 @@ class RuleEngine:
                     decision=filtered.decision,
                 )
             )
+        if fused_result.overflow_count > 0 and decision == "OK":
+            decision = "RECHECK"
+            error_code = ErrorCode.CONFIGURATION_ERROR
+        else:
+            error_code = ErrorCode.NONE
 
         return InspectionResult(
             sequence_id=job.sequence_id,
@@ -56,7 +61,7 @@ class RuleEngine:
             decision=decision,
             defects=defects,
             quality_pass=True,
-            error_code=ErrorCode.NONE,
+            error_code=error_code,
             elapsed_ms=elapsed_ms,
         )
 

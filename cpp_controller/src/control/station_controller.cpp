@@ -108,6 +108,18 @@ bool StationController::initialize(const StationConfig& config) {
 }
 
 bool StationController::wait_for_trigger(PlcTrigger* out_trigger, std::string* error_message) {
+  const auto snapshot = health_.snapshot();
+  if (snapshot.state == StationState::Fault) {
+    if (error_message != nullptr) {
+      *error_message = snapshot.alarm_message.empty()
+                           ? "station is in fault state"
+                           : snapshot.alarm_message;
+    }
+    record_system_event("trigger_wait_blocked_by_fault",
+                        ErrorCode::DeviceFault,
+                        error_message != nullptr ? *error_message : "station is in fault state");
+    return false;
+  }
   if (!plc_client_->wait_trigger(out_trigger, config_.trigger_timeout_ms, error_message)) {
     const std::string message =
         error_message != nullptr ? *error_message : "PLC trigger wait failed";
@@ -170,7 +182,9 @@ InspectionResultPayload StationController::inspect_one_seat(const PlcTrigger& tr
     return make_and_send_recheck_result(trigger, sequence_id, ErrorCode::InvalidPayload, error);
   }
   const auto decision = static_cast<InspectionDecision>(result.meta.decision);
-  if (!plc_client_->send_decision(trigger, sequence_id, decision, 200, &error)) {
+  const InspectionDecision plc_decision =
+      decision == InspectionDecision::Error ? InspectionDecision::Recheck : decision;
+  if (!plc_client_->send_decision(trigger, sequence_id, plc_decision, 200, &error)) {
     auto recheck = make_recheck_result(trigger, sequence_id, ErrorCode::DeviceFault, error);
     record_result_health(recheck, error);
     record_event("plc_output_failed",
@@ -187,7 +201,9 @@ InspectionResultPayload StationController::inspect_one_seat(const PlcTrigger& tr
                sequence_id,
                decision,
                static_cast<ErrorCode>(result.meta.error_code),
-               "detector result accepted and PLC output sent");
+               plc_decision == decision
+                   ? "detector result accepted and PLC output sent"
+                   : "detector ERROR mapped to PLC RECHECK output");
   log_result(result);
   return result;
 }

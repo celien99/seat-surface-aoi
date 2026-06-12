@@ -46,8 +46,14 @@ bool FrameRingBuffer::initialize(const std::string& name,
   }
 
   auto* h = header();
-  if (reset || h->magic != kShmProtocolMagic || h->version != kShmProtocolVersion ||
-      h->slot_count != slot_count || h->slot_size != slot_size) {
+  const bool layout_matches =
+      h->magic == kShmProtocolMagic && h->version == kShmProtocolVersion &&
+      h->slot_count == slot_count && h->slot_size == slot_size;
+  if (!reset && !shm_.was_created() && !layout_matches) {
+    shm_.close();
+    return false;
+  }
+  if (reset || shm_.was_created()) {
     std::memset(shm_.data(), 0, total_size);
     initialize_header(h, slot_count, slot_size);
     for (std::uint32_t i = 0; i < slot_count; ++i) {

@@ -618,6 +618,18 @@ bool FrameAssembler::wait_robot_pose_ready(const PlcTrigger& trigger,
     return false;
   }
   RobotPoseRequest request;
+  if (config_.capture_mode != CaptureMode::RobotFlyshot) {
+    out_status->ready = true;
+    out_status->fault = false;
+    out_status->shot_id = trigger.trigger_id;
+    out_status->robot_timestamp_us = 0;
+    for (int index = 0; index < 3; ++index) {
+      out_status->tcp_xyz_mm[index] = 0.0F;
+      out_status->rpy_deg[index] = 0.0F;
+    }
+    out_status->message = "fixed camera mode";
+    return true;
+  }
   request.pose_index = view.pose_index;
   request.pose_id = view.pose_id;
   request.shot_id_source = view.shot_id_source;

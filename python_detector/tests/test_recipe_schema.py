@@ -244,6 +244,45 @@ def test_recipe_parses_fusion_config() -> None:
     assert recipe.fusion.max_candidates_per_roi == 16
 
 
+def test_recipe_preserves_list_cameras_with_same_camera_different_pose() -> None:
+    recipe = recipe_from_dict(
+        {
+            "recipe_id": "robot_views",
+            "sku": "sku",
+            "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+            "cameras": [
+                {"camera_id": "EYE_IN_HAND", "pose_id": "T1_BACKREST", "model_key": "default"},
+                {"camera_id": "EYE_IN_HAND", "pose_id": "T2_CUSHION", "model_key": "default"},
+            ],
+            "thresholds": {"scratch": {"ng_score": 0.35, "recheck_score": 0.2}},
+            "models": {"default": {"backend": "fake", "role": "primary", "class_names": ["scratch"]}},
+        }
+    )
+
+    assert [(camera.camera_id, camera.pose_id) for camera in recipe.cameras] == [
+        ("EYE_IN_HAND", "T1_BACKREST"),
+        ("EYE_IN_HAND", "T2_CUSHION"),
+    ]
+    assert recipe.model_key_for("EYE_IN_HAND", "full", "T2_CUSHION") == "default"
+
+
+def test_recipe_rejects_duplicate_list_camera_pose() -> None:
+    with pytest.raises(RecipeValidationError, match="重复视角配置"):
+        recipe_from_dict(
+            {
+                "recipe_id": "duplicate_robot_view",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                "cameras": [
+                    {"camera_id": "EYE_IN_HAND", "pose_id": "T1_BACKREST", "model_key": "default"},
+                    {"camera_id": "EYE_IN_HAND", "pose_id": "T1_BACKREST", "model_key": "default"},
+                ],
+                "thresholds": {"scratch": {"ng_score": 0.35, "recheck_score": 0.2}},
+                "models": {"default": {"backend": "fake", "role": "primary", "class_names": ["scratch"]}},
+            }
+        )
+
+
 def test_recipe_rejects_model_class_without_explicit_threshold() -> None:
     with pytest.raises(RecipeValidationError, match="models.detector.class_names 缺少显式 thresholds 配置"):
         recipe_from_dict(

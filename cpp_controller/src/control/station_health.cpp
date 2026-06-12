@@ -96,7 +96,8 @@ StationHealthSnapshot StationHealthMonitor::snapshot() const {
 
 void StationHealthMonitor::update_alarm(ErrorCode error_code, const std::string& message) {
   if (snapshot_.consecutive_recheck_count >= critical_recheck_threshold_ ||
-      error_code == ErrorCode::DeviceFault) {
+      error_code == ErrorCode::DeviceFault ||
+      error_code == ErrorCode::DetectorTimeout) {
     snapshot_.alarm_level = AlarmLevel::Critical;
     snapshot_.state = StationState::Fault;
   } else if (snapshot_.consecutive_recheck_count >= warning_recheck_threshold_ ||

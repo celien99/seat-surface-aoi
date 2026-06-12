@@ -618,6 +618,18 @@ bool reject_todo_if_set(const std::string& field_name,
   return false;
 }
 
+std::uint32_t bytes_per_channel_for_pixel_format(const std::string& pixel_format) {
+  if (pixel_format == "Mono8" || pixel_format == "BGR8" || pixel_format == "RGB8" ||
+      pixel_format == "BayerRG8") {
+    return 1;
+  }
+  if (pixel_format == "Mono10" || pixel_format == "Mono12" || pixel_format == "Mono16" ||
+      pixel_format == "BayerRG12") {
+    return 2;
+  }
+  return 0;
+}
+
 }  // namespace
 
 const char* capture_mode_name(CaptureMode mode) {
@@ -1002,6 +1014,13 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
       }
       return false;
     }
+    if (bytes_per_channel_for_pixel_format(camera.pixel_format) == 0) {
+      if (error_message != nullptr) {
+        *error_message = "不支持的相机 pixel_format: camera." +
+                         std::to_string(camera.camera_index) + "." + camera.pixel_format;
+      }
+      return false;
+    }
   }
   if (!validate_capture_views(config, error_message)) {
     return false;
@@ -1036,8 +1055,10 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
       frame_slot_image_offset(static_cast<std::uint32_t>(expected_frame_count));
   if (config.capture_views.empty()) {
     for (const auto& camera : config.cameras) {
+      const std::uint32_t bytes_per_channel =
+          bytes_per_channel_for_pixel_format(camera.pixel_format);
       estimated_payload_size += static_cast<std::uint64_t>(camera.width) *
-                                camera.height * camera.channels *
+                                camera.height * camera.channels * bytes_per_channel *
                                 config.light_order.size();
     }
   } else {
@@ -1047,8 +1068,10 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
         continue;
       }
       const auto& camera = camera_iter->second;
+      const std::uint32_t bytes_per_channel =
+          bytes_per_channel_for_pixel_format(camera.pixel_format);
       estimated_payload_size += static_cast<std::uint64_t>(camera.width) *
-                                camera.height * camera.channels *
+                                camera.height * camera.channels * bytes_per_channel *
                                 config.light_order.size();
     }
   }

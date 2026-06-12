@@ -181,7 +181,7 @@ def _predict_manifest_groups(
     engine = InferenceEngine(ModelRegistry())
     image_predictions: list[dict] = []
     for group in groups:
-        selected_model_key = model_key or recipe.model_key_for(group.camera_id, group.roi_name)
+        selected_model_key = model_key or recipe.model_key_for(group.camera_id, group.roi_name, group.pose_id)
         if selected_model_key not in recipe.models:
             raise TrainingDataError(f"{group.group_id}: 配方缺少模型配置: {selected_model_key}")
         try:
@@ -196,6 +196,7 @@ def _predict_manifest_groups(
                     "sample_id": group.sample_id,
                     "source_trace_dir": group.source_trace_dir,
                     "camera_id": group.camera_id,
+                    "pose_id": group.pose_id,
                     "roi_name": group.roi_name,
                     "split": group.split,
                     "decision": group.decision,

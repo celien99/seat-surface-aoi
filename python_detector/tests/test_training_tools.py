@@ -28,6 +28,7 @@ def test_collect_trace_dataset_generates_manifest_and_images(tmp_path: Path) -> 
     assert rows[0]["recipe_id"] == "seat_a_black_leather_v1"
     assert rows[0]["seat_id"] == "SIM_1"
     assert rows[0]["sequence_id"] == 1
+    assert rows[0]["pose_id"] == "TOP_BACK"
     assert rows[0]["decision"] == "NG"
     assert rows[0]["split"] == "train"
     assert rows[0]["label_status"] == "unlabeled"
@@ -36,6 +37,28 @@ def test_collect_trace_dataset_generates_manifest_and_images(tmp_path: Path) -> 
     assert all(row["bbox_xyxy_pixel"] == [[1, 2, 10, 12]] for row in rows)
     for row in rows:
         assert (output / row["image_path"]).read_bytes().startswith(b"P5\n")
+
+
+def test_collect_trace_dataset_keeps_robot_pose_images_separate(tmp_path: Path) -> None:
+    trace_dir = _write_robot_pose_trace(tmp_path / "trace" / "20260609" / "SIM_ROBOT_1")
+    output = tmp_path / "dataset"
+
+    samples = collect_trace_dataset([trace_dir], output, split="train")
+
+    rows = [sample.as_dict() for sample in samples]
+    assert len(rows) == 4
+    assert {(row["camera_id"], row["pose_id"], row["light_id"]) for row in rows} == {
+        ("EYE_IN_HAND", "T1_BACKREST", "DIFFUSE"),
+        ("EYE_IN_HAND", "T1_BACKREST", "HIGH_LEFT"),
+        ("EYE_IN_HAND", "T2_CUSHION", "DIFFUSE"),
+        ("EYE_IN_HAND", "T2_CUSHION", "HIGH_LEFT"),
+    }
+    assert all("EYE_IN_HAND/T1_BACKREST" in row["image_path"] for row in rows if row["pose_id"] == "T1_BACKREST")
+    assert all("EYE_IN_HAND/T2_CUSHION" in row["image_path"] for row in rows if row["pose_id"] == "T2_CUSHION")
+    assert {row["pose_id"]: row["has_defect"] for row in rows if row["light_id"] == "DIFFUSE"} == {
+        "T1_BACKREST": True,
+        "T2_CUSHION": False,
+    }
 
 
 def test_collect_trace_dataset_fails_on_empty_trace_root(tmp_path: Path) -> None:
@@ -170,6 +193,53 @@ def _write_trace(trace_dir: Path) -> Path:
                         "defect_id": "defect_1",
                         "class_name": "scratch",
                         "camera_id": "TOP_BACK",
+                        "roi_name": "full",
+                        "bbox_xyxy_pixel": [1, 2, 10, 12],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return trace_dir
+
+
+def _write_robot_pose_trace(trace_dir: Path) -> Path:
+    for pose_id, pixel in (("T1_BACKREST", b"\x01\x02\x03\x04"), ("T2_CUSHION", b"\x05\x06\x07\x08")):
+        image_dir = trace_dir / "images" / "EYE_IN_HAND" / pose_id / "full"
+        image_dir.mkdir(parents=True)
+        for light_id in ("DIFFUSE", "HIGH_LEFT"):
+            (image_dir / f"{light_id}.pgm").write_bytes(b"P5\n2 2\n255\n" + pixel)
+    (trace_dir / "job.json").write_text(
+        json.dumps(
+            {
+                "sequence_id": 1,
+                "trigger_id": 1001,
+                "seat_id": "SIM_ROBOT",
+                "recipe_id": "seat_a_robot_flyshot_v1",
+                "sku": "seat_a_black_leather",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (trace_dir / "recipe_summary.json").write_text(
+        json.dumps({"recipe_id": "seat_a_robot_flyshot_v1", "sku": "seat_a_black_leather"}),
+        encoding="utf-8",
+    )
+    (trace_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "sequence_id": 1,
+                "trigger_id": 1001,
+                "seat_id": "SIM_ROBOT",
+                "decision": "NG",
+                "quality_pass": True,
+                "defects": [
+                    {
+                        "defect_id": "defect_1",
+                        "class_name": "scratch",
+                        "camera_id": "EYE_IN_HAND",
+                        "pose_id": "T1_BACKREST",
                         "roi_name": "full",
                         "bbox_xyxy_pixel": [1, 2, 10, 12],
                     }

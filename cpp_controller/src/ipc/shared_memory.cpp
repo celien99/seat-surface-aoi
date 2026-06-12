@@ -25,9 +25,11 @@ SharedMemory& SharedMemory::operator=(SharedMemory&& other) noexcept {
   data_ = other.data_;
   size_ = other.size_;
   name_ = std::move(other.name_);
+  was_created_ = other.was_created_;
   other.fd_ = -1;
   other.data_ = nullptr;
   other.size_ = 0;
+  other.was_created_ = false;
   return *this;
 }
 
@@ -37,6 +39,7 @@ SharedMemory::~SharedMemory() {
 
 bool SharedMemory::create_or_open(const std::string& name, std::size_t size, bool reset) {
   close();
+  was_created_ = false;
   if (reset) {
     ::shm_unlink(name.c_str());
   }
@@ -64,6 +67,7 @@ bool SharedMemory::create_or_open(const std::string& name, std::size_t size, boo
 
   size_ = size;
   name_ = name;
+  was_created_ = created;
   return true;
 }
 
@@ -77,6 +81,7 @@ void SharedMemory::close() {
     fd_ = -1;
   }
   size_ = 0;
+  was_created_ = false;
 }
 
 void SharedMemory::unlink_name() {

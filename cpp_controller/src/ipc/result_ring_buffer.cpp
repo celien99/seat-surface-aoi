@@ -45,8 +45,14 @@ bool ResultRingBuffer::initialize(const std::string& name,
   }
 
   auto* h = header();
-  if (reset || h->magic != kShmProtocolMagic || h->version != kShmProtocolVersion ||
-      h->slot_count != slot_count || h->slot_size != slot_size) {
+  const bool layout_matches =
+      h->magic == kShmProtocolMagic && h->version == kShmProtocolVersion &&
+      h->slot_count == slot_count && h->slot_size == slot_size;
+  if (!reset && !shm_.was_created() && !layout_matches) {
+    shm_.close();
+    return false;
+  }
+  if (reset || shm_.was_created()) {
     std::memset(shm_.data(), 0, total_size);
     initialize_header(h, slot_count, slot_size);
     for (std::uint32_t i = 0; i < slot_count; ++i) {
@@ -76,12 +82,20 @@ bool ResultRingBuffer::wait_for_result(std::uint64_t sequence_id,
         header()->heartbeat = now_us();
         return true;
       }
+      const bool reclaimed =
+          reclaim_stale_or_bad_slot(i, sequence_id, &slot_error_code, error_message);
+      if (reclaimed) {
+        header()->read_index += 1;
+        header()->heartbeat = now_us();
+      }
       if (slot_error_code != ErrorCode::None) {
         if (out_error_code != nullptr) {
           *out_error_code = slot_error_code;
         }
-        header()->read_index += 1;
-        header()->heartbeat = now_us();
+        if (!reclaimed) {
+          header()->read_index += 1;
+          header()->heartbeat = now_us();
+        }
         return false;
       }
     }
@@ -130,9 +144,13 @@ bool ResultRingBuffer::read_ready_slot(std::uint32_t slot_index,
   }
 
   slot->state.store(static_cast<std::uint32_t>(SlotState::Reading), std::memory_order_release);
-  if (slot->payload_size < result_slot_defects_offset() ||
+  const std::uint64_t expected_payload_size =
+      result_slot_defects_offset() +
+      static_cast<std::uint64_t>(slot->defect_count) * sizeof(DefectResultMeta);
+  if (slot->payload_size != expected_payload_size ||
       slot->payload_size > slot_size_ ||
-      slot->defect_count > kMaxDefectsPerResult) {
+      slot->defect_count > kMaxDefectsPerResult ||
+      slot->result_meta.defect_count != slot->defect_count) {
     slot->state.store(static_cast<std::uint32_t>(SlotState::Empty),
                       std::memory_order_release);
     if (out_error_code != nullptr) {
@@ -183,6 +201,39 @@ bool ResultRingBuffer::read_ready_slot(std::uint32_t slot_index,
 
   slot->state.store(static_cast<std::uint32_t>(SlotState::Empty), std::memory_order_release);
   return true;
+}
+
+bool ResultRingBuffer::reclaim_stale_or_bad_slot(std::uint32_t slot_index,
+                                                 std::uint64_t sequence_id,
+                                                 ErrorCode* out_error_code,
+                                                 std::string* error_message) {
+  auto* slot = slot_header(slot_index);
+  const auto state = static_cast<SlotState>(slot->state.load(std::memory_order_acquire));
+  if (state == SlotState::Ready && slot->sequence_id < sequence_id) {
+    slot->state.store(static_cast<std::uint32_t>(SlotState::Empty),
+                      std::memory_order_release);
+    return true;
+  }
+  if (state == SlotState::Corrupted || state == SlotState::Timeout) {
+    if (slot->sequence_id > sequence_id) {
+      return false;
+    }
+    slot->state.store(static_cast<std::uint32_t>(SlotState::Empty),
+                      std::memory_order_release);
+    if (slot->sequence_id < sequence_id) {
+      return true;
+    }
+    if (out_error_code != nullptr) {
+      *out_error_code = state == SlotState::Corrupted ? ErrorCode::CrcMismatch
+                                                      : ErrorCode::DetectorTimeout;
+    }
+    if (error_message != nullptr) {
+      *error_message = state == SlotState::Corrupted ? "result slot marked corrupted"
+                                                     : "result slot marked timeout";
+    }
+    return true;
+  }
+  return false;
 }
 
 }  // namespace seat_aoi

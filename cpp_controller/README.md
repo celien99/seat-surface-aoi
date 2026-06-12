@@ -161,6 +161,8 @@ ipc_safety_checks   (依赖 seat_aoi_control)
 
 机器人飞拍模式会在采集每个 pose 前调用 `RobotClient::wait_pose_ready()`，校验 READY/FAULT/SHOT_ID，并把 `pose_id`、`shot_id`、机器人时间戳和 TCP 位姿写入 `LightFrameMeta`。任何机器人未到位、FAULT、触发错序或超时都返回 `RobotFault`，不会输出 `OK`。
 
+固定机位模式不会调用 `RobotClient`，采集器会为每个固定机位填充确定性的中性 pose 状态：`ready=true`、`fault=false`、`shot_id=trigger_id`、机器人时间戳和 TCP/RPY 为 0。这样固定机位链路不会因为未配置机器人 backend 被误阻断。
+
 ---
 
 ## 共享内存协议
@@ -210,6 +212,13 @@ Empty ─→ Writing ─→ Ready ─→ Reading ─→ Empty
 | `SeatJobMeta` | 232 bytes | 作业元数据，含 `view_count` 与 `capture_mode` |
 | `InspectionResultMeta` | 104 bytes | 检测结果元数据 |
 | `DefectResultMeta` | 464 bytes | 单个缺陷描述，含 `camera_id` 与 `pose_id` |
+
+### 初始化和结果回收安全策略
+
+- Frame/Result ring 打开既有共享内存时会校验 `magic/version/slot_count/slot_size`。未显式 reset 且布局不匹配时初始化失败，不会静默清零或重写可能属于另一进程的共享内存。
+- Result ring 读取时要求 `payload_size == ResultSlotHeader + defect_count * DefectResultMeta`，且 slot 头与 `InspectionResultMeta.defect_count` 一致，防止缺陷数组截断或尾部脏数据被接受。
+- 等待当前 `sequence_id` 时，旧序号的 `Ready/Corrupted/Timeout` slot 会被回收清空；当前序号的 `Corrupted` 或 `Timeout` slot 会立即转成 `CrcMismatch` 或 `DetectorTimeout`，不会继续等待到超时。
+- detector 返回 `ERROR` 时，C++ 记录原始错误和健康状态，但输出给 PLC 的动作映射为 `Recheck`，避免把检测侧不确定状态输出成产线 `OK`。
 
 ---
 
@@ -358,6 +367,7 @@ cp config/station_runtime.robot_flyshot.production.example.conf \
 - 机器人飞拍模式必须配置非 simulated 的 `robot.backend`、Robot READY/FAULT/START 点位以及每个 pose 的 `shot_id_source`、`photo_trigger_input` 和标定位姿信息。
 - 生产模式必须使用 `camera_exposure_output` 或等价硬触发同步，`software` 仅用于模拟或低精度联调。
 - `strobe_width_us` 不能大于 `exposure_us`，`frame_slot_size` 必须能容纳 `view_count x light_count` 的完整图像包。
+- 相机 `pixel_format` 只接受当前已知格式，`Mono10/Mono12/Mono16/BayerRG12` 按 2 bytes/channel 估算 frame slot 容量，避免高位深图像因容量低估写爆 slot。
 - `warning_recheck_threshold` 和 `critical_recheck_threshold` 控制连续复检报警升级，后者必须大于前者。
 - `trace_root` 指定 C++ 生产事件日志目录，默认写入 `trace/cpp_controller_events.jsonl`。
 
@@ -423,6 +433,8 @@ cp config/station_runtime.robot_flyshot.production.example.conf \
 | PLC 输出失败 | DeviceFault | Recheck |
 
 同时，C++ 主控会把 `inspection_start`、`inspection_complete`、`inspection_recheck`、`plc_output_failed` 等事件写入 `trace_root/cpp_controller_events.jsonl`。事件包含 `timestamp_us`、`sequence_id`、`trigger_id`、`seat_id`、`sku`、`decision`、`error_code` 和错误说明，用于现场复盘采集、IPC、detector 超时和 PLC 输出故障。
+
+`DetectorTimeout` 会把工位健康状态升级为 `Fault`；后续 `wait_for_trigger()` 会拒绝继续等待 PLC 触发并记录 `trigger_wait_blocked_by_fault`，直到外部复位或重新初始化。这样 detector 失联不会让产线在未知检测能力下继续放行新座椅。
 
 ---
 

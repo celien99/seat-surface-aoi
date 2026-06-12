@@ -24,13 +24,14 @@ public:
   std::size_t size() const { return size_; }
   const std::string& name() const { return name_; }
   bool is_open() const { return data_ != nullptr; }
+  bool was_created() const { return was_created_; }
 
 private:
   int fd_ = -1;
   void* data_ = nullptr;
   std::size_t size_ = 0;
   std::string name_;
+  bool was_created_ = false;
 };
 
 }  // namespace seat_aoi
-

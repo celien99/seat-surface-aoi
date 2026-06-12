@@ -23,6 +23,7 @@ class ManifestRow:
     decision: str
     quality_pass: bool
     camera_id: str
+    pose_id: str
     roi_name: str
     light_id: str
     image_path: str
@@ -48,6 +49,7 @@ class ManifestSampleGroup:
     decision: str
     quality_pass: bool
     camera_id: str
+    pose_id: str
     roi_name: str
     split: str
     label_status: str
@@ -100,9 +102,9 @@ def load_manifest_groups(manifest_path: Path) -> list[ManifestSampleGroup]:
     if not rows:
         raise TrainingDataError(f"manifest 没有样本: {manifest_path}")
     dataset_root = manifest_path.parent
-    grouped: dict[tuple[str, str, str, str], list[ManifestRow]] = {}
+    grouped: dict[tuple[str, str, str, str, str], list[ManifestRow]] = {}
     for row in rows:
-        key = (_base_sample_id(row.sample_id, row.light_id), row.source_trace_dir, row.camera_id, row.roi_name)
+        key = (_base_sample_id(row.sample_id, row.light_id), row.source_trace_dir, row.camera_id, row.pose_id, row.roi_name)
         grouped.setdefault(key, []).append(row)
 
     groups: list[ManifestSampleGroup] = []
@@ -123,6 +125,7 @@ def load_manifest_groups(manifest_path: Path) -> list[ManifestSampleGroup]:
                 decision=first.decision,
                 quality_pass=first.quality_pass,
                 camera_id=first.camera_id,
+                pose_id=first.pose_id,
                 roi_name=first.roi_name,
                 split=first.split,
                 label_status=first.label_status,
@@ -146,13 +149,14 @@ def build_feature_group_from_manifest_group(
     if not frames:
         raise TrainingDataError(f"{group.group_id}: 没有图像帧")
 
-    selected_model_key = model_key or recipe.model_key_for(group.camera_id, group.roi_name)
+    selected_model_key = model_key or recipe.model_key_for(group.camera_id, group.roi_name, group.pose_id)
     if selected_model_key not in recipe.models:
         raise TrainingDataError(f"{group.group_id}: 配方缺少模型配置: {selected_model_key}")
     light_order = tuple(light_id for light_id in recipe.light_order if light_id in frames) or tuple(frames)
     first_frame = next(iter(frames.values()))
     registration = RegistrationReport(
         camera_id=group.camera_id,
+        pose_id=group.pose_id,
         roi_name=group.roi_name,
         base_light_id=light_order[0],
         calibration_id=first_frame.calibration_id,
@@ -185,7 +189,7 @@ def light_frame_from_manifest_row(row: ManifestRow, dataset_root: Path) -> Light
     pgm = read_pgm(image_path)
     return LightFrame(
         camera_id=row.camera_id,
-        pose_id="",
+        pose_id=row.pose_id,
         light_id=row.light_id,
         frame_index=row.line_number,
         light_seq_index=row.line_number - 1,
@@ -259,6 +263,7 @@ def _row_from_dict(raw: dict[str, Any], line_number: int, manifest_path: Path) -
         decision=str(raw.get("decision", "")),
         quality_pass=bool(raw.get("quality_pass", False)),
         camera_id=_required_str(raw, "camera_id", line_number, manifest_path),
+        pose_id=str(raw.get("pose_id") or raw.get("camera_id", "")),
         roi_name=_required_str(raw, "roi_name", line_number, manifest_path),
         light_id=light_id,
         image_path=_required_str(raw, "image_path", line_number, manifest_path),
@@ -398,7 +403,7 @@ def _assert_group_consistent(rows: tuple[ManifestRow, ...], manifest_path: Path)
         if row.light_id in seen_lights:
             raise TrainingDataError(f"{manifest_path}:{row.line_number}: 重复光源: {row.light_id}")
         seen_lights.add(row.light_id)
-        for field_name in ("source_trace_dir", "camera_id", "roi_name", "decision", "split", "label_status"):
+        for field_name in ("source_trace_dir", "camera_id", "pose_id", "roi_name", "decision", "split", "label_status"):
             if getattr(row, field_name) != getattr(first, field_name):
                 raise TrainingDataError(f"{manifest_path}:{row.line_number}: 样本组字段不一致: {field_name}")
 
@@ -443,6 +448,7 @@ _KNOWN_FIELDS = {
     "decision",
     "quality_pass",
     "camera_id",
+    "pose_id",
     "roi_name",
     "light_id",
     "image_path",

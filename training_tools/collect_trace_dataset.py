@@ -23,6 +23,7 @@ class DatasetSample:
     decision: str
     quality_pass: bool
     camera_id: str
+    pose_id: str
     roi_name: str
     light_id: str
     image_path: str
@@ -42,6 +43,7 @@ class DatasetSample:
             "decision": self.decision,
             "quality_pass": self.quality_pass,
             "camera_id": self.camera_id,
+            "pose_id": self.pose_id,
             "roi_name": self.roi_name,
             "light_id": self.light_id,
             "image_path": self.image_path,
@@ -174,13 +176,17 @@ def _collect_trace_dir(
     defects = _defects_by_roi(result)
 
     samples: list[DatasetSample] = []
-    for image_path in sorted(images_dir.glob("*/*/*.pgm")):
-        camera_id = image_path.parent.parent.name
-        roi_name = image_path.parent.name
-        light_id = image_path.stem
-        defect_items = defects.get((camera_id, roi_name), [])
-        sample_id = _sample_id(trace_dir, sequence_id, camera_id, roi_name, light_id)
-        relative_image_path = Path("images") / camera_id / roi_name / light_id / f"{sample_id}{image_path.suffix}"
+    for image_path, camera_id, pose_id, roi_name, light_id in _iter_trace_images(images_dir):
+        defect_items = defects.get((camera_id, pose_id, roi_name), [])
+        sample_id = _sample_id(trace_dir, sequence_id, camera_id, pose_id, roi_name, light_id)
+        relative_image_path = (
+            Path("images")
+            / camera_id
+            / pose_id
+            / roi_name
+            / light_id
+            / f"{sample_id}{image_path.suffix}"
+        )
         destination = output_dir / relative_image_path
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(image_path, destination)
@@ -194,6 +200,7 @@ def _collect_trace_dir(
                 decision=decision,
                 quality_pass=quality_pass,
                 camera_id=camera_id,
+                pose_id=pose_id,
                 roi_name=roi_name,
                 light_id=light_id,
                 image_path=relative_image_path.as_posix(),
@@ -235,8 +242,25 @@ def _int_value(value: Any, name: str, trace_dir: Path) -> int:
         raise TraceDatasetError(f"{name} 必须是整数: {trace_dir}") from exc
 
 
-def _defects_by_roi(result: dict[str, Any]) -> dict[tuple[str, str], list[dict[str, Any]]]:
-    defects: dict[tuple[str, str], list[dict[str, Any]]] = {}
+def _iter_trace_images(images_dir: Path) -> list[tuple[Path, str, str, str, str]]:
+    images: list[tuple[Path, str, str, str, str]] = []
+    for image_path in sorted(images_dir.glob("*/*/*.pgm")):
+        camera_id = image_path.parent.parent.name
+        pose_id = camera_id
+        roi_name = image_path.parent.name
+        light_id = image_path.stem
+        images.append((image_path, camera_id, pose_id, roi_name, light_id))
+    for image_path in sorted(images_dir.glob("*/*/*/*.pgm")):
+        camera_id = image_path.parent.parent.parent.name
+        pose_id = image_path.parent.parent.name
+        roi_name = image_path.parent.name
+        light_id = image_path.stem
+        images.append((image_path, camera_id, pose_id, roi_name, light_id))
+    return images
+
+
+def _defects_by_roi(result: dict[str, Any]) -> dict[tuple[str, str, str], list[dict[str, Any]]]:
+    defects: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
     raw_defects = result.get("defects", [])
     if not isinstance(raw_defects, list):
         return defects
@@ -244,10 +268,11 @@ def _defects_by_roi(result: dict[str, Any]) -> dict[tuple[str, str], list[dict[s
         if not isinstance(item, dict):
             continue
         camera_id = str(item.get("camera_id") or "")
+        pose_id = str(item.get("pose_id") or camera_id)
         roi_name = str(item.get("roi_name") or "")
         if not camera_id or not roi_name:
             continue
-        defects.setdefault((camera_id, roi_name), []).append(item)
+        defects.setdefault((camera_id, pose_id, roi_name), []).append(item)
     return defects
 
 
@@ -262,7 +287,7 @@ def _bbox(defect: dict[str, Any], trace_dir: Path) -> list[int]:
     return [int(value) for value in raw_bbox]
 
 
-def _sample_id(trace_dir: Path, sequence_id: int, camera_id: str, roi_name: str, light_id: str) -> str:
+def _sample_id(trace_dir: Path, sequence_id: int, camera_id: str, pose_id: str, roi_name: str, light_id: str) -> str:
     safe_trace = _safe_name(trace_dir.name)
     trace_hash = hashlib.sha1(str(trace_dir.resolve()).encode("utf-8")).hexdigest()[:8]
     return "_".join(
@@ -272,6 +297,7 @@ def _sample_id(trace_dir: Path, sequence_id: int, camera_id: str, roi_name: str,
             trace_hash,
             str(sequence_id),
             camera_id,
+            pose_id,
             roi_name,
             light_id,
         )

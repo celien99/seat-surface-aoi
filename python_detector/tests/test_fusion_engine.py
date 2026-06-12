@@ -58,7 +58,8 @@ def test_fusion_caps_candidates_per_roi() -> None:
 
     fused = FusionEngine().fuse(candidates, FusionConfig(max_candidates_per_roi=2))
 
-    assert fused.suppressed_count == 2
+    assert fused.suppressed_count == 0
+    assert fused.overflow_count == 2
     assert len(fused.candidates) == 2
 
 

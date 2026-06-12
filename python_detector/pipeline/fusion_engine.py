@@ -11,6 +11,7 @@ from python_detector.models.inference_engine import DefectCandidate
 class FusedResult:
     candidates: list[DefectCandidate]
     suppressed_count: int = 0
+    overflow_count: int = 0
 
 
 class FusionEngine:
@@ -29,28 +30,31 @@ class FusionEngine:
 
         fused: list[DefectCandidate] = []
         suppressed_count = 0
+        overflow_count = 0
         for group in groups.values():
-            kept, suppressed = self._nms_group(group, config)
+            kept, suppressed, overflow = self._nms_group(group, config)
             fused.extend(kept)
             suppressed_count += suppressed
+            overflow_count += overflow
         fused.sort(key=lambda item: (item.camera_id, item.roi_name, item.class_name, -item.score))
-        return FusedResult(candidates=fused, suppressed_count=suppressed_count)
+        return FusedResult(candidates=fused, suppressed_count=suppressed_count, overflow_count=overflow_count)
 
-    def _nms_group(self, candidates: list[DefectCandidate], config: FusionConfig) -> tuple[list[DefectCandidate], int]:
+    def _nms_group(self, candidates: list[DefectCandidate], config: FusionConfig) -> tuple[list[DefectCandidate], int, int]:
         sorted_candidates = sorted(candidates, key=lambda item: item.score, reverse=True)
         kept: list[DefectCandidate] = []
         suppressed_count = 0
+        overflow_count = 0
         for candidate in sorted_candidates:
             matched_index = self._first_overlapping_index(kept, candidate, config.iou_threshold)
             if matched_index is None:
                 if len(kept) < config.max_candidates_per_roi:
                     kept.append(candidate)
                 else:
-                    suppressed_count += 1
+                    overflow_count += 1
                 continue
             kept[matched_index] = self._merge_candidates(kept[matched_index], candidate)
             suppressed_count += 1
-        return kept, suppressed_count
+        return kept, suppressed_count, overflow_count
 
     def _first_overlapping_index(
         self,
