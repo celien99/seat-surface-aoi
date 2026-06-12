@@ -149,7 +149,7 @@ seat-surface-aoi/
 ├── training_tools/      # trace 转样本、embedding、PCA/PatchCore/FAISS、评估、回放、benchmark
 ├── model/               # 真实模型产物占位：YOLO、WideResNet50、PCA、PatchCore、FAISS
 ├── docs/                # 架构、协议、C++ 运维、Python 算法运维、调用关系摘要
-└── tools/               # 协议校验、模型资产校验、架构就绪度检查、模拟 IPC 脚本
+└── tools/               # 项目级协议/资产/架构校验和 C++/Python IPC 联调脚本
 ```
 
 | 目录 | 读者入口 | 主要关注点 |
@@ -157,6 +157,7 @@ seat-surface-aoi/
 | `cpp_controller/` | [C++ 主控 README](cpp_controller/README.md) | PLC/Robot/Camera/Light 抽象、Capture Plan、共享内存发布、故障注入。 |
 | `python_detector/` | [Python 检测算法层导览](python_detector/README.md) | 质量门禁、ROI、ECC、多光源特征、模型后端、融合、规则、trace。 |
 | `training_tools/` | [Python 运维文档](docs/python_detector_operations.md) | 离线样本、embedding、PCA、PatchCore/FAISS、回放、benchmark。 |
+| `tools/` | [验证矩阵](#验证矩阵) | 跨 C++/Python 的协议、模型资产、架构就绪度和 IPC 联调校验。 |
 | `model/` | [模型产物目录说明](model/README.md) | 真实 ONNX、PCA、memory bank、FAISS 索引的部署约定。 |
 | `docs/` | [文档总览](docs/README.md) | V4 架构、共享内存协议、运维和代码调用关系。 |
 
@@ -238,6 +239,8 @@ trace/
   -> model/patchcore/*
   -> training_tools.evaluate_pipeline
 ```
+
+训练、回放、benchmark 和模型资产生成入口只放在 `training_tools/`；`tools/` 只放项目级校验和联调脚本，避免同一能力出现双入口。
 
 ## 验证矩阵
 

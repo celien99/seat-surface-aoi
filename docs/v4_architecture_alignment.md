@@ -160,7 +160,7 @@
 
 - 配方 schema 允许 `patchcore` 模型族，并限制只能作为 `safety_net`。
 - 已支持 `patchcore_knn` 后端，读取 memory bank JSON，执行 exact KNN，输出 anomaly score。
-- 已提供 `training_tools.build_patchcore_memory_bank`，支持从 JSONL embedding 构建 memory bank 并保存 coreset 参数、PCA 版本和 FAISS 元数据；旧 `tools.build_patchcore_memory_bank` 保留兼容包装。
+- 已提供 `training_tools.build_patchcore_memory_bank`，支持从 JSONL embedding 构建 memory bank 并保存 coreset 参数、PCA 版本和 FAISS 元数据；训练与回放类入口统一归属 `training_tools/`，不再在 `tools/` 保留兼容包装。
 - 已支持 `faiss_index_path`，部署环境有有效 FAISS 索引时优先使用 FAISS；缺索引或缺依赖时回退 exact KNN，并在 trace 中记录 `backend` 与 `fallback_reason`。
 - 已在 `model/patchcore/` 预留 PCA、memory bank 和 FAISS 索引产物路径，并提供模型资产校验工具。
 - anomaly score 会作为 `unknown_anomaly` 候选进入融合、缺陷过滤和规则引擎，低置信但可疑样本走 `RECHECK`。

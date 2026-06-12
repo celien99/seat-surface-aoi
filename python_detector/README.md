@@ -20,7 +20,7 @@ SeatInspectionJob
 
 Python 只负责检测链路，不控制 PLC、工业相机或频闪；在线图像和结果交换必须通过共享内存。任意缺帧、CRC 错误、协议错误、质量门禁失败、ROI/配准失败或模型异常都不能输出 `OK`，必须返回 `RECHECK` 或 `ERROR`。
 
-离线训练样本生成、真实 ROI 图 embedding 提取、PCA/PatchCore/FAISS 资产训练、ROI/监督 YOLO ONNX 导出、manifest 评估、回放和 benchmark 放在根目录 `training_tools/`。调用方向只能是 `training_tools -> python_detector`，在线算法层不能 import 离线训练工具。
+离线训练样本生成、真实 ROI 图 embedding 提取、PCA/PatchCore/FAISS 资产训练、ROI/监督 YOLO ONNX 导出、manifest 评估、回放和 benchmark 放在根目录 `training_tools/`。调用方向只能是 `training_tools -> python_detector`，在线算法层不能 import 离线训练工具；训练、回放和 benchmark 不再通过 `tools/` 暴露兼容入口。
 
 ## 依赖管理
 
@@ -215,7 +215,8 @@ training_tools/
 - 新增真实模型产物：放入根目录 `model/`，同步 `model/README.md`、生产配方模板和 `tools.validate_model_assets`。
 - 新增 trace 字段：改 `trace/trace_writer.py`、测试和本文。
 - 新增离线样本或训练支撑能力：放入根目录 `training_tools/`，只能消费 `python_detector` 公开入口和 trace 产物。
-- 新增或调整架构要求：同步 `tools.validate_architecture_readiness`、相关测试、根 README 和本文。
+- 新增回放、benchmark、训练或模型资产生成入口：放入 `training_tools/`，不要在 `tools/` 增加转发包装。
+- 新增或调整项目级协议、模型资产、架构就绪度或 IPC 联调校验：放入 `tools/`，同步 `tools.validate_architecture_readiness`、相关测试、根 README 和本文。
 - 修改在线共享内存协议：必须同步 C++、Python、校验工具、协议文档和测试。
 
 ## 验证命令

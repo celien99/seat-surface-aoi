@@ -7,7 +7,6 @@ import pytest
 
 from training_tools.build_patchcore_memory_bank import build_memory_bank
 from training_tools.collect_trace_dataset import TraceDatasetError, collect_trace_dataset, main as collect_main
-from tools.build_patchcore_memory_bank import build_memory_bank as compat_build_memory_bank
 
 
 def test_collect_trace_dataset_generates_manifest_and_images(tmp_path: Path) -> None:
@@ -66,14 +65,13 @@ def test_collect_trace_dataset_cli_reports_broken_json(tmp_path: Path, capsys: p
     assert "collect_trace_dataset_failed=JSON 解析失败" in captured.out
 
 
-def test_patchcore_memory_bank_builder_is_available_from_new_and_compat_modules(tmp_path: Path) -> None:
+def test_patchcore_memory_bank_builder_is_available_from_training_tools(tmp_path: Path) -> None:
     embeddings = tmp_path / "embeddings.jsonl"
     embeddings.write_text(
         "\n".join(json.dumps({"embedding": [float(index), float(index + 1)]}) for index in range(4)),
         encoding="utf-8",
     )
     output = tmp_path / "bank.json"
-    compat_output = tmp_path / "compat_bank.json"
 
     bank = build_memory_bank(
         embeddings,
@@ -83,16 +81,7 @@ def test_patchcore_memory_bank_builder_is_available_from_new_and_compat_modules(
         pca_version="pca_v1",
         faiss_enabled=True,
     )
-    compat_bank = compat_build_memory_bank(
-        embeddings,
-        compat_output,
-        version="bank_v1",
-        coreset_ratio=0.5,
-        pca_version="pca_v1",
-        faiss_enabled=True,
-    )
 
-    assert bank == compat_bank
     assert bank["embedding_dim"] == 2
     assert len(bank["vectors"]) == 2
 
@@ -140,4 +129,3 @@ def _write_trace(trace_dir: Path) -> Path:
         encoding="utf-8",
     )
     return trace_dir
-

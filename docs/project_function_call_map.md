@@ -26,7 +26,7 @@ PLC / 相机 / 频闪 / 机器人
 | `cpp_controller/` | C++ 主控、硬件抽象、采集编排、共享内存 IPC、健康报警和模拟驱动。 |
 | `python_detector/` | Python 检测算法、共享内存客户端、配方/标定、模型适配、trace 和单元测试。 |
 | `training_tools/` | 离线训练支撑：trace 转样本、embedding、PCA/PatchCore/FAISS、YOLO 导出、评估、回放、benchmark。 |
-| `tools/` | 协议校验、模型资产校验、架构就绪度检查、模拟 IPC 脚本和旧命令兼容包装。 |
+| `tools/` | 项目级工程校验和联调：协议校验、模型资产校验、架构就绪度检查、模拟 IPC 和 C++ soak 脚本。 |
 | `model/` | 真实模型、PCA、PatchCore memory bank 和 FAISS 索引占位目录。 |
 | `docs/` | 架构、协议、C++ 运维、Python 算法运维和本摘要。 |
 
