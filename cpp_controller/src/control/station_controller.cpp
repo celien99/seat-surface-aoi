@@ -320,6 +320,19 @@ bool StationController::validate_detector_result(const PlcTrigger& trigger,
       set_error("detector result OK with defects");
       return false;
     }
+  } else if (decision == InspectionDecision::NG) {
+    if (result.meta.quality_pass == 0) {
+      set_error("detector result NG with quality_pass=false");
+      return false;
+    }
+    if (result.meta.error_code != static_cast<std::uint32_t>(ErrorCode::None)) {
+      set_error("detector result NG with non-zero error_code");
+      return false;
+    }
+    if (result.meta.defect_count == 0) {
+      set_error("detector result NG without defects");
+      return false;
+    }
   } else if (result.meta.error_code == static_cast<std::uint32_t>(ErrorCode::None) &&
              decision == InspectionDecision::Error) {
     set_error("detector result ERROR with empty error_code");

@@ -59,6 +59,33 @@ def test_dome_roi_locator_fake_yolo_returns_traceable_report() -> None:
     assert report.locations[0].confidence == pytest.approx(0.99)
 
 
+class DuplicateRoiLocator(RoiLocator):
+    def _fake_yolo_rows(self, templates, recipe):  # type: ignore[no-untyped-def]
+        return [
+            [0.0, 0.0, 63.0, 47.0, 0.99, 0.0],
+            [1.0, 0.0, 63.0, 47.0, 0.98, 0.0],
+        ]
+
+
+def test_dome_roi_locator_rechecks_duplicate_conflicting_detections() -> None:
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    recipe = replace(
+        recipe,
+        roi_locator=replace(
+            recipe.roi_locator,
+            backend="fake_yolo",
+            model_path="simulated-yolo.onnx",
+            max_pose_error_px=4.0,
+        ),
+    )
+    pipeline = InspectionPipeline(preprocessor=Preprocessor(roi_locator=DuplicateRoiLocator()))
+
+    result = pipeline.process(make_simulated_job(), recipe)
+
+    assert result.decision == "RECHECK"
+    assert "full: duplicate conflicting ROI detections" in pipeline.last_context["error"]["message"]
+
+
 def test_dome_roi_locator_missing_light_returns_error_not_ok() -> None:
     recipe = RecipeManager().load("seat_a_black_leather_v1")
     recipe = replace(recipe, roi_locator=replace(recipe.roi_locator, backend="template"))

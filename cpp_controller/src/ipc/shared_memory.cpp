@@ -57,6 +57,14 @@ bool SharedMemory::create_or_open(const std::string& name, std::size_t size, boo
     close();
     return false;
   }
+  if (!created) {
+    struct stat stat_buf {};
+    if (::fstat(fd_, &stat_buf) != 0 ||
+        stat_buf.st_size != static_cast<off_t>(size)) {
+      close();
+      return false;
+    }
+  }
 
   data_ = ::mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
   if (data_ == MAP_FAILED) {

@@ -11,8 +11,22 @@ namespace seat_aoi {
 
 namespace {
 
-bool parse_bool(const std::string& value) {
-  return value == "true" || value == "1" || value == "yes";
+bool parse_bool_field(const std::string& field_name,
+                      const std::string& value,
+                      bool* out_value,
+                      std::string* error_message) {
+  if (value == "true" || value == "1" || value == "yes" || value == "on") {
+    *out_value = true;
+    return true;
+  }
+  if (value == "false" || value == "0" || value == "no" || value == "off") {
+    *out_value = false;
+    return true;
+  }
+  if (error_message != nullptr) {
+    *error_message = field_name + " 必须是布尔值 true/false/1/0/yes/no/on/off: " + value;
+  }
+  return false;
 }
 
 std::string trim(const std::string& value) {
@@ -429,7 +443,11 @@ bool apply_camera_value(RuntimeCameraConfig* camera,
                               &camera->buffer_count,
                               error_message);
   } else if (field == "simulate_missing_frame") {
-    camera->simulate_missing_frame = parse_bool(value);
+    return parse_bool_field("camera." + std::to_string(camera->camera_index) +
+                                ".simulate_missing_frame",
+                            value,
+                            &camera->simulate_missing_frame,
+                            error_message);
   } else {
     if (error_message != nullptr) {
       *error_message = "未知相机配置字段: camera." +
@@ -875,30 +893,52 @@ bool load_station_runtime_config(const std::string& path,
         return false;
       }
     } else if (key == "reset_shared_memory") {
-      config.reset_shared_memory = parse_bool(value);
+      if (!parse_bool_field(key, value, &config.reset_shared_memory, error_message)) {
+        return false;
+      }
     } else if (key == "simulate_light_fault") {
-      config.light.simulate_fault = parse_bool(value);
+      if (!parse_bool_field(key, value, &config.light.simulate_fault, error_message)) {
+        return false;
+      }
     } else if (key == "light.simulate_fault") {
-      config.light.simulate_fault = parse_bool(value);
+      if (!parse_bool_field(key, value, &config.light.simulate_fault, error_message)) {
+        return false;
+      }
     } else if (key == "simulate_plc_output_fault") {
-      config.plc.simulate_output_fault = parse_bool(value);
+      if (!parse_bool_field(key, value, &config.plc.simulate_output_fault, error_message)) {
+        return false;
+      }
     } else if (key == "plc.simulate_output_fault") {
-      config.plc.simulate_output_fault = parse_bool(value);
+      if (!parse_bool_field(key, value, &config.plc.simulate_output_fault, error_message)) {
+        return false;
+      }
     } else if (key == "simulate_trigger_timeout") {
-      config.plc.simulate_trigger_timeout = parse_bool(value);
+      if (!parse_bool_field(key, value, &config.plc.simulate_trigger_timeout, error_message)) {
+        return false;
+      }
     } else if (key == "plc.simulate_trigger_timeout") {
-      config.plc.simulate_trigger_timeout = parse_bool(value);
+      if (!parse_bool_field(key, value, &config.plc.simulate_trigger_timeout, error_message)) {
+        return false;
+      }
     } else if (key == "simulate_robot_fault") {
-      config.robot.simulate_fault = parse_bool(value);
+      if (!parse_bool_field(key, value, &config.robot.simulate_fault, error_message)) {
+        return false;
+      }
     } else if (key == "robot.simulate_fault") {
-      config.robot.simulate_fault = parse_bool(value);
+      if (!parse_bool_field(key, value, &config.robot.simulate_fault, error_message)) {
+        return false;
+      }
     } else if (key == "simulate_missing_frame") {
+      bool simulate_missing_frame = false;
+      if (!parse_bool_field(key, value, &simulate_missing_frame, error_message)) {
+        return false;
+      }
       for (auto& camera : config.cameras) {
-        camera.simulate_missing_frame = parse_bool(value);
+        camera.simulate_missing_frame = simulate_missing_frame;
       }
       for (auto& [camera_index, camera] : cameras) {
         (void)camera_index;
-        camera.simulate_missing_frame = parse_bool(value);
+        camera.simulate_missing_frame = simulate_missing_frame;
       }
     } else if (key == "trace_root") {
       config.trace_root = value;

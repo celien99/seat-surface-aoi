@@ -1,10 +1,17 @@
 #include <array>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <vector>
+
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "common/string_utils.hpp"
 #include "common/time_utils.hpp"
@@ -704,6 +711,136 @@ bool test_detector_timeout_fault_blocks_next_trigger() {
   return passed;
 }
 
+bool write_detector_result_slot(std::uint64_t sequence_id,
+                                std::uint64_t trigger_id,
+                                const std::string& seat_id,
+                                std::uint32_t slot_count,
+                                std::uint32_t result_slot_size,
+                                seat_aoi::InspectionDecision decision,
+                                std::uint32_t quality_pass,
+                                seat_aoi::ErrorCode error_code,
+                                std::uint32_t defect_count) {
+  const std::size_t total_size =
+      seat_aoi::shared_memory_total_size(slot_count, result_slot_size);
+  const auto open_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(300);
+  int fd = -1;
+  void* mapped = nullptr;
+  while (std::chrono::steady_clock::now() < open_deadline) {
+    fd = ::shm_open(seat_aoi::kResultShmName, O_RDWR, 0600);
+    if (fd >= 0) {
+      struct stat stat_buf {};
+      if (::fstat(fd, &stat_buf) == 0 &&
+          stat_buf.st_size >= static_cast<off_t>(total_size)) {
+        mapped = ::mmap(nullptr, total_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        if (mapped != MAP_FAILED) {
+          break;
+        }
+        mapped = nullptr;
+      }
+      ::close(fd);
+      fd = -1;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  if (mapped == nullptr || fd < 0) {
+    std::cerr << "failed to open result shm for injected detector result\n";
+    return false;
+  }
+  auto* base = slot_base(mapped, 0, result_slot_size);
+  auto* slot = reinterpret_cast<seat_aoi::ResultSlotHeader*>(base);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
+  while (std::chrono::steady_clock::now() < deadline) {
+    std::uint32_t expected = static_cast<std::uint32_t>(seat_aoi::SlotState::Empty);
+    if (slot->state.compare_exchange_strong(
+            expected,
+            static_cast<std::uint32_t>(seat_aoi::SlotState::Writing),
+            std::memory_order_acq_rel)) {
+      std::memset(base + sizeof(std::uint32_t),
+                  0,
+                  result_slot_size - sizeof(std::uint32_t));
+      const std::size_t defect_bytes =
+          static_cast<std::size_t>(defect_count) * sizeof(seat_aoi::DefectResultMeta);
+      slot->sequence_id = sequence_id;
+      slot->payload_size = seat_aoi::result_slot_defects_offset() + defect_bytes;
+      slot->defect_count = defect_count;
+      slot->reserved = 0;
+      slot->result_meta.sequence_id = sequence_id;
+      slot->result_meta.trigger_id = trigger_id;
+      seat_aoi::copy_cstr(slot->result_meta.seat_id, seat_id);
+      slot->result_meta.decision = static_cast<std::uint32_t>(decision);
+      slot->result_meta.defect_count = defect_count;
+      slot->result_meta.quality_pass = quality_pass;
+      slot->result_meta.error_code = static_cast<std::uint32_t>(error_code);
+      slot->result_meta.elapsed_ms = 1.0F;
+      slot->result_meta.reserved = 0;
+      slot->payload_crc32 =
+          seat_aoi::crc32(base + seat_aoi::result_slot_defects_offset(), defect_bytes);
+      slot->header_crc32 = 0;
+      slot->header_crc32 = result_header_crc(slot);
+      slot->state.store(static_cast<std::uint32_t>(seat_aoi::SlotState::Ready),
+                        std::memory_order_release);
+      ::munmap(mapped, total_size);
+      ::close(fd);
+      return true;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  ::munmap(mapped, total_size);
+  ::close(fd);
+  std::cerr << "result shm slot did not become empty for injected detector result\n";
+  return false;
+}
+
+bool test_detector_ng_with_quality_failure_is_rechecked() {
+  seat_aoi::StationConfig config;
+  config.reset_shared_memory = true;
+  config.publish_timeout_ms = 50;
+  config.detector_timeout_ms = 500;
+  config.trigger_timeout_ms = 5;
+  config.camera_timeout_ms = 5;
+  config.light_timeout_ms = 5;
+
+  seat_aoi::StationController station;
+  if (!station.initialize(config)) {
+    std::cerr << "invalid NG station initialize failed\n";
+    return false;
+  }
+
+  seat_aoi::PlcTrigger trigger;
+  trigger.trigger_id = 7012;
+  trigger.seat_id = "SIM_INVALID_NG";
+  trigger.sku = "seat_a_black_leather";
+  const std::uint32_t slot_count = config.slot_count;
+  const std::uint32_t result_slot_size = config.result_slot_size;
+  std::thread detector_thread([&trigger, slot_count, result_slot_size]() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    (void)write_detector_result_slot(1,
+                                     trigger.trigger_id,
+                                     trigger.seat_id,
+                                     slot_count,
+                                     result_slot_size,
+                                     seat_aoi::InspectionDecision::NG,
+                                     0,
+                                     seat_aoi::ErrorCode::QualityFailed,
+                                     1);
+  });
+  const auto result = station.inspect_one_seat(trigger);
+  detector_thread.join();
+  station.cleanup_shared_memory();
+
+  const bool passed =
+      static_cast<seat_aoi::InspectionDecision>(result.meta.decision) ==
+          seat_aoi::InspectionDecision::Recheck &&
+      static_cast<seat_aoi::ErrorCode>(result.meta.error_code) ==
+          seat_aoi::ErrorCode::InvalidPayload &&
+      result.meta.quality_pass == 0;
+  if (!passed) {
+    std::cerr << "detector NG with quality failure was not converted to RECHECK: decision="
+              << result.meta.decision << " error=" << result.meta.error_code << "\n";
+  }
+  return passed;
+}
+
 bool test_station_writes_detector_timeout_event_log() {
   seat_aoi::StationConfig config;
   config.reset_shared_memory = true;
@@ -775,6 +912,44 @@ bool test_unsupported_production_backend_fails_fast() {
   return true;
 }
 
+bool test_shared_memory_existing_size_mismatch_fails() {
+  constexpr const char* kName = "/seat_aoi_shm_size_mismatch";
+  seat_aoi::SharedMemory first;
+  if (!first.create_or_open(kName, 4096, true)) {
+    std::cerr << "initial shm create failed\n";
+    return false;
+  }
+  first.close();
+  seat_aoi::SharedMemory second;
+  const bool ok = second.create_or_open(kName, 8192, false);
+  second.close();
+  ::shm_unlink(kName);
+  const bool passed = !ok;
+  if (!passed) {
+    std::cerr << "existing shm size mismatch did not fail\n";
+  }
+  return passed;
+}
+
+bool test_invalid_bool_config_rejected() {
+  const std::string path =
+      "/tmp/seat_aoi_invalid_bool_config_" + std::to_string(seat_aoi::now_us()) + ".conf";
+  {
+    std::ofstream output(path);
+    output << "reset_shared_memory=flase\n";
+  }
+  seat_aoi::StationRuntimeConfig config;
+  std::string error;
+  const bool ok = seat_aoi::load_station_runtime_config(path, &config, &error);
+  std::remove(path.c_str());
+  const bool passed = !ok && error.find("reset_shared_memory") != std::string::npos &&
+                      error.find("布尔值") != std::string::npos;
+  if (!passed) {
+    std::cerr << "invalid bool config was not rejected: " << error << "\n";
+  }
+  return passed;
+}
+
 }  // namespace
 
 int main() {
@@ -838,10 +1013,19 @@ int main() {
   if (!test_detector_timeout_fault_blocks_next_trigger()) {
     return 1;
   }
+  if (!test_detector_ng_with_quality_failure_is_rechecked()) {
+    return 1;
+  }
   if (!test_station_writes_detector_timeout_event_log()) {
     return 1;
   }
   if (!test_unsupported_production_backend_fails_fast()) {
+    return 1;
+  }
+  if (!test_shared_memory_existing_size_mismatch_fails()) {
+    return 1;
+  }
+  if (!test_invalid_bool_config_rejected()) {
     return 1;
   }
   std::cout << "ipc safety checks passed\n";

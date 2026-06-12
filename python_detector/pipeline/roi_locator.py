@@ -139,6 +139,7 @@ class RoiLocator:
         locations: list[RoiLocation] = []
         located_templates: dict[str, RoiTemplate] = {}
         errors: list[str] = []
+        candidates_by_roi: dict[str, list[RoiLocation]] = {}
         for row in rows:
             try:
                 location = self._location_from_row(row, dome_frame, by_class_id, recipe)
@@ -153,11 +154,19 @@ class RoiLocator:
                     f"{recipe.roi_locator.max_pose_error_px:.3f}px"
                 )
                 continue
-            locations.append(location)
-            located_templates[location.roi_name] = RoiTemplate(
-                roi_name=location.roi_name,
-                polygon_xy=location.polygon_xy,
-                output_size=location.output_size,
+            candidates_by_roi.setdefault(location.roi_name, []).append(location)
+
+        for roi_name, candidates in candidates_by_roi.items():
+            candidates.sort(key=lambda item: (-item.confidence, item.pose_error_px))
+            best = candidates[0]
+            conflicting = [candidate for candidate in candidates[1:] if candidate.polygon_xy != best.polygon_xy]
+            if conflicting:
+                errors.append(f"{roi_name}: duplicate conflicting ROI detections")
+            locations.append(best)
+            located_templates[roi_name] = RoiTemplate(
+                roi_name=best.roi_name,
+                polygon_xy=best.polygon_xy,
+                output_size=best.output_size,
             )
 
         missing = [roi_name for roi_name in templates if roi_name not in located_templates]

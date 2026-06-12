@@ -135,6 +135,42 @@ def test_light_seq_index_must_match_configured_light_order() -> None:
     )
 
 
+def test_inconsistent_required_light_shot_id_returns_recheck() -> None:
+    pipeline = InspectionPipeline()
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    job = _job(LIGHTS)
+    for index, frame in enumerate(job.camera_bundles[0].light_frames.values()):
+        frame.shot_id = 9000 + index
+
+    result = pipeline.process(job, recipe)
+
+    assert result.decision == "RECHECK"
+    assert (
+        "TOP_BACK/TOP_BACK: inconsistent shot_id in required lights"
+        in pipeline.last_context["quality_report"].messages
+    )
+
+
+def test_inconsistent_required_light_robot_pose_returns_recheck() -> None:
+    pipeline = InspectionPipeline()
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    job = _job(LIGHTS)
+    for frame in job.camera_bundles[0].light_frames.values():
+        frame.shot_id = 9000
+        frame.robot_timestamp_us = 1_000_000
+        frame.robot_tcp_xyz_mm = (100.0, 200.0, 300.0)
+        frame.robot_rpy_deg = (1.0, 2.0, 3.0)
+    job.camera_bundles[0].light_frames["HIGH_RIGHT"].robot_tcp_xyz_mm = (100.5, 200.0, 300.0)
+
+    result = pipeline.process(job, recipe)
+
+    assert result.decision == "RECHECK"
+    assert (
+        "TOP_BACK/TOP_BACK: inconsistent robot_tcp_xyz_mm in required lights"
+        in pipeline.last_context["quality_report"].messages
+    )
+
+
 def test_quality_gate_ignores_stride_padding_for_exposure_stats() -> None:
     width = 8
     height = 8

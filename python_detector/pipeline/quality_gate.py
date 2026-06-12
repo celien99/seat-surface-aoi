@@ -101,6 +101,7 @@ class ImageQualityGate:
         light_seq_indices = [frame.light_seq_index for frame in frames]
         if len(set(light_seq_indices)) != len(light_seq_indices):
             messages.append(f"{bundle.camera_id}: duplicate light_seq_index in required lights")
+        self._check_robot_pose_consistency(bundle, frames, messages)
         camera_recipe = recipe.camera(bundle.camera_id, bundle.pose_id)
         light_order = camera_recipe.light_order if camera_recipe is not None else recipe.light_order
         light_seq_by_id = {light_id: index for index, light_id in enumerate(light_order)}
@@ -130,6 +131,46 @@ class ImageQualityGate:
         gain_delta = max(gains) - min(gains)
         if gain_delta > recipe.quality.max_gain_delta:
             messages.append(f"{bundle.camera_id}: gain delta {gain_delta:.3f} exceeds {recipe.quality.max_gain_delta:.3f}")
+
+    def _check_robot_pose_consistency(
+        self,
+        bundle: CameraBundle,
+        frames: list[LightFrame],
+        messages: list[str],
+    ) -> None:
+        label = f"{bundle.camera_id}/{bundle.pose_id}" if bundle.pose_id else bundle.camera_id
+        shot_ids = [frame.shot_id for frame in frames]
+        non_zero_shots = [shot_id for shot_id in shot_ids if shot_id != 0]
+        if non_zero_shots:
+            if len(non_zero_shots) != len(shot_ids):
+                messages.append(f"{label}: mixed empty and non-empty shot_id in required lights")
+            elif len(set(shot_ids)) != 1:
+                messages.append(f"{label}: inconsistent shot_id in required lights")
+
+        robot_timestamps = [frame.robot_timestamp_us for frame in frames]
+        non_zero_robot_timestamps = [timestamp for timestamp in robot_timestamps if timestamp != 0]
+        has_robot_pose = any(
+            any(abs(value) > 1e-6 for value in frame.robot_tcp_xyz_mm + frame.robot_rpy_deg)
+            for frame in frames
+        )
+        if non_zero_robot_timestamps or has_robot_pose:
+            if len(non_zero_robot_timestamps) != len(robot_timestamps):
+                messages.append(f"{label}: mixed empty and non-empty robot_timestamp_us in required lights")
+            elif len(set(robot_timestamps)) != 1:
+                messages.append(f"{label}: inconsistent robot_timestamp_us in required lights")
+            reference_xyz = frames[0].robot_tcp_xyz_mm
+            reference_rpy = frames[0].robot_rpy_deg
+            for frame in frames[1:]:
+                if not self._float_tuple_close(reference_xyz, frame.robot_tcp_xyz_mm):
+                    messages.append(f"{label}: inconsistent robot_tcp_xyz_mm in required lights")
+                    break
+            for frame in frames[1:]:
+                if not self._float_tuple_close(reference_rpy, frame.robot_rpy_deg):
+                    messages.append(f"{label}: inconsistent robot_rpy_deg in required lights")
+                    break
+
+    def _float_tuple_close(self, left: tuple[float, ...], right: tuple[float, ...]) -> bool:
+        return len(left) == len(right) and all(abs(a - b) <= 1e-4 for a, b in zip(left, right))
 
     def _check_frame(self, frame: LightFrame, recipe: Recipe) -> FrameQuality:
         values = frame.image

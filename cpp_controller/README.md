@@ -215,9 +215,10 @@ Empty ─→ Writing ─→ Ready ─→ Reading ─→ Empty
 
 ### 初始化和结果回收安全策略
 
-- Frame/Result ring 打开既有共享内存时会校验 `magic/version/slot_count/slot_size`。未显式 reset 且布局不匹配时初始化失败，不会静默清零或重写可能属于另一进程的共享内存。
+- Frame/Result ring 打开既有共享内存时会校验 POSIX 共享内存对象实际大小以及 `magic/version/slot_count/slot_size`。未显式 reset 且大小或布局不匹配时初始化失败，不会静默清零或重写可能属于另一进程的共享内存。
 - Result ring 读取时要求 `payload_size == ResultSlotHeader + defect_count * DefectResultMeta`，且 slot 头与 `InspectionResultMeta.defect_count` 一致，防止缺陷数组截断或尾部脏数据被接受。
 - 等待当前 `sequence_id` 时，旧序号的 `Ready/Corrupted/Timeout` slot 会被回收清空；当前序号的 `Corrupted` 或 `Timeout` slot 会立即转成 `CrcMismatch` 或 `DetectorTimeout`，不会继续等待到超时。
+- detector 返回结果时会校验判定语义：`OK` 必须质量通过、无错误且无缺陷，`NG` 必须质量通过、无错误且存在缺陷；语义不一致的结果按 `InvalidPayload` 转为 `RECHECK`。
 - detector 返回 `ERROR` 时，C++ 记录原始错误和健康状态，但输出给 PLC 的动作映射为 `Recheck`，避免把检测侧不确定状态输出成产线 `OK`。
 
 ---
@@ -293,6 +294,8 @@ cmake --build build
 | `--simulate-missing-frame` | 模拟相机丢帧 | false |
 | `--simulate-plc-output-fault` | 模拟 PLC 输出失败 | false |
 | `--simulate-trigger-timeout` | 模拟 PLC 触发超时 | false |
+
+运行时配置中的布尔字段只接受 `true/false/1/0/yes/no/on/off`，拼写错误或未知布尔值会导致配置加载失败，避免故障注入或共享内存 reset 选项被静默解释为 `false`。
 
 ### 运行时配置文件格式
 
