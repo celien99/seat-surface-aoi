@@ -257,11 +257,10 @@ bash tools/package_release.sh
 生产包需要同时带真实 Python 模型资产：
 
 ```bash
-bash tools/package_release.sh \
-  --model-dir /path/to/real/model \
-  --require-model-assets \
-  --model-recipe production_model_example
+bash tools/package_release.sh
 ```
+
+执行前先把真实模型产物替换到根目录 `model/`，脚本会默认集成该目录。
 
 解包后可执行 `./bin/seat_aoi_controller --config cpp_controller/config/station_runtime.example.conf --once --wait-ms 8000` 启动 C++ 主控。C++ 仍只负责 PLC、相机、频闪、机器人、共享内存写入和结果读取，不包含深度学习推理。
 

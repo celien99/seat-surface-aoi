@@ -134,14 +134,8 @@ uv run seat-aoi-detector --once --timeout-ms 8000
 # 真实模型资产上线前检查
 uv run python -m tools.validate_model_assets --recipe production_model_example
 
-# 生成离线部署包（默认带占位 model，仅用于参考联调）
+# 生成离线部署包，默认集成根目录 model/
 bash tools/package_release.sh
-
-# 生成生产部署包（必须传入真实模型目录并强校验）
-bash tools/package_release.sh \
-  --model-dir /path/to/real/model \
-  --require-model-assets \
-  --model-recipe production_model_example
 
 # 架构就绪度检查
 uv run python -m tools.validate_architecture_readiness --scope reference
@@ -188,7 +182,7 @@ seat-surface-aoi/
 | `cpp_controller/` | C++ 主控源码、配置模板、CMake 工程和诊断工具源码。 |
 | `python_detector/` | Python detector、配方、标定、ROI 模板、算法和测试。 |
 | `training_tools/` | 离线回放、benchmark、embedding、PCA/PatchCore/FAISS 资产生成工具。 |
-| `model/` | 模型目录结构或通过 `--model-dir` 指定的真实模型产物。 |
+| `model/` | 根目录 `model/` 下的模型目录结构或真实模型产物。 |
 | `tools/`、`docs/` | 协议校验、模型资产校验、架构检查、模拟 IPC 脚本和运维文档。 |
 
 参考联调包可以直接执行：
@@ -197,16 +191,13 @@ seat-surface-aoi/
 bash tools/package_release.sh
 ```
 
-生产包必须传入真实模型目录，并启用模型资产强校验：
+生产包必须先把真实模型产物替换到根目录 `model/`，再直接执行打包脚本：
 
 ```bash
-bash tools/package_release.sh \
-  --model-dir /path/to/real/model \
-  --require-model-assets \
-  --model-recipe production_model_example
+bash tools/package_release.sh
 ```
 
-脚本会生成 `dist/<package>.tar.gz` 和对应 `.sha256`。解包后可先运行 `bash validate_package.sh` 做协议和 IPC 基础校验；如需使用包内已构建的 C++ 产物跑模拟 IPC，可运行 `bash run_packaged_simulated_ipc.sh`。生产包不默认包含现场训练数据、trace、日志、`.venv` 或本地构建缓存。
+脚本会生成 `dist/<package>.tar.gz` 和对应 `.sha256`，并默认集成根目录 `model/`。解包后可先运行 `bash validate_package.sh` 做协议和 IPC 基础校验；如需使用包内已构建的 C++ 产物跑模拟 IPC，可运行 `bash run_packaged_simulated_ipc.sh`。生产包不默认包含现场训练数据、trace、日志、`.venv` 或本地构建缓存。
 
 ## 在线链路
 

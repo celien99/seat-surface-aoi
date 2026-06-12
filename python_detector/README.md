@@ -51,7 +51,7 @@ uv run python -m python_detector.detector_main --once --timeout-ms 8000
 
 - `python_detector/`：在线 detector、IPC 客户端、配方、标定、ROI 模板、算法流水线、模型后端和测试。
 - `training_tools/`：离线回放、benchmark、embedding、PCA/PatchCore/FAISS 资产生成工具。
-- `model/`：默认使用仓库占位目录；生产打包时必须通过 `--model-dir` 指向真实模型产物目录。
+- `model/`：默认集成根目录 `model/`；生产打包前必须先把真实模型产物替换到该目录。
 - `pyproject.toml` 和 `uv.lock`：用于在目标环境恢复 Python detector 依赖。
 
 参考联调包可以生成但不代表生产模型就绪：
@@ -60,13 +60,10 @@ uv run python -m python_detector.detector_main --once --timeout-ms 8000
 bash tools/package_release.sh
 ```
 
-生产包必须启用模型资产强校验，防止 1 字节占位 ONNX/PCA/FAISS 文件进入产线：
+生产包必须先替换根目录 `model/` 下的 1 字节占位 ONNX/PCA/FAISS 文件，然后直接打包：
 
 ```bash
-bash tools/package_release.sh \
-  --model-dir /path/to/real/model \
-  --require-model-assets \
-  --model-recipe production_model_example
+bash tools/package_release.sh
 ```
 
 解包后可运行：

@@ -6,9 +6,7 @@ BUILD_DIR="${ROOT_DIR}/cpp_controller/build"
 OUTPUT_DIR="${ROOT_DIR}/dist"
 MODEL_DIR="${ROOT_DIR}/model"
 PACKAGE_NAME=""
-MODEL_RECIPE="production_model_example"
 CMAKE_BUILD_TYPE="Release"
-REQUIRE_MODEL_ASSETS=0
 RUN_TESTS=0
 SKIP_BUILD=0
 SKIP_PROTOCOL=0
@@ -22,7 +20,7 @@ usage() {
   - cpp_controller/：C++ 主控源码、配置和 CMake 工程
   - python_detector/：Python 在线检测进程、配方、标定和测试
   - training_tools/：离线回放、benchmark 和模型资产生成工具
-  - model/：模型目录结构或传入的真实模型产物
+  - model/：根目录 model/ 下的模型目录结构或真实模型产物
   - tools/：协议、模型资产、架构检查和模拟 IPC 脚本
   - docs/、README.md、pyproject.toml、uv.lock
 
@@ -32,19 +30,13 @@ usage() {
 选项:
   --output-dir <path>        输出目录，默认 dist/
   --package-name <name>      包目录和归档名称，默认 seat-surface-aoi-<git>-<utc>
-  --model-dir <path>         模型产物目录，默认 model/
-  --require-model-assets     对包内模型按配方做上线前强校验
-  --model-recipe <recipe>    模型校验配方，默认 production_model_example
   --run-tests                打包前运行 uv run pytest
   --skip-build               跳过 C++ 构建，直接使用现有 build 产物
   --skip-protocol            跳过协议和 IPC 诊断校验
   --help                     显示帮助
 
 生产打包建议:
-  bash tools/package_release.sh \
-    --model-dir /path/to/real/model \
-    --require-model-assets \
-    --model-recipe production_model_example
+  先把真实模型产物替换到根目录 model/，再执行 bash tools/package_release.sh。
 USAGE
 }
 
@@ -70,18 +62,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --package-name)
       PACKAGE_NAME="$2"
-      shift 2
-      ;;
-    --model-dir)
-      MODEL_DIR="$(abs_path "$2")"
-      shift 2
-      ;;
-    --require-model-assets)
-      REQUIRE_MODEL_ASSETS=1
-      shift
-      ;;
-    --model-recipe)
-      MODEL_RECIPE="$2"
       shift 2
       ;;
     --run-tests)
@@ -236,7 +216,7 @@ bash tools/run_simulated_ipc.sh
 
 ## 生产模型
 
-生产包必须把真实模型产物放入 `model/`，并在打包时使用 `--require-model-assets`。占位模型只能用于参考链路和联调包，不能作为生产包放行。
+生产包必须先把真实模型产物放入 `model/`，打包脚本会默认集成该目录。占位模型只能用于参考链路和联调包，不能作为生产包放行。
 
 ## 启动入口
 
@@ -335,7 +315,6 @@ write_manifest() {
   local git_commit="$3"
   local git_dirty="$4"
   local model_dir="$5"
-  local require_model_assets="$6"
   local uname_value
   uname_value="$(uname -a)"
   cat > "${stage_dir}/PACKAGE_MANIFEST.json" <<EOF
@@ -347,8 +326,6 @@ write_manifest() {
   "platform": "${uname_value}",
   "build_type": "${CMAKE_BUILD_TYPE}",
   "model_dir": "${model_dir}",
-  "model_recipe": "${MODEL_RECIPE}",
-  "require_model_assets": ${require_model_assets},
   "components": [
     "bin/seat_aoi_controller",
     "bin/protocol_layout",
@@ -437,28 +414,13 @@ if git -C "${ROOT_DIR}" diff --quiet --ignore-submodules -- && git -C "${ROOT_DI
 else
   GIT_DIRTY=true
 fi
-if [[ "${REQUIRE_MODEL_ASSETS}" -eq 1 ]]; then
-  MODEL_REQUIRED_JSON=true
-else
-  MODEL_REQUIRED_JSON=false
-fi
-write_manifest "${STAGE_DIR}" "${CREATED_AT}" "${GIT_COMMIT}" "${GIT_DIRTY}" "${MODEL_DIR}" "${MODEL_REQUIRED_JSON}"
+write_manifest "${STAGE_DIR}" "${CREATED_AT}" "${GIT_COMMIT}" "${GIT_DIRTY}" "${MODEL_DIR}"
 
 (
   cd "${STAGE_DIR}"
   find . -type f | sort > PACKAGE_FILES.txt
 )
 
-if [[ "${REQUIRE_MODEL_ASSETS}" -eq 1 ]]; then
-  (
-    cd "${STAGE_DIR}"
-    if command -v uv >/dev/null 2>&1; then
-      PYTHONPATH="${STAGE_DIR}" uv --project "${ROOT_DIR}" run python -m tools.validate_model_assets --recipe "${MODEL_RECIPE}"
-    else
-      PYTHONPATH="${STAGE_DIR}" python3 -m tools.validate_model_assets --recipe "${MODEL_RECIPE}"
-    fi
-  )
-fi
 rm -rf "${STAGE_DIR}/.venv" "${STAGE_DIR}/__pycache__"
 
 rm -f "${ARCHIVE_PATH}" "${ARCHIVE_PATH}.sha256"
