@@ -5,6 +5,7 @@ project(seat_surface_aoi_controller LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_library(seat_aoi_ipc
   src/ipc/crc32.cpp
@@ -40,6 +41,7 @@ target_include_directories(seat_aoi_control PUBLIC include)
 target_link_libraries(seat_aoi_control PUBLIC seat_aoi_ipc)
 
 add_executable(seat_aoi_controller src/main.cpp)
+target_include_directories(seat_aoi_controller PRIVATE include)
 target_link_libraries(seat_aoi_controller PRIVATE seat_aoi_control)
 
 add_executable(protocol_layout tools/protocol_layout.cpp)
