@@ -2,7 +2,7 @@
 
 ## 项目定位
 
-本项目是汽车座椅表面缺陷检测系统的参考实现，在线主链路遵循 `seat-defect-inspection-architecture.md` 和 `v4_architecture_alignment.md`：
+本项目是汽车座椅表面缺陷检测系统的参考实现，在线主链路遵循 `docs/v4_architecture_alignment.md`、`docs/shm_protocol.md` 和 `docs/README.md`：
 
 - C++ 负责 PLC、相机、频闪、共享内存写入、结果读取和节拍控制。
 - Python 作为独立检测进程，负责图像质量门禁、预处理、多光源特征、模型推理、融合和规则判定。
@@ -23,7 +23,7 @@
 
 ## 推荐执行顺序
 
-1. 先阅读 `seat-defect-inspection-architecture.md`、`v4_architecture_alignment.md` 和本文件。
+1. 先阅读 `docs/README.md`、`docs/v4_architecture_alignment.md`、`docs/shm_protocol.md` 和本文件。
 2. 检查当前 git 状态，确认是否存在用户未提交改动。
 3. 按最小可验证范围修改代码。
 4. 同步更新 `README.md`；如涉及 `python_detector`，同步更新 `python_detector/README.md`。

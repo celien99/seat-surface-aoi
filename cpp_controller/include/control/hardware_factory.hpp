@@ -16,7 +16,7 @@ namespace detail {
 inline std::string unsupported_driver_message(const char* device,
                                               HardwareBackend backend) {
   return std::string(device) + " backend=" + hardware_backend_name(backend) +
-         " 尚未链接真实硬件驱动。请按 docs/cpp_controller_production_config_quickstart.md "
+         " 尚未链接真实硬件驱动。请按 docs/cpp_controller_operations.md "
          "填写现场参数，并在 C++ 中接入对应厂商 SDK/协议适配器。";
 }
 

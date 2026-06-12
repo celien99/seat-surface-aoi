@@ -470,7 +470,7 @@ def _check_trace_training_and_ops(scope: ReadinessScope) -> list[ReadinessItem]:
         "training_tools/build_faiss_index.py",
         "training_tools/train_roi_yolo.py",
         "training_tools/train_supervised_yolo.py",
-        "docs/trace_and_replay.md",
+        "docs/python_detector_operations.md",
     ]
     missing = [path for path in required_paths if not (REPO_ROOT / path).exists()]
     if missing:
@@ -492,27 +492,26 @@ def _check_trace_training_and_ops(scope: ReadinessScope) -> list[ReadinessItem]:
         )
 
     ops_docs = [
-        "docs/deployment.md",
-        "docs/test_machine_integration.md",
-        "docs/cpp_controller_production_sop.md",
-        "docs/hardware_integration.md",
+        "docs/README.md",
+        "docs/cpp_controller_operations.md",
+        "docs/python_detector_operations.md",
     ]
     missing_ops_docs = [path for path in ops_docs if not (REPO_ROOT / path).exists()]
     if missing_ops_docs:
         items.append(
             _blocked(
                 "部署运维闭环",
-                "架构图的系统监控、上线验收和异常恢复需要部署与测试机集成文档。",
+                "架构图的系统监控、上线验收和异常恢复需要精简后的运维文档。",
                 f"缺少: {missing_ops_docs}",
-                "补齐部署、测试机集成和生产 SOP 文档。",
+                "补齐 docs 总览、C++ 运维和 Python 算法运维文档。",
             )
         )
     else:
         items.append(
             _ok(
                 "部署运维闭环",
-                "项目需提供部署、测试机集成、生产 SOP 和硬件对接说明。",
-                "部署与测试机集成文档齐备。",
+                "项目需提供 docs 总览、C++ 运维和 Python 算法运维说明。",
+                "精简后的部署与运维文档齐备。",
             )
         )
 

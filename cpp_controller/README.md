@@ -349,7 +349,7 @@ cp config/station_runtime.robot_flyshot.production.example.conf \
 ./build/seat_aoi_controller --config config/station_runtime.robot_flyshot.production.conf --validate-config
 ```
 
-配置字段逐项说明见 [C++ 主控生产配置快速上手](../docs/cpp_controller_production_config_quickstart.md)。
+配置字段逐项说明见 [C++ 主控部署与硬件运维](../docs/cpp_controller_operations.md)。
 
 新增生产校验要点：
 

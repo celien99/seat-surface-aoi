@@ -178,7 +178,7 @@ seat-surface-aoi/
 ├── model/               # 真实模型产物占位目录：YOLO、监督检测、WideResNet50、PCA、PatchCore、可选 FAISS
 ├── python_detector/     # 独立 Python 检测算法模块、V4 ROI/ECC/embedding/PCA/PatchCore 流水线、配方、测试
 ├── training_tools/      # 离线训练支撑：Trace 转样本、真实 ROI 图 embedding、PCA/PatchCore/FAISS、YOLO 导出、评估、回放和 benchmark
-├── docs/                # 架构、协议、部署、硬件和模型文档
+├── docs/                # 精简后的架构、协议、C++ 运维、Python 算法运维和调用关系文档
 ├── tools/               # 协议校验、模型资产/架构就绪度校验、模拟 IPC 和旧离线命令兼容包装
 ├── pyproject.toml       # Python 算法模块包元数据、依赖分组、测试和 lint 配置
 ├── uv.lock              # Python 依赖锁文件
@@ -188,22 +188,14 @@ seat-surface-aoi/
 
 ## 关键文档
 
+- [docs 文档总览](docs/README.md)
 - [V4.0 架构对齐说明](docs/v4_architecture_alignment.md)
-- [项目功能调用关系与封装逻辑深度分析](docs/project_function_call_map.md)
-- [模型产物目录说明](model/README.md)
 - [共享内存协议](docs/shm_protocol.md)
-- [硬件对接说明](docs/hardware_integration.md)
-- [C++ 主控硬件集成与使用手册](docs/cpp_controller_hardware_manual.md)
-- [C++ 主控生产配置快速上手](docs/cpp_controller_production_config_quickstart.md)
-- [C++ 主控生产上线 SOP](docs/cpp_controller_production_sop.md)
-- [配方设计说明](docs/recipe_design.md)
-- [标定与 ROI 说明](docs/calibration_and_roi.md)
-- [模型后端说明](docs/model_backend.md)
-- [Python 检测算法模块规范](docs/python_detector_module.md)
+- [项目调用关系摘要](docs/project_function_call_map.md)
+- [C++ 主控部署与硬件运维](docs/cpp_controller_operations.md)
+- [Python 检测算法与模型运维](docs/python_detector_operations.md)
+- [模型产物目录说明](model/README.md)
 - [Python 检测算法层导览](python_detector/README.md)
-- [追溯与回放说明](docs/trace_and_replay.md)
-- [测试机集成清单](docs/test_machine_integration.md)
-- [部署说明](docs/deployment.md)
 
 ## 架构就绪度检查
 
