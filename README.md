@@ -17,6 +17,7 @@
   <a href="#系统总览">系统总览</a> ·
   <a href="#快速开始">快速开始</a> ·
   <a href="#工程地图">工程地图</a> ·
+  <a href="#部署打包">部署打包</a> ·
   <a href="#验证矩阵">验证矩阵</a> ·
   <a href="#文档地图">文档地图</a> ·
   <a href="#安全边界">安全边界</a>
@@ -133,6 +134,15 @@ uv run seat-aoi-detector --once --timeout-ms 8000
 # 真实模型资产上线前检查
 uv run python -m tools.validate_model_assets --recipe production_model_example
 
+# 生成离线部署包（默认带占位 model，仅用于参考联调）
+bash tools/package_release.sh
+
+# 生成生产部署包（必须传入真实模型目录并强校验）
+bash tools/package_release.sh \
+  --model-dir /path/to/real/model \
+  --require-model-assets \
+  --model-recipe production_model_example
+
 # 架构就绪度检查
 uv run python -m tools.validate_architecture_readiness --scope reference
 uv run python -m tools.validate_architecture_readiness --scope production
@@ -167,6 +177,36 @@ seat-surface-aoi/
 ![项目功能与代码映射图](docs/assets/project-function-code-map.png)
 
 </details>
+
+## 部署打包
+
+项目提供 `tools/package_release.sh` 生成离线部署包。打包边界是“可部署的在线检测链路”，默认包含：
+
+| 内容 | 说明 |
+| --- | --- |
+| `bin/` | 已构建的 `seat_aoi_controller`、`protocol_layout`、`ipc_safety_checks`。 |
+| `cpp_controller/` | C++ 主控源码、配置模板、CMake 工程和诊断工具源码。 |
+| `python_detector/` | Python detector、配方、标定、ROI 模板、算法和测试。 |
+| `training_tools/` | 离线回放、benchmark、embedding、PCA/PatchCore/FAISS 资产生成工具。 |
+| `model/` | 模型目录结构或通过 `--model-dir` 指定的真实模型产物。 |
+| `tools/`、`docs/` | 协议校验、模型资产校验、架构检查、模拟 IPC 脚本和运维文档。 |
+
+参考联调包可以直接执行：
+
+```bash
+bash tools/package_release.sh
+```
+
+生产包必须传入真实模型目录，并启用模型资产强校验：
+
+```bash
+bash tools/package_release.sh \
+  --model-dir /path/to/real/model \
+  --require-model-assets \
+  --model-recipe production_model_example
+```
+
+脚本会生成 `dist/<package>.tar.gz` 和对应 `.sha256`。解包后可先运行 `bash validate_package.sh` 做协议和 IPC 基础校验；如需使用包内已构建的 C++ 产物跑模拟 IPC，可运行 `bash run_packaged_simulated_ipc.sh`。生产包不默认包含现场训练数据、trace、日志、`.venv` 或本地构建缓存。
 
 ## 在线链路
 

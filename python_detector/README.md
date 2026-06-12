@@ -45,6 +45,39 @@ uv run python -m python_detector.detector_main --once --timeout-ms 8000
 
 端到端模拟仍使用 `bash tools/run_simulated_ipc.sh`。该脚本会优先使用 `uv run python` 启动 detector；如果本机没有 uv，则回退到系统 `python3`。
 
+## 部署打包
+
+根目录 `tools/package_release.sh` 会把 Python 在线检测层和模型目录一起放入离线部署包。包内 Python 相关内容包括：
+
+- `python_detector/`：在线 detector、IPC 客户端、配方、标定、ROI 模板、算法流水线、模型后端和测试。
+- `training_tools/`：离线回放、benchmark、embedding、PCA/PatchCore/FAISS 资产生成工具。
+- `model/`：默认使用仓库占位目录；生产打包时必须通过 `--model-dir` 指向真实模型产物目录。
+- `pyproject.toml` 和 `uv.lock`：用于在目标环境恢复 Python detector 依赖。
+
+参考联调包可以生成但不代表生产模型就绪：
+
+```bash
+bash tools/package_release.sh
+```
+
+生产包必须启用模型资产强校验，防止 1 字节占位 ONNX/PCA/FAISS 文件进入产线：
+
+```bash
+bash tools/package_release.sh \
+  --model-dir /path/to/real/model \
+  --require-model-assets \
+  --model-recipe production_model_example
+```
+
+解包后可运行：
+
+```bash
+bash validate_package.sh
+bash run_packaged_simulated_ipc.sh
+```
+
+打包不会包含现场 `trace/`、训练数据集、日志、`.venv` 或本地缓存。Python detector 仍只负责检测链路，不控制 PLC、相机、机器人或频闪。
+
 ## 文件结构
 
 ```text

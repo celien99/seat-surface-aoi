@@ -239,6 +239,32 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
+### 部署打包
+
+根目录提供 `tools/package_release.sh` 生成离线部署包。脚本会先构建 C++ 主控，再把下列 C++ 相关内容放入包内：
+
+- `bin/seat_aoi_controller`：已构建主控入口。
+- `bin/protocol_layout`：协议结构体大小诊断工具。
+- `bin/ipc_safety_checks`：共享内存故障注入与安全检查工具。
+- `cpp_controller/`：源码、`CMakeLists.txt`、配置模板和工具源码，不包含 `build/` 缓存。
+
+参考联调包：
+
+```bash
+bash tools/package_release.sh
+```
+
+生产包需要同时带真实 Python 模型资产：
+
+```bash
+bash tools/package_release.sh \
+  --model-dir /path/to/real/model \
+  --require-model-assets \
+  --model-recipe production_model_example
+```
+
+解包后可执行 `./bin/seat_aoi_controller --config cpp_controller/config/station_runtime.example.conf --once --wait-ms 8000` 启动 C++ 主控。C++ 仍只负责 PLC、相机、频闪、机器人、共享内存写入和结果读取，不包含深度学习推理。
+
 ### 运行
 
 ```bash
