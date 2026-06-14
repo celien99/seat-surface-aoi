@@ -34,7 +34,7 @@ elif command -v clang++ >/dev/null 2>&1; then
   clang++ -std=c++17 -I "${ROOT_DIR}/cpp_controller/include" \
     "${ROOT_DIR}/cpp_controller/src/main.cpp" \
     "${ROOT_DIR}/cpp_controller/src/ipc/crc32.cpp" \
-    "${ROOT_DIR}/cpp_controller/src/ipc/shared_memory.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/ipc/shared_memory_posix.cpp" \
     "${ROOT_DIR}/cpp_controller/src/ipc/frame_ring_buffer.cpp" \
     "${ROOT_DIR}/cpp_controller/src/ipc/result_ring_buffer.cpp" \
     "${ROOT_DIR}/cpp_controller/src/control/light_controller.cpp" \
@@ -52,7 +52,7 @@ elif command -v clang++ >/dev/null 2>&1; then
 	  clang++ -std=c++17 -I "${ROOT_DIR}/cpp_controller/include" \
 	    "${ROOT_DIR}/cpp_controller/tools/ipc_safety_checks.cpp" \
 	    "${ROOT_DIR}/cpp_controller/src/ipc/crc32.cpp" \
-	    "${ROOT_DIR}/cpp_controller/src/ipc/shared_memory.cpp" \
+	    "${ROOT_DIR}/cpp_controller/src/ipc/shared_memory_posix.cpp" \
 	    "${ROOT_DIR}/cpp_controller/src/ipc/frame_ring_buffer.cpp" \
 	    "${ROOT_DIR}/cpp_controller/src/ipc/result_ring_buffer.cpp" \
 	    "${ROOT_DIR}/cpp_controller/src/control/light_controller.cpp" \

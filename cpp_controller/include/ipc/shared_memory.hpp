@@ -16,6 +16,7 @@ public:
   ~SharedMemory();
 
   bool create_or_open(const std::string& name, std::size_t size, bool reset);
+  bool open_existing(const std::string& name, std::size_t size);
   void close();
   void unlink_name();
 
@@ -27,7 +28,11 @@ public:
   bool was_created() const { return was_created_; }
 
 private:
+#ifdef _WIN32
+  void* mapping_handle_ = nullptr;
+#else
   int fd_ = -1;
+#endif
   void* data_ = nullptr;
   std::size_t size_ = 0;
   std::string name_;

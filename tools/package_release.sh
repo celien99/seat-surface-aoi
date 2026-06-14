@@ -102,7 +102,7 @@ build_cpp_with_clang() {
   local include_args=(-std=c++17 -O2 -I "${ROOT_DIR}/cpp_controller/include")
   local common_sources=(
     "${ROOT_DIR}/cpp_controller/src/ipc/crc32.cpp"
-    "${ROOT_DIR}/cpp_controller/src/ipc/shared_memory.cpp"
+    "${ROOT_DIR}/cpp_controller/src/ipc/shared_memory_posix.cpp"
     "${ROOT_DIR}/cpp_controller/src/ipc/frame_ring_buffer.cpp"
     "${ROOT_DIR}/cpp_controller/src/ipc/result_ring_buffer.cpp"
     "${ROOT_DIR}/cpp_controller/src/control/hardware_backend.cpp"
@@ -212,6 +212,7 @@ bash validate_package.sh
 
 ```bash
 bash tools/run_simulated_ipc.sh
+uv run python tools/run_simulated_ipc.py
 ```
 
 ## 生产模型
@@ -228,7 +229,7 @@ bash tools/run_simulated_ipc.sh
 PYTHONPATH=. uv run python -m python_detector.detector_main --once --timeout-ms 8000
 ```
 
-在线图像和检测结果只能通过 POSIX 共享内存交换，不使用 TCP。任何缺帧、超时、协议错误、CRC 错误、质量门禁失败或模型异常都不能输出 OK。
+在线图像和检测结果只能通过共享内存交换，不使用 TCP；Windows 工控机使用 Named Shared Memory。任何缺帧、超时、协议错误、CRC 错误、质量门禁失败或模型异常都不能输出 OK。
 EOF
 }
 
@@ -387,6 +388,7 @@ copy_tree "${ROOT_DIR}/docs" "${STAGE_DIR}/docs"
 
 mkdir -p "${STAGE_DIR}/tools"
 cp "${ROOT_DIR}/tools/run_simulated_ipc.sh" "${STAGE_DIR}/tools/"
+cp "${ROOT_DIR}/tools/run_simulated_ipc.py" "${STAGE_DIR}/tools/"
 cp "${ROOT_DIR}/tools/run_cpp_soak.sh" "${STAGE_DIR}/tools/"
 cp "${ROOT_DIR}/tools/validate_protocol.py" "${STAGE_DIR}/tools/"
 cp "${ROOT_DIR}/tools/validate_model_assets.py" "${STAGE_DIR}/tools/"

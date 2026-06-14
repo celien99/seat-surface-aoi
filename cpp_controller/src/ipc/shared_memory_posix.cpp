@@ -1,8 +1,9 @@
 #include "ipc/shared_memory.hpp"
 
+#ifndef _WIN32
+
 #include <cerrno>
 #include <cstring>
-#include <stdexcept>
 #include <utility>
 
 #include <fcntl.h>
@@ -79,6 +80,30 @@ bool SharedMemory::create_or_open(const std::string& name, std::size_t size, boo
   return true;
 }
 
+bool SharedMemory::open_existing(const std::string& name, std::size_t size) {
+  close();
+  was_created_ = false;
+  fd_ = ::shm_open(name.c_str(), O_RDWR, 0600);
+  if (fd_ < 0) {
+    return false;
+  }
+  struct stat stat_buf {};
+  if (::fstat(fd_, &stat_buf) != 0 ||
+      stat_buf.st_size < static_cast<off_t>(size)) {
+    close();
+    return false;
+  }
+  data_ = ::mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
+  if (data_ == MAP_FAILED) {
+    data_ = nullptr;
+    close();
+    return false;
+  }
+  size_ = size;
+  name_ = name;
+  return true;
+}
+
 void SharedMemory::close() {
   if (data_ != nullptr) {
     ::munmap(data_, size_);
@@ -99,3 +124,5 @@ void SharedMemory::unlink_name() {
 }
 
 }  // namespace seat_aoi
+
+#endif

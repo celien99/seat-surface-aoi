@@ -7,16 +7,23 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+set(SEAT_AOI_SHARED_MEMORY_SOURCE src/ipc/shared_memory_posix.cpp)
+if(WIN32)
+  set(SEAT_AOI_SHARED_MEMORY_SOURCE src/ipc/shared_memory_win32.cpp)
+endif()
+
 add_library(seat_aoi_ipc
   src/ipc/crc32.cpp
-  src/ipc/shared_memory.cpp
+  ${SEAT_AOI_SHARED_MEMORY_SOURCE}
   src/ipc/frame_ring_buffer.cpp
   src/ipc/result_ring_buffer.cpp
 )
 
 target_include_directories(seat_aoi_ipc PUBLIC include)
 
-if(UNIX AND NOT APPLE)
+if(WIN32)
+  target_compile_definitions(seat_aoi_ipc PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
+elseif(UNIX AND NOT APPLE)
   target_link_libraries(seat_aoi_ipc PUBLIC rt pthread)
 else()
   target_link_libraries(seat_aoi_ipc PUBLIC pthread)
@@ -39,6 +46,9 @@ add_library(seat_aoi_control
 
 target_include_directories(seat_aoi_control PUBLIC include)
 target_link_libraries(seat_aoi_control PUBLIC seat_aoi_ipc)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9)
+  target_link_libraries(seat_aoi_control PUBLIC stdc++fs)
+endif()
 
 add_executable(seat_aoi_controller src/main.cpp)
 target_include_directories(seat_aoi_controller PRIVATE include)

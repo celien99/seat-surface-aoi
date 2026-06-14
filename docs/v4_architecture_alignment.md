@@ -11,7 +11,7 @@
 - C++ 作为实时主控，负责 PLC、相机、光源、机器人 pose/shot 读取、触发同步、共享内存写入、结果读取和保守降级。
 - 固定机位多光源和机器人飞拍多光源在 C++ Capture Plan 层统一抽象为 `capture_view` / `pose_id` 检测视角序列。
 - Python 作为独立检测进程，按 `(camera_id, pose_id)` 组装 `CameraBundle`，不参与 PLC、相机、频闪或机器人控制。
-- 在线图像与结果通过 POSIX 共享内存传输，不使用 TCP。
+- 在线图像与结果通过跨平台共享内存传输，不使用 TCP；Linux/macOS 使用 POSIX 共享内存，Windows 工控机使用 Named Shared Memory。
 - Python AI Runtime 以 ONNX Runtime 作为 YOLO/WideResNet50/FilterClassifier 等模型的推理底座，PatchCore 向量检索优先使用 FAISS，缺索引或缺依赖时回退 exact KNN。
 - 协议错误、CRC 错误、缺帧、超时、机器人 FAULT、质量门禁失败和模型异常都不会输出 `OK`。
 

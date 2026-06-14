@@ -2,16 +2,12 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
 #include <thread>
 #include <vector>
-
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #include "common/string_utils.hpp"
 #include "common/time_utils.hpp"
@@ -23,6 +19,7 @@
 #include "ipc/crc32.hpp"
 #include "ipc/frame_ring_buffer.hpp"
 #include "ipc/result_ring_buffer.hpp"
+#include "ipc/shared_memory.hpp"
 
 namespace {
 
@@ -723,30 +720,18 @@ bool write_detector_result_slot(std::uint64_t sequence_id,
   const std::size_t total_size =
       seat_aoi::shared_memory_total_size(slot_count, result_slot_size);
   const auto open_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(300);
-  int fd = -1;
-  void* mapped = nullptr;
+  seat_aoi::SharedMemory shm;
   while (std::chrono::steady_clock::now() < open_deadline) {
-    fd = ::shm_open(seat_aoi::kResultShmName, O_RDWR, 0600);
-    if (fd >= 0) {
-      struct stat stat_buf {};
-      if (::fstat(fd, &stat_buf) == 0 &&
-          stat_buf.st_size >= static_cast<off_t>(total_size)) {
-        mapped = ::mmap(nullptr, total_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-        if (mapped != MAP_FAILED) {
-          break;
-        }
-        mapped = nullptr;
-      }
-      ::close(fd);
-      fd = -1;
+    if (shm.open_existing(seat_aoi::kResultShmName, total_size)) {
+      break;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
   }
-  if (mapped == nullptr || fd < 0) {
+  if (!shm.is_open()) {
     std::cerr << "failed to open result shm for injected detector result\n";
     return false;
   }
-  auto* base = slot_base(mapped, 0, result_slot_size);
+  auto* base = slot_base(shm.data(), 0, result_slot_size);
   auto* slot = reinterpret_cast<seat_aoi::ResultSlotHeader*>(base);
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
   while (std::chrono::steady_clock::now() < deadline) {
@@ -779,14 +764,12 @@ bool write_detector_result_slot(std::uint64_t sequence_id,
       slot->header_crc32 = result_header_crc(slot);
       slot->state.store(static_cast<std::uint32_t>(seat_aoi::SlotState::Ready),
                         std::memory_order_release);
-      ::munmap(mapped, total_size);
-      ::close(fd);
+      shm.close();
       return true;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
   }
-  ::munmap(mapped, total_size);
-  ::close(fd);
+  shm.close();
   std::cerr << "result shm slot did not become empty for injected detector result\n";
   return false;
 }
@@ -842,6 +825,9 @@ bool test_detector_ng_with_quality_failure_is_rechecked() {
 }
 
 bool test_station_writes_detector_timeout_event_log() {
+  const auto trace_root = std::filesystem::temp_directory_path() /
+                          ("seat_aoi_cpp_event_log_test_" +
+                           std::to_string(seat_aoi::now_us()));
   seat_aoi::StationConfig config;
   config.reset_shared_memory = true;
   config.slot_count = 1;
@@ -857,8 +843,7 @@ bool test_station_writes_detector_timeout_event_log() {
   config.light_channels = {
       seat_aoi::RuntimeLightChannelConfig{1, 1, 800, 800, 0, 1.0F, 60.0F},
   };
-  config.trace_root = "/tmp/seat_aoi_cpp_event_log_test_" +
-                      std::to_string(seat_aoi::now_us());
+  config.trace_root = trace_root.string();
 
   seat_aoi::StationController station;
   if (!station.initialize(config)) {
@@ -919,11 +904,10 @@ bool test_shared_memory_existing_size_mismatch_fails() {
     std::cerr << "initial shm create failed\n";
     return false;
   }
-  first.close();
   seat_aoi::SharedMemory second;
   const bool ok = second.create_or_open(kName, 8192, false);
   second.close();
-  ::shm_unlink(kName);
+  first.unlink_name();
   const bool passed = !ok;
   if (!passed) {
     std::cerr << "existing shm size mismatch did not fail\n";
@@ -933,7 +917,9 @@ bool test_shared_memory_existing_size_mismatch_fails() {
 
 bool test_invalid_bool_config_rejected() {
   const std::string path =
-      "/tmp/seat_aoi_invalid_bool_config_" + std::to_string(seat_aoi::now_us()) + ".conf";
+      (std::filesystem::temp_directory_path() /
+       ("seat_aoi_invalid_bool_config_" + std::to_string(seat_aoi::now_us()) + ".conf"))
+          .string();
   {
     std::ofstream output(path);
     output << "reset_shared_memory=flase\n";

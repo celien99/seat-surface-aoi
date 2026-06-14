@@ -1,9 +1,11 @@
 # 共享内存协议
 
-在线图像和结果链路使用两个 POSIX 共享内存区域：
+在线图像和结果链路使用两个共享内存区域。协议文档中的名称是跨平台逻辑名：
 
 - `/seat_aoi_cpp_to_py_frames_v1`：C++ 写入 `SeatInspectionJob` 图像 slot，Python 读取。
 - `/seat_aoi_py_to_cpp_results_v1`：Python 写入 `InspectionResult` 结果 slot，C++ 读取。
+
+Linux/macOS 平台直接使用上述 POSIX 共享内存名称。Windows 工控机平台层会把逻辑名映射为 `Local\seat_aoi_cpp_to_py_frames_v1` 和 `Local\seat_aoi_py_to_cpp_results_v1`，底层使用 Windows Named Shared Memory；协议布局、slot 状态机、CRC 和错误码不变。
 
 在线检测数据面禁止使用 TCP。
 

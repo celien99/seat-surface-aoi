@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import mmap
-import os
 import struct
 import time
-import ctypes
 from dataclasses import dataclass
 
 from .data_types import CameraBundle, DefectResult, InspectionResult, LightFrame, SeatInspectionJob
+from .shared_memory_map import SharedMemoryMap
 from .shm_protocol import (
     DEFAULT_FRAME_SLOT_SIZE,
     DEFAULT_RESULT_SLOT_SIZE,
@@ -68,30 +67,6 @@ LIGHT_INDEX_BY_ID = {light_id: index for index, light_id in LIGHT_ID_BY_INDEX.it
 CAMERA_INDEX_BY_ID = {camera_id: index for index, camera_id in CAMERA_ID_BY_INDEX.items()}
 
 
-@dataclass
-class _SharedMemoryMap:
-    name: str
-    size: int
-    fd: int
-    mm: mmap.mmap
-
-    @classmethod
-    def open(cls, name: str, size: int) -> "_SharedMemoryMap":
-        libc = ctypes.CDLL(None, use_errno=True)
-        shm_open = libc.shm_open
-        shm_open.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_uint]
-        shm_open.restype = ctypes.c_int
-        fd = shm_open(name.encode("utf-8"), os.O_RDWR, 0)
-        if fd < 0:
-            errno = ctypes.get_errno()
-            raise FileNotFoundError(errno, os.strerror(errno), name)
-        return cls(name=name, size=size, fd=fd, mm=mmap.mmap(fd, size))
-
-    def close(self) -> None:
-        self.mm.close()
-        os.close(self.fd)
-
-
 @dataclass(frozen=True)
 class _FrameSlotIdentity:
     sequence_id: int
@@ -120,8 +95,8 @@ class ShmClient:
         self.result_slot_size = result_slot_size
         frame_total = SHM_HEADER.size + slot_count * frame_slot_size
         result_total = SHM_HEADER.size + slot_count * result_slot_size
-        self.frames = _SharedMemoryMap.open(frame_name, frame_total)
-        self.results = _SharedMemoryMap.open(result_name, result_total)
+        self.frames = SharedMemoryMap.open(frame_name, frame_total)
+        self.results = SharedMemoryMap.open(result_name, result_total)
         self._validate_header(self.frames.mm, frame_slot_size)
         self._validate_header(self.results.mm, result_slot_size)
         self._pending_frame_slots: dict[int, int] = {}

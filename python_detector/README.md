@@ -43,7 +43,7 @@ uv run python -m tools.validate_architecture_readiness --scope reference
 uv run python -m python_detector.detector_main --once --timeout-ms 8000
 ```
 
-端到端模拟仍使用 `bash tools/run_simulated_ipc.sh`。该脚本会优先使用 `uv run python` 启动 detector；如果本机没有 uv，则回退到系统 `python3`。
+端到端模拟可使用 `bash tools/run_simulated_ipc.sh`；Windows 工控机或跨平台联调使用 `uv run python tools/run_simulated_ipc.py`。两个入口都会先启动 C++ 主控，再启动 detector 读取共享内存任务并写回结果。
 
 ## 部署打包
 
@@ -95,7 +95,8 @@ python_detector/
 ├── ipc/
 │   ├── data_types.py           # LightFrame、CameraBundle、SeatInspectionJob、InspectionResult 等数据结构
 │   ├── shm_protocol.py         # Python 侧共享内存协议常量、结构体布局、CRC、枚举
-│   └── shm_client.py           # POSIX shared memory 读取任务和写回结果
+│   ├── shared_memory_map.py    # POSIX/Windows 共享内存名称映射和 mmap 打开封装
+│   └── shm_client.py           # 读取共享内存任务和写回结果
 ├── pipeline/
 │   ├── pipeline.py             # InspectionPipeline 主编排
 │   ├── quality_gate.py         # 图像质量门禁：缺帧、曝光、锐度、运动模糊、时间戳等

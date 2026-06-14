@@ -32,6 +32,11 @@ PlcClientConfig make_plc_client_config(const RuntimePlcConfig& config) {
 
 }  // namespace
 
+StationController::~StationController() {
+  frame_ring_.close();
+  result_ring_.close();
+}
+
 bool StationController::initialize(const StationConfig& config) {
   config_ = config;
   StationRuntimeConfig runtime_config;
@@ -213,6 +218,8 @@ void StationController::cleanup_shared_memory() {
   record_system_event("station_stopped", ErrorCode::None, "shared memory cleanup requested");
   frame_ring_.unlink_name();
   result_ring_.unlink_name();
+  frame_ring_.close();
+  result_ring_.close();
 }
 
 StationHealthSnapshot StationController::health_snapshot() const {

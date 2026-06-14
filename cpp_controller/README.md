@@ -2,7 +2,7 @@
 
 ## 概述
 
-`cpp_controller` 是座椅表面 AOI 检测系统的 C++ 主控程序，负责工位流程编排、固定机位/机器人飞拍采集调度、PLC/Robot 信号交互，以及通过 POSIX 共享内存与 Python 检测引擎进行 IPC 通信。
+`cpp_controller` 是座椅表面 AOI 检测系统的 C++ 主控程序，负责工位流程编排、固定机位/机器人飞拍采集调度、PLC/Robot 信号交互，以及通过跨平台共享内存与 Python 检测引擎进行 IPC 通信。Linux/macOS 使用 POSIX 共享内存，Windows 工控机使用 Named Shared Memory。
 
 ### 核心定位
 
@@ -32,7 +32,8 @@ cpp_controller/
 │   ├── main.cpp                            # 主入口，命令行参数解析与主循环
 │   │
 │   ├── ipc/                                # IPC 共享内存通信层
-│   │   ├── shared_memory.cpp               # POSIX shm_open/mmap 封装
+│   │   ├── shared_memory_posix.cpp         # Linux/macOS POSIX shm_open/mmap 封装
+│   │   ├── shared_memory_win32.cpp         # Windows CreateFileMapping/MapViewOfFile 封装
 │   │   ├── crc32.cpp                       # CRC32 校验和计算
 │   │   ├── frame_ring_buffer.cpp           # 图像帧环形缓冲区（C++ → Python）
 │   │   └── result_ring_buffer.cpp          # 检测结果环形缓冲区（Python → C++）
@@ -109,7 +110,7 @@ cpp_controller/
 ### 依赖关系
 
 ```
-seat_aoi_ipc (无外部依赖，仅 pthread)
+seat_aoi_ipc (无外部依赖，Linux/macOS 链接 pthread/rt，Windows 使用 Win32 API)
        ↑
 seat_aoi_control (依赖 seat_aoi_ipc)
        ↑
@@ -117,7 +118,7 @@ seat_aoi_controller (依赖 seat_aoi_control)
 ipc_safety_checks   (依赖 seat_aoi_control)
 ```
 
-默认构建外部依赖为零，仅依赖 C++17 标准库 + POSIX（`shm_open`, `mmap`, `pthread`）。真实生产 backend 需要按现场硬件型号额外链接 PLC、相机或频闪厂商 SDK。
+默认构建外部依赖为零，仅依赖 C++17 标准库和系统共享内存 API：Linux/macOS 使用 `shm_open`/`mmap`，Windows 使用 `CreateFileMappingW`/`MapViewOfFile`。真实生产 backend 需要按现场硬件型号额外链接 PLC、相机或频闪厂商 SDK。
 
 ---
 
@@ -215,7 +216,7 @@ Empty ─→ Writing ─→ Ready ─→ Reading ─→ Empty
 
 ### 初始化和结果回收安全策略
 
-- Frame/Result ring 打开既有共享内存时会校验 POSIX 共享内存对象实际大小以及 `magic/version/slot_count/slot_size`。未显式 reset 且大小或布局不匹配时初始化失败，不会静默清零或重写可能属于另一进程的共享内存。
+- Frame/Result ring 打开既有共享内存时会校验共享内存对象实际大小以及 `magic/version/slot_count/slot_size`。未显式 reset 且大小或布局不匹配时初始化失败，不会静默清零或重写可能属于另一进程的共享内存。Windows 下逻辑名会映射为 `Local\seat_aoi_cpp_to_py_frames_v1` 和 `Local\seat_aoi_py_to_cpp_results_v1`。
 - Result ring 读取时要求 `payload_size == ResultSlotHeader + defect_count * DefectResultMeta`，且 slot 头与 `InspectionResultMeta.defect_count` 一致，防止缺陷数组截断或尾部脏数据被接受。
 - 等待当前 `sequence_id` 时，旧序号的 `Ready/Corrupted/Timeout` slot 会被回收清空；当前序号的 `Corrupted` 或 `Timeout` slot 会立即转成 `CrcMismatch` 或 `DetectorTimeout`，不会继续等待到超时。
 - detector 返回结果时会校验判定语义：`OK` 必须质量通过、无错误且无缺陷，`NG` 必须质量通过、无错误且存在缺陷；语义不一致的结果按 `InvalidPayload` 转为 `RECHECK`。
@@ -228,8 +229,8 @@ Empty ─→ Writing ─→ Ready ─→ Reading ─→ Empty
 ### 系统要求
 
 - CMake ≥ 3.16
-- C++17 编译器（GCC ≥ 8 / Clang ≥ 7）
-- POSIX 兼容系统（Linux / macOS）
+- C++17 编译器（GCC ≥ 8 / Clang ≥ 7 / MSVC Build Tools 2019+）
+- Linux、macOS 或 Windows 工控机环境
 
 ### 构建
 
@@ -676,24 +677,17 @@ cmake --build build
 
 ### 需要补充的 Mock 检测器
 
-当前主循环在 `wait_for_result()` 处会超时（没有 Python 检测器写结果），需要补充一个 Mock Result Writer：
+当前主循环在 `wait_for_result()` 处需要 Python detector 写回结果。联调时优先使用根目录跨平台入口：
 
-```python
-# mock_detector.py — 模拟检测器，向 ResultRingBuffer 写入结果
-import mmap
-import struct
-import os
-import time
-
-SHM_NAME = "/seat_aoi_py_to_cpp_results_v1"
-# ... 打开共享内存，轮询 Ready 状态的槽位，写入模拟检测结果
+```bash
+uv run python tools/run_simulated_ipc.py
 ```
 
 ---
 
 ## 设计原则
 
-1. **默认零外部依赖** — 模拟模式使用纯 C++17 + POSIX，任何 Linux/macOS 系统可直接编译运行
+1. **默认零外部依赖** — 模拟模式使用纯 C++17 和系统共享内存 API，Linux/macOS/Windows 可按平台直接编译运行
 2. **生产配置先行** — 先通过配置模板和 `--validate-config` 固化现场参数，再按 backend 接入真实驱动
 3. **保守失败** — 任何异常路径均返回 Recheck，宁可复检不误判通过
 4. **CRC 校验** — 所有共享内存数据帧附带 CRC32，防止静默数据损坏

@@ -59,6 +59,7 @@ struct StationConfig {
 
 class StationController {
 public:
+  ~StationController();
   bool initialize(const StationConfig& config);
   bool wait_for_trigger(PlcTrigger* out_trigger, std::string* error_message);
   InspectionResultPayload inspect_one_seat(const PlcTrigger& trigger);

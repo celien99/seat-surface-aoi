@@ -1,21 +1,13 @@
 #include "control/production_event_log.hpp"
 
-#include <cerrno>
-#include <cstring>
+#include <filesystem>
 #include <sstream>
-#include <sys/stat.h>
-#include <sys/types.h>
 
 #include "common/time_utils.hpp"
 
 namespace seat_aoi {
 
 namespace {
-
-bool directory_exists(const std::string& path) {
-  struct stat info {};
-  return ::stat(path.c_str(), &info) == 0 && S_ISDIR(info.st_mode);
-}
 
 bool ensure_directory(const std::string& path, std::string* error_message) {
   if (path.empty()) {
@@ -24,38 +16,17 @@ bool ensure_directory(const std::string& path, std::string* error_message) {
     }
     return false;
   }
-  if (directory_exists(path)) {
+  std::error_code ec;
+  if (std::filesystem::is_directory(path, ec)) {
     return true;
   }
-
-  std::string current;
-  if (!path.empty() && path.front() == '/') {
-    current = "/";
-  }
-  std::size_t start = path.front() == '/' ? 1U : 0U;
-  while (start <= path.size()) {
-    const auto slash = path.find('/', start);
-    const std::string part = path.substr(start, slash - start);
-    if (!part.empty()) {
-      if (!current.empty() && current.back() != '/') {
-        current += "/";
-      }
-      current += part;
-      if (!directory_exists(current) && ::mkdir(current.c_str(), 0755) != 0 &&
-          errno != EEXIST) {
-        if (error_message != nullptr) {
-          *error_message = "创建 trace 目录失败: " + current + " error=" +
-                           std::strerror(errno);
-        }
-        return false;
-      }
+  if (!std::filesystem::create_directories(path, ec) && !std::filesystem::is_directory(path, ec)) {
+    if (error_message != nullptr) {
+      *error_message = "创建 trace 目录失败: " + path + " error=" + ec.message();
     }
-    if (slash == std::string::npos) {
-      break;
-    }
-    start = slash + 1U;
+    return false;
   }
-  return directory_exists(path);
+  return true;
 }
 
 std::string json_escape(const std::string& value) {
