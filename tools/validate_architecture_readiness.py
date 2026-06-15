@@ -353,7 +353,7 @@ def _check_recipe_light_quality_trace(recipe: Recipe, area: str) -> list[Readine
 
 
 def _check_v4_algorithm_contract(scope: ReadinessScope) -> list[ReadinessItem]:
-    recipe = load_recipe_file(REPO_ROOT / "python_detector/config/production_model.example.yaml")
+    recipe = load_recipe_file(REPO_ROOT / "python_detector/config/production_recipe.yaml")
     items: list[ReadinessItem] = []
     if recipe.roi_locator.backend == "onnx_yolo" and recipe.roi_locator.model_path:
         items.append(
@@ -420,9 +420,9 @@ def _check_v4_algorithm_contract(scope: ReadinessScope) -> list[ReadinessItem]:
         items.append(
             _blocked(
                 "V4 AI Runtime",
-                "生产模型模板必须同时声明监督 ONNX 与 PatchCore safety net 工程入口。",
+                "生产模型配方必须同时声明监督 ONNX 与 PatchCore safety net 工程入口。",
                 f"primary_onnx={primary_onnx}; patchcore_safety_net={patchcore}",
-                "补齐 production_model.example.yaml 的模型后端声明。",
+                "补齐 production_recipe.yaml 的模型后端声明。",
             )
         )
 

@@ -379,6 +379,8 @@ cp config/station_runtime.production.example.conf config/station_runtime.product
 ./build/seat_aoi_controller --config config/station_runtime.production.conf --validate-config
 ```
 
+该模板的 `recipe_id` 已对齐 Python 固定机位生产配方 `seat_a_black_leather_production_v1`。模型补齐后，Python detector 会按该配方启用 ONNX ROI、ECC、监督 ONNX、WideResNet50/PCA/PatchCore/FAISS safety net；相机 `calibration_id` 必须和 Python 标定文件保持一致。
+
 机器人飞拍生产模板位于 `config/station_runtime.robot_flyshot.production.example.conf`，复制后需要补齐 `robot.*`、`pose.<N>.*`、末端相机和光源控制器参数：
 
 ```bash
@@ -386,6 +388,8 @@ cp config/station_runtime.robot_flyshot.production.example.conf \
    config/station_runtime.robot_flyshot.production.conf
 ./build/seat_aoi_controller --config config/station_runtime.robot_flyshot.production.conf --validate-config
 ```
+
+机器人飞拍模板的 `recipe_id` 已对齐 Python 生产配方 `seat_a_robot_flyshot_production_v1`，每个 `pose.<N>.calibration_id` 必须匹配 Python 中 `EYE_IN_HAND` 下对应 pose 的标定文件。
 
 配置字段逐项说明见 [C++ 主控部署与硬件运维](../docs/cpp_controller_operations.md)。
 

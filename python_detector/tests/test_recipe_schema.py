@@ -10,6 +10,25 @@ def test_recipe_manager_loads_default_yaml() -> None:
     assert recipe.models["fake_default"].backend == "fake"
 
 
+def test_recipe_manager_loads_production_yaml() -> None:
+    recipe = RecipeManager().load("seat_a_black_leather_production_v1")
+
+    assert recipe.roi_locator.backend == "onnx_yolo"
+    assert recipe.registration.method == "ecc"
+    assert recipe.models["supervised_defect_onnx"].backend == "onnx"
+    assert recipe.models["patchcore_unknown_safety_net"].backend == "patchcore_knn"
+
+
+def test_recipe_manager_loads_robot_production_yaml() -> None:
+    recipe = RecipeManager().load("seat_a_robot_flyshot_production_v1")
+
+    assert [(camera.camera_id, camera.pose_id) for camera in recipe.cameras] == [
+        ("EYE_IN_HAND", "T1_BACKREST"),
+        ("EYE_IN_HAND", "T2_CUSHION"),
+    ]
+    assert recipe.model_key_for("EYE_IN_HAND", "full", "T2_CUSHION") == "supervised_defect_onnx"
+
+
 def test_recipe_rejects_missing_required_field() -> None:
     with pytest.raises(RecipeValidationError):
         recipe_from_dict({"recipe_id": "bad"})

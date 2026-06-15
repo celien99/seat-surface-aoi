@@ -1,0 +1,8 @@
+roi_templates:
+  full:
+    polygon_xy:
+      - [0, 0]
+      - [2447, 0]
+      - [2447, 2047]
+      - [0, 2047]
+    output_size: [2448, 2048]

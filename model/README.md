@@ -34,6 +34,13 @@ model/
 部署前执行：
 
 ```bash
+uv run python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1
+uv run python -m tools.validate_model_assets --recipe seat_a_robot_flyshot_production_v1
+```
+
+`production_model.example.yaml` 保留为真实模型接入参考模板，也可单独检查：
+
+```bash
 uv run python -m tools.validate_model_assets --recipe production_model_example
 ```
 

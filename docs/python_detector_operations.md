@@ -257,10 +257,11 @@ model/patchcore/seat_patchcore.faiss
 上线前校验：
 
 ```bash
-uv run python -m tools.validate_model_assets --recipe production_model_example
+uv run python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1
+uv run python -m tools.validate_model_assets --recipe seat_a_robot_flyshot_production_v1
 ```
 
-仓库默认占位文件未替换时该命令应失败，并列出需要替换的真实模型产物。
+仓库默认占位文件未替换时这些命令应失败，并列出需要替换的真实模型产物。`production_model.example.yaml` 仍保留为参考模板；在线生产链路应使用 `seat_a_black_leather_production_v1` 或 `seat_a_robot_flyshot_production_v1`。
 
 ## Trace、回放与训练闭环
 
@@ -370,12 +371,20 @@ uv run python -m training_tools.benchmark_pipeline \
 5. 固定机位或机器人飞拍配置同步对齐 `recipe_id`、`camera_id`、`pose_id`、`calibration_id` 和 `light_order`。
 6. 运行 schema、协议、回放和模拟 IPC 验证。
 
+模型资产补齐后的生产配方入口：
+
+- 固定机位：`python_detector/config/production_recipe.yaml`，`recipe_id=seat_a_black_leather_production_v1`。
+- 机器人飞拍：`python_detector/config/production_robot_flyshot_recipe.yaml`，`recipe_id=seat_a_robot_flyshot_production_v1`。
+- 两者都启用 `onnx_yolo` ROI、`ecc` 配准、监督 ONNX 主检测、WideResNet50 embedding、PCA、PatchCore KNN 和可选 FAISS safety net。
+- 仓库内 `production_full_roi.yaml` 和 `*production*.yaml` 标定文件只是可校验模板；现场必须用真实 ROI、像素尺寸和多光源对齐矩阵替换。
+
 ## 验证命令
 
 ```bash
 uv run pytest
 uv run python -m tools.validate_protocol
-uv run python -m tools.validate_model_assets --recipe production_model_example
+uv run python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1
+uv run python -m tools.validate_model_assets --recipe seat_a_robot_flyshot_production_v1
 uv run python -m tools.validate_architecture_readiness --scope reference
 bash tools/run_simulated_ipc.sh
 ```
