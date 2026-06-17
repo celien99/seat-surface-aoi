@@ -405,7 +405,7 @@ cp config/station_runtime.production.example.conf config/station_runtime.product
 
 当前固定机位生产模板按现场已确认硬件预置：海康 MV-CH120-20GC，4096 x 3072，Hikrobot MVS backend；镜头 MVL-KF0814M-12MPE，8mm F1.4，1.1"，C 接口；频闪控制器 FL-ACDH-20048-4，4 通道。单相机、Mono8、4 光源图像包约 48 MB，模板保留 `frame_slot_size=67108864`；如果后续增加第二个同分辨率固定机位，应把 `frame_slot_size` 至少提高到 `134217728`，并同步 Python 共享内存配置。
 
-Hikrobot MVS backend 当前按 `Mono8` 单通道实现：按 `camera.0.serial_number` 匹配相机，配置 `4096 x 3072`、`TriggerMode=On`、`TriggerSource=Software`、`Line1=ExposureActive`。C++ 每个光源轮次先设置曝光/增益并 arm 相机，再发送 `TriggerSoftware`；真实频闪应接相机 ExposureActive/ExposureOut 输出，确保光源点亮落在曝光窗口内。其他像素格式不会隐式转换，配置不匹配会保守失败。
+Hikrobot MVS backend 当前按 `Mono8` 单通道实现，并已按海康 MVS C++ 示例工程对齐：进程内引用计数调用 `MV_CC_Initialize/Finalize`，枚举 GigE/USB/GenTL 设备，按 `camera.0.serial_number` 匹配相机，配置 `4096 x 3072`、`TriggerMode=On`、`TriggerSource=Software`、`Line1=ExposureStartActive`、`StrobeEnable=true`。C++ 每个光源轮次先设置曝光/增益并 arm 相机，再发送 `TriggerSoftware`；真实频闪应接相机 `ExposureStartActive`/ExposureOut 输出，确保光源点亮落在曝光窗口内。取帧使用 MVS 示例里的 `nExtendWidth/nExtendHeight/nFrameLenEx` 字段，其他像素格式不会隐式转换，配置不匹配会保守失败。
 
 PLC 未确定前，使用 `config/station_runtime.lab_manual.example.conf` 做手动触发联调，只验证相机、频闪、共享内存和 Python detector 收图。该模板的 `frame_slot_size=67108864` 会被联调脚本同步传给 Python detector，避免 4096 x 3072 图像在 Python 侧仍按默认 16 MB 打开共享内存。进入生产闭环前仍必须补齐 PLC backend、触发输入、`trigger_id/seat_id/sku` 来源和 OK/NG/RECHECK 输出点位。
 

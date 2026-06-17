@@ -130,7 +130,7 @@ cmake -S cpp_controller -B cpp_controller/build `
 cmake --build cpp_controller/build --config Release
 ```
 
-该 backend 按 `camera.<N>.serial_number` 匹配相机，当前只接收 `Mono8` 单通道图像。`trigger_sync_mode=camera_exposure_output` 下，C++ 逐光源设置曝光/增益并发送 MVS `TriggerSoftware`，相机 `Line1=ExposureActive` 输出应接到频闪控制器触发输入，真实点亮时刻由相机曝光窗口定义。
+该 backend 已按海康 MVS C++ 示例工程对齐 SDK 初始化、设备枚举、软件触发、IO 输出和取帧字段，按 `camera.<N>.serial_number` 匹配相机，当前只接收 `Mono8` 单通道图像。`trigger_sync_mode=camera_exposure_output` 下，C++ 逐光源设置曝光/增益并发送 MVS `TriggerSoftware`，相机 `Line1=ExposureStartActive` 且 `StrobeEnable=true`，该输出应接到频闪控制器触发输入，真实点亮时刻由相机曝光窗口定义。
 
 PLC 未接入前先使用实验室/工控机手动触发配置：
 
@@ -394,8 +394,8 @@ camera_index=0:
   vendor/model: Hikrobot MV-CH120-20GC
   serial:
   lens: MVL-KF0814M-12MPE, 8mm F1.4, 1.1", C mount
-  exposure_output_line: Line1
-  trigger_input_line: Line0
+  exposure_output_line: Line1 (ExposureStartActive -> strobe trigger input)
+  trigger_input_line: Line0 (reserved; current backend uses MVS TriggerSoftware)
   width: 4096
   height: 3072
   pixel_format: Mono8

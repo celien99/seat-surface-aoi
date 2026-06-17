@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <mutex>
 #include <sstream>
 
 #include "common/string_utils.hpp"
@@ -17,11 +18,52 @@ namespace {
 
 #ifdef SEAT_AOI_ENABLE_HIKROBOT_MVS
 constexpr int kMvsOk = MV_OK;
+constexpr unsigned int kSupportedDeviceTypes =
+    MV_GIGE_DEVICE | MV_USB_DEVICE | MV_GENTL_GIGE_DEVICE |
+    MV_GENTL_CAMERALINK_DEVICE | MV_GENTL_CXP_DEVICE | MV_GENTL_XOF_DEVICE;
+
+std::mutex& mvs_sdk_mutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
+std::uint32_t& mvs_sdk_ref_count() {
+  static std::uint32_t ref_count = 0;
+  return ref_count;
+}
 
 std::string mvs_error(const char* operation, int code) {
   std::ostringstream oss;
   oss << operation << " failed, mvs_code=0x" << std::hex << code;
   return oss.str();
+}
+
+bool acquire_mvs_sdk(std::string* error_message) {
+  std::lock_guard<std::mutex> lock(mvs_sdk_mutex());
+  std::uint32_t& ref_count = mvs_sdk_ref_count();
+  if (ref_count == 0) {
+    const int ret = MV_CC_Initialize();
+    if (ret != kMvsOk) {
+      if (error_message != nullptr) {
+        *error_message = mvs_error("MV_CC_Initialize", ret);
+      }
+      return false;
+    }
+  }
+  ++ref_count;
+  return true;
+}
+
+void release_mvs_sdk() {
+  std::lock_guard<std::mutex> lock(mvs_sdk_mutex());
+  std::uint32_t& ref_count = mvs_sdk_ref_count();
+  if (ref_count == 0) {
+    return;
+  }
+  --ref_count;
+  if (ref_count == 0) {
+    MV_CC_Finalize();
+  }
 }
 
 bool set_enum_by_string(void* handle,
@@ -54,9 +96,9 @@ bool set_float_value(void* handle,
 
 bool set_int_value(void* handle,
                    const char* key,
-                   std::uint32_t value,
+                   std::int64_t value,
                    std::string* error_message) {
-  const int ret = MV_CC_SetIntValue(handle, key, value);
+  const int ret = MV_CC_SetIntValueEx(handle, key, value);
   if (ret == kMvsOk) {
     return true;
   }
@@ -66,17 +108,56 @@ bool set_int_value(void* handle,
   return false;
 }
 
+bool set_bool_value(void* handle,
+                    const char* key,
+                    bool value,
+                    std::string* error_message) {
+  const int ret = MV_CC_SetBoolValue(handle, key, value);
+  if (ret == kMvsOk) {
+    return true;
+  }
+  if (error_message != nullptr) {
+    *error_message = mvs_error(key, ret);
+  }
+  return false;
+}
+
+bool set_image_node_num(void* handle,
+                        std::uint32_t value,
+                        std::string* error_message) {
+  const int ret = MV_CC_SetImageNodeNum(handle, value);
+  if (ret == kMvsOk) {
+    return true;
+  }
+  if (error_message != nullptr) {
+    *error_message = mvs_error("MV_CC_SetImageNodeNum", ret);
+  }
+  return false;
+}
+
 bool serial_matches(const MV_CC_DEVICE_INFO* info, const std::string& serial_number) {
   if (serial_number.empty() || info == nullptr) {
     return false;
   }
-  if (info->nTLayerType == MV_GIGE_DEVICE) {
+  if (info->nTLayerType == MV_GIGE_DEVICE || info->nTLayerType == MV_GENTL_GIGE_DEVICE) {
     const auto* gige = &info->SpecialInfo.stGigEInfo;
     return serial_number == reinterpret_cast<const char*>(gige->chSerialNumber);
   }
   if (info->nTLayerType == MV_USB_DEVICE) {
     const auto* usb = &info->SpecialInfo.stUsb3VInfo;
     return serial_number == reinterpret_cast<const char*>(usb->chSerialNumber);
+  }
+  if (info->nTLayerType == MV_GENTL_CAMERALINK_DEVICE) {
+    const auto* cml = &info->SpecialInfo.stCMLInfo;
+    return serial_number == reinterpret_cast<const char*>(cml->chSerialNumber);
+  }
+  if (info->nTLayerType == MV_GENTL_CXP_DEVICE) {
+    const auto* cxp = &info->SpecialInfo.stCXPInfo;
+    return serial_number == reinterpret_cast<const char*>(cxp->chSerialNumber);
+  }
+  if (info->nTLayerType == MV_GENTL_XOF_DEVICE) {
+    const auto* xof = &info->SpecialInfo.stXoFInfo;
+    return serial_number == reinterpret_cast<const char*>(xof->chSerialNumber);
   }
   return false;
 }
@@ -112,10 +193,18 @@ bool HikrobotMvsCamera::initialize(const CameraConfig& config) {
   set_error("Hikrobot MVS SDK 未启用；请使用 -DSEAT_AOI_ENABLE_HIKROBOT_MVS=ON 并配置 MVS include/lib 路径");
   return false;
 #else
+  std::string error;
+  if (!acquire_mvs_sdk(&error)) {
+    set_error(error);
+    return false;
+  }
+  sdk_initialized_ = true;
+
   MV_CC_DEVICE_INFO_LIST devices{};
-  int ret = MV_CC_EnumDevices(MV_GIGE_DEVICE | MV_USB_DEVICE, &devices);
+  int ret = MV_CC_EnumDevices(kSupportedDeviceTypes, &devices);
   if (ret != kMvsOk) {
     set_error(mvs_error("MV_CC_EnumDevices", ret));
+    close();
     return false;
   }
   MV_CC_DEVICE_INFO* selected = nullptr;
@@ -131,12 +220,14 @@ bool HikrobotMvsCamera::initialize(const CameraConfig& config) {
     oss << "未找到海康相机 serial_number=" << config_.serial_number
         << " device_count=" << devices.nDeviceNum;
     set_error(oss.str());
+    close();
     return false;
   }
 
   ret = MV_CC_CreateHandle(&handle_, selected);
   if (ret != kMvsOk) {
     set_error(mvs_error("MV_CC_CreateHandle", ret));
+    close();
     return false;
   }
   ret = MV_CC_OpenDevice(handle_);
@@ -149,11 +240,10 @@ bool HikrobotMvsCamera::initialize(const CameraConfig& config) {
     const int packet_size = MV_CC_GetOptimalPacketSize(handle_);
     if (packet_size > 0) {
       std::string packet_error;
-      set_int_value(handle_, "GevSCPSPacketSize", static_cast<std::uint32_t>(packet_size), &packet_error);
+      set_int_value(handle_, "GevSCPSPacketSize", packet_size, &packet_error);
     }
   }
 
-  std::string error;
   if (!set_enum_by_string(handle_, "PixelFormat", config_.pixel_format, &error) ||
       !set_int_value(handle_, "Width", config_.width, &error) ||
       !set_int_value(handle_, "Height", config_.height, &error) ||
@@ -161,8 +251,12 @@ bool HikrobotMvsCamera::initialize(const CameraConfig& config) {
       !set_enum_by_string(handle_, "TriggerMode", "On", &error) ||
       !set_enum_by_string(handle_, "TriggerSource", "Software", &error) ||
       !set_enum_by_string(handle_, "LineSelector", config_.exposure_output_line, &error) ||
-      !set_enum_by_string(handle_, "LineMode", "Output", &error) ||
-      !set_enum_by_string(handle_, "LineSource", "ExposureActive", &error)) {
+      !set_enum_by_string(handle_, "LineSource", "ExposureStartActive", &error) ||
+      !set_bool_value(handle_, "StrobeEnable", true, &error) ||
+      !set_int_value(handle_, "StrobeLineDuration", 0, &error) ||
+      !set_int_value(handle_, "StrobeLineDelay", 0, &error) ||
+      !set_int_value(handle_, "StrobeLinePreDelay", 0, &error) ||
+      !set_image_node_num(handle_, std::max<std::uint32_t>(config_.buffer_count, 1U), &error)) {
     set_error(error);
     close();
     return false;
@@ -276,7 +370,7 @@ bool HikrobotMvsCamera::wait_frame(std::uint64_t trigger_id,
   const auto release_frame = [&]() {
     MV_CC_FreeImageBuffer(handle_, &frame);
   };
-  if (frame.pBufAddr == nullptr || frame.stFrameInfo.nFrameLen == 0) {
+  if (frame.pBufAddr == nullptr || frame.stFrameInfo.nFrameLenEx == 0) {
     release_frame();
     ++dropped_frames_;
     set_error("Hikrobot MVS returned empty frame");
@@ -290,12 +384,12 @@ bool HikrobotMvsCamera::wait_frame(std::uint64_t trigger_id,
     return false;
   }
 
-  const std::uint32_t width = frame.stFrameInfo.nWidth;
-  const std::uint32_t height = frame.stFrameInfo.nHeight;
+  const std::uint32_t width = frame.stFrameInfo.nExtendWidth;
+  const std::uint32_t height = frame.stFrameInfo.nExtendHeight;
   const std::uint32_t stride = width * config_.channels;
   const std::uint64_t expected_size = static_cast<std::uint64_t>(stride) * height;
   if (width != config_.width || height != config_.height ||
-      frame.stFrameInfo.nFrameLen < expected_size) {
+      frame.stFrameInfo.nFrameLenEx < expected_size) {
     release_frame();
     ++dropped_frames_;
     set_error("Hikrobot MVS frame size mismatch");
@@ -344,8 +438,12 @@ void HikrobotMvsCamera::close() {
     MV_CC_CloseDevice(handle_);
     MV_CC_DestroyHandle(handle_);
   }
+  if (sdk_initialized_) {
+    release_mvs_sdk();
+  }
 #endif
   handle_ = nullptr;
+  sdk_initialized_ = false;
   initialized_ = false;
   grabbing_ = false;
   armed_ = false;

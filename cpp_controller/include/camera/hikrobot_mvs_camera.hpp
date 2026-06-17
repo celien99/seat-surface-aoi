@@ -37,6 +37,7 @@ private:
 
   CameraConfig config_{};
   void* handle_ = nullptr;
+  bool sdk_initialized_ = false;
   bool initialized_ = false;
   bool grabbing_ = false;
   bool armed_ = false;
