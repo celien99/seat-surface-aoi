@@ -62,8 +62,18 @@ def main() -> int:
     subprocess.run([str(controller), "--cleanup"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     controller_args = [str(controller), "--once", "--wait-ms", "8000"]
+    detector_args = ["-m", "python_detector.detector_main", "--once", "--timeout-ms", "8000"]
     if args.config:
         controller_args = [str(controller), "--config", args.config, "--once", "--wait-ms", "8000"]
+        detector_args = [
+            "-m",
+            "python_detector.detector_main",
+            "--config",
+            args.config,
+            "--once",
+            "--timeout-ms",
+            "8000",
+        ]
 
     cpp_process = subprocess.Popen(controller_args)
     time.sleep(0.2)
@@ -71,7 +81,7 @@ def main() -> int:
     env["PYTHONPATH"] = str(ROOT_DIR)
     try:
         run(
-            python_runner() + ["-m", "python_detector.detector_main", "--once", "--timeout-ms", "8000"],
+            python_runner() + detector_args,
             cwd=ROOT_DIR,
             env=env,
         )

@@ -42,9 +42,12 @@ uv run python -m tools.validate_model_assets --recipe seat_a_black_leather_produ
 uv run python -m tools.validate_model_assets --recipe seat_a_robot_flyshot_production_v1
 uv run python -m tools.validate_architecture_readiness --scope reference
 uv run python -m python_detector.detector_main --once --timeout-ms 8000
+uv run python -m python_detector.detector_main \
+  --config cpp_controller/config/station_runtime.lab_manual.example.conf \
+  --once --timeout-ms 8000
 ```
 
-端到端模拟可使用 `bash tools/run_simulated_ipc.sh`；Windows 工控机或跨平台联调使用 `uv run python tools/run_simulated_ipc.py`。两个入口都会先启动 C++ 主控，再启动 detector 读取共享内存任务并写回结果。
+端到端模拟可使用 `bash tools/run_simulated_ipc.sh`；Windows 工控机或跨平台联调使用 `uv run python tools/run_simulated_ipc.py`。两个入口都会先启动 C++ 主控，再启动 detector 读取共享内存任务并写回结果。带 `--config` 运行时，脚本会把同一份 C++ 运行配置传给 detector，detector 会读取 `slot_count`、`frame_slot_size` 和 `result_slot_size`，确保 4096 x 3072 固定机位高分辨率图像不会因为 Python 仍使用默认 16 MB slot 而布局不匹配。
 
 ## 部署打包
 

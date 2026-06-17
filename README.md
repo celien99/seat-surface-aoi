@@ -281,6 +281,8 @@ C++ 生产模板已把 `recipe_id` 对齐到上述生产配方；上线前还必
 
 当前固定机位硬件基线已记录到 `cpp_controller/config/station_runtime.production.example.conf`：海康 MV-CH120-20GC 工业相机，4096 x 3072，Hikrobot MVS backend；MVL-KF0814M-12MPE FA 镜头，8mm F1.4，1.1"，C 接口；FL-ACDH-20048-4 四通道频闪控制器；4 路光源按 `light_order=1,2,3,4` 串行 TDM 采集。PLC 仍保留生产配置 TODO，测试阶段可先使用手动/模拟触发验证相机、频闪、共享内存和 Python 收图链路。
 
+PLC 接入前的工控机联调使用 `cpp_controller/config/station_runtime.lab_manual.example.conf`：`hardware_mode=lab` 配合 `plc.backend=manual_trigger`，只生成手动触发任务并记录结果，不输出真实 PLC IO；`production` 模式仍禁止 `manual_trigger` 和 `simulated` backend。`tools/run_simulated_ipc.*` 与打包后的 `run_packaged_simulated_ipc.sh` 会把 `--config` 同步传给 Python detector，detector 会读取同一份 `slot_count/frame_slot_size/result_slot_size`，4096 x 3072 图像不需要现场再改 Python 共享内存参数。
+
 典型离线闭环：
 
 ```text

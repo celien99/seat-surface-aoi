@@ -75,8 +75,10 @@ fi
 "${IPC_CHECKS}"
 "${CONTROLLER}" --cleanup >/dev/null 2>&1 || true
 CONTROLLER_ARGS=(--once --wait-ms 8000)
+DETECTOR_ARGS=(--once --timeout-ms 8000)
 if [[ -n "${CONFIG_PATH}" ]]; then
   CONTROLLER_ARGS=(--config "${CONFIG_PATH}" "${CONTROLLER_ARGS[@]}")
+  DETECTOR_ARGS=(--config "${CONFIG_PATH}" "${DETECTOR_ARGS[@]}")
 fi
 "${CONTROLLER}" "${CONTROLLER_ARGS[@]}" &
 CPP_PID=$!
@@ -84,7 +86,7 @@ sleep 0.2
 
 (
   cd "${ROOT_DIR}"
-  PYTHONPATH="${ROOT_DIR}" "${PYTHON_RUNNER[@]}" -m python_detector.detector_main --once --timeout-ms 8000
+  PYTHONPATH="${ROOT_DIR}" "${PYTHON_RUNNER[@]}" -m python_detector.detector_main "${DETECTOR_ARGS[@]}"
 )
 
 wait "${CPP_PID}"

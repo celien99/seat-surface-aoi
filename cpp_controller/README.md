@@ -90,6 +90,7 @@ cpp_controller/
 │
 └── config/
     ├── station_runtime.example.conf        # 固定机位模拟配置模板
+    ├── station_runtime.lab_manual.example.conf # 固定机位手动触发联调模板
     ├── station_runtime.production.example.conf # 固定机位生产配置模板
     ├── station_runtime.robot_flyshot.example.conf # 机器人飞拍模拟配置模板
     └── station_runtime.robot_flyshot.production.example.conf # 机器人飞拍生产配置模板
@@ -124,11 +125,12 @@ ipc_safety_checks   (依赖 seat_aoi_control)
 
 ## 硬件模式说明
 
-当前支持两种运行模式：
+当前支持三种运行模式：
 
 | 模式 | 配置 | 用途 |
 |------|------|------|
 | 模拟模式 | `hardware_mode=simulated` | 不需要真实硬件，使用模拟 PLC、模拟相机、模拟频闪跑通端到端 IPC 和故障注入 |
+| 实验室联调模式 | `hardware_mode=lab` | PLC 未接入前使用 `plc.backend=manual_trigger`，配合真实相机/频闪 backend 做工控机手动触发联调 |
 | 生产模式 | `hardware_mode=production` | 强制填写 PLC、相机、频闪现场参数，禁止误用 simulated backend；当前仓库提供配置校验和 fail-fast 保护，真实 SDK 需按型号接入 |
 
 模拟模式行为：
@@ -140,16 +142,16 @@ ipc_safety_checks   (依赖 seat_aoi_control)
 | **相机** (`camera_device.cpp`) | 生成合成图像（纹理 + 梯度 + 伪随机数据），64×48 可配置分辨率 | `--simulate-missing-frame` 模拟丢帧 |
 | **光源** (`light_controller.cpp`) | 模拟频闪时序，1ms sleep 模拟硬件延迟 | `--simulate-light-fault` 模拟光源故障 |
 
-生产模式当前支持的配置 backend 名称：
+当前支持的配置 backend 名称：
 
 | 设备 | 可选 backend |
 |------|--------------|
-| PLC | `modbus_tcp`、`siemens_s7`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk` |
+| PLC | `manual_trigger`、`modbus_tcp`、`siemens_s7`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk` |
 | 相机 | `basler_pylon`、`hikrobot_mvs`、`daheng_galaxy`、`flir_spinnaker`、`vendor_sdk`、`custom_sdk` |
 | 频闪 | `serial_ascii`、`modbus_tcp`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk` |
 | Robot | `modbus_tcp`、`siemens_s7`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk` |
 
-如果生产模式选择了非 simulated backend，但 C++ 尚未链接对应真实驱动，程序会在初始化阶段明确报错并退出，不会偷偷回退到模拟硬件。
+`manual_trigger` 只能用于 `hardware_mode=lab`，它生成测试触发并记录结果，不输出真实 PLC IO。`production` 模式禁止 `manual_trigger` 和 `simulated` backend。如果选择了非 simulated backend，但 C++ 尚未链接对应真实驱动，程序会在初始化阶段明确报错并退出，不会偷偷回退到模拟硬件。
 
 ## 采集方案模式
 
@@ -157,7 +159,7 @@ ipc_safety_checks   (依赖 seat_aoi_control)
 
 | 模式 | 配置值 | 视角定义 | 典型配置 |
 |------|--------|----------|----------|
-| 固定机位多光源 | `capture_mode=fixed_camera` | 每个 `camera.<N>` 自动生成一个检测视角，`pose_id` 默认等于 `camera_id` | `config/station_runtime.example.conf`、`config/station_runtime.production.example.conf` |
+| 固定机位多光源 | `capture_mode=fixed_camera` | 每个 `camera.<N>` 自动生成一个检测视角，`pose_id` 默认等于 `camera_id` | `config/station_runtime.example.conf`、`config/station_runtime.lab_manual.example.conf`、`config/station_runtime.production.example.conf` |
 | 机器人飞拍多光源 | `capture_mode=robot_flyshot` | 每个 `pose.<N>` 是一个检测视角，可共享同一末端相机 `EYE_IN_HAND` | `config/station_runtime.robot_flyshot.example.conf`、`config/station_runtime.robot_flyshot.production.example.conf` |
 
 机器人飞拍模式会在采集每个 pose 前调用 `RobotClient::wait_pose_ready()`，校验 READY/FAULT/SHOT_ID，并把 `pose_id`、`shot_id`、机器人时间戳和 TCP 位姿写入 `LightFrameMeta`。任何机器人未到位、FAULT、触发错序或超时都返回 `RobotFault`，不会输出 `OK`。
@@ -383,7 +385,7 @@ cp config/station_runtime.production.example.conf config/station_runtime.product
 
 当前固定机位生产模板按现场已确认硬件预置：海康 MV-CH120-20GC，4096 x 3072，Hikrobot MVS backend；镜头 MVL-KF0814M-12MPE，8mm F1.4，1.1"，C 接口；频闪控制器 FL-ACDH-20048-4，4 通道。单相机、Mono8、4 光源图像包约 48 MB，模板保留 `frame_slot_size=67108864`；如果后续增加第二个同分辨率固定机位，应把 `frame_slot_size` 至少提高到 `134217728`，并同步 Python 共享内存配置。
 
-PLC 未确定前，可以先保留 PLC TODO 或使用模拟/手动触发路径，只验证相机、频闪、共享内存和 Python detector 收图。进入生产闭环前仍必须补齐 PLC backend、触发输入、`trigger_id/seat_id/sku` 来源和 OK/NG/RECHECK 输出点位。
+PLC 未确定前，使用 `config/station_runtime.lab_manual.example.conf` 做手动触发联调，只验证相机、频闪、共享内存和 Python detector 收图。该模板的 `frame_slot_size=67108864` 会被联调脚本同步传给 Python detector，避免 4096 x 3072 图像在 Python 侧仍按默认 16 MB 打开共享内存。进入生产闭环前仍必须补齐 PLC backend、触发输入、`trigger_id/seat_id/sku` 来源和 OK/NG/RECHECK 输出点位。
 
 机器人飞拍生产模板位于 `config/station_runtime.robot_flyshot.production.example.conf`，复制后需要补齐 `robot.*`、`pose.<N>.*`、末端相机和光源控制器参数：
 

@@ -689,6 +689,7 @@ bool load_station_runtime_config(const std::string& path,
   for (const auto& camera : config.cameras) {
     cameras[camera.camera_index] = camera;
   }
+  bool has_explicit_camera_config = false;
   std::map<std::uint32_t, RuntimeCaptureViewConfig> capture_views;
   for (const auto& view : config.capture_views) {
     capture_views[view.pose_index] = view;
@@ -954,6 +955,10 @@ bool load_station_runtime_config(const std::string& path,
         std::uint32_t camera_index = 0;
         std::string camera_field;
         if (parse_camera_key(key, &camera_index, &camera_field)) {
+          if (!has_explicit_camera_config) {
+            cameras.clear();
+            has_explicit_camera_config = true;
+          }
           auto* camera = ensure_camera(&cameras, camera_index);
           if (!apply_camera_value(camera, camera_field, value, error_message)) {
             return false;
@@ -1122,6 +1127,12 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
     return false;
   }
 
+  const bool plc_is_simulated = is_simulated_backend(config.plc.backend);
+  const bool plc_is_manual = is_manual_trigger_backend(config.plc.backend);
+  const bool camera_is_simulated = is_simulated_backend(config.camera_backend);
+  const bool light_is_simulated = is_simulated_backend(config.light.backend);
+  const bool robot_is_simulated = is_simulated_backend(config.robot.backend);
+
   if (config.hardware_mode == HardwareMode::Simulated) {
     if (!is_simulated_backend(config.plc.backend) ||
         !is_simulated_backend(config.camera_backend) ||
@@ -1143,13 +1154,24 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
     return false;
   }
 
-  if (is_simulated_backend(config.plc.backend) ||
-      is_simulated_backend(config.camera_backend) ||
-      is_simulated_backend(config.light.backend) ||
-      (config.capture_mode == CaptureMode::RobotFlyshot &&
-       is_simulated_backend(config.robot.backend))) {
+  if (config.hardware_mode == HardwareMode::Lab) {
+    if (!plc_is_manual && !plc_is_simulated) {
+      if (error_message != nullptr) {
+        *error_message = "hardware_mode=lab 时 plc.backend 只能是 manual_trigger 或 simulated";
+      }
+      return false;
+    }
+    if (config.capture_mode == CaptureMode::RobotFlyshot && robot_is_simulated) {
+      if (error_message != nullptr) {
+        *error_message = "hardware_mode=lab 的机器人飞拍模式必须配置真实 robot.backend";
+      }
+      return false;
+    }
+  } else if (plc_is_simulated || plc_is_manual || camera_is_simulated ||
+             light_is_simulated ||
+             (config.capture_mode == CaptureMode::RobotFlyshot && robot_is_simulated)) {
     if (error_message != nullptr) {
-      *error_message = "hardware_mode=production 时不能使用 simulated backend；"
+      *error_message = "hardware_mode=production 时不能使用 simulated/manual_trigger backend；"
                        "请填写 plc.backend、camera_backend、light.backend 和 robot.backend";
     }
     return false;
@@ -1164,21 +1186,25 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
     return false;
   }
 
-  if (!require_non_empty("plc.trigger_source", config.plc.trigger_source, error_message) ||
-      !require_non_empty("plc.trigger_id_source", config.plc.trigger_id_source, error_message) ||
-      !require_non_empty("plc.seat_id_source", config.plc.seat_id_source, error_message) ||
-      !require_non_empty("plc.sku_source", config.plc.sku_source, error_message) ||
-      !require_non_empty("plc.ok_output", config.plc.ok_output, error_message) ||
-      !require_non_empty("plc.ng_output", config.plc.ng_output, error_message) ||
-      !require_non_empty("plc.recheck_output", config.plc.recheck_output, error_message)) {
-    return false;
+  if (!plc_is_manual) {
+    if (!require_non_empty("plc.trigger_source", config.plc.trigger_source, error_message) ||
+        !require_non_empty("plc.trigger_id_source", config.plc.trigger_id_source, error_message) ||
+        !require_non_empty("plc.seat_id_source", config.plc.seat_id_source, error_message) ||
+        !require_non_empty("plc.sku_source", config.plc.sku_source, error_message) ||
+        !require_non_empty("plc.ok_output", config.plc.ok_output, error_message) ||
+        !require_non_empty("plc.ng_output", config.plc.ng_output, error_message) ||
+        !require_non_empty("plc.recheck_output", config.plc.recheck_output, error_message)) {
+      return false;
+    }
   }
-  if ((config.plc.backend == HardwareBackend::ModbusTcp ||
+  if (!plc_is_manual &&
+      (config.plc.backend == HardwareBackend::ModbusTcp ||
        config.plc.backend == HardwareBackend::SiemensS7) &&
       !require_non_empty("plc.host", config.plc.host, error_message)) {
     return false;
   }
-  if ((config.plc.backend == HardwareBackend::ModbusTcp ||
+  if (!plc_is_manual &&
+      (config.plc.backend == HardwareBackend::ModbusTcp ||
        config.plc.backend == HardwareBackend::SiemensS7) &&
       config.plc.port == 0) {
     if (error_message != nullptr) {

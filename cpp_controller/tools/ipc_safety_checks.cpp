@@ -473,6 +473,84 @@ bool test_runtime_light_channel_config_parses() {
   return passed;
 }
 
+bool test_explicit_camera_config_replaces_defaults() {
+  const std::string path = "/tmp/seat_aoi_single_camera_config.conf";
+  {
+    std::ofstream out(path);
+    out << "hardware_mode=lab\n"
+        << "plc.backend=manual_trigger\n"
+        << "camera.backend=simulated\n"
+        << "light.backend=simulated\n"
+        << "slot_count=4\n"
+        << "frame_slot_size=67108864\n"
+        << "result_slot_size=65536\n"
+        << "publish_timeout_ms=1000\n"
+        << "detector_timeout_ms=5000\n"
+        << "trigger_timeout_ms=1000\n"
+        << "camera_timeout_ms=300\n"
+        << "light_timeout_ms=300\n"
+        << "warning_recheck_threshold=3\n"
+        << "critical_recheck_threshold=5\n"
+        << "max_jobs=1\n"
+        << "recipe_id=seat_a_black_leather_production_v1\n"
+        << "capture_mode=fixed_camera\n"
+        << "light_order=1,2,3,4\n"
+        << "trigger_sync_mode=camera_exposure_output\n"
+        << "trace_root=trace\n"
+        << "plc.station_id=LAB_AOI_01\n"
+        << "plc.sku_source=seat_a_black_leather\n"
+        << "camera.0.camera_id=TOP_BACK\n"
+        << "camera.0.serial_number=MVCH120_TEST_SN\n"
+        << "camera.0.calibration_id=calib/top_back_production_v1\n"
+        << "camera.0.width=4096\n"
+        << "camera.0.height=3072\n"
+        << "camera.0.channels=1\n"
+        << "camera.0.pixel_format=Mono8\n"
+        << "camera.0.trigger_line=Line0\n"
+        << "camera.0.exposure_output_line=Line1\n"
+        << "camera.0.buffer_count=8\n"
+        << "light.device_id=FL-ACDH-20048-4\n"
+        << "light.trigger_input_line=TriggerIn1\n"
+        << "light.1.physical_channel=1\n"
+        << "light.1.exposure_us=800\n"
+        << "light.1.strobe_width_us=700\n"
+        << "light.1.trigger_delay_us=10\n"
+        << "light.1.gain=1.0\n"
+        << "light.1.current_percent=60\n"
+        << "light.2.physical_channel=2\n"
+        << "light.2.exposure_us=800\n"
+        << "light.2.strobe_width_us=700\n"
+        << "light.2.trigger_delay_us=10\n"
+        << "light.2.gain=1.0\n"
+        << "light.2.current_percent=60\n"
+        << "light.3.physical_channel=3\n"
+        << "light.3.exposure_us=800\n"
+        << "light.3.strobe_width_us=650\n"
+        << "light.3.trigger_delay_us=10\n"
+        << "light.3.gain=1.0\n"
+        << "light.3.current_percent=55\n"
+        << "light.4.physical_channel=4\n"
+        << "light.4.exposure_us=800\n"
+        << "light.4.strobe_width_us=650\n"
+        << "light.4.trigger_delay_us=10\n"
+        << "light.4.gain=1.0\n"
+        << "light.4.current_percent=55\n";
+  }
+  seat_aoi::StationRuntimeConfig config;
+  std::string error;
+  const bool ok = seat_aoi::load_station_runtime_config(path, &config, &error);
+  std::remove(path.c_str());
+  const bool passed = ok && config.cameras.size() == 1 &&
+                      config.cameras[0].camera_index == 0 &&
+                      config.cameras[0].width == 4096 &&
+                      config.cameras[0].height == 3072;
+  if (!passed) {
+    std::cerr << "explicit camera config did not replace defaults: " << error
+              << " camera_count=" << config.cameras.size() << "\n";
+  }
+  return passed;
+}
+
 bool test_production_template_rejects_todo_placeholders() {
   seat_aoi::StationRuntimeConfig config;
   std::string error;
@@ -537,6 +615,67 @@ bool test_filled_production_config_validates() {
     std::cerr << "filled production config did not validate: " << error << "\n";
   }
   return ok;
+}
+
+bool test_lab_manual_trigger_config_validates() {
+  auto config = make_filled_production_runtime_config();
+  config.hardware_mode = seat_aoi::HardwareMode::Lab;
+  config.plc.backend = seat_aoi::HardwareBackend::ManualTrigger;
+  config.plc.host.clear();
+  config.plc.port = 0;
+  config.plc.trigger_source.clear();
+  config.plc.trigger_id_source.clear();
+  config.plc.seat_id_source.clear();
+  config.plc.ok_output.clear();
+  config.plc.ng_output.clear();
+  config.plc.recheck_output.clear();
+  config.plc.ack_input.clear();
+  config.plc.station_id = "LAB_AOI_01";
+  config.plc.sku_source = "seat_a_black_leather";
+  std::string error;
+  const bool ok = seat_aoi::validate_station_runtime_config(config, &error);
+  if (!ok) {
+    std::cerr << "lab manual trigger config did not validate: " << error << "\n";
+  }
+  return ok;
+}
+
+bool test_production_rejects_manual_trigger_backend() {
+  auto config = make_filled_production_runtime_config();
+  config.plc.backend = seat_aoi::HardwareBackend::ManualTrigger;
+  std::string error;
+  const bool ok = seat_aoi::validate_station_runtime_config(config, &error);
+  const bool passed = !ok && error.find("manual_trigger") != std::string::npos;
+  if (!passed) {
+    std::cerr << "production manual trigger was not rejected: " << error << "\n";
+  }
+  return passed;
+}
+
+bool test_manual_trigger_plc_client_generates_trigger() {
+  seat_aoi::ManualTriggerPlcClient client;
+  seat_aoi::PlcClientConfig config;
+  config.station_id = "LAB_AOI_01";
+  config.sku_source = "seat_a_black_leather";
+  if (!client.initialize(config)) {
+    std::cerr << "manual trigger client did not initialize\n";
+    return false;
+  }
+  seat_aoi::PlcTrigger trigger;
+  std::string error;
+  const bool ok = client.wait_trigger(&trigger, 100, &error);
+  const bool sent = client.send_decision(
+      trigger, 1, seat_aoi::InspectionDecision::Recheck, 100, &error);
+  const bool passed = ok && sent && trigger.trigger_id == 9000 &&
+                      trigger.seat_id == "LAB_AOI_01_MANUAL_SEAT_9000" &&
+                      trigger.sku == "seat_a_black_leather" &&
+                      client.get_health().ok;
+  if (!passed) {
+    std::cerr << "manual trigger client produced unexpected trigger: "
+              << trigger.trigger_id << " " << trigger.seat_id << " " << trigger.sku
+              << " error=" << error << "\n";
+  }
+  return passed;
 }
 
 bool test_robot_flyshot_runtime_config_parses() {
@@ -972,10 +1111,22 @@ int main() {
   if (!test_runtime_light_channel_config_parses()) {
     return 1;
   }
+  if (!test_explicit_camera_config_replaces_defaults()) {
+    return 1;
+  }
   if (!test_production_template_rejects_todo_placeholders()) {
     return 1;
   }
   if (!test_filled_production_config_validates()) {
+    return 1;
+  }
+  if (!test_lab_manual_trigger_config_validates()) {
+    return 1;
+  }
+  if (!test_production_rejects_manual_trigger_backend()) {
+    return 1;
+  }
+  if (!test_manual_trigger_plc_client_generates_trigger()) {
     return 1;
   }
   if (!test_robot_flyshot_runtime_config_parses()) {

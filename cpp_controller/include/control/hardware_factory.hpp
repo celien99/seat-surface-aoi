@@ -203,6 +203,9 @@ private:
 }  // namespace detail
 
 inline std::unique_ptr<IPlcClient> create_plc_client(HardwareBackend backend) {
+  if (is_manual_trigger_backend(backend)) {
+    return std::make_unique<ManualTriggerPlcClient>();
+  }
   if (!is_simulated_backend(backend)) {
     return std::make_unique<detail::UnsupportedPlcClient>(backend);
   }

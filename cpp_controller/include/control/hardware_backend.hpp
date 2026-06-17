@@ -6,11 +6,13 @@ namespace seat_aoi {
 
 enum class HardwareMode {
   Simulated,
+  Lab,
   Production,
 };
 
 enum class HardwareBackend {
   Simulated,
+  ManualTrigger,
   ModbusTcp,
   SiemensS7,
   EthercatIo,
@@ -27,6 +29,7 @@ enum class HardwareBackend {
 const char* hardware_mode_name(HardwareMode mode);
 const char* hardware_backend_name(HardwareBackend backend);
 bool is_simulated_backend(HardwareBackend backend);
+bool is_manual_trigger_backend(HardwareBackend backend);
 bool parse_hardware_mode(const std::string& value,
                          HardwareMode* out_mode,
                          std::string* error_message);
