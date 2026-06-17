@@ -285,6 +285,24 @@ def test_recipe_preserves_list_cameras_with_same_camera_different_pose() -> None
     assert recipe.model_key_for("EYE_IN_HAND", "full", "T2_CUSHION") == "default"
 
 
+def test_default_camera_accepts_dynamic_pose_without_explicit_pose_config() -> None:
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+
+    assert recipe.accepts_camera_pose("TOP_BACK", "PITCH_15") is True
+    assert recipe.pose_uses_default_camera("TOP_BACK", "PITCH_15") is True
+    assert recipe.camera("TOP_BACK", "PITCH_15") == recipe.default_camera("TOP_BACK")
+    assert recipe.model_key_for("TOP_BACK", "full", "PITCH_15") == "fake_default"
+
+
+def test_explicit_robot_pose_recipe_rejects_unknown_pose_fallback() -> None:
+    recipe = RecipeManager().load("seat_a_robot_flyshot_v1")
+
+    assert recipe.accepts_camera_pose("EYE_IN_HAND", "T3_UNKNOWN") is False
+    assert recipe.pose_uses_default_camera("EYE_IN_HAND", "T3_UNKNOWN") is False
+    assert recipe.camera("EYE_IN_HAND", "T3_UNKNOWN") is None
+    assert recipe.model_key_for("EYE_IN_HAND", "full", "T3_UNKNOWN") == "default"
+
+
 def test_recipe_rejects_duplicate_list_camera_pose() -> None:
     with pytest.raises(RecipeValidationError, match="重复视角配置"):
         recipe_from_dict(

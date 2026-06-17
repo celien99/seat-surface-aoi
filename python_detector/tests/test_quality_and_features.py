@@ -1,6 +1,6 @@
 from dataclasses import replace
 
-from python_detector.config.recipe_schema import RecipeManager
+from python_detector.config.recipe_schema import RecipeManager, recipe_from_dict
 from python_detector.ipc.data_types import CameraBundle, LightFrame, SeatInspectionJob
 from python_detector.pipeline.pipeline import InspectionPipeline
 from python_detector.pipeline.quality_gate import ImageQualityGate
@@ -84,6 +84,72 @@ def test_missing_configured_camera_returns_recheck() -> None:
     assert result.decision == "RECHECK"
     assert result.quality_pass is False
     assert "TOP_CUSHION: missing configured camera bundle" in pipeline.last_context["quality_report"].messages
+
+
+def test_default_camera_config_accepts_dynamic_pose_bundle() -> None:
+    pipeline = InspectionPipeline()
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    job = _job(LIGHTS, include_cushion=True)
+    dynamic_pose_id = "PITCH_15"
+    job.camera_bundles[0].pose_id = dynamic_pose_id
+    for frame in job.camera_bundles[0].light_frames.values():
+        frame.pose_id = dynamic_pose_id
+
+    result = pipeline.process(job, recipe)
+
+    assert result.decision == "OK"
+    assert result.quality_pass is True
+    assert not pipeline.last_context["quality_report"].messages
+    assert any(
+        summary["camera_id"] == "TOP_BACK" and summary["pose_id"] == dynamic_pose_id
+        for summary in pipeline.last_context["feature_summary"]
+    )
+
+
+def test_explicit_robot_pose_recipe_rechecks_unknown_pose_bundle() -> None:
+    pipeline = InspectionPipeline()
+    recipe = recipe_from_dict(
+        {
+            "recipe_id": "robot_single_view_test",
+            "sku": "seat_a_black_leather",
+            "light_order": list(LIGHTS),
+            "cameras": [
+                {
+                    "camera_id": "EYE_IN_HAND",
+                    "pose_id": "T1_BACKREST",
+                    "model_key": "default",
+                    "calibration_id": "calib/t1_simulated_v1",
+                }
+            ],
+            "thresholds": {"scratch": {"ng_score": 0.35, "recheck_score": 0.2}},
+            "models": {"default": {"backend": "fake", "role": "primary", "class_names": ["scratch"]}},
+        }
+    )
+    frames = {
+        light: _frame(light, frame_index=index + 1, timestamp_us=1_000 + index * 100)
+        for index, light in enumerate(LIGHTS)
+    }
+    for frame in frames.values():
+        frame.camera_id = "EYE_IN_HAND"
+        frame.pose_id = "T3_UNKNOWN"
+        frame.calibration_id = "calib/t1_simulated_v1"
+    job = SeatInspectionJob(
+        sequence_id=3,
+        trigger_id=4,
+        seat_id="SIM_ROBOT_UNKNOWN",
+        recipe_id=recipe.recipe_id,
+        sku=recipe.sku,
+        camera_bundles=[
+            CameraBundle(camera_id="EYE_IN_HAND", pose_id="T3_UNKNOWN", light_frames=frames),
+        ],
+    )
+
+    result = pipeline.process(job, recipe)
+
+    assert result.decision == "RECHECK"
+    assert result.quality_pass is False
+    assert "EYE_IN_HAND/T3_UNKNOWN: camera pose not enabled by recipe" in pipeline.last_context["quality_report"].messages
+    assert "EYE_IN_HAND/T1_BACKREST: missing configured camera pose bundle" in pipeline.last_context["quality_report"].messages
 
 
 def test_non_monotonic_required_light_timestamp_returns_recheck() -> None:

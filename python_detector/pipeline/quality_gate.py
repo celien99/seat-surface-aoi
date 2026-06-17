@@ -32,7 +32,7 @@ class ImageQualityGate:
         if job.sku != recipe.sku:
             messages.append(f"sku mismatch: job={job.sku} recipe={recipe.sku}")
 
-        expected_views = {(camera.camera_id, camera.pose_id or camera.camera_id) for camera in recipe.cameras}
+        required_views = recipe.required_view_keys()
         seen_views: set[tuple[str, str]] = set()
         for bundle in job.camera_bundles:
             pose_id = bundle.pose_id or bundle.camera_id
@@ -40,14 +40,15 @@ class ImageQualityGate:
             if view_key in seen_views:
                 messages.append(f"{bundle.camera_id}/{pose_id}: duplicate camera pose bundle")
             seen_views.add(view_key)
-            if view_key not in expected_views:
-                messages.append(f"{bundle.camera_id}/{pose_id}: camera pose not enabled by recipe")
+            if not recipe.accepts_camera_pose(bundle.camera_id, pose_id):
+                messages.append(recipe.view_not_enabled_message(bundle.camera_id, pose_id))
             reports.extend(self._check_camera_bundle(bundle, recipe, messages))
-        for camera_id, pose_id in sorted(expected_views - seen_views):
-            if pose_id == camera_id:
-                messages.append(f"{camera_id}: missing configured camera bundle")
-            else:
-                messages.append(f"{camera_id}/{pose_id}: missing configured camera pose bundle")
+        for camera_id, pose_id in sorted(required_views):
+            if (camera_id, pose_id) in seen_views:
+                continue
+            if pose_id == camera_id and any(seen_camera_id == camera_id for seen_camera_id, _ in seen_views):
+                continue
+            messages.append(recipe.missing_view_message(camera_id, pose_id))
         is_pass = not messages and all(report.is_pass for report in reports)
         return QualityReport(is_pass=is_pass, frame_reports=reports, messages=messages)
 

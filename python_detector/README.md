@@ -161,7 +161,7 @@ training_tools/
 
 `RecipeManager` 默认从包内 `python_detector/config` 加载 YAML，不依赖当前工作目录。`CalibrationManager` 通过 `paths.resolve_package_path()` 同时兼容包内路径和历史仓库相对路径，例如 `python_detector/config/roi/default_roi.yaml`。
 
-配方中的 `cameras` 实际表示检测视角配置。固定机位模式下 `pose_id` 默认等于 `camera_id`；机器人飞拍模式下允许多个视角共享同一 `camera_id`，并用 `pose_id` 区分轨迹点、ROI、标定和模型配置，例如 `EYE_IN_HAND/T1_BACKREST`、`EYE_IN_HAND/T2_CUSHION`。`cameras` 支持字典和列表两种写法；列表写法会按条目保序解析，不会再把相同 `camera_id` 的不同 `pose_id` 折叠覆盖，重复 `(camera_id, pose_id)` 会报配方校验错误。
+配方中的 `cameras` 实际表示检测视角配置。固定机位模式下 `pose_id` 默认等于 `camera_id`；如果某个固定机位只配置默认视角，Python 检测层允许同一 `camera_id` 下动态 `pose_id` 的多张照片复用该机位的标定、ROI 和模型配置，并在特征、结果和 trace 中继续保留原始 `pose_id`。机器人飞拍模式下允许多个视角共享同一 `camera_id`，并用显式 `pose_id` 区分轨迹点、ROI、标定和模型配置，例如 `EYE_IN_HAND/T1_BACKREST`、`EYE_IN_HAND/T2_CUSHION`；这类显式 pose 配方不会把未知 `pose_id` fallback 到第一条配置。`cameras` 支持字典和列表两种写法；列表写法会按条目保序解析，不会再把相同 `camera_id` 的不同 `pose_id` 折叠覆盖，重复 `(camera_id, pose_id)` 会报配方校验错误。
 
 模型补齐后，固定机位生产任务应使用 `recipe_id=seat_a_black_leather_production_v1`，机器人飞拍生产任务应使用 `recipe_id=seat_a_robot_flyshot_production_v1`。这两个配方会启用 `onnx_yolo` Dome ROI、`ecc` 多光源配准、监督 ONNX 主检测、WideResNet50 embedding、PCA、PatchCore KNN 和可选 FAISS safety net；仓库内生产标定和 `production_full_roi.yaml` 是可校验模板，真实上线必须替换为现场标定和 ROI。
 
@@ -187,7 +187,7 @@ training_tools/
 
 ### 质量门禁与预处理
 
-`ImageQualityGate` 在进入模型前拦截不可靠输入，包括缺少必需机位/光源、非单调时间戳、重复帧号、曝光/增益漂移、过曝欠曝、锐度不足、光源亮度漂移，以及同一视角必需光源间的 `shot_id`、机器人时间戳、TCP 坐标和 RPY 姿态不一致。固定机位可以保留空的机器人字段；一旦任一光源携带机器人字段，其余必需光源必须保持一致。失败结果进入 `RuleEngine.make_quality_fail_result()`，不会输出 `OK`。
+`ImageQualityGate` 在进入模型前拦截不可靠输入，包括缺少必需机位/光源、未启用的显式机器人 pose、非单调时间戳、重复帧号、曝光/增益漂移、过曝欠曝、锐度不足、光源亮度漂移，以及同一视角必需光源间的 `shot_id`、机器人时间戳、TCP 坐标和 RPY 姿态不一致。固定机位默认配置可接收同一机位的动态 `pose_id`，但仍要求每个动态视角自己的必需光源完整、时序一致、质量通过；固定机位可以保留空的机器人字段，一旦任一光源携带机器人字段，其余必需光源必须保持一致。失败结果进入 `RuleEngine.make_quality_fail_result()`，不会输出 `OK`。
 
 `Preprocessor` 只接受当前实现支持的 `MONO8` / `UINT8` / 单通道图像，并显式检查 stride、图像长度、标定版本和图像尺寸。ROI 可以是轴对齐矩形裁剪，也可以是四点透视展开。Dome ROI 定位会按 `roi_name` 聚合同名候选，优先选择置信度最高、姿态误差最低的候选；同名 ROI 出现互相冲突的框时返回 `RECHECK`，避免重复检测静默覆盖 ROI。
 

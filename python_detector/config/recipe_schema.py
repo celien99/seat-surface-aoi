@@ -154,17 +154,66 @@ class Recipe:
     trace: TraceConfig = field(default_factory=TraceConfig)
 
     def camera(self, camera_id: str, pose_id: str | None = None) -> CameraRecipe | None:
-        if pose_id:
-            for camera in self.cameras:
-                if camera.camera_id == camera_id and camera.pose_id == pose_id:
-                    return camera
+        exact = self.exact_camera(camera_id, pose_id)
+        if exact is not None:
+            return exact
+        pose_label = pose_id or camera_id
+        if pose_label == camera_id or self.default_camera_accepts_dynamic_pose(camera_id):
+            return self.default_camera(camera_id)
+        return None
+
+    def exact_camera(self, camera_id: str, pose_id: str | None = None) -> CameraRecipe | None:
+        pose_label = pose_id or camera_id
+        for camera in self.cameras:
+            if camera.camera_id == camera_id and (camera.pose_id or camera.camera_id) == pose_label:
+                return camera
+        return None
+
+    def default_camera(self, camera_id: str) -> CameraRecipe | None:
         for camera in self.cameras:
             if camera.camera_id == camera_id and camera.pose_id in ("", camera_id):
                 return camera
-        for camera in self.cameras:
-            if camera.camera_id == camera_id:
-                return camera
         return None
+
+    def accepts_camera_pose(self, camera_id: str, pose_id: str | None = None) -> bool:
+        if self.exact_camera(camera_id, pose_id) is not None:
+            return True
+        return self.default_camera_accepts_dynamic_pose(camera_id)
+
+    def configured_view_keys(self) -> set[tuple[str, str]]:
+        return {(camera.camera_id, camera.pose_id or camera.camera_id) for camera in self.cameras}
+
+    def required_view_keys(self) -> set[tuple[str, str]]:
+        return self.configured_view_keys()
+
+    def pose_uses_default_camera(self, camera_id: str, pose_id: str | None = None) -> bool:
+        pose_label = pose_id or camera_id
+        return (
+            pose_label != camera_id
+            and self.exact_camera(camera_id, pose_label) is None
+            and self.default_camera_accepts_dynamic_pose(camera_id)
+        )
+
+    def default_camera_accepts_dynamic_pose(self, camera_id: str) -> bool:
+        return self.default_camera(camera_id) is not None and not self.has_explicit_camera_poses(camera_id)
+
+    def has_explicit_camera_poses(self, camera_id: str) -> bool:
+        return any(
+            camera.camera_id == camera_id and camera.pose_id not in ("", camera.camera_id)
+            for camera in self.cameras
+        )
+
+    def camera_label(self, camera_id: str, pose_id: str | None = None) -> str:
+        pose_label = pose_id or camera_id
+        return camera_id if pose_label == camera_id else f"{camera_id}/{pose_label}"
+
+    def missing_view_message(self, camera_id: str, pose_id: str) -> str:
+        if pose_id == camera_id:
+            return f"{camera_id}: missing configured camera bundle"
+        return f"{camera_id}/{pose_id}: missing configured camera pose bundle"
+
+    def view_not_enabled_message(self, camera_id: str, pose_id: str | None = None) -> str:
+        return f"{self.camera_label(camera_id, pose_id)}: camera pose not enabled by recipe"
 
     def model_key_for(self, camera_id: str, roi_name: str, pose_id: str | None = None) -> str:
         camera = self.camera(camera_id, pose_id)
