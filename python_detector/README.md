@@ -41,6 +41,7 @@ uv run python -m tools.validate_protocol
 uv run python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1
 uv run python -m tools.validate_model_assets --recipe seat_a_robot_flyshot_production_v1
 uv run python -m tools.validate_architecture_readiness --scope reference
+uv run python -m tools.validate_deployment_preflight
 uv run python -m python_detector.detector_main --once --timeout-ms 8000
 uv run python -m python_detector.detector_main \
   --config cpp_controller/config/station_runtime.lab_manual.example.conf \
@@ -151,6 +152,12 @@ training_tools/
 
 - `--scope reference` 校验参考实现是否具备固定机位、机器人飞拍、共享内存 v2、质量门禁、trace、ROI/ECC/ONNX/PatchCore/FAISS 接入点等能力。
 - `--scope production` 校验上线阻塞项，真实模型资产、正式生产配置仍是占位值时会返回 `BLOCKED`。
+
+根目录 `tools/validate_deployment_preflight.py` 用于 Windows 工控机上机前交接：
+
+- 默认模式确认当前环境可实现的参考链路、Windows 共享内存映射、跨平台 IPC 入口、部署包入口和 PLC 前手动联调路径无本地阻塞。
+- `--strict-production` 用于放行前，把正式生产配置和真实模型资产缺失升级为 `BLOCKED`。
+- 真实模型、现场 `production.conf`、MES/报警/监控协议属于现场 ACTION，不应在本机用占位产物伪造通过。
 
 ## 关键实现说明
 
@@ -270,6 +277,7 @@ uv run python -m tools.validate_protocol
 uv run python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1
 uv run python -m tools.validate_model_assets --recipe seat_a_robot_flyshot_production_v1
 uv run python -m tools.validate_architecture_readiness --scope reference
+uv run python -m tools.validate_deployment_preflight
 uv run python -m training_tools.replay_dataset --count 3 --write-trace
 bash tools/run_simulated_ipc.sh
 bash tools/run_simulated_ipc.sh --config cpp_controller/config/station_runtime.robot_flyshot.example.conf

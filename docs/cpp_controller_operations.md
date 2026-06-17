@@ -52,6 +52,10 @@ bash tools/run_simulated_ipc.sh --config cpp_controller/config/station_runtime.r
 
 # 短时长稳压测
 bash tools/run_cpp_soak.sh --jobs 20 --wait-ms 8000
+
+# 上 Windows 工控机前交接预检
+uv run python -m tools.validate_deployment_preflight
+uv run python -m tools.validate_deployment_preflight --strict-production
 ```
 
 生产配置只校验字段，不启动硬件：
@@ -61,6 +65,8 @@ cpp_controller/build/seat_aoi_controller \
   --config cpp_controller/config/station_runtime.production.conf \
   --validate-config
 ```
+
+`tools.validate_deployment_preflight` 是源码树和部署包共用的上机前检查入口。默认模式用于交接，会确认本地参考链路、Windows Named Shared Memory 映射、跨平台模拟 IPC、部署包校验入口和 `lab/manual_trigger` 联调路径已经具备；真实 `production.conf`、真实模型资产和 MES/报警/监控协议会作为现场 ACTION 输出。`--strict-production` 用于工控机放行前，正式生产配置或真实模型资产缺失时返回阻塞。
 
 机器人飞拍生产配置：
 

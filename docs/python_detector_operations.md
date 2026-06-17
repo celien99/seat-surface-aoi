@@ -55,6 +55,15 @@ uv sync --group dev --extra onnx --extra faiss
 uv sync --locked --no-dev
 ```
 
+上 Windows 工控机前使用部署预检区分本地可实现项和现场项：
+
+```bash
+uv run python -m tools.validate_deployment_preflight
+uv run python -m tools.validate_deployment_preflight --strict-production
+```
+
+默认模式确认参考链路、Windows 共享内存映射、跨平台 IPC、部署包入口和 PLC 前手动联调路径无本地阻塞；严格模式把正式生产配置和真实模型资产缺失作为阻塞。
+
 ## IPC 与协议
 
 `python_detector/ipc/shm_protocol.py` 必须与 `cpp_controller/include/ipc/shm_protocol.hpp` 保持二进制布局一致。当前协议为 v2，每帧携带 `camera_id`、`pose_id`、`shot_id`、机器人时间戳和 TCP 位姿；Python 按 `(camera_id, pose_id)` 组包为 `CameraBundle`。

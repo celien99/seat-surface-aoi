@@ -10,7 +10,7 @@
 | [共享内存协议](shm_protocol.md) | C++ 与 Python 在线 IPC 的固定布局、状态机、错误码和校验要求。 |
 | [项目调用关系摘要](project_function_call_map.md) | 端到端调用链、关键模块边界和阅读顺序。 |
 | [C++ 主控部署与硬件运维](cpp_controller_operations.md) | PLC、相机、频闪、机器人、生产配置、上线 SOP、测试机联调和失败场景。 |
-| [Python 检测算法与模型运维](python_detector_operations.md) | Python 算法入口、配方、ROI/标定、模型后端、trace、训练样本、回放和 benchmark。 |
+| [Python 检测算法与模型运维](python_detector_operations.md) | Python 算法入口、配方、ROI/标定、模型后端、trace、训练样本、回放、benchmark 和上机预检。 |
 
 辅助图片保留在 `docs/assets/`：
 
@@ -45,3 +45,4 @@
 4. 接硬件、上线、测试机联调时读 [C++ 主控部署与硬件运维](cpp_controller_operations.md)。
 5. 改 Python 算法、配方、模型、trace 或训练闭环时读 [Python 检测算法与模型运维](python_detector_operations.md)。
 6. 需要快速定位代码调用链时读 [项目调用关系摘要](project_function_call_map.md)。
+7. 上 Windows 工控机前运行 `uv run python -m tools.validate_deployment_preflight`；放行前再运行 `uv run python -m tools.validate_deployment_preflight --strict-production`。

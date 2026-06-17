@@ -302,6 +302,10 @@ bash tools/package_release.sh
 
 # 运行 IPC 安全测试
 ./build/ipc_safety_checks
+
+# Windows 工控机上机前交接预检
+uv run python -m tools.validate_deployment_preflight
+uv run python -m tools.validate_deployment_preflight --strict-production
 ```
 
 ### 命令行参数
@@ -324,6 +328,8 @@ bash tools/package_release.sh
 | `--simulate-trigger-timeout` | 模拟 PLC 触发超时 | false |
 
 运行时配置中的布尔字段只接受 `true/false/1/0/yes/no/on/off`，拼写错误或未知布尔值会导致配置加载失败，避免故障注入或共享内存 reset 选项被静默解释为 `false`。
+
+上机前建议先运行 `tools.validate_deployment_preflight`。默认模式确认当前仓库可实现的参考链路、Windows Named Shared Memory 映射、跨平台模拟 IPC、部署包入口和 `lab/manual_trigger` 联调路径无本地阻塞；`--strict-production` 用于正式放行，会把缺少正式 `production.conf` 或真实模型资产作为阻塞项。
 
 ### 运行时配置文件格式
 

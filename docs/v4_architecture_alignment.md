@@ -203,6 +203,7 @@
 
 - 已有配方、标定、模型配置、trace、Trace 转训练样本、回放、benchmark 和双采集模式运维文档。
 - 已有根目录 `model/` 模型产物占位、真实模型配方模板和 `tools.validate_model_assets` 上线前资产校验。
+- 已有 `tools.validate_deployment_preflight` 上机前交接预检，可区分当前环境可实现项、现场硬件配置项、真实模型资产项和 MES/报警/监控平台项。
 - 已有模型缓存隔离、trace 保存策略、固定机位/机器人飞拍配置模板和测试机集成说明。
 - trace 已扩展 ROI 定位、ECC、embedding、PCA、KNN 和 anomaly score 摘要。
 - 已将离线训练支撑剥离到 `training_tools/`，只消费 Python 检测层公开入口和 trace 产物，不反向耦合在线 detector。
@@ -253,7 +254,16 @@ uv run pytest
 uv run python -m tools.validate_protocol
 uv run python -m tools.validate_model_assets --recipe production_model_example
 uv run python -m tools.validate_architecture_readiness --scope reference
+uv run python -m tools.validate_deployment_preflight
 bash tools/run_simulated_ipc.sh
 ```
 
 默认模拟链路要求测试、协议校验、架构就绪度检查和模拟 IPC 通过；`validate_model_assets --recipe production_model_example` 在占位文件未替换时应失败，并列出需要替换的真实模型产物。
+
+上 Windows 工控机放行前再执行：
+
+```bash
+uv run python -m tools.validate_deployment_preflight --strict-production
+```
+
+严格模式会把正式 `production.conf` 和真实模型资产缺失作为阻塞；默认模式则用于当前环境交接，只要求本地可实现的参考链路、跨平台共享内存、部署包入口和手动联调路径无阻塞。

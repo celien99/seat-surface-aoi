@@ -108,6 +108,7 @@ uv sync --group dev
 uv run pytest
 uv run python -m tools.validate_protocol
 uv run python -m tools.validate_architecture_readiness --scope reference
+uv run python -m tools.validate_deployment_preflight
 ```
 
 ### 3. 跑端到端模拟 IPC
@@ -151,6 +152,10 @@ bash tools/package_release.sh
 # 架构就绪度检查
 uv run python -m tools.validate_architecture_readiness --scope reference
 uv run python -m tools.validate_architecture_readiness --scope production
+
+# Windows 工控机上机前交接预检
+uv run python -m tools.validate_deployment_preflight
+uv run python -m tools.validate_deployment_preflight --strict-production
 ```
 
 `validate_model_assets --recipe seat_a_black_leather_production_v1` 和 `seat_a_robot_flyshot_production_v1` 在仓库占位模型未替换时应失败，并列出需要部署的真实模型产物；这属于上线前阻塞检查，不是默认模拟链路失败。
@@ -172,7 +177,7 @@ seat-surface-aoi/
 | `cpp_controller/` | [C++ 主控 README](cpp_controller/README.md) | PLC/Robot/Camera/Light 抽象、Capture Plan、共享内存发布、故障注入。 |
 | `python_detector/` | [Python 检测算法层导览](python_detector/README.md) | 质量门禁、ROI、ECC、多光源特征、模型后端、融合、规则、trace。 |
 | `training_tools/` | [Python 运维文档](docs/python_detector_operations.md) | 离线样本、embedding、PCA、PatchCore/FAISS、回放、benchmark。 |
-| `tools/` | [验证矩阵](#验证矩阵) | 跨 C++/Python 的协议、模型资产、架构就绪度和 IPC 联调校验。 |
+| `tools/` | [验证矩阵](#验证矩阵) | 跨 C++/Python 的协议、模型资产、架构就绪度、部署预检和 IPC 联调校验。 |
 | `model/` | [模型产物目录说明](model/README.md) | 真实 ONNX、PCA、memory bank、FAISS 索引的部署约定。 |
 | `docs/` | [文档总览](docs/README.md) | V4 架构、共享内存协议、运维和代码调用关系。 |
 
@@ -209,6 +214,15 @@ bash tools/package_release.sh
 ```
 
 脚本会生成 `dist/<package>.tar.gz` 和对应 `.sha256`，并默认集成根目录 `model/`。解包后可先运行 `bash validate_package.sh` 做协议和 IPC 基础校验；如需使用包内已构建的 C++ 产物跑模拟 IPC，可运行 `bash run_packaged_simulated_ipc.sh`。生产包不默认包含现场训练数据、trace、日志、`.venv` 或本地构建缓存。
+
+部署包和源码树都提供上机前预检入口：
+
+```bash
+uv run python -m tools.validate_deployment_preflight
+uv run python -m tools.validate_deployment_preflight --strict-production
+```
+
+默认预检用于交接，验证当前仓库可实现的参考链路、Windows 共享内存映射、跨平台 IPC 入口、部署包入口和 PLC 前手动联调路径；真实生产配置、真实模型资产和 MES/报警/监控协议会列为现场 ACTION。`--strict-production` 用于 Windows 工控机放行前，把正式 `production.conf` 和真实模型资产缺失升级为阻塞项。
 
 ## 在线链路
 
@@ -306,6 +320,8 @@ PLC 接入前的工控机联调使用 `cpp_controller/config/station_runtime.lab
 | 协议布局校验 | `uv run python -m tools.validate_protocol` | C++/Python 结构体大小和协议常量一致。 |
 | 参考架构检查 | `uv run python -m tools.validate_architecture_readiness --scope reference` | 参考链路能力完整。 |
 | 生产阻塞检查 | `uv run python -m tools.validate_architecture_readiness --scope production` | 占位配置或模型未替换时返回阻塞项。 |
+| 部署上机预检 | `uv run python -m tools.validate_deployment_preflight` | 当前环境可实现项无阻塞，并列出现场硬件、模型和平台 ACTION。 |
+| 严格生产预检 | `uv run python -m tools.validate_deployment_preflight --strict-production` | 正式生产配置或真实模型资产缺失时返回阻塞项。 |
 | 模型资产检查 | `uv run python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1` | 真实模型缺失时失败并列出待替换资产。 |
 | 端到端模拟 IPC | `bash tools/run_simulated_ipc.sh` 或 `uv run python tools/run_simulated_ipc.py` | C++ 和 Python 通过共享内存完成一次检测闭环；Windows 使用 Python 跨平台入口。 |
 

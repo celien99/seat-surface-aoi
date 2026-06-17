@@ -215,6 +215,15 @@ bash tools/run_simulated_ipc.sh
 uv run python tools/run_simulated_ipc.py
 ```
 
+上 Windows 工控机或产线联调前，先运行部署预检：
+
+```bash
+PYTHONPATH=. uv run python -m tools.validate_deployment_preflight
+PYTHONPATH=. uv run python -m tools.validate_deployment_preflight --strict-production
+```
+
+默认预检用于交接，会把真实模型、正式 production.conf 和 MES/监控接口列为现场 ACTION；`--strict-production` 用于上机放行前，会把真实模型和正式生产配置缺失作为阻塞项。
+
 ## 生产模型
 
 生产包必须先把真实模型产物放入 `model/`，打包脚本会默认集成该目录。占位模型只能用于参考链路和联调包，不能作为生产包放行。
@@ -249,6 +258,7 @@ else
 fi
 
 PYTHONPATH="${ROOT_DIR}" "${PYTHON_RUNNER[@]}" -m tools.validate_protocol
+PYTHONPATH="${ROOT_DIR}" "${PYTHON_RUNNER[@]}" -m tools.validate_deployment_preflight
 "${ROOT_DIR}/bin/protocol_layout"
 "${ROOT_DIR}/bin/ipc_safety_checks"
 echo "部署包基础校验通过"
@@ -395,6 +405,7 @@ cp "${ROOT_DIR}/tools/run_cpp_soak.sh" "${STAGE_DIR}/tools/"
 cp "${ROOT_DIR}/tools/validate_protocol.py" "${STAGE_DIR}/tools/"
 cp "${ROOT_DIR}/tools/validate_model_assets.py" "${STAGE_DIR}/tools/"
 cp "${ROOT_DIR}/tools/validate_architecture_readiness.py" "${STAGE_DIR}/tools/"
+cp "${ROOT_DIR}/tools/validate_deployment_preflight.py" "${STAGE_DIR}/tools/"
 cp "${ROOT_DIR}/tools/package_release.sh" "${STAGE_DIR}/tools/"
 chmod +x "${STAGE_DIR}/tools/"*.sh
 
