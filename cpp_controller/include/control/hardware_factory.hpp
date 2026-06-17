@@ -4,6 +4,7 @@
 #include <string>
 
 #include "camera/camera_worker.hpp"
+#include "camera/hikrobot_mvs_camera.hpp"
 #include "control/hardware_backend.hpp"
 #include "control/light_controller.hpp"
 #include "control/plc_client.hpp"
@@ -220,6 +221,9 @@ inline std::unique_ptr<ILightController> create_light_controller(HardwareBackend
 }
 
 inline std::unique_ptr<ICamera> create_camera(HardwareBackend backend) {
+  if (backend == HardwareBackend::HikrobotMvs) {
+    return std::make_unique<HikrobotMvsCamera>();
+  }
   if (!is_simulated_backend(backend)) {
     return std::make_unique<detail::UnsupportedCamera>(backend);
   }

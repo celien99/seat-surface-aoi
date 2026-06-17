@@ -7,6 +7,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+option(SEAT_AOI_ENABLE_HIKROBOT_MVS "Enable Hikrobot MVS camera SDK backend" OFF)
+set(SEAT_AOI_HIKROBOT_MVS_INCLUDE_DIR "" CACHE PATH "Hikrobot MVS SDK include directory")
+set(SEAT_AOI_HIKROBOT_MVS_LIBRARY "" CACHE FILEPATH "Hikrobot MVS SDK library")
+
 set(SEAT_AOI_SHARED_MEMORY_SOURCE src/ipc/shared_memory_posix.cpp)
 if(WIN32)
   set(SEAT_AOI_SHARED_MEMORY_SOURCE src/ipc/shared_memory_win32.cpp)
@@ -38,6 +42,7 @@ add_library(seat_aoi_control
   src/control/station_health.cpp
   src/control/station_runtime_config.cpp
   src/camera/camera_device.cpp
+  src/camera/hikrobot_mvs_camera.cpp
   src/camera/camera_worker.cpp
   src/control/trigger_scheduler.cpp
   src/control/frame_assembler.cpp
@@ -46,6 +51,33 @@ add_library(seat_aoi_control
 
 target_include_directories(seat_aoi_control PUBLIC include)
 target_link_libraries(seat_aoi_control PUBLIC seat_aoi_ipc)
+if(SEAT_AOI_ENABLE_HIKROBOT_MVS)
+  if(NOT SEAT_AOI_HIKROBOT_MVS_INCLUDE_DIR)
+    find_path(SEAT_AOI_HIKROBOT_MVS_INCLUDE_DIR
+      NAMES MvCameraControl.h
+      HINTS
+        "C:/Program Files (x86)/MVS/Development/Includes"
+        "C:/Program Files/MVS/Development/Includes"
+        "/opt/MVS/include"
+    )
+  endif()
+  if(NOT SEAT_AOI_HIKROBOT_MVS_LIBRARY)
+    find_library(SEAT_AOI_HIKROBOT_MVS_LIBRARY
+      NAMES MvCameraControl
+      HINTS
+        "C:/Program Files (x86)/MVS/Development/Libraries/win64"
+        "C:/Program Files/MVS/Development/Libraries/win64"
+        "/opt/MVS/lib/64"
+        "/opt/MVS/lib"
+    )
+  endif()
+  if(NOT SEAT_AOI_HIKROBOT_MVS_INCLUDE_DIR OR NOT SEAT_AOI_HIKROBOT_MVS_LIBRARY)
+    message(FATAL_ERROR "启用 SEAT_AOI_ENABLE_HIKROBOT_MVS 时必须提供 MVS include/lib 路径")
+  endif()
+  target_compile_definitions(seat_aoi_control PUBLIC SEAT_AOI_ENABLE_HIKROBOT_MVS)
+  target_include_directories(seat_aoi_control PUBLIC "${SEAT_AOI_HIKROBOT_MVS_INCLUDE_DIR}")
+  target_link_libraries(seat_aoi_control PUBLIC "${SEAT_AOI_HIKROBOT_MVS_LIBRARY}")
+endif()
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9)
   target_link_libraries(seat_aoi_control PUBLIC stdc++fs)
 endif()

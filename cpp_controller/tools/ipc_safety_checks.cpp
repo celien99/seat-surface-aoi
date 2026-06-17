@@ -678,6 +678,33 @@ bool test_manual_trigger_plc_client_generates_trigger() {
   return passed;
 }
 
+bool test_hikrobot_backend_fails_without_sdk_when_not_compiled() {
+#ifdef SEAT_AOI_ENABLE_HIKROBOT_MVS
+  return true;
+#else
+  auto camera = seat_aoi::create_camera(seat_aoi::HardwareBackend::HikrobotMvs);
+  seat_aoi::CameraConfig config;
+  config.camera_id = "TOP_BACK";
+  config.serial_number = "MV-CH120-20GC-TEST";
+  config.calibration_id = "calib/top_back_production_v1";
+  config.width = 4096;
+  config.height = 3072;
+  config.channels = 1;
+  config.pixel_format = "Mono8";
+  config.trigger_line = "Line0";
+  config.exposure_output_line = "Line1";
+  const bool initialized = camera->initialize(config);
+  const auto health = camera->get_health();
+  const bool passed = !initialized && !health.ok &&
+                      health.message.find("Hikrobot MVS SDK 未启用") != std::string::npos;
+  if (!passed) {
+    std::cerr << "hikrobot_mvs backend did not fail clearly without SDK: "
+              << health.message << "\n";
+  }
+  return passed;
+#endif
+}
+
 bool test_robot_flyshot_runtime_config_parses() {
   seat_aoi::StationRuntimeConfig config;
   std::string error;
@@ -1127,6 +1154,9 @@ int main() {
     return 1;
   }
   if (!test_manual_trigger_plc_client_generates_trigger()) {
+    return 1;
+  }
+  if (!test_hikrobot_backend_fails_without_sdk_when_not_compiled()) {
     return 1;
   }
   if (!test_robot_flyshot_runtime_config_parses()) {

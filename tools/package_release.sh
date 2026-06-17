@@ -113,6 +113,7 @@ build_cpp_with_clang() {
     "${ROOT_DIR}/cpp_controller/src/control/station_health.cpp"
     "${ROOT_DIR}/cpp_controller/src/control/station_runtime_config.cpp"
     "${ROOT_DIR}/cpp_controller/src/camera/camera_device.cpp"
+    "${ROOT_DIR}/cpp_controller/src/camera/hikrobot_mvs_camera.cpp"
     "${ROOT_DIR}/cpp_controller/src/camera/camera_worker.cpp"
     "${ROOT_DIR}/cpp_controller/src/control/trigger_scheduler.cpp"
     "${ROOT_DIR}/cpp_controller/src/control/frame_assembler.cpp"
