@@ -381,6 +381,10 @@ cp config/station_runtime.production.example.conf config/station_runtime.product
 
 该模板的 `recipe_id` 已对齐 Python 固定机位生产配方 `seat_a_black_leather_production_v1`。模型补齐后，Python detector 会按该配方启用 ONNX ROI、ECC、监督 ONNX、WideResNet50/PCA/PatchCore/FAISS safety net；相机 `calibration_id` 必须和 Python 标定文件保持一致。
 
+当前固定机位生产模板按现场已确认硬件预置：海康 MV-CH120-20GC，4096 x 3072，Hikrobot MVS backend；镜头 MVL-KF0814M-12MPE，8mm F1.4，1.1"，C 接口；频闪控制器 FL-ACDH-20048-4，4 通道。单相机、Mono8、4 光源图像包约 48 MB，模板保留 `frame_slot_size=67108864`；如果后续增加第二个同分辨率固定机位，应把 `frame_slot_size` 至少提高到 `134217728`，并同步 Python 共享内存配置。
+
+PLC 未确定前，可以先保留 PLC TODO 或使用模拟/手动触发路径，只验证相机、频闪、共享内存和 Python detector 收图。进入生产闭环前仍必须补齐 PLC backend、触发输入、`trigger_id/seat_id/sku` 来源和 OK/NG/RECHECK 输出点位。
+
 机器人飞拍生产模板位于 `config/station_runtime.robot_flyshot.production.example.conf`，复制后需要补齐 `robot.*`、`pose.<N>.*`、末端相机和光源控制器参数：
 
 ```bash
