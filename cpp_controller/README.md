@@ -147,9 +147,9 @@ ipc_safety_checks   (依赖 seat_aoi_control)
 
 | 设备 | 可选 backend | 已实现 |
 |------|--------------|--------|
-| Signal | `simulated`、`manual_trigger`、`external_signal`、**`tcp_signal`**、`modbus_tcp`、`siemens_s7`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk` | ✅ `simulated`、`manual_trigger`、`external_signal`、**`tcp_signal`** |
+| Signal | `simulated`、`manual_trigger`、`external_signal`、**`tcp_signal`**、**`distance_trigger`**、`modbus_tcp`、`siemens_s7`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk` | ✅ `simulated`、`manual_trigger`、`external_signal`、**`tcp_signal`**、**`distance_trigger`** |
 | 相机 | `basler_pylon`、**`hikrobot_mvs`**、`daheng_galaxy`、`flir_spinnaker`、`vendor_sdk`、`custom_sdk` | ✅ `simulated`、**`hikrobot_mvs`**（含 Line0 硬件触发） |
-| 频闪 | **`serial_ascii`**、`modbus_tcp`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk` | ✅ `simulated`、**`serial_ascii`**（FL-ACDH RS232） |
+| 频闪 | **`serial_ascii`**、`modbus_tcp`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk` | ✅ `simulated`、**`serial_ascii`**（FL-ACDH RS232，**多控制器支持**） |
 | Robot | `modbus_tcp`、`siemens_s7`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk` | ✅ `simulated` |
 
 `manual_trigger` 只能用于 `hardware_mode=lab`，它生成测试触发并记录结果，不输出真实外部 IO。`production` 模式要求 `signal.backend=external_signal` 或 `tcp_signal`，禁止 `manual_trigger` 和 `simulated` backend。如果选择了非 simulated backend，但 C++ 尚未链接对应真实驱动，程序会在初始化阶段明确报错并退出，不会偷偷回退到模拟硬件。
@@ -164,6 +164,87 @@ ipc_safety_checks   (依赖 seat_aoi_control)
 ### FL-ACDH 频闪控制器 (`serial_ascii`)
 
 当 `light.backend=serial_ascii` 时，通过 RS232 串口（`light.serial_port`、`light.baud_rate`，默认 9600 8N1）与 FL-ACDH-20048-4 通信，使用 XOR 校验和的专有 ASCII 帧协议。
+
+### 多控制器频闪
+
+`light` 配置支持单控制器和多控制器两种模式：
+
+**单控制器（兼容旧格式）**：
+```ini
+light.backend=serial_ascii
+light.serial_port=/dev/ttyUSB0
+light.1.physical_channel=1    # light.<N>.<field> → controller 0
+```
+
+**多控制器（新格式）**：
+```ini
+light.0.backend=serial_ascii
+light.0.serial_port=/dev/ttyUSB0
+light.0.1.physical_channel=1  # light.<M>.<N>.<field>：控制器 M, 光源索引 N
+light.1.backend=serial_ascii
+light.1.serial_port=/dev/ttyUSB1
+light.1.3.physical_channel=1  # 第二台控制器通道 1, 光源索引 3
+```
+
+每个 `RuntimeLightChannelConfig` 记录 `controller_index`，`FrameAssembler` 内部管理多个 `ILightController` 实例并按索引派发。
+
+### TCP 结果回传
+
+`TcpSignalClient::publish_result()` 支持通过 TCP 回传检测结果：
+
+```ini
+signal.result_host=192.168.1.100     # 结果通知目标 IP
+signal.result_port=9001              # 结果通知目标端口
+signal.result_prefix=result          # 报文前缀
+signal.result_delimiter=|            # 字段分隔符
+signal.ok_text=OK                    # OK 文本
+signal.ng_text=NG                    # NG 文本
+signal.recheck_text=RECHECK          # RECHECK 文本
+signal.error_text=ERROR              # ERROR 文本
+```
+
+发送格式：`result|seat_id|OK\n`。优先使用 `result_host:result_port`，回退复用 PLC 连接，再回退仅日志。
+
+### 图像落盘 (PGM)
+
+```ini
+image_save.enabled=true              # 启用存图
+image_save.root_dir=images           # 存储根目录
+image_save.save_original=true        # 保存采集原图
+```
+
+采集成功后自动保存 PGM 格式原图：`{root_dir}/{seat_id}/{camera_id}_{timestamp}_L{light_index}_original.pgm`。PGM (P5 binary) 纯 C++ 实现，无需外部库依赖。存图失败只打日志不阻断主流程。
+
+### JSON 详细结果输出
+
+```ini
+json_output.enabled=true             # 启用 JSON 输出
+json_output.host=192.168.1.100       # 目标 IP
+json_output.port=9002                # 目标端口
+```
+
+检测完成后通过 TCP 发送单行 JSON：
+```json
+{"type":"inspection_result","sn":"ABC123","overall":"OK","overall_code":1,"sequence":5,"error_code":0,"elapsed_ms":123.4,"defect_count":0}
+```
+发送失败不阻断主流程。
+
+### 距离传感器触发 (`distance_trigger`)
+
+当 `signal.backend=distance_trigger` 时，使用 JK-LRD 激光测距传感器（RS485 Modbus RTU）作为触发源：
+
+```ini
+signal.backend=distance_trigger
+signal.port=9000                    # 上游 TCP 信号端口（接收 SN）
+signal.trigger_queue_path=COM4,9600,1,500,500,50
+# 格式：串口,波特率,从站地址,阈值mm,消抖ms,轮询间隔ms
+```
+
+内部架构：
+- `DistanceSensor`：Modbus RTU (CRC-16) 轮询距离值，触发消抖状态机
+  - **ARMED** → 距离 < 阈值 → **Debouncing** → 持续阈值下超限 → **TRIGGERED**
+  - **TRIGGERED** → 距离 >= 阈值 + 2s 冷却 → **ARMED**（重新就绪）
+- `DistanceTriggerSignalClient`：包装上游 `TcpSignalClient`（SN 接收）+ `DistanceSensor`（触发），触发时用缓存的 SN 组装 `ExternalTrigger`
 
 ## 采集方案模式
 

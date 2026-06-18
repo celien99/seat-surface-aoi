@@ -29,7 +29,7 @@ Seat Surface AOI 是一套可验证、可扩展的汽车座椅表面缺陷检测
 
 | 层级 | 职责 | 当前实现 |
 | --- | --- | --- |
-| 实时主控 | PLC、相机、频闪、机器人 pose/shot、触发同步、节拍控制 | `cpp_controller/` C++17 主控、模拟硬件、Hikrobot MVS 相机 backend、FL-ACDH RS232 频闪 backend、TCP 信号 backend、生产配置校验和故障注入 |
+| 实时主控 | PLC、相机、频闪、机器人 pose/shot、触发同步、节拍控制 | `cpp_controller/` C++17 主控、模拟硬件、Hikrobot MVS 相机 (Line0 硬触发)、FL-ACDH RS232 多控制器频闪、TCP 信号 (SN+结果回传)、距离传感器触发、图像落盘 PGM、JSON 结果输出、生产配置校验和故障注入 |
 | 检测进程 | 质量门禁、预处理、ROI、配准、多光源特征、模型推理、融合判定 | `python_detector/` 独立进程，默认 fake 后端，可接 ONNX/PatchCore/FAISS |
 | 在线通信 | 图像包与检测结果交换 | 跨平台共享内存 frame/result ring buffer，固定布局、CRC 和协议校验 |
 | 离线闭环 | trace 转样本、embedding、PCA、PatchCore/FAISS、回放、benchmark | `training_tools/` 只消费在线检测公开入口，不反向耦合 detector |
@@ -258,7 +258,7 @@ main.cpp
       -> PlcClient.send_decision()
 ```
 
-C++ 侧负责生产节拍和设备安全，不能实现深度学习推理。当前仓库提供模拟 backend、Hikrobot MVS 相机 backend（含 Line0 硬件触发）、FL-ACDH RS232 频闪 backend、TCP 信号 backend、生产配置 fail-fast 校验和故障注入路径；其余 PLC、频闪和机器人真实 backend 仍需按现场协议或 SDK 接入。
+C++ 侧负责生产节拍和设备安全，不能实现深度学习推理。当前仓库已实现：模拟 backend、Hikrobot MVS 相机 backend（Line0 硬件触发）、FL-ACDH RS232 多控制器频闪 backend、TCP 信号 backend（SN 接收 + 结果回传）、距离传感器触发 backend（JK-LRD Modbus RTU）、图像落盘（PGM）、JSON 结果输出、生产配置 fail-fast 校验和故障注入路径；机器人真实 backend 仍需按现场协议或 SDK 接入。
 
 常驻生产闭环是：`seat_aoi_controller` 启动后持续等待 PLC/手动触发，按 Capture Plan 控制相机和频闪采集多光源图，写入共享内存 Frame Ring；Python detector 常驻读取 READY slot，完成检测或采样兜底后写 Result Ring；C++ 读取结果并输出给 PLC。`ERROR` 会被 C++ 映射为 PLC 侧 `RECHECK` 输出，避免产线误放行。
 
@@ -325,7 +325,15 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 C++ 生产模板已把 `recipe_id` 对齐到上述生产配方；上线前还必须用现场标定替换 `python_detector/config/calibration/*/*production*.yaml` 和 `python_detector/config/roi/production_full_roi.yaml` 的模板 ROI/矩阵。
 
-当前固定机位硬件基线已记录到 `cpp_controller/config/station_runtime.production.example.conf`：海康 MV-CH120-20GC 工业相机，4096 x 3072，Hikrobot MVS backend；MVL-KF0814M-12MPE FA 镜头，8mm F1.4，1.1"，C 接口；FL-ACDH-20048-4 四通道频闪控制器（RS232 serial_ascii backend）；4 路光源按 `light_order=1,2,3,4` 串行 TDM 采集。工控机安装 MVS 后可用 `-DSEAT_AOI_ENABLE_HIKROBOT_MVS=ON` 构建真实相机 backend；当前 MVS backend 已按海康 MVS C++ 示例对齐 SDK 初始化、硬件/软件触发、`Line1=ExposureStartActive` 频闪输出和取帧字段。频闪控制器已实现 RS232 串口协议（XOR 校验和），TCP 信号客户端（`tcp_signal` backend）监听 TCP 端口接收 PLC SN 触发行。其余 PLC 协议仍保留生产配置 TODO，测试阶段可先使用手动/模拟触发验证相机、频闪、共享内存和 Python 收图链路。
+当前固定机位硬件基线已记录到 `cpp_controller/config/station_runtime.production.example.conf`：海康 MV-CH120-20GC 工业相机，4096 x 3072，Hikrobot MVS backend；MVL-KF0814M-12MPE FA 镜头，8mm F1.4，1.1"，C 接口；FL-ACDH-20048-4 四通道频闪控制器（RS232 serial_ascii backend，支持多控制器扩展）；4 路光源按 `light_order=1,2,3,4` 串行 TDM 采集。
+
+**已实现的真实硬件后端：**
+- **相机**：Hikrobot MVS（Line0 硬件触发 + Software 软件触发），`-DSEAT_AOI_ENABLE_HIKROBOT_MVS=ON` 构建
+- **频闪**：FL-ACDH RS232 串口 ASCII 协议（XOR 校验和，多控制器 `light.<M>.<N>.<field>` 格式）
+- **信号**：TCP 信号客户端（SN 接收 + `result|seat_id|OK\n` 结果回传）、距离传感器触发（JK-LRD Modbus RTU，消抖触发状态机）
+- **辅助**：图像落盘 PGM（纯 C++ 零依赖）、JSON 详细结果 TCP 输出、生产配置 fail-fast 校验
+
+测试阶段可先用手动/模拟触发验证相机、频闪、共享内存和 Python 收图链路。
 
 PLC 接入前的工控机联调使用 `cpp_controller/config/station_runtime.lab_manual.example.conf`：`hardware_mode=lab` 配合 `plc.backend=manual_trigger`，只生成手动触发任务并记录结果，不输出真实 PLC IO；`production` 模式仍禁止 `manual_trigger` 和 `simulated` backend。`tools/run_simulated_ipc.*` 与打包后的 `run_packaged_simulated_ipc.sh` 会把 `--config` 同步传给 Python detector，detector 会读取同一份 `slot_count/frame_slot_size/result_slot_size`，4096 x 3072 图像不需要现场再改 Python 共享内存参数。
 
