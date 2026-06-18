@@ -66,6 +66,7 @@ flowchart LR
 
   PY -. trace .-> Training["training_tools<br/>样本 / PCA / PatchCore / FAISS"]
   Training -. model assets .-> PY
+  PY -. display channel .-> UI["PySide6/QML 前端<br/>online-detection-app"]
 ```
 
 核心边界很明确：
@@ -92,6 +93,7 @@ flowchart LR
 | 共享内存 IPC | C++/Python 双端固定布局结构体、frame/result ring buffer、slot 状态机、CRC、layout/对象大小 fail-fast 和协议校验工具。 |
 | V4 算法接口 | Dome ROI YOLO、ECC 配准、WideResNet50 embedding、PCA、PatchCore KNN 和 FAISS 可选加速接入点。 |
 | 保守判定 | 协议异常、CRC 错误、缺帧、超时、质量失败、shot/机器人位姿不一致、ROI 冲突、机器人 FAULT、候选融合溢出和模型异常返回 `RECHECK` 或 `ERROR`。 |
+| 前端展示通道 | Python detector 成功写回共享内存后，额外输出 `display_latest.json` 和 `display_events.jsonl`，供 PySide6/QML 前端只读显示。 |
 | 数据闭环 | trace、按 `camera_id/pose_id` 隔离的 ROI 图、overlay、manifest、embedding、PCA/PatchCore/FAISS 资产训练、回放与 benchmark。 |
 
 ## 快速开始
@@ -141,6 +143,12 @@ uv run python tools/run_simulated_ipc.py \
 # Python detector 在线入口
 uv run python -m python_detector.detector_main --once --timeout-ms 8000
 uv run seat-aoi-detector --once --timeout-ms 8000
+
+# Python detector 写前端展示通道，默认输出到 trace_root
+uv run python -m python_detector.detector_main \
+  --config cpp_controller/config/station_runtime.example.conf \
+  --display-root trace \
+  --once --timeout-ms 8000
 
 # 真实模型资产上线前检查
 uv run python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1
@@ -262,6 +270,8 @@ python_detector.detector_main
 
 Python 侧只处理检测链路。任意输入不可信、配方不一致、模型缺失、输出越界或质量失败，都会进入保守结果，不用 `OK` 掩盖异常。
 
+Python detector 默认启用前端展示通道。每次检测完成并成功写回共享内存结果后，会在 `trace_root` 下追加 `display_events.jsonl`，并原子更新 `display_latest.json`。事件字段包括 `sequence_id`、`trigger_id`、`seat_id`、`sku`、`recipe_id`、`decision`、`quality_pass`、`error_code`、`elapsed_ms`、缺陷列表、质量/错误消息、`trace_dir`、ROI PGM 图路径和 overlay PPM 路径。该通道只给 `online-detection-app` 的 PySide6/QML 前端读取显示，不参与 C++/Python 在线共享内存协议；展示通道落盘失败只会打印告警，不改变 detector 已写回 C++ 的判定结果。C++ 侧采集失败或 detector timeout 等没有 Python 结果的场景，前端应继续读取 `trace_root/cpp_controller_events.jsonl` 展示主控事件。
+
 ### 共享内存协议
 
 | 方向 | 共享内存逻辑名称 | 内容 |
@@ -317,6 +327,7 @@ PLC 接入前的工控机联调使用 `cpp_controller/config/station_runtime.lab
 | 场景 | 命令 | 期望 |
 | --- | --- | --- |
 | Python 单元测试 | `uv run pytest` | 协议、配方、质量门禁、ROI、模型、融合、trace 和训练工具测试通过。 |
+| 前端展示通道测试 | `uv run pytest python_detector/tests/test_display_channel.py` | `display_latest.json`、`display_events.jsonl` 和 trace 图像/overlay 路径输出正确。 |
 | 协议布局校验 | `uv run python -m tools.validate_protocol` | C++/Python 结构体大小和协议常量一致。 |
 | 参考架构检查 | `uv run python -m tools.validate_architecture_readiness --scope reference` | 参考链路能力完整。 |
 | 生产阻塞检查 | `uv run python -m tools.validate_architecture_readiness --scope production` | 占位配置或模型未替换时返回阻塞项。 |
@@ -343,6 +354,7 @@ PLC 接入前的工控机联调使用 `cpp_controller/config/station_runtime.lab
 - Python 不控制 PLC、相机、机器人或频闪。
 - C++ 主控不实现深度学习推理。
 - 在线图像和结果不走 TCP，必须使用共享内存。
+- PySide6/QML 展示通道只读 `display_latest.json`、`display_events.jsonl`、trace 图和 C++ 事件日志，不参与设备控制和检测判定。
 - 任意不确定状态、超时、缺帧、协议错误、CRC 错误、质量门禁失败或模型异常都不能输出 `OK`。
 - 修改共享内存协议必须同步更新 C++、Python、校验工具、测试和协议文档。
 - 真实生产配置不得静默回退到 simulated backend。

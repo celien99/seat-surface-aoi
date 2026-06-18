@@ -166,6 +166,25 @@ training_tools/
 - `SeatSurfaceAoiAlgorithm`：纯算法入口。输入 `SeatInspectionJob`，按 `recipe_id` 加载配方，调用 `InspectionPipeline`，可选写 trace，返回 `AlgorithmRun`。
 - `InspectionPipeline`：测试和扩展时最常用的编排类。构造函数允许注入质量门禁、预处理、特征、推理、融合、规则引擎等子模块。
 - `DetectorProcess`：在线进程入口。只负责初始化 `ShmClient`、等待任务、调用算法 facade、发布结果和释放共享内存 slot。
+- `DisplayChannelWriter`：只读前端展示通道输出器。detector 成功写回共享内存后追加 `display_events.jsonl` 并原子更新 `display_latest.json`，供 PySide6/QML 前端读取。
+
+### 前端展示通道
+
+`python_detector.detector_main` 默认启用展示通道，输出目录为 C++ 运行配置里的 `trace_root`；也可以通过 `--display-root` 覆盖，或用 `--disable-display-channel` 关闭。
+
+```bash
+uv run python -m python_detector.detector_main \
+  --config cpp_controller/config/station_runtime.example.conf \
+  --display-root trace \
+  --once --timeout-ms 8000
+```
+
+输出文件：
+
+- `display_latest.json`：最近一次 Python detector 判定，原子替换，适合 PySide6/QML 轮询。
+- `display_events.jsonl`：检测结果追加日志，适合前端日志页或回放。
+
+事件字段包含 `sequence_id`、`trigger_id`、`seat_id`、`sku`、`recipe_id`、`decision`、`quality_pass`、`error_code`、`elapsed_ms`、缺陷列表、质量/错误消息、`trace_dir`、ROI PGM 图和 overlay PPM 图路径。展示通道只供 `online-detection-app` 读取显示，不读写现有 C++/Python 共享内存 slot；如果展示 JSON 落盘失败，只打印告警，不改变已写回 C++ 的检测结果。采集失败、detector timeout 等 C++ 侧保守结果仍由前端读取 `trace_root/cpp_controller_events.jsonl` 补充显示。
 
 ### 配方与标定
 
