@@ -10,16 +10,8 @@ class CameraDevice {
 public:
   bool initialize(const CameraConfig& config);
   bool arm(std::uint64_t trigger_id,
-           const LightChannelParam& light_param,
-           std::uint32_t light_seq_index,
            int timeout_ms);
-  bool simulate_exposure_output(std::uint64_t trigger_id,
-                                const LightChannelParam& light_param,
-                                std::uint32_t light_seq_index,
-                                int timeout_ms);
   bool capture(std::uint64_t trigger_id,
-               const LightChannelParam& light_param,
-               std::uint32_t light_seq_index,
                CapturedFrame* out_frame,
                int timeout_ms);
   CameraHealth get_health() const;

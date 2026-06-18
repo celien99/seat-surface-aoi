@@ -80,7 +80,6 @@ bool StationController::initialize(const StationConfig& config) {
   runtime_config.capture_views = config.capture_views;
   runtime_config.signal = config.signal;
   runtime_config.robot = config.robot;
-  runtime_config.trigger_sync_mode = config.trigger_sync_mode;
   if (runtime_config.lights.empty()) {
     runtime_config.lights.emplace_back();
   }

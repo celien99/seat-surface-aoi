@@ -404,75 +404,9 @@ bool FlAcdhLightController::send_command(char cmd, char channel,
 }
 
 // ============================================================================
-// 命令序列
-// ============================================================================
-
-bool FlAcdhLightController::send_arm_sequence(const LightChannelParam& channel,
-                                               std::uint64_t /*trigger_id*/,
-                                               std::uint32_t /*light_seq_index*/,
-                                               int timeout_ms,
-                                               std::string* error_message) {
-  const char ch = channel_char(channel.physical_channel);
-  const std::string strobe_val = format_strobe_width(channel.strobe_width_us);
-  const std::string delay_val = format_delay(channel.trigger_delay_us);
-
-  // C: 联动模式 = 0 (独立通道) — 可能被拒绝，继续
-  if (!send_command('C', ch, "000", true, timeout_ms, error_message)) {
-    return false;
-  }
-  // B: 触发边沿 = 1 (上升沿) — 可能被拒绝，继续
-  if (!send_command('B', ch, "001", true, timeout_ms, error_message)) {
-    return false;
-  }
-  // 8: 触发模式 = 0 (外部触发) — 关键
-  if (!send_command('8', ch, "000", false, timeout_ms, error_message)) {
-    return false;
-  }
-  // 9: 频闪脉宽 — 关键
-  if (!send_command('9', ch, strobe_val, false, timeout_ms, error_message)) {
-    return false;
-  }
-  // A: 相机同步延迟 — 关键
-  if (!send_command('A', ch, delay_val, false, timeout_ms, error_message)) {
-    return false;
-  }
-
-  std::cout << "FL-ACDH " << serial_port_ << " ch=" << channel.physical_channel
-            << " armed: strobe=" << channel.strobe_width_us
-            << "us delay=" << channel.trigger_delay_us << "us" << std::endl;
-  return true;
-}
-
-bool FlAcdhLightController::send_trigger_command(const LightChannelParam& channel,
-                                                  std::uint64_t /*trigger_id*/,
-                                                  std::uint32_t /*light_seq_index*/,
-                                                  int timeout_ms,
-                                                  std::string* error_message) {
-  const char ch = channel_char(channel.physical_channel);
-  // 7: 远程触发 — 关键
-  if (!send_command('7', ch, "000", false, timeout_ms, error_message)) {
-    return false;
-  }
-  std::cout << "FL-ACDH " << serial_port_ << " ch=" << channel.physical_channel
-            << " triggered" << std::endl;
-  return true;
-}
-
-bool FlAcdhLightController::send_full_sequence(const LightChannelParam& channel,
-                                                std::uint64_t trigger_id,
-                                                std::uint32_t light_seq_index,
-                                                int timeout_ms,
-                                                std::string* error_message) {
-  if (!send_arm_sequence(channel, trigger_id, light_seq_index, timeout_ms,
-                          error_message)) {
-    return false;
-  }
-  return send_trigger_command(channel, trigger_id, light_seq_index, timeout_ms,
-                               error_message);
-}
 
 // ============================================================================
-// ILightController 接口实现
+// ILightController 接口实现（对齐 Deploy：每步 = 配置+点火完整序列）
 // ============================================================================
 
 bool FlAcdhLightController::initialize(const LightControllerConfig& config) {
@@ -500,7 +434,6 @@ bool FlAcdhLightController::initialize(const LightControllerConfig& config) {
   trigger_count_ = 0;
   last_light_index_ = 0;
   last_physical_channel_ = 0;
-  hardware_trigger_armed_ = false;
   return true;
 }
 
@@ -509,26 +442,22 @@ bool FlAcdhLightController::prepare_sequence(const LightSequence& sequence,
                                               int timeout_ms,
                                               std::string* error_message) {
   if (!initialized_ || sequence.channels.empty() || timeout_ms <= 0) {
-    if (error_message != nullptr) {
+    if (error_message != nullptr)
       *error_message = "FL-ACDH 未初始化、序列为空或 timeout_ms 非法";
-    }
     return false;
   }
   if (simulate_fault_) {
-    if (error_message != nullptr) {
-      *error_message = "FL-ACDH 模拟光源故障";
-    }
+    if (error_message != nullptr) *error_message = "FL-ACDH 模拟光源故障";
     shutdown_all();
     return false;
   }
-  // 校验所有通道参数
   for (const auto& channel : sequence.channels) {
-    if (!set_channel(channel.light_index, channel)) {
+    if (!channel.enabled) continue;
+    if (channel.physical_channel == 0 || channel.strobe_width_us == 0 ||
+        channel.current_percent <= 0.0F || channel.current_percent > 100.0F) {
       if (error_message != nullptr) {
-        std::ostringstream oss;
-        oss << "FL-ACDH 光源通道 light_index=" << channel.light_index
-            << " physical_channel=" << channel.physical_channel << " 参数非法";
-        *error_message = oss.str();
+        *error_message = "FL-ACDH 光源通道 light_index=" +
+                         std::to_string(channel.light_index) + " 参数非法";
       }
       shutdown_all();
       return false;
@@ -538,146 +467,48 @@ bool FlAcdhLightController::prepare_sequence(const LightSequence& sequence,
 }
 
 bool FlAcdhLightController::trigger_channel(const LightChannelParam& channel,
-                                             std::uint64_t trigger_id,
+                                             std::uint64_t /*trigger_id*/,
                                              std::uint32_t light_seq_index,
                                              int timeout_ms,
                                              std::string* error_message) {
-  if (!initialized_ || timeout_ms <= 0 || !valid_channel_param(channel)) {
-    if (error_message != nullptr) {
-      *error_message = "FL-ACDH 光源通道触发参数非法";
-    }
+  if (!initialized_ || timeout_ms <= 0 ||
+      channel.physical_channel == 0 || channel.strobe_width_us == 0) {
+    if (error_message != nullptr)
+      *error_message = "FL-ACDH trigger_channel 参数非法";
     shutdown_all();
     return false;
   }
+  if (!channel.enabled) return true;
   if (simulate_fault_) {
-    if (error_message != nullptr) {
-      *error_message = "FL-ACDH 模拟光源故障";
-    }
+    if (error_message != nullptr) *error_message = "FL-ACDH 模拟光源故障";
     shutdown_all();
     return false;
   }
 
-  std::cout << "FL-ACDH trigger_id=" << trigger_id
-            << " light_index=" << channel.light_index
-            << " physical_channel=" << channel.physical_channel
-            << " light_seq_index=" << light_seq_index
+  const char ch = channel_char(channel.physical_channel);
+  const std::string strobe_val = format_strobe_width(channel.strobe_width_us);
+  const std::string delay_val = format_delay(channel.trigger_delay_us);
+
+  std::cout << "FL-ACDH " << serial_port_ << " ch=" << channel.physical_channel
             << " strobe=" << channel.strobe_width_us
-            << "us delay=" << channel.trigger_delay_us << "us" << std::endl;
+            << "us delay=" << channel.trigger_delay_us
+            << "us light_seq_index=" << light_seq_index << std::endl;
 
-  if (!send_full_sequence(channel, trigger_id, light_seq_index, timeout_ms,
-                           error_message)) {
-    shutdown_all();
-    return false;
-  }
+  // 对齐 Deploy：每条命令按 C->B->8->9->A->7 顺序发送
+  if (!send_command('C', ch, "000", true, timeout_ms, error_message)) return false;
+  if (!send_command('B', ch, "001", true, timeout_ms, error_message)) return false;
+  if (!send_command('8', ch, "000", false, timeout_ms, error_message)) return false;
+  if (!send_command('9', ch, strobe_val, false, timeout_ms, error_message)) return false;
+  if (!send_command('A', ch, delay_val, false, timeout_ms, error_message)) return false;
+  if (!send_command('7', ch, "000", false, timeout_ms, error_message)) return false;
+
+  std::cout << "FL-ACDH " << serial_port_ << " ch=" << channel.physical_channel
+            << " triggered" << std::endl;
 
   ++trigger_count_;
   last_light_index_ = channel.light_index;
   last_physical_channel_ = channel.physical_channel;
   return true;
-}
-
-bool FlAcdhLightController::arm_hardware_trigger(const LightChannelParam& channel,
-                                                  std::uint64_t trigger_id,
-                                                  std::uint32_t light_seq_index,
-                                                  int timeout_ms,
-                                                  std::string* error_message) {
-  if (!initialized_ || timeout_ms <= 0 || !valid_channel_param(channel)) {
-    if (error_message != nullptr) {
-      *error_message = "FL-ACDH 硬触发 arm 参数非法";
-    }
-    shutdown_all();
-    return false;
-  }
-  if (simulate_fault_) {
-    if (error_message != nullptr) {
-      *error_message = "FL-ACDH 模拟光源故障";
-    }
-    shutdown_all();
-    return false;
-  }
-
-  std::cout << "FL-ACDH arm_hardware_trigger trigger_id=" << trigger_id
-            << " light_index=" << channel.light_index
-            << " physical_channel=" << channel.physical_channel
-            << " light_seq_index=" << light_seq_index
-            << " strobe=" << channel.strobe_width_us
-            << "us delay=" << channel.trigger_delay_us << "us" << std::endl;
-
-  if (!send_arm_sequence(channel, trigger_id, light_seq_index, timeout_ms,
-                          error_message)) {
-    shutdown_all();
-    return false;
-  }
-
-  hardware_trigger_armed_ = true;
-  armed_channel_ = channel;
-  return true;
-}
-
-bool FlAcdhLightController::notify_hardware_triggered(const LightChannelParam& channel,
-                                                       std::uint64_t trigger_id,
-                                                       std::uint32_t light_seq_index,
-                                                       int timeout_ms,
-                                                       std::string* error_message) {
-  if (!initialized_ || timeout_ms <= 0 || !hardware_trigger_armed_ ||
-      armed_channel_.light_index != channel.light_index ||
-      armed_channel_.physical_channel != channel.physical_channel) {
-    if (error_message != nullptr) {
-      *error_message =
-          "FL-ACDH 硬触发未 arm 或通道不匹配 (light_index=" +
-          std::to_string(channel.light_index) +
-          " physical_channel=" + std::to_string(channel.physical_channel) + ")";
-    }
-    shutdown_all();
-    return false;
-  }
-  if (simulate_fault_) {
-    if (error_message != nullptr) {
-      *error_message = "FL-ACDH 模拟光源故障";
-    }
-    shutdown_all();
-    return false;
-  }
-
-  std::cout << "FL-ACDH notify_hardware_triggered trigger_id=" << trigger_id
-            << " light_index=" << channel.light_index
-            << " physical_channel=" << channel.physical_channel
-            << " light_seq_index=" << light_seq_index << std::endl;
-
-  if (!send_trigger_command(channel, trigger_id, light_seq_index, timeout_ms,
-                             error_message)) {
-    shutdown_all();
-    return false;
-  }
-
-  hardware_trigger_armed_ = false;
-  armed_channel_ = LightChannelParam{};
-  ++trigger_count_;
-  last_light_index_ = channel.light_index;
-  last_physical_channel_ = channel.physical_channel;
-  return true;
-}
-
-bool FlAcdhLightController::run_sequence(const LightSequence& sequence,
-                                          std::uint64_t trigger_id,
-                                          int timeout_ms,
-                                          std::string* error_message) {
-  if (!prepare_sequence(sequence, trigger_id, timeout_ms, error_message)) {
-    return false;
-  }
-  for (std::uint32_t i = 0; i < sequence.channels.size(); ++i) {
-    if (!trigger_channel(sequence.channels[i], trigger_id, i, timeout_ms,
-                         error_message)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-bool FlAcdhLightController::set_channel(std::uint32_t light_index,
-                                         const LightChannelParam& param) {
-  return initialized_ && light_index == param.light_index && light_index != 0 &&
-         valid_channel_param(param);
 }
 
 LightHealth FlAcdhLightController::get_health() const {
@@ -688,28 +519,21 @@ LightHealth FlAcdhLightController::get_health() const {
   const bool serial_open = (fd_ >= 0);
 #endif
   health.ok = initialized_ && serial_open && !simulate_fault_;
-  health.ready = initialized_ && serial_open && !simulate_fault_ && !hardware_trigger_armed_;
-  health.over_current = false;
-  health.over_temperature = false;
-  health.trigger_missed = false;
+  health.ready = initialized_ && serial_open && !simulate_fault_;
   health.trigger_count = trigger_count_;
   health.last_light_index = last_light_index_;
   health.last_physical_channel = last_physical_channel_;
-  if (!serial_open) {
+  if (!serial_open)
     health.message = "FL-ACDH 串口未打开";
-  } else if (simulate_fault_) {
+  else if (simulate_fault_)
     health.message = "FL-ACDH 模拟故障";
-  } else {
-    health.message = "FL-ACDH serial " + serial_port_ + " @ " +
-                     std::to_string(baud_rate_);
-  }
+  else
+    health.message = "FL-ACDH serial " + serial_port_ + " @ " + std::to_string(baud_rate_);
   return health;
 }
 
 void FlAcdhLightController::shutdown_all() {
   initialized_ = false;
-  hardware_trigger_armed_ = false;
-  armed_channel_ = LightChannelParam{};
   close_serial();
 }
 

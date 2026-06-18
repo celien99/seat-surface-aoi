@@ -50,7 +50,6 @@ struct StationConfig {
   std::vector<RuntimeCaptureViewConfig> capture_views;
   RuntimeSignalConfig signal;
   RuntimeRobotConfig robot;
-  TriggerSyncMode trigger_sync_mode = TriggerSyncMode::CameraExposureOutput;
   bool simulate_light_fault = false;
   bool simulate_signal_result_fault = false;
   bool simulate_trigger_timeout = false;

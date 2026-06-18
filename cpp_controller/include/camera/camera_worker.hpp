@@ -14,10 +14,6 @@ public:
            const LightChannelParam& light_param,
            std::uint32_t light_seq_index,
            int timeout_ms) override;
-  bool simulate_exposure_output(std::uint64_t trigger_id,
-                                const LightChannelParam& light_param,
-                                std::uint32_t light_seq_index,
-                                int timeout_ms) override;
   bool wait_frame(std::uint64_t trigger_id,
                   const LightChannelParam& light_param,
                   std::uint32_t light_seq_index,

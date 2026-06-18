@@ -14,16 +14,6 @@ namespace seat_aoi {
 
 namespace {
 
-const char* trigger_sync_mode_name(TriggerSyncMode mode) {
-  switch (mode) {
-    case TriggerSyncMode::Software:
-      return "software";
-    case TriggerSyncMode::CameraExposureOutput:
-      return "camera_exposure_output";
-  }
-  return "unknown";
-}
-
 void set_acquisition_error(AcquisitionError* error,
                            ErrorCode code,
                            AcquisitionStage stage,
@@ -221,140 +211,38 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
          ++light_seq_index) {
       const auto light_param = sequence.channels[light_seq_index];
 
-      if (config_.trigger_sync_mode == TriggerSyncMode::Software) {
-        // 软件触发：直接触发光源频闪
-        if (!light_controllers_[light_param.controller_index]->trigger_channel(light_param,
-                                               trigger.trigger_id,
-                                               light_seq_index,
-                                               config_.light_timeout_ms,
-                                               error != nullptr ? &error->message : nullptr)) {
-          const std::string detail =
-              error != nullptr && !error->message.empty() ? error->message
-                                                          : "simulated light channel failed";
-          set_acquisition_error(error,
-                                ErrorCode::LightFault,
-                                AcquisitionStage::TriggerLight,
-                                view.camera_index,
-                                light_param.light_index,
-                                light_seq_index,
-                                detail);
-          for (auto& ctrl : light_controllers_) ctrl->shutdown_all();
-          initialized_ = false;
-          cameras_.clear();
-          return false;
-        }
-      } else if (config_.trigger_sync_mode == TriggerSyncMode::CameraExposureOutput) {
-        // ① 光源 arm — 进入预就绪状态
-        if (!light_controllers_[light_param.controller_index]->arm_hardware_trigger(light_param,
-                                                    trigger.trigger_id,
-                                                    light_seq_index,
-                                                    config_.light_timeout_ms,
-                                                    error != nullptr ? &error->message : nullptr)) {
-          const std::string detail =
-              error != nullptr && !error->message.empty()
-                  ? error->message
-                  : "simulated light hardware trigger arm failed";
-          set_acquisition_error(error,
-                                ErrorCode::LightFault,
-                                AcquisitionStage::ArmLight,
-                                view.camera_index,
-                                light_param.light_index,
-                                light_seq_index,
-                                detail);
-          for (auto& ctrl : light_controllers_) ctrl->shutdown_all();
-          initialized_ = false;
-          cameras_.clear();
-          return false;
-        }
+      // 对齐 Deploy：臂相机 → 频闪 C→B→8→9→A→7 → 取图 → post_delay
+      if (!light_param.enabled) continue;
 
-        // ② 当前机位相机 arm — 等待曝光
-        if (!camera.arm(trigger.trigger_id,
-                        light_param,
-                        light_seq_index,
-                        config_.camera_timeout_ms)) {
-          std::ostringstream oss;
-          oss << "simulated camera arm failed camera_index=" << view.camera_index
-              << " light_index=" << light_param.light_index
-              << " light_seq_index=" << light_seq_index;
-          set_acquisition_error(error,
-                                ErrorCode::CameraFault,
-                                AcquisitionStage::ArmCamera,
-                                view.camera_index,
-                                light_param.light_index,
-                                light_seq_index,
-                                oss.str());
-          for (auto& ctrl : light_controllers_) ctrl->shutdown_all();
-          initialized_ = false;
-          cameras_.clear();
-          return false;
-        }
-
-        // ③ 当前机位相机模拟曝光输出 → 触发光源频闪
-        if (!camera.simulate_exposure_output(trigger.trigger_id,
-                                             light_param,
-                                             light_seq_index,
-                                             config_.camera_timeout_ms)) {
-          std::ostringstream oss;
-          oss << "simulated camera exposure output failed camera_index=" << view.camera_index
-              << " light_index=" << light_param.light_index
-              << " light_seq_index=" << light_seq_index;
-          set_acquisition_error(error,
-                                ErrorCode::TriggerSyncFault,
-                                AcquisitionStage::ExposureOutput,
-                                view.camera_index,
-                                light_param.light_index,
-                                light_seq_index,
-                                oss.str());
-          for (auto& ctrl : light_controllers_) ctrl->shutdown_all();
-          initialized_ = false;
-          cameras_.clear();
-          return false;
-        }
-
-        // ④ 通知光源硬件触发完成
-        if (!light_controllers_[light_param.controller_index]->notify_hardware_triggered(light_param,
-                                                         trigger.trigger_id,
-                                                         light_seq_index,
-                                                         config_.light_timeout_ms,
-                                                         error != nullptr ? &error->message : nullptr)) {
-          const std::string detail =
-              error != nullptr && !error->message.empty()
-                  ? error->message
-                  : "simulated light hardware trigger failed";
-          set_acquisition_error(error,
-                                ErrorCode::TriggerSyncFault,
-                                AcquisitionStage::ConfirmLightTrigger,
-                                view.camera_index,
-                                light_param.light_index,
-                                light_seq_index,
-                                detail);
-          for (auto& ctrl : light_controllers_) ctrl->shutdown_all();
-          initialized_ = false;
-          cameras_.clear();
-          return false;
-        }
-      } else {
-        set_acquisition_error(error,
-                              ErrorCode::ConfigurationError,
-                              AcquisitionStage::Configuration,
-                              view.camera_index,
-                              light_param.light_index,
-                              light_seq_index,
-                              std::string("unsupported trigger sync mode ") +
-                                  trigger_sync_mode_name(config_.trigger_sync_mode));
+      if (!camera.arm(trigger.trigger_id,
+                      light_param, light_seq_index,
+                      config_.camera_timeout_ms)) {
+        std::ostringstream oss;
+        oss << "camera arm failed camera_index=" << view.camera_index
+            << " light_index=" << light_param.light_index;
+        set_acquisition_error(error, ErrorCode::CameraFault, AcquisitionStage::ArmCamera,
+                              view.camera_index, light_param.light_index, light_seq_index, oss.str());
         for (auto& ctrl : light_controllers_) ctrl->shutdown_all();
-        initialized_ = false;
-        cameras_.clear();
+        initialized_ = false; cameras_.clear();
         return false;
       }
 
-      // ⑤ 当前机位单相机采集（串行，不使用 std::async）
+      if (!light_controllers_[light_param.controller_index]->trigger_channel(
+              light_param, trigger.trigger_id, light_seq_index,
+              config_.light_timeout_ms, error != nullptr ? &error->message : nullptr)) {
+        const std::string detail = error != nullptr && !error->message.empty()
+                                       ? error->message : "light channel trigger failed";
+        set_acquisition_error(error, ErrorCode::LightFault, AcquisitionStage::TriggerLight,
+                              view.camera_index, light_param.light_index, light_seq_index, detail);
+        for (auto& ctrl : light_controllers_) ctrl->shutdown_all();
+        initialized_ = false; cameras_.clear();
+        return false;
+      }
+
       CapturedFrame frame;
       if (!camera.wait_frame(trigger.trigger_id,
-                             light_param,
-                             light_seq_index,
-                             &frame,
-                             config_.camera_timeout_ms)) {
+                             light_param, light_seq_index,
+                             &frame, config_.camera_timeout_ms)) {
         std::ostringstream oss;
         oss << "simulated camera frame timeout pose_id=" << view.pose_id
             << " camera_index=" << view.camera_index

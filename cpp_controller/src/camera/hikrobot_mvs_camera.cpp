@@ -342,37 +342,6 @@ bool HikrobotMvsCamera::arm(std::uint64_t trigger_id,
   return true;
 }
 
-bool HikrobotMvsCamera::simulate_exposure_output(std::uint64_t trigger_id,
-                                                 const LightChannelParam& light_param,
-                                                 std::uint32_t light_seq_index,
-                                                 int timeout_ms) {
-  if (!initialized_ || !grabbing_ || timeout_ms <= 0 || !armed_ ||
-      armed_trigger_id_ != trigger_id ||
-      armed_light_index_ != light_param.light_index ||
-      armed_light_seq_index_ != light_seq_index) {
-    set_error("Hikrobot MVS 前置状态非法");
-    return false;
-  }
-#ifndef SEAT_AOI_ENABLE_HIKROBOT_MVS
-  set_error("Hikrobot MVS SDK 未启用，无法触发真实相机");
-  return false;
-#else
-  // 硬件触发模式：相机等待 Line0 外部脉冲（由 FL-ACDH 同步输出提供），
-  // 无需发送 TriggerSoftware 命令，直接返回成功。
-  // 软件触发模式：发送 TriggerSoftware 命令触发相机采集。
-  if (!config_.trigger_line.empty()) {
-    return true;
-  }
-
-  const int ret = MV_CC_SetCommandValue(handle_, "TriggerSoftware");
-  if (ret != kMvsOk) {
-    set_error(mvs_error("TriggerSoftware", ret));
-    return false;
-  }
-  return true;
-#endif
-}
-
 bool HikrobotMvsCamera::wait_frame(std::uint64_t trigger_id,
                                    const LightChannelParam& light_param,
                                    std::uint32_t light_seq_index,

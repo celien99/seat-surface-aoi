@@ -64,58 +64,16 @@ class UnsupportedLightController final : public ILightController {
 public:
   explicit UnsupportedLightController(HardwareBackend backend) : backend_(backend) {}
 
-  bool initialize(const LightControllerConfig& /*config*/) override {
-    return false;
+  bool initialize(const LightControllerConfig& /*config*/) override { return false; }
+  bool prepare_sequence(const LightSequence& /*seq*/, std::uint64_t /*tid*/,
+                        int /*t*/, std::string* error_message) override {
+    set_error(error_message); return false;
   }
-
-  bool prepare_sequence(const LightSequence& /*sequence*/,
-                        std::uint64_t /*trigger_id*/,
-                        int /*timeout_ms*/,
-                        std::string* error_message) override {
-    set_error(error_message);
-    return false;
-  }
-
-  bool trigger_channel(const LightChannelParam& /*channel*/,
-                       std::uint64_t /*trigger_id*/,
-                       std::uint32_t /*light_seq_index*/,
-                       int /*timeout_ms*/,
+  bool trigger_channel(const LightChannelParam& /*ch*/, std::uint64_t /*tid*/,
+                       std::uint32_t /*si*/, int /*t*/,
                        std::string* error_message) override {
-    set_error(error_message);
-    return false;
+    set_error(error_message); return false;
   }
-
-  bool arm_hardware_trigger(const LightChannelParam& /*channel*/,
-                            std::uint64_t /*trigger_id*/,
-                            std::uint32_t /*light_seq_index*/,
-                            int /*timeout_ms*/,
-                            std::string* error_message) override {
-    set_error(error_message);
-    return false;
-  }
-
-  bool notify_hardware_triggered(const LightChannelParam& /*channel*/,
-                                 std::uint64_t /*trigger_id*/,
-                                 std::uint32_t /*light_seq_index*/,
-                                 int /*timeout_ms*/,
-                                 std::string* error_message) override {
-    set_error(error_message);
-    return false;
-  }
-
-  bool run_sequence(const LightSequence& /*sequence*/,
-                    std::uint64_t /*trigger_id*/,
-                    int /*timeout_ms*/,
-                    std::string* error_message = nullptr) override {
-    set_error(error_message);
-    return false;
-  }
-
-  bool set_channel(std::uint32_t /*light_index*/,
-                   const LightChannelParam& /*param*/) override {
-    return false;
-  }
-
   LightHealth get_health() const override {
     LightHealth health;
     health.ok = false;
@@ -151,13 +109,6 @@ public:
            const LightChannelParam& /*light_param*/,
            std::uint32_t /*light_seq_index*/,
            int /*timeout_ms*/) override {
-    return false;
-  }
-
-  bool simulate_exposure_output(std::uint64_t /*trigger_id*/,
-                                const LightChannelParam& /*light_param*/,
-                                std::uint32_t /*light_seq_index*/,
-                                int /*timeout_ms*/) override {
     return false;
   }
 

@@ -75,24 +75,6 @@ bool parse_light_order(const std::string& value,
   return true;
 }
 
-bool parse_trigger_sync_mode(const std::string& value,
-                             TriggerSyncMode* out_mode,
-                             std::string* error_message) {
-  if (value == "camera_exposure_output" || value == "hardware" ||
-      value == "hard_trigger") {
-    *out_mode = TriggerSyncMode::CameraExposureOutput;
-    return true;
-  }
-  if (value == "software") {
-    *out_mode = TriggerSyncMode::Software;
-    return true;
-  }
-  if (error_message != nullptr) {
-    *error_message = "trigger_sync_mode 只能是 camera_exposure_output 或 software: " + value;
-  }
-  return false;
-}
-
 bool parse_capture_mode_value(const std::string& value,
                               CaptureMode* out_mode,
                               std::string* error_message) {
@@ -947,10 +929,6 @@ bool load_station_runtime_config(const std::string& path,
       if (!parse_capture_mode_value(value, &config.capture_mode, error_message)) {
         return false;
       }
-    } else if (key == "trigger_sync_mode") {
-      if (!parse_trigger_sync_mode(value, &config.trigger_sync_mode, error_message)) {
-        return false;
-      }
     } else if (key == "reset_shared_memory") {
       if (!parse_bool_field(key, value, &config.reset_shared_memory, error_message)) {
         return false;
@@ -1223,13 +1201,6 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
       return false;
     }
     return true;
-  }
-
-  if (config.trigger_sync_mode != TriggerSyncMode::CameraExposureOutput) {
-    if (error_message != nullptr) {
-      *error_message = "生产模式必须使用 camera_exposure_output 或等价硬触发同步";
-    }
-    return false;
   }
 
   if (config.hardware_mode == HardwareMode::Lab) {

@@ -21,18 +21,10 @@ bool SimCamera::arm(std::uint64_t trigger_id,
   if (!running_) {
     return false;
   }
-  return device_.arm(trigger_id, light_param, light_seq_index, timeout_ms);
+  (void)light_param; (void)light_seq_index;
+  return device_.arm(trigger_id, timeout_ms);
 }
 
-bool SimCamera::simulate_exposure_output(std::uint64_t trigger_id,
-                                            const LightChannelParam& light_param,
-                                            std::uint32_t light_seq_index,
-                                            int timeout_ms) {
-  if (!running_) {
-    return false;
-  }
-  return device_.simulate_exposure_output(trigger_id, light_param, light_seq_index, timeout_ms);
-}
 
 bool SimCamera::wait_frame(std::uint64_t trigger_id,
                               const LightChannelParam& light_param,
@@ -42,7 +34,8 @@ bool SimCamera::wait_frame(std::uint64_t trigger_id,
   if (!running_) {
     return false;
   }
-  return device_.capture(trigger_id, light_param, light_seq_index, out_frame, timeout_ms);
+  (void)light_param; (void)light_seq_index;
+  return device_.capture(trigger_id, out_frame, timeout_ms);
 }
 
 CameraHealth SimCamera::get_health() const {

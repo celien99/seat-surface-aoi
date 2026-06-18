@@ -127,7 +127,6 @@ struct StationRuntimeConfig {
   std::string recipe_id = "seat_a_black_leather_v1";
   std::vector<std::uint32_t> light_order = {1, 2, 3, 4};
   CaptureMode capture_mode = CaptureMode::FixedCamera;
-  TriggerSyncMode trigger_sync_mode = TriggerSyncMode::CameraExposureOutput;
   std::string trace_root = "trace";
   std::vector<RuntimeCameraConfig> cameras = {
       RuntimeCameraConfig{0, "TOP_BACK", "", "calib/simulated_v1", 64, 48, 1, "Mono8", "", "", 8, false},

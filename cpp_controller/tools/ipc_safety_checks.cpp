@@ -495,7 +495,6 @@ bool test_explicit_camera_config_replaces_defaults() {
         << "recipe_id=seat_a_black_leather_production_v1\n"
         << "capture_mode=fixed_camera\n"
         << "light_order=1,2,3,4\n"
-        << "trigger_sync_mode=camera_exposure_output\n"
         << "trace_root=trace\n"
         << "signal.station_id=LAB_AOI_01\n"
         << "signal.default_sku=seat_a_black_leather\n"
