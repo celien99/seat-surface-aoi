@@ -10,12 +10,16 @@ Rectangle {
     property string systemStatus: "stopped"
     property int okCount: 0
     property int ngCount: 0
+    property int recheckCount: 0
+    property int errorCount: 0
     property real tactRate: 0.0
     property string lineStatus: "unknown"
     property bool lineConnected: false
     property bool lineBusy: false
     property string lastTriggerResult: ""
     property string triggerError: ""
+    property string operationMode: ""
+    property string statusMessage: ""
 
     height: 52
     color: Theme.bgSecondary
@@ -49,6 +53,25 @@ Rectangle {
             font.pixelSize: Theme.fontSizeSM
             font.bold: true
             Layout.rightMargin: Theme.spacingMD
+        }
+
+        Rectangle {
+            Layout.preferredWidth: modeText.implicitWidth + 24
+            Layout.preferredHeight: 28
+            radius: Theme.radiusSM
+            color: operationMode === "采样模式" ? Theme.statusWarningDim : Theme.bgTertiary
+            border {
+                width: 1
+                color: operationMode === "采样模式" ? Theme.statusWarning : Theme.borderDefault
+            }
+            Text {
+                id: modeText
+                anchors.centerIn: parent
+                text: operationMode || qsTr("等待数据")
+                color: operationMode === "采样模式" ? Theme.statusWarning : Theme.textSecondary
+                font.pixelSize: Theme.fontSizeXS
+                font.bold: true
+            }
         }
 
         // Separator
@@ -145,6 +168,26 @@ Rectangle {
             }
         }
 
+        Rectangle {
+            visible: statusMessage !== "" && triggerError === ""
+            Layout.preferredWidth: Math.min(statusText.implicitWidth + 20, 300)
+            Layout.preferredHeight: 28
+            radius: Theme.radiusSM
+            color: Theme.bgTertiary
+            border { width: 1; color: Theme.borderDefault }
+            clip: true
+            Text {
+                id: statusText
+                anchors.centerIn: parent
+                width: parent.width - 16
+                text: statusMessage
+                color: Theme.textSecondary
+                font.pixelSize: Theme.fontSizeXS
+                font.bold: true
+                elide: Text.ElideRight
+            }
+        }
+
         // OK count
         Text {
             text: qsTr("OK  ") + okCount
@@ -158,6 +201,22 @@ Rectangle {
         Text {
             text: qsTr("NG  ") + ngCount
             color: ngCount > 0 ? Theme.statusNG : Theme.textSecondary
+            font.pixelSize: Theme.fontSizeMD
+            font.bold: true
+            Layout.leftMargin: Theme.spacingSM
+        }
+
+        Text {
+            text: qsTr("复检  ") + recheckCount
+            color: recheckCount > 0 ? Theme.statusWarning : Theme.textSecondary
+            font.pixelSize: Theme.fontSizeMD
+            font.bold: true
+            Layout.leftMargin: Theme.spacingSM
+        }
+
+        Text {
+            text: qsTr("异常  ") + errorCount
+            color: errorCount > 0 ? Theme.statusNG : Theme.textSecondary
             font.pixelSize: Theme.fontSizeMD
             font.bold: true
             Layout.leftMargin: Theme.spacingSM

@@ -47,6 +47,18 @@ Rectangle {
                 Layout.fillWidth: true
             }
             InfoCard {
+                accentColor: Theme.statusWarning
+                cardLabel: qsTr("复检")
+                cardValue: String(statsScreen.viewModel ? statsScreen.viewModel.recheck : 0)
+                Layout.fillWidth: true
+            }
+            InfoCard {
+                accentColor: Theme.statusNG
+                cardLabel: qsTr("异常")
+                cardValue: String(statsScreen.viewModel ? statsScreen.viewModel.error : 0)
+                Layout.fillWidth: true
+            }
+            InfoCard {
                 accentColor: Theme.accent
                 cardLabel: qsTr("合格率")
                 cardValue: (statsScreen.viewModel ? statsScreen.viewModel.okRate.toFixed(1) : "0.0") + "%"

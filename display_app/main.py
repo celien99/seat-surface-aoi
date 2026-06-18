@@ -11,6 +11,7 @@ from PySide6.QtQml import QQmlApplicationEngine
 
 from display_app.infrastructure.image_provider import CameraImageProvider
 from display_app.services.display_bridge import DisplayBridge
+from display_app.services.operator_journal import OperatorJournal
 from display_app.viewmodels.main_viewmodel import MainViewModel
 
 
@@ -33,11 +34,13 @@ def main(argv: list[str] | None = None) -> int:
     app = QGuiApplication([sys.argv[0], *args.qt_args])
     image_provider = CameraImageProvider()
     bridge = DisplayBridge(args.trace_root, image_provider)
+    journal = OperatorJournal(args.trace_root)
     view_model = MainViewModel(
         bridge,
         line_id=args.line_id,
         grid_layout=args.grid_layout,
         ng_popup_seconds=args.ng_popup_seconds,
+        journal=journal,
     )
 
     engine = QQmlApplicationEngine()

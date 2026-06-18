@@ -43,10 +43,34 @@ class DisplayEvent:
     overlays: list[dict[str, Any]] = field(default_factory=list)
     timestamp_ms: int = 0
     raw: dict[str, Any] = field(default_factory=dict)
+    source: str = "python_detector"
+    asset_unavailable: bool = False
+    sample_collection: bool = False
 
     @property
     def event_key(self) -> tuple[int, int, int]:
         return self.sequence_id, self.trigger_id, self.timestamp_ms
+
+
+@dataclass(slots=True)
+class ControllerEvent:
+    timestamp_us: int
+    event: str
+    sequence_id: int
+    trigger_id: int
+    seat_id: str
+    sku: str
+    decision: str
+    error: str
+    error_code: int
+    station_state: str
+    alarm_level: str
+    message: str
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def event_key(self) -> tuple[int, int, int]:
+        return self.sequence_id, self.trigger_id, self.timestamp_us
 
 
 class DisplayBridge:
@@ -56,6 +80,8 @@ class DisplayBridge:
         self.trace_root = Path(trace_root)
         self.image_provider = image_provider
         self.latest_path = self.trace_root / "display_latest.json"
+        self.controller_events_path = self.trace_root / "cpp_controller_events.jsonl"
+        self._controller_offset = 0
 
     def read_latest(self) -> DisplayEvent | None:
         if not self.latest_path.exists():
@@ -94,6 +120,29 @@ class DisplayBridge:
 
         return sorted(set(camera_ids))
 
+    def read_controller_events(self, *, limit: int = 100) -> list[ControllerEvent]:
+        if not self.controller_events_path.exists():
+            return []
+        try:
+            with self.controller_events_path.open("r", encoding="utf-8") as handle:
+                handle.seek(self._controller_offset)
+                lines = handle.readlines()
+                self._controller_offset = handle.tell()
+        except OSError:
+            return []
+        events: list[ControllerEvent] = []
+        for line in lines[-limit:]:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                events.append(_controller_event_from_payload(payload))
+        return events
+
 
 def _event_from_payload(payload: dict[str, Any]) -> DisplayEvent:
     defects = [
@@ -128,7 +177,48 @@ def _event_from_payload(payload: dict[str, Any]) -> DisplayEvent:
         overlays=[item for item in payload.get("overlays", []) if isinstance(item, dict)],
         timestamp_ms=int(payload.get("timestamp_ms", 0) or 0),
         raw=payload,
+        source=str(payload.get("source", "python_detector") or "python_detector"),
+        asset_unavailable=_asset_unavailable(payload),
+        sample_collection=_sample_collection_enabled(payload),
     )
+
+
+def _controller_event_from_payload(payload: dict[str, Any]) -> ControllerEvent:
+    return ControllerEvent(
+        timestamp_us=int(payload.get("timestamp_us", 0) or 0),
+        event=str(payload.get("event", "")),
+        sequence_id=int(payload.get("sequence_id", 0) or 0),
+        trigger_id=int(payload.get("trigger_id", 0) or 0),
+        seat_id=str(payload.get("seat_id", "")),
+        sku=str(payload.get("sku", "")),
+        decision=str(payload.get("decision", "RECHECK") or "RECHECK"),
+        error=str(payload.get("error", "")),
+        error_code=int(payload.get("error_code", 0) or 0),
+        station_state=str(payload.get("station_state", "")),
+        alarm_level=str(payload.get("alarm_level", "")),
+        message=str(payload.get("message", "")),
+        raw=payload,
+    )
+
+
+def _asset_unavailable(payload: dict[str, Any]) -> bool:
+    error = payload.get("error", {})
+    if isinstance(error, dict):
+        if bool(error.get("asset_unavailable")):
+            return True
+        asset = error.get("asset", {})
+        if isinstance(asset, dict) and asset:
+            return True
+    return False
+
+
+def _sample_collection_enabled(payload: dict[str, Any]) -> bool:
+    if _asset_unavailable(payload):
+        return True
+    sample = payload.get("sample_collection", {})
+    if isinstance(sample, dict):
+        return bool(sample.get("enabled"))
+    return False
 
 
 def _asset_camera_id(asset: dict[str, Any]) -> str:

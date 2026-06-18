@@ -103,8 +103,10 @@ Rectangle {
                 visible: cameraStatus !== "ok"
                 Layout.alignment: Qt.AlignVCenter
                 height: 20
-                badgeText: cameraStatus === "ng" ? qsTr("NG") : qsTr("REJECT")
-                badgeStatus: cameraStatus === "ng" ? "ng" : "warning"
+                badgeText: cameraStatus === "ng" ? qsTr("NG")
+                           : cameraStatus === "error" ? qsTr("异常")
+                           : qsTr("复检")
+                badgeStatus: cameraStatus === "ng" || cameraStatus === "error" ? "ng" : "warning"
                 maxBadgeWidth: 82
             }
 
@@ -172,6 +174,7 @@ Rectangle {
 
     function statusColor(status, dim) {
         if (status === "ng") return dim ? Theme.statusNGDim : Theme.statusNG
+        if (status === "error") return dim ? Theme.statusNGDim : Theme.statusNG
         if (status === "warn") return dim ? Theme.statusWarningDim : Theme.statusWarning
         return hoverArea.containsMouse ? Theme.borderStrong : Theme.borderDefault
     }

@@ -6,7 +6,8 @@ from typing import Any
 
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
-from display_app.services.display_bridge import DisplayBridge, DisplayDefect, DisplayEvent
+from display_app.services.display_bridge import ControllerEvent, DisplayBridge, DisplayDefect, DisplayEvent
+from display_app.services.operator_journal import OperatorJournal
 
 
 @dataclass(slots=True)
@@ -46,6 +47,11 @@ class MainViewModel(QObject):
     statsChanged = Signal()
     distributionChanged = Signal()
     reviewsChanged = Signal()
+    recheckCountChanged = Signal()
+    errorCountChanged = Signal()
+    operationModeChanged = Signal()
+    statusMessageChanged = Signal()
+    stationAlarmChanged = Signal()
 
     def __init__(
         self,
@@ -54,9 +60,11 @@ class MainViewModel(QObject):
         line_id: str = "AOI-1",
         grid_layout: str = "2x2",
         ng_popup_seconds: int = 30,
+        journal: OperatorJournal | None = None,
     ) -> None:
         super().__init__()
         self._bridge = bridge
+        self._journal = journal
         self._line_id = line_id
         self._system_status = "paused"
         self._ok_count = 0
@@ -75,13 +83,31 @@ class MainViewModel(QObject):
         self._trigger_error = ""
         self._grid_layout = grid_layout
         self._trigger_enabled = False
+        self._operation_mode = "等待数据"
+        self._status_message = "等待检测结果"
+        self._station_alarm = ""
         self._camera_list: list[dict[str, Any]] = []
         self._camera_index: dict[str, dict[str, Any]] = {}
         self._last_event_key: tuple[int, int, int] | None = None
+        self._last_controller_event_key: tuple[int, int, int] | None = None
+        self._seen_controller_events: set[tuple[int, int, int]] = set()
         self._event_timestamps: list[float] = []
-        self._stats = DisplayStats()
-        self._logs: list[dict[str, Any]] = []
-        self._reviews: list[dict[str, Any]] = []
+        persisted_logs = journal.load_logs() if journal is not None else []
+        persisted_reviews = journal.load_reviews() if journal is not None else []
+        self._logs: list[dict[str, Any]] = list(reversed(persisted_logs[-500:]))
+        self._reviews: list[dict[str, Any]] = list(persisted_reviews)
+        self._stats = _stats_from_logs(self._logs)
+        for item in self._logs:
+            if item.get("source") == "cpp_controller":
+                try:
+                    key = (
+                        int(item.get("sequence_id", 0) or 0),
+                        int(item.get("trigger_id", 0) or 0),
+                        int(float(item.get("timestamp", 0.0) or 0.0) * 1_000_000),
+                    )
+                    self._seen_controller_events.add(key)
+                except (TypeError, ValueError):
+                    continue
         self._status_filter = ""
         self._camera_filter = ""
         self._ng_popup_seconds = max(1, int(ng_popup_seconds))
@@ -144,6 +170,15 @@ class MainViewModel(QObject):
     def _get_trigger_enabled(self) -> bool:
         return self._trigger_enabled
 
+    def _get_operation_mode(self) -> str:
+        return self._operation_mode
+
+    def _get_status_message(self) -> str:
+        return self._status_message
+
+    def _get_station_alarm(self) -> str:
+        return self._station_alarm
+
     def _get_grid_layout(self) -> str:
         return self._grid_layout
 
@@ -155,6 +190,12 @@ class MainViewModel(QObject):
 
     def _get_ng(self) -> int:
         return self._stats.ng
+
+    def _get_recheck(self) -> int:
+        return self._stats.recheck
+
+    def _get_error(self) -> int:
+        return self._stats.error
 
     def _get_ok_rate(self) -> float:
         return round(self._stats.ok / max(self._stats.total, 1) * 100.0, 2)
@@ -194,10 +235,15 @@ class MainViewModel(QObject):
     triggerError = Property(str, _get_trigger_error, notify=triggerErrorChanged)
     triggerErrorDisplay = Property(str, _get_trigger_error_display, notify=triggerErrorDisplayChanged)
     triggerEnabled = Property(bool, _get_trigger_enabled, notify=triggerEnabledChanged)
+    operationMode = Property(str, _get_operation_mode, notify=operationModeChanged)
+    statusMessage = Property(str, _get_status_message, notify=statusMessageChanged)
+    stationAlarm = Property(str, _get_station_alarm, notify=stationAlarmChanged)
     gridLayout = Property(str, _get_grid_layout, notify=gridLayoutChanged)
     total = Property(int, _get_total, notify=statsChanged)
     ok = Property(int, _get_ok, notify=statsChanged)
     ng = Property(int, _get_ng, notify=statsChanged)
+    recheck = Property(int, _get_recheck, notify=statsChanged)
+    error = Property(int, _get_error, notify=statsChanged)
     okRate = Property(float, _get_ok_rate, notify=statsChanged)
     defectDistribution = Property(dict, _get_defect_distribution, notify=distributionChanged)
     logs = Property(list, _get_logs, notify=logsChanged)
@@ -205,6 +251,7 @@ class MainViewModel(QObject):
 
     @Slot()
     def pollLatest(self) -> None:
+        self._poll_controller_events()
         event = self._bridge.read_latest()
         if event is None:
             self._set_runtime_state(
@@ -213,6 +260,7 @@ class MainViewModel(QObject):
                 line_connected=False,
                 trigger_error="等待检测结果 display_latest.json",
             )
+            self._set_status_message("等待 Python detector 展示事件")
             return
         if event.event_key == self._last_event_key:
             return
@@ -234,7 +282,10 @@ class MainViewModel(QObject):
         if self._logs:
             review = dict(self._logs[0])
             review["id"] = len(self._reviews) + 1
+            review["review_status"] = "pending"
             self._reviews.insert(0, review)
+            self._save_reviews()
+            self._persist_action("mark_review", review)
             self.reviewsChanged.emit()
         self._hide_ng_overlay("mark_review")
 
@@ -269,10 +320,16 @@ class MainViewModel(QObject):
 
     @Slot(int)
     def confirmAsDefect(self, record_id: int) -> None:
+        review = self._review_by_id(record_id)
+        if review is not None:
+            self._persist_action("review_confirm_defect", review)
         self._remove_review(record_id)
 
     @Slot(int)
     def dismissAsOK(self, record_id: int) -> None:
+        review = self._review_by_id(record_id)
+        if review is not None:
+            self._persist_action("review_dismiss_as_ok", review)
         self._remove_review(record_id)
 
     def _apply_event(self, event: DisplayEvent, image_camera_ids: list[str]) -> None:
@@ -291,7 +348,10 @@ class MainViewModel(QObject):
             if status == "NG" and camera_id == defect_camera_id:
                 entry["status"] = "ng"
                 entry["defectLabel"] = _defect_label(defect)
-            elif status in {"RECHECK", "ERROR"}:
+            elif status == "ERROR":
+                entry["status"] = "error"
+                entry["defectLabel"] = event.message or status
+            elif status == "RECHECK":
                 entry["status"] = "warn"
                 entry["defectLabel"] = event.message or status
             else:
@@ -300,10 +360,12 @@ class MainViewModel(QObject):
         self.cameraListChanged.emit()
 
         self._record_stats(status, defect)
-        self._append_log(event, status, defect)
+        self._append_detection_log(event, status, defect)
         self._update_tact_rate()
         self._last_trigger_result = status
         self.lastTriggerResultChanged.emit()
+        self._set_operation_mode(_operation_mode(event, status))
+        self._set_status_message(_event_status_message(event, status))
         self._set_runtime_state(
             system_status="running",
             line_status="online",
@@ -349,29 +411,77 @@ class MainViewModel(QObject):
         self._ng_count = self._stats.ng
         self.okCountChanged.emit()
         self.ngCountChanged.emit()
+        self.recheckCountChanged.emit()
+        self.errorCountChanged.emit()
         self.statsChanged.emit()
         self.distributionChanged.emit()
 
-    def _append_log(self, event: DisplayEvent, status: str, defect: DisplayDefect | None) -> None:
+    def _append_detection_log(self, event: DisplayEvent, status: str, defect: DisplayDefect | None) -> None:
         timestamp = (event.timestamp_ms / 1000.0) if event.timestamp_ms else time.time()
-        self._logs.insert(
-            0,
-            {
-                "id": len(self._logs) + 1,
-                "timestamp": timestamp,
-                "camera_id": _display_camera_id(defect) if defect else "",
-                "status": status,
-                "reason": event.message,
-                "defect_type": _defect_label(defect),
-                "confidence": float(defect.score if defect else 0.0),
-                "operator_action": "",
-                "sequence_id": event.sequence_id,
-                "trigger_id": event.trigger_id,
-                "seat_id": event.seat_id,
-            },
-        )
+        record = {
+            "id": self._next_log_id(),
+            "timestamp": timestamp,
+            "source": event.source,
+            "camera_id": _display_camera_id(defect) if defect else "",
+            "status": status,
+            "reason": _event_status_message(event, status),
+            "defect_type": _defect_label(defect),
+            "confidence": float(defect.score if defect else 0.0),
+            "operator_action": "",
+            "sequence_id": event.sequence_id,
+            "trigger_id": event.trigger_id,
+            "seat_id": event.seat_id,
+            "error_code": event.error_code,
+            "trace_dir": event.trace_dir,
+        }
+        self._logs.insert(0, record)
         self._logs = self._logs[:500]
+        if self._journal is not None:
+            self._journal.append_log(record)
         self.logsChanged.emit()
+
+    def _append_controller_log(self, event: ControllerEvent) -> None:
+        status = _normal_status(event.decision)
+        timestamp = event.timestamp_us / 1_000_000.0 if event.timestamp_us else time.time()
+        record = {
+            "id": self._next_log_id(),
+            "timestamp": timestamp,
+            "source": "cpp_controller",
+            "camera_id": "",
+            "status": status,
+            "reason": event.message or event.error or event.event,
+            "defect_type": event.error,
+            "confidence": 0.0,
+            "operator_action": "",
+            "sequence_id": event.sequence_id,
+            "trigger_id": event.trigger_id,
+            "seat_id": event.seat_id,
+            "error_code": event.error_code,
+            "station_state": event.station_state,
+            "alarm_level": event.alarm_level,
+        }
+        self._logs.insert(0, record)
+        self._logs = self._logs[:500]
+        if self._journal is not None:
+            self._journal.append_log(record)
+        self.logsChanged.emit()
+
+    def _poll_controller_events(self) -> None:
+        for event in self._bridge.read_controller_events():
+            if event.event_key == self._last_controller_event_key or event.event_key in self._seen_controller_events:
+                continue
+            self._last_controller_event_key = event.event_key
+            self._seen_controller_events.add(event.event_key)
+            if event.error_code != 0 or event.decision in {"RECHECK", "ERROR"}:
+                self._append_controller_log(event)
+                self._set_station_alarm(event.message or event.error)
+                self._set_status_message(event.message or event.error or event.event)
+                self._set_runtime_state(
+                    system_status="running" if event.station_state != "Fault" else "paused",
+                    line_status=event.station_state or "controller",
+                    line_connected=True,
+                    trigger_error=event.message if event.error_code != 0 else "",
+                )
 
     def _update_tact_rate(self) -> None:
         now = time.time()
@@ -400,6 +510,7 @@ class MainViewModel(QObject):
             return
         if self._logs:
             self._logs[0]["operator_action"] = action
+            self._persist_action(action, self._logs[0])
             self.logsChanged.emit()
         self._ng_visible = False
         self._remaining_seconds = 0
@@ -444,7 +555,52 @@ class MainViewModel(QObject):
 
     def _remove_review(self, record_id: int) -> None:
         self._reviews = [item for item in self._reviews if int(item.get("id", -1)) != int(record_id)]
+        self._save_reviews()
         self.reviewsChanged.emit()
+
+    def _review_by_id(self, record_id: int) -> dict[str, Any] | None:
+        for item in self._reviews:
+            if int(item.get("id", -1)) == int(record_id):
+                return item
+        return None
+
+    def _save_reviews(self) -> None:
+        if self._journal is not None:
+            self._journal.save_reviews(self._reviews)
+
+    def _persist_action(self, action: str, record: dict[str, Any]) -> None:
+        if self._journal is not None:
+            payload = dict(record)
+            payload["operator_action"] = action
+            payload["action_timestamp"] = time.time()
+            self._journal.append_action(payload)
+
+    def _next_log_id(self) -> int:
+        max_id = 0
+        for item in self._logs:
+            try:
+                max_id = max(max_id, int(item.get("id", 0)))
+            except (TypeError, ValueError):
+                continue
+        return max_id + 1
+
+    def _set_operation_mode(self, value: str) -> None:
+        if self._operation_mode == value:
+            return
+        self._operation_mode = value
+        self.operationModeChanged.emit()
+
+    def _set_status_message(self, value: str) -> None:
+        if self._status_message == value:
+            return
+        self._status_message = value
+        self.statusMessageChanged.emit()
+
+    def _set_station_alarm(self, value: str) -> None:
+        if self._station_alarm == value:
+            return
+        self._station_alarm = value
+        self.stationAlarmChanged.emit()
 
 
 def _normal_status(decision: str) -> str:
@@ -472,3 +628,44 @@ def _display_camera_id(defect: DisplayDefect | None) -> str:
     if defect.pose_id and defect.pose_id != defect.camera_id:
         return f"{defect.camera_id}/{defect.pose_id}"
     return defect.camera_id
+
+
+def _operation_mode(event: DisplayEvent, status: str) -> str:
+    if event.asset_unavailable or event.sample_collection:
+        return "采样模式"
+    if status in {"RECHECK", "ERROR"}:
+        return "复检/异常"
+    return "在线检测"
+
+
+def _event_status_message(event: DisplayEvent, status: str) -> str:
+    if event.asset_unavailable or event.sample_collection:
+        return event.message or "模型资产未就绪，当前任务保存为训练样本"
+    if event.message:
+        return event.message
+    if status == "RECHECK":
+        return "当前结果需要复检"
+    if status == "ERROR":
+        return "检测链路异常"
+    return ""
+
+
+def _stats_from_logs(logs: list[dict[str, Any]]) -> DisplayStats:
+    stats = DisplayStats()
+    for item in reversed(logs):
+        status = str(item.get("status", "")).upper()
+        if status not in {"OK", "NG", "RECHECK", "ERROR"}:
+            continue
+        stats.total += 1
+        if status == "OK":
+            stats.ok += 1
+        elif status == "NG":
+            stats.ng += 1
+            defect_type = str(item.get("defect_type", "") or "")
+            if defect_type:
+                stats.defect_types[defect_type] = stats.defect_types.get(defect_type, 0) + 1
+        elif status == "ERROR":
+            stats.error += 1
+        else:
+            stats.recheck += 1
+    return stats

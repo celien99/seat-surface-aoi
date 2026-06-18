@@ -69,7 +69,15 @@ Rectangle {
                             font.pixelSize: Theme.fontSizeXS
                         }
                         Text {
-                            text: modelData.timestamp ? new Date(modelData.timestamp * 1000).toLocaleString(Qt.locale()) : ""
+                            text: qsTr("原因: ") + (modelData.reason || "--")
+                            color: Theme.textSecondary
+                            font.pixelSize: Theme.fontSizeXS
+                            Layout.fillWidth: true
+                            elide: Text.ElideRight
+                        }
+                        Text {
+                            text: (modelData.source === "cpp_controller" ? qsTr("主控  ") : qsTr("检测  "))
+                                  + (modelData.timestamp ? new Date(modelData.timestamp * 1000).toLocaleString(Qt.locale()) : "")
                             color: Theme.textMuted
                             font.pixelSize: Theme.fontSizeXS
                         }

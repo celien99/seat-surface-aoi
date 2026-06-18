@@ -41,12 +41,16 @@ Rectangle {
             systemStatus: viewModel ? viewModel.systemStatus : "stopped"
             okCount: viewModel ? viewModel.okCount : 0
             ngCount: viewModel ? viewModel.ngCount : 0
+            recheckCount: viewModel ? viewModel.recheck : 0
+            errorCount: viewModel ? viewModel.error : 0
             tactRate: viewModel ? viewModel.tactRate : 0.0
             lineStatus: viewModel ? viewModel.lineStatus : "unknown"
             lineConnected: viewModel ? viewModel.lineConnected : false
             lineBusy: viewModel ? viewModel.lineBusy : false
             lastTriggerResult: viewModel ? viewModel.lastTriggerResult : ""
             triggerError: viewModel ? viewModel.triggerErrorDisplay : ""
+            operationMode: viewModel ? viewModel.operationMode : ""
+            statusMessage: viewModel ? viewModel.statusMessage : ""
         }
 
         Rectangle {
@@ -112,13 +116,6 @@ Rectangle {
                         onClicked: mainScreen.displayMode = "overlay"
                     }
 
-                    ActionButton {
-                        buttonText: qsTr("热力图")
-                        bgColor: mainScreen.displayMode === "heatmap" ? Theme.accent : Theme.bgTertiary
-                        implicitHeight: 30
-                        Layout.preferredWidth: 68
-                        onClicked: mainScreen.displayMode = "heatmap"
-                    }
                 }
 
                 ActionButton {

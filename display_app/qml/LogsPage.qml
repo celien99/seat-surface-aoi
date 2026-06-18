@@ -50,9 +50,10 @@ Rectangle {
                     anchors.leftMargin: Theme.spacingSM
                     anchors.rightMargin: Theme.spacingSM
                     Text { text: qsTr("时间"); color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS; Layout.fillWidth: true }
+                    Text { text: qsTr("来源"); color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS; Layout.preferredWidth: 110 }
                     Text { text: qsTr("Camera"); color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS; Layout.fillWidth: true }
                     Text { text: qsTr("状态"); color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS; Layout.preferredWidth: 90 }
-                    Text { text: qsTr("缺陷"); color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS; Layout.fillWidth: true }
+                    Text { text: qsTr("原因/缺陷"); color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS; Layout.fillWidth: true }
                     Text { text: qsTr("置信度"); color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS; Layout.preferredWidth: 90; horizontalAlignment: Text.AlignRight }
                     Text { text: qsTr("操作"); color: Theme.textSecondary; font.pixelSize: Theme.fontSizeXS; Layout.preferredWidth: 120; horizontalAlignment: Text.AlignRight }
                 }
@@ -77,6 +78,14 @@ Rectangle {
                         elide: Text.ElideRight
                     }
                     Text {
+                        text: modelData.source === "cpp_controller" ? qsTr("主控") : qsTr("检测")
+                        color: modelData.source === "cpp_controller" ? Theme.statusWarning : Theme.textSecondary
+                        font.pixelSize: Theme.fontSizeXS
+                        font.bold: modelData.source === "cpp_controller"
+                        Layout.preferredWidth: 110
+                        elide: Text.ElideRight
+                    }
+                    Text {
                         text: modelData.camera_id || "--"
                         color: Theme.textSecondary
                         font.pixelSize: Theme.fontSizeXS
@@ -85,7 +94,7 @@ Rectangle {
                     }
                     StatusBadge {
                         badgeText: modelData.status || "--"
-                        badgeStatus: modelData.status === "NG" ? "ng" : (modelData.status === "OK" ? "ok" : "warning")
+                        badgeStatus: modelData.status === "NG" || modelData.status === "ERROR" ? "ng" : (modelData.status === "OK" ? "ok" : "warning")
                         maxBadgeWidth: 90
                         Layout.preferredWidth: 90
                     }

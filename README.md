@@ -96,8 +96,9 @@ flowchart LR
 | 生产光源对齐 | 当前固定机位产线是 2 相机 + 3 光源，C++ `light_order=1,2,3` 与 Python 生产配方 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 已对齐；第 4 路 `HIGH_RIGHT` 仅作为后续扩展。 |
 | 保守判定 | 协议异常、CRC 错误、缺帧、超时、质量失败、shot/机器人位姿不一致、ROI 冲突、机器人 FAULT、候选融合溢出和模型异常返回 `RECHECK` 或 `ERROR`。 |
 | 无模型采样兜底 | 生产模型文件缺失、仍是占位文件或 ONNX/numpy 依赖未安装时，Python detector 返回 `RECHECK/CONFIGURATION_ERROR`，保存原始采集图和可用 ROI 图，不输出 `OK` 或 `NG`。 |
-| 前端展示页面 | `display_app/` 迁移 PySide6/QML 监控界面，轮询 `display_latest.json`，展示相机/视角图像、OK/NG 计数、日志、复核队列和 NG 弹窗。 |
-| 前端展示通道 | Python detector 成功写回共享内存后，额外输出 `display_latest.json` 和 `display_events.jsonl`，供 PySide6/QML 前端只读显示；展示桥优先显示 ROI 图，缺 ROI 时显示原始采集图。 |
+| 前端展示页面 | `display_app/` 迁移 PySide6/QML 监控界面，轮询 `display_latest.json` 与 C++ 主控事件，展示相机/视角图像、OK/NG/复检/异常计数、采样模式、日志、复核队列和 NG 弹窗。 |
+| 前端展示通道 | Python detector 成功写回共享内存后，额外输出 `display_latest.json` 和 `display_events.jsonl`；C++ 主控输出 `cpp_controller_events.jsonl`；展示桥优先显示 ROI 图，缺 ROI 时显示原始采集图。 |
+| 操作员追溯 | `display_app` 持久化 `display_operator_events.jsonl` 与 `display_review_queue.json`，记录主控告警、复核队列和操作员确认/忽略动作，便于训练标注闭环。 |
 | 数据闭环 | trace、按 `camera_id/pose_id` 隔离的 ROI 图、overlay、manifest、embedding、PCA/PatchCore/FAISS 资产训练、回放与 benchmark。 |
 
 ## 快速开始
@@ -193,7 +194,7 @@ seat-surface-aoi/
 | --- | --- | --- |
 | `cpp_controller/` | [C++ 主控 README](cpp_controller/README.md) | PLC/Robot/Camera/Light 抽象、Capture Plan、共享内存发布、故障注入。 |
 | `python_detector/` | [Python 检测算法层导览](python_detector/README.md) | 质量门禁、ROI、ECC、多光源特征、模型后端、融合、规则、trace。 |
-| `display_app/` | [PySide6/QML 展示前端](display_app/README.md) | 读取 `display_latest.json`、加载 PGM/PPM 图像、显示监控/统计/日志/复核页面。 |
+| `display_app/` | [PySide6/QML 展示前端](display_app/README.md) | 读取 `display_latest.json`、C++ 主控事件和 trace 图，显示监控/统计/日志/复核页面并持久化操作员动作。 |
 | `training_tools/` | [Python 运维文档](docs/python_detector_operations.md) | 离线样本、embedding、PCA、PatchCore/FAISS、回放、benchmark。 |
 | `tools/` | [验证矩阵](#验证矩阵) | 跨 C++/Python 的协议、模型资产、架构就绪度、部署预检和 IPC 联调校验。 |
 | `model/` | [模型产物目录说明](model/README.md) | 真实 ONNX、PCA、memory bank、FAISS 索引的部署约定。 |
@@ -283,18 +284,18 @@ python_detector.detector_main
 
 Python 侧只处理检测链路。任意输入不可信、配方不一致、输出越界或质量失败，都会进入保守结果，不用 `OK` 掩盖异常。生产模型文件缺失、仍是占位文件、ONNX/numpy 依赖未安装、PCA 或 PatchCore memory bank 未就绪时，当前任务返回 `RECHECK` 并带 `CONFIGURATION_ERROR`，同时写 trace 样本用于后续训练；这类资产未就绪状态不会被报成 `NG`。
 
-Python detector 默认启用前端展示通道。每次检测完成并成功写回共享内存结果后，会在 `trace_root` 下追加 `display_events.jsonl`，并原子更新 `display_latest.json`。事件字段包括 `sequence_id`、`trigger_id`、`seat_id`、`sku`、`recipe_id`、`decision`、`quality_pass`、`error_code`、`elapsed_ms`、缺陷列表、质量/错误消息、`trace_dir`、原始采集 PGM 图、ROI PGM 图路径和 overlay PPM 路径。该通道由本仓库 `display_app/` 的 PySide6/QML 展示前端只读消费，也可供外部 `online-detection-app` 对接；它不参与 C++/Python 在线共享内存协议。展示通道落盘失败只会打印告警，不改变 detector 已写回 C++ 的判定结果。C++ 侧采集失败或 detector timeout 等没有 Python 结果的场景，前端后续可继续读取 `trace_root/cpp_controller_events.jsonl` 补充主控事件。
+Python detector 默认启用前端展示通道。每次检测完成并成功写回共享内存结果后，会在 `trace_root` 下追加 `display_events.jsonl`，并原子更新 `display_latest.json`。事件字段包括 `sequence_id`、`trigger_id`、`seat_id`、`sku`、`recipe_id`、`decision`、`quality_pass`、`error_code`、`elapsed_ms`、缺陷列表、质量/错误消息、`sample_collection`、`trace_dir`、原始采集 PGM 图、ROI PGM 图路径和 overlay PPM 路径。该通道由本仓库 `display_app/` 的 PySide6/QML 展示前端只读消费，也可供外部 `online-detection-app` 对接；它不参与 C++/Python 在线共享内存协议。展示通道落盘失败只会打印告警，不改变 detector 已写回 C++ 的判定结果。C++ 侧采集失败或 detector timeout 等没有 Python 结果的场景，前端读取 `trace_root/cpp_controller_events.jsonl` 补充主控事件。
 
 ### PySide6/QML 展示前端
 
-`display_app/` 迁移了 `/Users/yyh/code/online-detection-app` 中已经开发好的监控展示资源，并收敛成当前项目内的只读操作页面。它复用相机网格、检测图/原图切换、NG 弹窗、统计、日志和复核交互，但不启动原项目的相机、PLC、触发服务、模型部署或 `seat_defect_core`。
+`display_app/` 迁移了 `/Users/yyh/code/online-detection-app` 中已经开发好的监控展示资源，并收敛成当前项目内的只读操作页面。它复用相机网格、检测图/原图切换、NG 弹窗、统计、日志和复核交互，但不启动原项目的相机、PLC、触发服务、模型部署或 `seat_defect_core`。前端会显示 OK、NG、复检和异常计数，模型资产未就绪时显示“采样模式”，并把主控告警、复核队列和操作员动作持久化到 `trace_root`。
 
 ```bash
 uv sync --extra display
 uv run seat-aoi-display --trace-root trace --line-id AOI-1
 ```
 
-展示前端读取 `trace/display_latest.json`，按事件中的图片路径更新 `image://camera/<camera_id>` 图像源。正常检测优先显示 ROI PGM 和 overlay PPM；模型资产未就绪或 ROI 未产出时，前端会显示 `raw_images/<camera_id>/<pose_id>/<light_id>.pgm` 中的原始采集图。若事件没有 trace 图像，页面仍会更新状态、计数和日志；图像区域等待下一次带图像的检测事件。
+展示前端读取 `trace/display_latest.json` 和 `trace/cpp_controller_events.jsonl`，按事件中的图片路径更新 `image://camera/<camera_id>` 图像源。正常检测优先显示 ROI PGM 和 overlay PPM；模型资产未就绪或 ROI 未产出时，前端会显示 `raw_images/<camera_id>/<pose_id>/<light_id>.pgm` 中的原始采集图。若事件没有 trace 图像，页面仍会更新状态、计数和日志；图像区域等待下一次带图像的检测事件。前端会额外写入 `display_operator_events.jsonl` 与 `display_review_queue.json`，用于操作员复核追溯和训练标注闭环。
 
 ### 共享内存协议
 
@@ -360,7 +361,7 @@ PLC 接入前的工控机联调使用 `cpp_controller/config/station_runtime.lab
 | --- | --- | --- |
 | Python 单元测试 | `uv run pytest` | 协议、配方、质量门禁、ROI、模型、融合、trace 和训练工具测试通过。 |
 | 前端展示通道测试 | `uv run pytest python_detector/tests/test_display_channel.py` | `display_latest.json`、`display_events.jsonl` 和 trace 图像/overlay 路径输出正确。 |
-| PySide6 展示桥接测试 | `uv run pytest display_app/tests/test_display_app_bridge.py` | PGM/PPM 解码、`display_latest.json` 解析和前端 ViewModel 状态更新正确。 |
+| PySide6 展示桥接测试 | `uv run pytest display_app/tests/test_display_app_bridge.py` | PGM/PPM 解码、`display_latest.json`、C++ 主控事件、采样模式和前端 ViewModel 持久化状态更新正确。 |
 | 协议布局校验 | `uv run python -m tools.validate_protocol` | C++/Python 结构体大小和协议常量一致。 |
 | 参考架构检查 | `uv run python -m tools.validate_architecture_readiness --scope reference` | 参考链路能力完整。 |
 | 生产阻塞检查 | `uv run python -m tools.validate_architecture_readiness --scope production` | 占位配置或模型未替换时返回阻塞项。 |

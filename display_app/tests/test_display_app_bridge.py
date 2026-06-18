@@ -6,6 +6,7 @@ from pathlib import Path
 from display_app.infrastructure.image_provider import CameraImageProvider
 from display_app.services.display_bridge import DisplayBridge
 from display_app.services.image_loader import load_netpbm_bgr
+from display_app.services.operator_journal import OperatorJournal
 from display_app.viewmodels.main_viewmodel import MainViewModel
 
 
@@ -90,6 +91,8 @@ def test_display_bridge_publishes_raw_image_when_roi_is_unavailable(tmp_path: Pa
             "quality_pass": True,
             "error_code": 13,
             "message": "模型资产未就绪，保存采集样本",
+            "error": {"asset_unavailable": True},
+            "sample_collection": {"enabled": True, "reason": "model_asset_unavailable"},
             "images": [
                 {
                     "kind": "raw_image",
@@ -108,6 +111,8 @@ def test_display_bridge_publishes_raw_image_when_roi_is_unavailable(tmp_path: Pa
 
     assert event is not None
     assert event.decision == "RECHECK"
+    assert event.asset_unavailable is True
+    assert event.sample_collection is True
     assert bridge.publish_images(event) == ["CAM_FRONT/POSE_A"]
     assert provider._frames["CAM_FRONT/POSE_A"][0, 0].tolist() == [9, 9, 9]
 
@@ -158,6 +163,101 @@ def test_main_view_model_updates_from_display_event(tmp_path: Path) -> None:
     assert view_model.logs[0]["defect_type"] == "scratch"
 
 
+def test_main_view_model_marks_model_unavailable_as_sampling_mode(tmp_path: Path) -> None:
+    raw_path = tmp_path / "raw.pgm"
+    raw_path.write_bytes(b"P5\n2 1\n255\n\x09\x0a")
+    _write_latest(
+        tmp_path,
+        {
+            "decision": "RECHECK",
+            "quality_pass": True,
+            "error_code": 13,
+            "message": "模型资产未就绪，保存采集样本",
+            "error": {"asset_unavailable": True},
+            "sample_collection": {"enabled": True},
+            "images": [{"camera_id": "CAM_FRONT", "pose_id": "CAM_FRONT", "path": str(raw_path)}],
+        },
+    )
+    view_model = MainViewModel(DisplayBridge(tmp_path, CameraImageProvider()), journal=OperatorJournal(tmp_path))
+
+    view_model.pollLatest()
+
+    assert view_model.operationMode == "采样模式"
+    assert view_model.recheck == 1
+    assert view_model.error == 0
+    assert "模型资产未就绪" in view_model.statusMessage
+    assert (tmp_path / "display_operator_events.jsonl").exists()
+
+
+def test_display_bridge_reads_cpp_controller_events(tmp_path: Path) -> None:
+    event_path = tmp_path / "cpp_controller_events.jsonl"
+    event_path.write_text(
+        json.dumps(
+            {
+                "timestamp_us": 1781758399933000,
+                "event": "inspection_recheck",
+                "sequence_id": 7,
+                "trigger_id": 1007,
+                "seat_id": "S7",
+                "sku": "seat_a_black_leather",
+                "decision": "RECHECK",
+                "error": "DetectorTimeout",
+                "error_code": 5,
+                "station_state": "Ready",
+                "alarm_level": "Warning",
+                "message": "detector result timeout",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    bridge = DisplayBridge(tmp_path, CameraImageProvider())
+
+    events = bridge.read_controller_events()
+
+    assert len(events) == 1
+    assert events[0].error == "DetectorTimeout"
+    assert events[0].message == "detector result timeout"
+    assert bridge.read_controller_events() == []
+
+
+def test_main_view_model_persists_review_actions(tmp_path: Path) -> None:
+    image_path = tmp_path / "roi.pgm"
+    image_path.write_bytes(b"P5\n2 1\n255\n\x01\x02")
+    _write_latest(
+        tmp_path,
+        {
+            "decision": "NG",
+            "defect_count": 1,
+            "defects": [
+                {
+                    "defect_id": "d1",
+                    "class_name": "scratch",
+                    "severity": "major",
+                    "camera_id": "CAM_FRONT",
+                    "pose_id": "CAM_FRONT",
+                    "roi_name": "seat",
+                    "score": 0.88,
+                    "decision": "NG",
+                }
+            ],
+            "images": [{"camera_id": "CAM_FRONT", "pose_id": "CAM_FRONT", "path": str(image_path)}],
+        },
+    )
+    view_model = MainViewModel(DisplayBridge(tmp_path, CameraImageProvider()), journal=OperatorJournal(tmp_path))
+
+    view_model.pollLatest()
+    view_model.markReview()
+    view_model.confirmAsDefect(1)
+
+    assert view_model.reviews == []
+    assert (tmp_path / "display_review_queue.json").exists()
+    journal_lines = (tmp_path / "display_operator_events.jsonl").read_text(encoding="utf-8").splitlines()
+    assert any("mark_review" in line for line in journal_lines)
+    assert any("review_confirm_defect" in line for line in journal_lines)
+
+
 def _write_latest(root: Path, overrides: dict) -> None:
     payload = {
         "schema": "seat_surface_aoi.display_event.v1",
@@ -177,6 +277,7 @@ def _write_latest(root: Path, overrides: dict) -> None:
         "quality_messages": [],
         "message": "",
         "error": {},
+        "sample_collection": {},
         "trace_dir": "",
         "images": [],
         "overlays": [],
