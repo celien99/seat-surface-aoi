@@ -34,10 +34,10 @@
 - 已在 C++ 配置和 Python 配方中支持固定机位和机器人飞拍两类采集方案。
 - 固定机位配置通过 `capture_mode=fixed_camera` 生成相机视角；机器人飞拍配置通过 `capture_mode=robot_flyshot` 显式声明 `pose.<N>`。
 - C++ 主控固定采用视角级串行 TDM：当前视角完成全部 `light_order` 后再切换下一视角，避免多视角并行频闪污染。
-- 默认主链路使用 `DIFFUSE`、`POLAR_DIFFUSE`、`HIGH_LEFT`、`HIGH_RIGHT`。
+- 参考算法配方和模拟运行配置使用 `DIFFUSE`、`POLAR_DIFFUSE`、`HIGH_LEFT`、`HIGH_RIGHT` 四个 V4 语义光源；当前固定机位工控机生产配置已经按双相机 + 三光源落地为 `light_order=1,2,3`，上线前必须补齐第 4 路 `HIGH_RIGHT` 采集，或把 Python 生产配方、模型输入通道和测试同步降为经过验证的 3 光源方案。
 - Python 配方通过 `v4_lights.semantic_to_light_id` 统一 V4 语义光源，默认映射为 `DOME -> DIFFUSE`、`DARKFIELD_L -> HIGH_LEFT`、`DARKFIELD_R -> HIGH_RIGHT`、`BRIGHTFIELD -> POLAR_DIFFUSE`。
 - Python 检测层把 `cameras` 视为检测视角配置，固定机位通常 `pose_id == camera_id`；机器人飞拍允许多个 `pose_id` 共享同一个末端相机 `camera_id=EYE_IN_HAND`。
-- C++ 模拟链路支持 `camera_exposure_output` 硬触发同步模式。
+- C++ 运行配置通过相机 `trigger_line`、`exposure_output_line` 和频闪 `trigger_input_line` 记录触发接线；当前 FL-ACDH 方案以控制器 F 口同步输出触发相机 Line0，Line1 ExposureStartActive 保留用于调试或后续 GPIO 同步方案。
 
 差距：
 
@@ -266,4 +266,4 @@ bash tools/run_simulated_ipc.sh
 uv run python -m tools.validate_deployment_preflight --strict-production
 ```
 
-严格模式会把正式 `production.conf` 和真实模型资产缺失作为阻塞；默认模式则用于当前环境交接，只要求本地可实现的参考链路、跨平台共享内存、部署包入口和手动联调路径无阻塞。
+严格模式会把正式 `production.conf` 缺失、固定机位光源/生产配方不一致和真实模型资产缺失作为阻塞；默认模式则用于当前环境交接，只要求本地可实现的参考链路、跨平台共享内存、部署包入口和手动联调路径无阻塞。

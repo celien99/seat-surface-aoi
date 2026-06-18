@@ -25,6 +25,7 @@ PLC / 相机 / 频闪 / 机器人
 | --- | --- |
 | `cpp_controller/` | C++ 主控、硬件抽象、采集编排、共享内存 IPC、健康报警和模拟驱动。 |
 | `python_detector/` | Python 检测算法、共享内存客户端、配方/标定、模型适配、trace 和单元测试。 |
+| `display_app/` | PySide6/QML 只读展示前端，消费 detector display 通道和 trace 图像，不参与设备控制或判定。 |
 | `training_tools/` | 离线训练支撑：trace 转样本、embedding、PCA/PatchCore/FAISS、YOLO 导出、评估、回放、benchmark。 |
 | `tools/` | 项目级工程校验和联调：协议校验、模型资产校验、架构就绪度检查、模拟 IPC 和 C++ soak 脚本。 |
 | `model/` | 真实模型、PCA、PatchCore memory bank 和 FAISS 索引占位目录。 |
@@ -37,7 +38,7 @@ main.cpp
   -> StationRuntimeConfig
   -> HardwareFactory
   -> StationController
-      -> PlcClient.wait_trigger()
+      -> ISignalClient.wait_trigger()
       -> FrameAssembler.capture_job()
           -> RobotClient.wait_pose_ready()
           -> LightController.prepare_sequence()
@@ -47,7 +48,7 @@ main.cpp
       -> FrameRingBuffer.publish()
       -> ResultRingBuffer.wait_result()
       -> validate detector result
-      -> PlcClient.send_decision()
+      -> ISignalClient.publish_result()
       -> ControllerEventLogger
 ```
 
@@ -57,7 +58,7 @@ main.cpp
 - `FrameAssembler`：固定机位/机器人飞拍 capture plan、逐视角逐光源采集和结构化采集错误。
 - `CameraWorker` / `CameraDevice`：相机初始化、arm、取帧、健康状态和模拟图像生成。
 - `LightController`：光源通道参数、硬触发 arm、触发确认和异常关闭。
-- `PlcClient`：触发输入、结果输出、ack 和 PLC 健康状态。
+- `ISignalClient`：触发输入、SN/seat 元数据、结果输出和外部信号健康状态；当前实现包括 simulated、manual_trigger、external_signal、tcp_signal 和 distance_trigger。
 - `RobotClient`：机器人 ready/fault、SHOT_ID、PHOTO_TRIGGER 和 TCP 位姿。
 - `FrameRingBuffer` / `ResultRingBuffer`：固定布局共享内存读写、状态机、CRC 和超时。
 

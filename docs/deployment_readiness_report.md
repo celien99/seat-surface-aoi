@@ -1,0 +1,249 @@
+# 工控机上线补齐报告
+
+> 目标工位：固定双机位 + 三光源频闪
+> 生成日期：2026-06-18
+
+---
+
+## 一、硬件清单
+
+| 设备 | 型号/规格 | 数量 | 标识/序列号 |
+|------|-----------|------|-------------|
+| 工业相机 | 海康 MV-CH120-20GC，4096×3072，Mono8 | 2 | DA9184656 / DA9184665 |
+| FA 镜头 | MVL-KF0814M-12MPE，8mm F1.4，1.1"，C 接口 | 2 | — |
+| 频闪控制器 | FL-ACDH-20048-4（4 通道，使用通道 1/2/3） | 1 | — |
+| 光源 | 3 组 | 3 | — |
+| 工控机 | Windows 10/11 x64 | 1 | — |
+| 网线 | 触发信号 TCP 直连 + 相机 GigE | 3+ | — |
+| RS232 转 USB | FL-ACDH 串口通信 | 1 | — |
+
+---
+
+## 二、硬件接线图
+
+```
+                        ┌───────────────────────────────┐
+                        │        工控机 (Windows)         │
+                        │                               │
+     触发端 ──网线──→   │  TCP :9000 (tcp_signal)       │
+                        │                               │
+                        │  USB-RS232 ──→ FL-ACDH 串口   │
+                        │       ↑                       │
+                        │    COM? (设备管理器确认)        │
+                        │                               │
+   DA9184656 ──网线──→  │  GigE 相机 0 (TOP_BACK)       │
+   DA9184665 ──网线──→  │  GigE 相机 1 (TOP_CUSHION)    │
+                        └───────────────────────────────┘
+
+            FL-ACDH-20048-4 面板接线
+            ═══════════════════════════
+            串口 (RS232)  ←── PC USB-RS232
+            F 口 (同步输出) ──┬── 相机A Line0 (并联)
+                              └── 相机B Line0 (并联)
+            通道 1  ──→ 光源 1 (主照明)
+            通道 2  ──→ 光源 2 (侧向补光)
+            通道 3  ──→ 光源 3 (低角度打光)
+            通道 4    （预留）
+```
+
+### 接线验证要点
+
+- [ ] 设备管理器 → "端口 (COM 和 LPT)" → 确认 USB-RS232 的 COM 号
+- [ ] 设备管理器 → "网络适配器" → 确认两个 GigE 相机网卡已配置（建议 MTU 9000 Jumbo Frame）
+- [ ] MVS 客户端 → 枚举设备 → 确认 `DA9184656` / `DA9184665` 在线
+- [ ] FL-ACDH 上电 → RS232 串口通信测试
+- [ ] 相机 Line0 收到 FL-ACDH F 口同步信号（示波器确认波形的上升沿触发）
+
+---
+
+## 三、配置自检矩阵
+
+### ✅ 已固化（不需修改，当前配置已体现）
+
+| 项目 | 文件 | 状态 |
+|------|------|------|
+| 相机序列号 | `station_runtime.production.conf` | ✅ `DA9184656` / `DA9184665` |
+| 相机分辨率 | C++ config + Python calibration | ✅ 4096×3072 |
+| 频闪后端 | `light.backend=serial_ascii` | ✅ FL-ACDH RS232 |
+| 相机后端 | `camera.backend=hikrobot_mvs` | ✅ MVS SDK |
+| 信号后端 | `signal.backend=tcp_signal` | ✅ TCP 监听模式 |
+| 共享内存 | `slot_count=4, frame_slot_size=128 MB` | ✅ 容量 OK |
+| 运行模式 | `hardware_mode=production` | ✅ |
+| 故障注入 | 全部 `false` | ✅ |
+
+### 🔴 阻塞项（工控机实测前必须确认）
+
+| # | 参数 | 文件 | 当前值 | 操作 |
+|---|------|------|--------|------|
+| 1 | COM 端口 | `station_runtime.production.conf:123` | `COM3` | 设备管理器确认实际 COM 号 |
+| 2 | 结果回传端 IP | `station_runtime.production.conf:74` | `192.168.1.100` | 填写触发/上位机结果接收端真实 IP |
+| 3 | **C++ / Python 光源数量不一致** | 见下方详述 | 3 vs 4 | 需要决策并修改 |
+
+### 🟡 功能项（可后补，不阻运行）
+
+| # | 项目 | 文件 | 说明 |
+|---|------|------|------|
+| 4 | 标定对齐矩阵 | `python_detector/config/calibration/` | 当前全单位阵，多光源配准无偏移 |
+| 5 | JSON 输出 | `json_output.enabled=false` | 当前关闭，无影响 |
+| 6 | 图像落盘 | `image_save.enabled=false` | 生产环境建议关闭（Python trace 已存图） |
+| 7 | 站位 ID | `signal.station_id=LINE1_AOI_01` | 可自定义 |
+
+---
+
+## 四、光源数量不一致（需立即处理）
+
+### 问题
+
+C++ 配置只定义了 3 个光源通道，但 Python 配方期望 4 个光源。
+
+| 层 | 文件 | 光源配置 |
+|----|------|----------|
+| C++ config | `station_runtime.production.conf` | `light_order=1,2,3`（3 个物理通道） |
+| C++→Python 映射 | `python_detector/ipc/shm_client.py` | `1→DIFFUSE, 2→POLAR_DIFFUSE, 3→HIGH_LEFT` |
+| Python recipe | `production_recipe.yaml` | `required_lights: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT, HIGH_RIGHT]`（4 个） |
+| Python camera | `production_recipe.yaml` | `light_order: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT, HIGH_RIGHT]`（4 个） |
+
+**结果**：C++ 只采集 `light_index=1,2,3` → Python QualityGate 报告 `missing required light HIGH_RIGHT` → 质量门禁失败 → **每次检测都是 RECHECK**。
+
+该项已同步进入根目录 README、`docs/v4_architecture_alignment.md`、`docs/cpp_controller_operations.md` 和 `docs/python_detector_operations.md`，作为固定机位生产上线前必须决策的配置/硬件对齐项。
+
+### 决策方案
+
+**方案 A：补齐第 4 路 HIGH_RIGHT 采集。**
+
+在 `cpp_controller/config/station_runtime.production.conf` 增加 `light.4.*`，把 `light_order` 改为 `1,2,3,4`，并确认 FL-ACDH 通道 4、光源安装角度、曝光、增益和频闪宽度满足算法证据要求。该方案保持 Python 生产配方、模型输入通道和 V4 语义光源定义不变。
+
+**方案 B：把固定机位生产配方降为经过验证的 3 光源方案。**
+
+如果现场暂不增加硬件，需要修改 `python_detector/config/production_recipe.yaml`，把 4 光源改为 3 光源：
+
+```yaml
+# 改前                                               # 改后
+quality:                                             quality:
+  required_lights:                                     required_lights:
+    - DIFFUSE                                            - DIFFUSE
+    - POLAR_DIFFUSE                                      - POLAR_DIFFUSE
+    - HIGH_LEFT                                          - HIGH_LEFT
+    - HIGH_RIGHT                            ← 删掉
+
+cameras:                                             cameras:
+  TOP_BACK:                                            TOP_BACK:
+    light_order:                                          light_order:
+      - DIFFUSE                                             - DIFFUSE
+      - POLAR_DIFFUSE                                       - POLAR_DIFFUSE
+      - HIGH_LEFT                                           - HIGH_LEFT
+      - HIGH_RIGHT                             ← 删掉
+
+  TOP_CUSHION:                                          TOP_CUSHION:
+    light_order:                                          light_order:
+      - DIFFUSE                                             - DIFFUSE
+      - POLAR_DIFFUSE                                       - POLAR_DIFFUSE
+      - HIGH_LEFT                                           - HIGH_LEFT
+      - HIGH_RIGHT                             ← 删掉
+```
+
+选择方案 B 时，必须同步修改模型 `input_channels`、多光源特征定义、训练/评估配置和相关测试，并用现场样本验证缺陷召回率；未验证前不能把 3 光源配置作为生产放行条件。
+
+---
+
+## 五、模型资产（当前全为占位文件）
+
+| 文件 | 当前大小 | 用途 | 替换来源 |
+|------|----------|------|----------|
+| `model/roi_yolo/seat_roi_yolo.onnx` | 1 字节 | Dome 光源 ROI 定位 | YOLO 训练导出 |
+| `model/supervised_defect/seat_defect_detector.onnx` | 1 字节 | 缺陷检测（scratch/dent） | YOLO 训练导出 |
+| `model/wideresnet50/seat_wrn50_embedding.onnx` | 1 字节 | 多光源 ROI 特征提取 | WideResNet50 训练导出 |
+| `model/patchcore/seat_pca.json` | 1 字节 | embedding 降维参数 | PCA 训练脚本 |
+| `model/patchcore/seat_patchcore_bank.json` | 1 字节 | PatchCore memory bank | `build_patchcore_memory_bank` |
+| `model/patchcore/seat_patchcore.faiss` | 1 字节 | FAISS 加速索引 | FAISS 索引构建 |
+
+**当前行为**：所有模型缺失时，Python pipeline 自动返回 `RECHECK`（`error_code=CONFIGURATION_ERROR`），trace 保存 `raw_images/` 原始采集图，display_app 正常展示原图。不会输出 `OK` 或 `NG`。
+
+---
+
+## 六、构建与环境要求
+
+### 工控机软件依赖
+
+| 依赖 | 说明 | 安装方式 |
+|------|------|----------|
+| Visual Studio 2019+ Build Tools | C++17 MSVC 编译器 | VS Installer |
+| CMake ≥ 3.16 | 构建系统 | cmake.org |
+| 海康 MVS SDK | 相机驱动 + 开发库 | 海康官网下载 |
+| Python 3.10+ | 检测进程 | python.org |
+| uv | Python 包管理器 | `pip install uv` |
+
+### C++ 构建（启用海康 MVS）
+
+```powershell
+cd cpp_controller
+cmake -B build -DCMAKE_BUILD_TYPE=Release `
+  -DSEAT_AOI_ENABLE_HIKROBOT_MVS=ON `
+  -DSEAT_AOI_HIKROBOT_MVS_INCLUDE_DIR="C:/Program Files (x86)/MVS/Development/Includes" `
+  -DSEAT_AOI_HIKROBOT_MVS_LIBRARY="C:/Program Files (x86)/MVS/Development/Libraries/win64/MvCameraControl.lib"
+cmake --build build --config Release
+```
+
+### Python 环境初始化
+
+```powershell
+uv sync
+```
+
+---
+
+## 七、工控机启动流程
+
+### 上线前最后检查
+
+```powershell
+# 1. 校验 C++ 生产配置（应全部通过，无 TODO）
+.\cpp_controller\build\Release\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.production.conf --validate-config
+
+# 2. 校验 Python 侧架构就绪度
+uv run python -m tools.validate_architecture_readiness --scope production
+
+# 3. 校验模型资产（当前应失败并列出占位文件 — 这是预期的）
+uv run python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1
+
+# 4. 校验部署预检
+uv run python -m tools.validate_deployment_preflight --strict-production
+```
+
+### 生产启动（三个终端）
+
+```powershell
+# ====== 终端 1：Python 检测进程 ======
+uv run python -m python_detector.detector_main --config cpp_controller/config/station_runtime.production.conf
+
+# ====== 终端 2：C++ 主控（持续循环模式）=======
+.\cpp_controller\build\Release\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.production.conf --loop
+
+# ====== 终端 3：展示前端 ======
+uv run seat-aoi-display --trace-root trace --line-id AOI-1 --grid-layout 2x1
+```
+
+### 实验室联调启动（无外部信号，手动触发）
+
+C++ 用 `lab_manual.conf` 替代 `production.conf`（已预置好序列号）：
+
+```powershell
+# 终端 2 改为：
+.\cpp_controller\build\Release\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.lab_manual.conf --once
+```
+
+每次运行处理一个手动触发，不需要外部信号。
+
+---
+
+## 八、待完成时间线
+
+| 阶段 | 内容 | 阻塞性 |
+|------|------|--------|
+| **现在（工控机组装）** | 按接线图连接硬件，确认 COM 口、相机在线 | 🔴 阻塞 |
+| **现在（配置修正）** | 填入真实 COM 口，解决光源 3/4 不一致 | 🔴 阻塞 |
+| **联调阶段** | `lab_manual.conf` 手动触发，验证相机采图、频闪、共享内存、Python 收图、display_app 展示 | 🔴 阻塞 |
+| **联调阶段** | 确认触发端 IP，填入 `result_host` | 🟡 可后补 |
+| **训练阶段** | 采集样本 → 标注 → 训练 → 替换 `model/` 占位文件 | 🟠 模型迭代 |
+| **量产阶段** | 补齐标定对齐矩阵，压测节拍稳定性 | 🟡 迭代 |
+| **量产阶段** | MES/报警/监控平台对接 | 🟡 扩展 |

@@ -132,19 +132,9 @@ def _check_fixed_camera_config(config: dict[str, str]) -> list[ReadinessItem]:
         return [
             _blocked(
                 "固定机位多光源",
-                "固定机位方案必须至少包含相机视角和 4 路标准光源。",
+                "固定机位参考方案必须至少包含相机视角和 4 路标准语义光源。",
                 f"camera_ids={camera_ids}, light_order={light_order}",
                 "补齐 camera.<N> 与 light_order=1,2,3,4。",
-            )
-        ]
-
-    if config.get("trigger_sync_mode") != "camera_exposure_output":
-        return [
-            _blocked(
-                "固定机位多光源",
-                "生产推荐链路应以相机 ExposureOut 触发频闪，避免软件触发抖动。",
-                f"trigger_sync_mode={config.get('trigger_sync_mode')}",
-                "改为 trigger_sync_mode=camera_exposure_output。",
             )
         ]
 
@@ -153,7 +143,7 @@ def _check_fixed_camera_config(config: dict[str, str]) -> list[ReadinessItem]:
             "固定机位多光源",
             "固定机位方案需按相机视角串行完成多光源采集。",
             f"{len(camera_ids)} 个固定视角; light_order={','.join(light_order)}; "
-            "trigger_sync_mode=camera_exposure_output",
+            "触发同步由 trigger_line/exposure_output_line 与频闪接线共同定义",
         )
     ]
 
@@ -212,6 +202,7 @@ def _check_robot_flyshot_config(config: dict[str, str]) -> list[ReadinessItem]:
 def _check_production_runtime_config(scope: ReadinessScope) -> list[ReadinessItem]:
     fixed_path = REPO_ROOT / "cpp_controller/config/station_runtime.production.example.conf"
     robot_path = REPO_ROOT / "cpp_controller/config/station_runtime.robot_flyshot.production.example.conf"
+    fixed_deployed_path = REPO_ROOT / "cpp_controller/config/station_runtime.production.conf"
     missing = [str(path.relative_to(REPO_ROOT)) for path in (fixed_path, robot_path) if not path.exists()]
     if missing:
         return [
@@ -227,31 +218,60 @@ def _check_production_runtime_config(scope: ReadinessScope) -> list[ReadinessIte
     for path in (fixed_path, robot_path):
         if "TODO" in path.read_text(encoding="utf-8"):
             todo_files.append(str(path.relative_to(REPO_ROOT)))
+    items: list[ReadinessItem] = []
     if todo_files and scope == "production":
-        return [
+        items.append(
             _blocked(
                 "生产运行配置",
                 "生产上线配置不能保留 TODO、空端口、模拟 backend 等占位值。",
                 f"仍有占位项: {todo_files}",
                 "按现场 PLC/相机/光源/机器人参数生成正式 production.conf 并运行 --validate-config。",
             )
-        ]
-    if todo_files:
-        return [
+        )
+    elif todo_files:
+        items.append(
             _warn(
                 "生产运行配置",
                 "参考实现提供生产模板，但上线前必须替换现场参数。",
                 f"模板仍含 TODO，占位文件: {todo_files}",
                 "进入现场联调后生成正式 production.conf。",
             )
-        ]
-    return [
-        _ok(
-            "生产运行配置",
-            "生产配置模板需覆盖固定机位和机器人飞拍两种方案。",
-            "固定机位与机器人飞拍生产模板均存在且未发现 TODO。",
         )
-    ]
+    else:
+        items.append(
+            _ok(
+                "生产运行配置",
+                "生产配置模板需覆盖固定机位和机器人飞拍两种方案。",
+                "固定机位与机器人飞拍生产模板均存在且未发现 TODO。",
+            )
+        )
+
+    if fixed_deployed_path.exists():
+        config = _read_key_value_config(fixed_deployed_path)
+        cxx_light_ids = _light_ids_from_order(_split_csv(config.get("light_order", "")))
+        recipe = load_recipe_file(REPO_ROOT / "python_detector/config/production_recipe.yaml")
+        required_lights = list(recipe.quality.required_lights)
+        missing_lights = _missing_required(required_lights, cxx_light_ids)
+        if missing_lights:
+            status = _blocked if scope == "production" else _warn
+            items.append(
+                status(
+                    "生产光源配方对齐",
+                    "固定机位 production.conf 的 light_order 必须覆盖 Python 生产配方 required_lights。",
+                    f"C++ light_order={config.get('light_order')} -> {cxx_light_ids}; "
+                    f"Python required_lights={required_lights}; missing={missing_lights}",
+                    "选择补齐第 4 路 HIGH_RIGHT 采集，或把 Python 生产配方降为已验证的 3 光源方案并同步测试。",
+                )
+            )
+        else:
+            items.append(
+                _ok(
+                    "生产光源配方对齐",
+                    "固定机位 C++ 采集光源与 Python 生产配方必需光源一致。",
+                    f"C++ lights={cxx_light_ids}; Python required_lights={required_lights}",
+                )
+            )
+    return items
 
 
 def _check_python_recipes() -> list[ReadinessItem]:
@@ -572,6 +592,23 @@ def _indexed_records(config: dict[str, str], prefix: str) -> dict[int, dict[str,
 
 def _split_csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _light_ids_from_order(light_order: list[str]) -> list[str]:
+    light_id_by_index = {
+        "1": "DIFFUSE",
+        "2": "POLAR_DIFFUSE",
+        "3": "HIGH_LEFT",
+        "4": "HIGH_RIGHT",
+        "5": "HIGH_FRONT",
+        "6": "HIGH_REAR",
+        "7": "LOW_LEFT",
+        "8": "LOW_RIGHT",
+        "9": "LOW_FRONT",
+        "10": "LOW_REAR",
+        "11": "NIR",
+    }
+    return [light_id_by_index.get(index, f"LIGHT_{index}") for index in light_order]
 
 
 def _missing_required(required: list[str], present: Any) -> list[str]:

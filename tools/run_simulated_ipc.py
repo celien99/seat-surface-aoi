@@ -43,7 +43,11 @@ def python_runner() -> list[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="运行跨平台端到端模拟 IPC")
-    parser.add_argument("--config", default="", help="C++ station runtime config 路径")
+    parser.add_argument(
+        "--config",
+        default=str(ROOT_DIR / "cpp_controller" / "config" / "station_runtime.example.conf"),
+        help="C++ station runtime config 路径",
+    )
     args = parser.parse_args()
 
     try:
@@ -61,19 +65,16 @@ def main() -> int:
     run([str(ipc_checks)])
     subprocess.run([str(controller), "--cleanup"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    controller_args = [str(controller), "--once", "--wait-ms", "8000"]
-    detector_args = ["-m", "python_detector.detector_main", "--once", "--timeout-ms", "8000"]
-    if args.config:
-        controller_args = [str(controller), "--config", args.config, "--once", "--wait-ms", "8000"]
-        detector_args = [
-            "-m",
-            "python_detector.detector_main",
-            "--config",
-            args.config,
-            "--once",
-            "--timeout-ms",
-            "8000",
-        ]
+    controller_args = [str(controller), "--config", args.config, "--once", "--wait-ms", "8000"]
+    detector_args = [
+        "-m",
+        "python_detector.detector_main",
+        "--config",
+        args.config,
+        "--once",
+        "--timeout-ms",
+        "8000",
+    ]
 
     cpp_process = subprocess.Popen(controller_args)
     time.sleep(0.2)

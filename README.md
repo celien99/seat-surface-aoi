@@ -29,7 +29,7 @@ Seat Surface AOI 是一套可验证、可扩展的汽车座椅表面缺陷检测
 
 | 层级 | 职责 | 当前实现 |
 | --- | --- | --- |
-| 实时主控 | PLC、相机、频闪、机器人 pose/shot、触发同步、节拍控制 | `cpp_controller/` C++17 主控、模拟硬件、Hikrobot MVS 相机 (Line0 硬触发)、FL-ACDH RS232 多控制器频闪、TCP 信号 (SN+结果回传)、距离传感器触发、图像落盘 PGM、JSON 结果输出、生产配置校验和故障注入 |
+| 实时主控 | PLC、相机、频闪、机器人 pose/shot、触发同步、节拍控制 | `cpp_controller/` C++17 主控、按 `light_index/light_seq_index` 生成元数据的模拟相机、Hikrobot MVS 相机 (Line0 硬触发)、FL-ACDH RS232 多控制器频闪、TCP 信号 (SN+结果回传)、距离传感器触发、图像落盘 PGM、JSON 结果输出、生产配置校验和故障注入 |
 | 检测进程 | 质量门禁、预处理、ROI、配准、多光源特征、模型推理、融合判定 | `python_detector/` 独立进程，默认 fake 后端，可接 ONNX/PatchCore/FAISS |
 | 在线通信 | 图像包与检测结果交换 | 跨平台共享内存 frame/result ring buffer，固定布局、CRC 和协议校验 |
 | 离线闭环 | trace 转样本、embedding、PCA、PatchCore/FAISS、回放、benchmark | `training_tools/` 只消费在线检测公开入口，不反向耦合 detector |
@@ -88,10 +88,12 @@ flowchart LR
 | 能力 | 状态 |
 | --- | --- |
 | 双采集模式 | 支持固定机位 `fixed_camera` 与机器人飞拍 `robot_flyshot`，二者在 C++ Capture Plan 层统一为检测视角序列。 |
+| 参考模拟链路 | C++ 内置 fallback、`station_runtime.example.conf` 与 `station_runtime.robot_flyshot.example.conf` 均使用 4 路模拟光源，对齐默认 Python 配方的 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT/HIGH_RIGHT`。 |
 | 同机位多角度输入 | 固定机位默认配置可接收同一 `camera_id` 下动态 `pose_id` 的多张照片，按同一机位配方、标定、模型处理并在 trace/result 中保留原始 `pose_id`；显式机器人飞拍 pose 仍必须精确匹配配方。 |
 | 视角级串行 TDM | 每个检测视角按 `light_order` 完成多光源采集后再切换下一视角，降低频闪互相污染风险。 |
 | 共享内存 IPC | C++/Python 双端固定布局结构体、frame/result ring buffer、slot 状态机、CRC、layout/对象大小 fail-fast 和协议校验工具。 |
 | V4 算法接口 | Dome ROI YOLO、ECC 配准、WideResNet50 embedding、PCA、PatchCore KNN 和 FAISS 可选加速接入点。 |
+| 生产光源对齐 | 当前固定机位生产配置是双相机 + 3 光源 `light_order=1,2,3`，而 Python 生产配方仍要求 `HIGH_RIGHT` 第 4 路语义光源；上线前必须补齐第 4 路采集或把生产配方降为已验证的 3 光源方案。 |
 | 保守判定 | 协议异常、CRC 错误、缺帧、超时、质量失败、shot/机器人位姿不一致、ROI 冲突、机器人 FAULT、候选融合溢出和模型异常返回 `RECHECK` 或 `ERROR`。 |
 | 无模型采样兜底 | 生产模型文件缺失、仍是占位文件或 ONNX/numpy 依赖未安装时，Python detector 返回 `RECHECK/CONFIGURATION_ERROR`，保存原始采集图和可用 ROI 图，不输出 `OK` 或 `NG`。 |
 | 前端展示页面 | `display_app/` 迁移 PySide6/QML 监控界面，轮询 `display_latest.json`，展示相机/视角图像、OK/NG 计数、日志、复核队列和 NG 弹窗。 |
@@ -127,7 +129,7 @@ Windows 工控机或希望使用跨平台入口时运行：
 uv run python tools/run_simulated_ipc.py
 ```
 
-模拟 IPC 会构建 C++ 主控，发布一次多视角多光源图像包，Python detector 从共享内存读取任务并写回结果。正常模拟链路应返回 `OK`；故障注入、协议错误或 detector 超时必须返回 `RECHECK` 或 `ERROR`。
+模拟 IPC 会构建 C++ 主控，默认使用 `cpp_controller/config/station_runtime.example.conf` 发布一次多视角四光源图像包，Python detector 从共享内存读取任务并写回结果。正常模拟链路应返回 `OK`；故障注入、协议错误或 detector 超时必须返回 `RECHECK` 或 `ERROR`。
 
 ## 常用入口
 
@@ -239,7 +241,7 @@ uv run python -m tools.validate_deployment_preflight
 uv run python -m tools.validate_deployment_preflight --strict-production
 ```
 
-默认预检用于交接，验证当前仓库可实现的参考链路、Windows 共享内存映射、跨平台 IPC 入口、部署包入口和 PLC 前手动联调路径；真实生产配置、真实模型资产和 MES/报警/监控协议会列为现场 ACTION。`--strict-production` 用于 Windows 工控机放行前，把正式 `production.conf` 和真实模型资产缺失升级为阻塞项。
+默认预检用于交接，验证当前仓库可实现的参考链路、Windows 共享内存映射、跨平台 IPC 入口、部署包入口和 PLC 前手动联调路径；真实生产配置、生产光源配方对齐、真实模型资产和 MES/报警/监控协议会列为现场 ACTION。`--strict-production` 用于 Windows 工控机放行前，把正式 `production.conf` 缺失、光源/配方不一致和真实模型资产缺失升级为阻塞项。
 
 ## 在线链路
 
@@ -250,17 +252,17 @@ main.cpp
   -> StationRuntimeConfig
   -> HardwareFactory
   -> StationController
-      -> PlcClient.wait_trigger()
+      -> ISignalClient.wait_trigger()
       -> FrameAssembler.capture_job()
       -> FrameRingBuffer.publish()
       -> ResultRingBuffer.wait_result()
       -> validate detector result
-      -> PlcClient.send_decision()
+      -> ISignalClient.publish_result()
 ```
 
 C++ 侧负责生产节拍和设备安全，不能实现深度学习推理。当前仓库已实现：模拟 backend、Hikrobot MVS 相机 backend（Line0 硬件触发）、FL-ACDH RS232 多控制器频闪 backend、TCP 信号 backend（SN 接收 + 结果回传）、距离传感器触发 backend（JK-LRD Modbus RTU）、图像落盘（PGM）、JSON 结果输出、生产配置 fail-fast 校验和故障注入路径；机器人真实 backend 仍需按现场协议或 SDK 接入。
 
-常驻生产闭环是：`seat_aoi_controller` 启动后持续等待 PLC/手动触发，按 Capture Plan 控制相机和频闪采集多光源图，写入共享内存 Frame Ring；Python detector 常驻读取 READY slot，完成检测或采样兜底后写 Result Ring；C++ 读取结果并输出给 PLC。`ERROR` 会被 C++ 映射为 PLC 侧 `RECHECK` 输出，避免产线误放行。
+常驻生产闭环是：`seat_aoi_controller` 启动后持续等待外部信号/手动触发，按 Capture Plan 控制相机和频闪采集多光源图，写入共享内存 Frame Ring；Python detector 常驻读取 READY slot，完成检测或采样兜底后写 Result Ring；C++ 读取结果并通过 `ISignalClient` 输出给 PLC/上位机。`ERROR` 会被 C++ 映射为外部信号侧 `RECHECK` 输出，避免产线误放行。
 
 ### Python 检测链路
 
@@ -325,7 +327,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 C++ 生产模板已把 `recipe_id` 对齐到上述生产配方；上线前还必须用现场标定替换 `python_detector/config/calibration/*/*production*.yaml` 和 `python_detector/config/roi/production_full_roi.yaml` 的模板 ROI/矩阵。
 
-当前固定机位硬件基线已记录到 `cpp_controller/config/station_runtime.production.example.conf`：海康 MV-CH120-20GC 工业相机，4096 x 3072，Hikrobot MVS backend；MVL-KF0814M-12MPE FA 镜头，8mm F1.4，1.1"，C 接口；FL-ACDH-20048-4 四通道频闪控制器（RS232 serial_ascii backend，支持多控制器扩展）；4 路光源按 `light_order=1,2,3,4` 串行 TDM 采集。
+当前固定机位硬件基线已记录到 `cpp_controller/config/station_runtime.production.example.conf` 和已生成的 `cpp_controller/config/station_runtime.production.conf`：海康 MV-CH120-20GC 工业相机，4096 x 3072，Hikrobot MVS backend；MVL-KF0814M-12MPE FA 镜头，8mm F1.4，1.1"，C 接口；FL-ACDH-20048-4 四通道频闪控制器（RS232 serial_ascii backend，支持多控制器扩展）；当前接入 3 组光源，按 `light_order=1,2,3` 串行 TDM 采集。Python 固定机位生产配方目前仍要求 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT/HIGH_RIGHT` 4 个必需光源，因此这属于上线前必须处理的配置/硬件对齐项。
 
 **已实现的真实硬件后端：**
 - **相机**：Hikrobot MVS（Line0 硬件触发 + Software 软件触发），`-DSEAT_AOI_ENABLE_HIKROBOT_MVS=ON` 构建
@@ -335,7 +337,7 @@ C++ 生产模板已把 `recipe_id` 对齐到上述生产配方；上线前还必
 
 测试阶段可先用手动/模拟触发验证相机、频闪、共享内存和 Python 收图链路。
 
-PLC 接入前的工控机联调使用 `cpp_controller/config/station_runtime.lab_manual.example.conf`：`hardware_mode=lab` 配合 `plc.backend=manual_trigger`，只生成手动触发任务并记录结果，不输出真实 PLC IO；`production` 模式仍禁止 `manual_trigger` 和 `simulated` backend。`tools/run_simulated_ipc.*` 与打包后的 `run_packaged_simulated_ipc.sh` 会把 `--config` 同步传给 Python detector，detector 会读取同一份 `slot_count/frame_slot_size/result_slot_size`，4096 x 3072 图像不需要现场再改 Python 共享内存参数。
+PLC 接入前的工控机联调使用 `cpp_controller/config/station_runtime.lab_manual.example.conf`：`hardware_mode=lab` 配合 `signal.backend=manual_trigger`，只生成手动触发任务并记录结果，不输出真实 PLC IO；`production` 模式仍禁止 `manual_trigger` 和 `simulated` backend。`tools/run_simulated_ipc.*` 与打包后的 `run_packaged_simulated_ipc.sh` 会把 `--config` 同步传给 Python detector，detector 会读取同一份 `slot_count/frame_slot_size/result_slot_size`，4096 x 3072 图像不需要现场再改 Python 共享内存参数。
 
 典型离线闭环：
 
@@ -363,7 +365,7 @@ PLC 接入前的工控机联调使用 `cpp_controller/config/station_runtime.lab
 | 参考架构检查 | `uv run python -m tools.validate_architecture_readiness --scope reference` | 参考链路能力完整。 |
 | 生产阻塞检查 | `uv run python -m tools.validate_architecture_readiness --scope production` | 占位配置或模型未替换时返回阻塞项。 |
 | 部署上机预检 | `uv run python -m tools.validate_deployment_preflight` | 当前环境可实现项无阻塞，并列出现场硬件、模型和平台 ACTION。 |
-| 严格生产预检 | `uv run python -m tools.validate_deployment_preflight --strict-production` | 正式生产配置或真实模型资产缺失时返回阻塞项。 |
+| 严格生产预检 | `uv run python -m tools.validate_deployment_preflight --strict-production` | 正式生产配置、生产光源配方对齐或真实模型资产缺失时返回阻塞项。 |
 | 模型资产检查 | `uv run python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1` | 真实模型缺失时失败并列出待替换资产。 |
 | 无模型采样兜底 | `uv run pytest python_detector/tests/test_trace_and_tools.py::test_pipeline_model_error_context_is_traceable python_detector/tests/test_trace_and_tools.py::test_pipeline_roi_model_asset_unavailable_saves_raw_images display_app/tests/test_display_app_bridge.py::test_display_bridge_publishes_raw_image_when_roi_is_unavailable` | 模型/ROI 模型资产缺失时返回 `RECHECK`，trace 保存原始图，前端能显示 raw 图。 |
 | 端到端模拟 IPC | `bash tools/run_simulated_ipc.sh` 或 `uv run python tools/run_simulated_ipc.py` | C++ 和 Python 通过共享内存完成一次检测闭环；Windows 使用 Python 跨平台入口。 |

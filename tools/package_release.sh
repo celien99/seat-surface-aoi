@@ -107,8 +107,10 @@ build_cpp_with_clang() {
     "${ROOT_DIR}/cpp_controller/src/ipc/frame_ring_buffer.cpp"
     "${ROOT_DIR}/cpp_controller/src/ipc/result_ring_buffer.cpp"
     "${ROOT_DIR}/cpp_controller/src/control/hardware_backend.cpp"
+    "${ROOT_DIR}/cpp_controller/src/control/fl_acdh_light_controller.cpp"
     "${ROOT_DIR}/cpp_controller/src/control/light_controller.cpp"
-    "${ROOT_DIR}/cpp_controller/src/control/plc_client.cpp"
+    "${ROOT_DIR}/cpp_controller/src/control/signal_client.cpp"
+    "${ROOT_DIR}/cpp_controller/src/control/tcp_signal_client.cpp"
     "${ROOT_DIR}/cpp_controller/src/control/robot_client.cpp"
     "${ROOT_DIR}/cpp_controller/src/control/production_event_log.cpp"
     "${ROOT_DIR}/cpp_controller/src/control/station_health.cpp"
@@ -119,6 +121,9 @@ build_cpp_with_clang() {
     "${ROOT_DIR}/cpp_controller/src/control/trigger_scheduler.cpp"
     "${ROOT_DIR}/cpp_controller/src/control/frame_assembler.cpp"
     "${ROOT_DIR}/cpp_controller/src/control/station_controller.cpp"
+    "${ROOT_DIR}/cpp_controller/src/control/image_writer.cpp"
+    "${ROOT_DIR}/cpp_controller/src/control/distance_sensor.cpp"
+    "${ROOT_DIR}/cpp_controller/src/control/distance_trigger_signal_client.cpp"
   )
   clang++ "${include_args[@]}" "${ROOT_DIR}/cpp_controller/src/main.cpp" "${common_sources[@]}" \
     -o "${BUILD_DIR}/seat_aoi_controller"
@@ -225,7 +230,7 @@ PYTHONPATH=. uv run python -m tools.validate_deployment_preflight
 PYTHONPATH=. uv run python -m tools.validate_deployment_preflight --strict-production
 ```
 
-默认预检用于交接，会把真实模型、正式 production.conf 和 MES/监控接口列为现场 ACTION；`--strict-production` 用于上机放行前，会把真实模型和正式生产配置缺失作为阻塞项。
+默认预检用于交接，会把真实模型、正式 production.conf、生产光源/配方对齐和 MES/监控接口列为现场 ACTION；`--strict-production` 用于上机放行前，会把真实模型、正式生产配置缺失和光源/配方不一致作为阻塞项。
 
 ## 生产模型
 

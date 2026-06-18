@@ -20,6 +20,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ -z "${CONFIG_PATH}" ]]; then
+  CONFIG_PATH="${ROOT_DIR}/cpp_controller/config/station_runtime.example.conf"
+fi
+
 mkdir -p "${BUILD_DIR}"
 if command -v uv >/dev/null 2>&1; then
   PYTHON_RUNNER=(uv run python)
@@ -37,8 +41,11 @@ elif command -v clang++ >/dev/null 2>&1; then
     "${ROOT_DIR}/cpp_controller/src/ipc/shared_memory_posix.cpp" \
     "${ROOT_DIR}/cpp_controller/src/ipc/frame_ring_buffer.cpp" \
     "${ROOT_DIR}/cpp_controller/src/ipc/result_ring_buffer.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/control/hardware_backend.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/control/fl_acdh_light_controller.cpp" \
     "${ROOT_DIR}/cpp_controller/src/control/light_controller.cpp" \
-    "${ROOT_DIR}/cpp_controller/src/control/plc_client.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/control/signal_client.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/control/tcp_signal_client.cpp" \
     "${ROOT_DIR}/cpp_controller/src/control/robot_client.cpp" \
     "${ROOT_DIR}/cpp_controller/src/control/production_event_log.cpp" \
     "${ROOT_DIR}/cpp_controller/src/control/station_health.cpp" \
@@ -49,26 +56,35 @@ elif command -v clang++ >/dev/null 2>&1; then
     "${ROOT_DIR}/cpp_controller/src/control/trigger_scheduler.cpp" \
     "${ROOT_DIR}/cpp_controller/src/control/frame_assembler.cpp" \
     "${ROOT_DIR}/cpp_controller/src/control/station_controller.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/control/image_writer.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/control/distance_sensor.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/control/distance_trigger_signal_client.cpp" \
     -o "${CONTROLLER}"
-	  clang++ -std=c++17 -I "${ROOT_DIR}/cpp_controller/include" \
-	    "${ROOT_DIR}/cpp_controller/tools/ipc_safety_checks.cpp" \
-	    "${ROOT_DIR}/cpp_controller/src/ipc/crc32.cpp" \
-	    "${ROOT_DIR}/cpp_controller/src/ipc/shared_memory_posix.cpp" \
-	    "${ROOT_DIR}/cpp_controller/src/ipc/frame_ring_buffer.cpp" \
-	    "${ROOT_DIR}/cpp_controller/src/ipc/result_ring_buffer.cpp" \
-	    "${ROOT_DIR}/cpp_controller/src/control/light_controller.cpp" \
-	    "${ROOT_DIR}/cpp_controller/src/control/plc_client.cpp" \
-	    "${ROOT_DIR}/cpp_controller/src/control/robot_client.cpp" \
-	    "${ROOT_DIR}/cpp_controller/src/control/production_event_log.cpp" \
-	    "${ROOT_DIR}/cpp_controller/src/control/station_health.cpp" \
-	    "${ROOT_DIR}/cpp_controller/src/control/station_runtime_config.cpp" \
-	    "${ROOT_DIR}/cpp_controller/src/camera/camera_device.cpp" \
-	    "${ROOT_DIR}/cpp_controller/src/camera/hikrobot_mvs_camera.cpp" \
-	    "${ROOT_DIR}/cpp_controller/src/camera/camera_worker.cpp" \
-	    "${ROOT_DIR}/cpp_controller/src/control/trigger_scheduler.cpp" \
-	    "${ROOT_DIR}/cpp_controller/src/control/frame_assembler.cpp" \
-	    "${ROOT_DIR}/cpp_controller/src/control/station_controller.cpp" \
-	    -o "${IPC_CHECKS}"
+  clang++ -std=c++17 -I "${ROOT_DIR}/cpp_controller/include" \
+    "${ROOT_DIR}/cpp_controller/tools/ipc_safety_checks.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/ipc/crc32.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/ipc/shared_memory_posix.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/ipc/frame_ring_buffer.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/ipc/result_ring_buffer.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/control/hardware_backend.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/control/fl_acdh_light_controller.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/control/light_controller.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/control/signal_client.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/control/tcp_signal_client.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/control/robot_client.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/control/production_event_log.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/control/station_health.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/control/station_runtime_config.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/camera/camera_device.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/camera/hikrobot_mvs_camera.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/camera/camera_worker.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/control/trigger_scheduler.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/control/frame_assembler.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/control/station_controller.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/control/image_writer.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/control/distance_sensor.cpp" \
+    "${ROOT_DIR}/cpp_controller/src/control/distance_trigger_signal_client.cpp" \
+    -o "${IPC_CHECKS}"
 else
   echo "缺少 cmake 或 clang++，无法构建 C++ 主控。" >&2
   exit 2
@@ -76,12 +92,8 @@ fi
 
 "${IPC_CHECKS}"
 "${CONTROLLER}" --cleanup >/dev/null 2>&1 || true
-CONTROLLER_ARGS=(--once --wait-ms 8000)
-DETECTOR_ARGS=(--once --timeout-ms 8000)
-if [[ -n "${CONFIG_PATH}" ]]; then
-  CONTROLLER_ARGS=(--config "${CONFIG_PATH}" "${CONTROLLER_ARGS[@]}")
-  DETECTOR_ARGS=(--config "${CONFIG_PATH}" "${DETECTOR_ARGS[@]}")
-fi
+CONTROLLER_ARGS=(--config "${CONFIG_PATH}" --once --wait-ms 8000)
+DETECTOR_ARGS=(--config "${CONFIG_PATH}" --once --timeout-ms 8000)
 "${CONTROLLER}" "${CONTROLLER_ARGS[@]}" &
 CPP_PID=$!
 sleep 0.2

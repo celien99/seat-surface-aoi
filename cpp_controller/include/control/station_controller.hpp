@@ -34,7 +34,7 @@ struct StationConfig {
   int max_jobs = 0;
   std::string recipe_id = "seat_a_black_leather_v1";
   std::string trace_root = "trace";
-  std::vector<std::uint32_t> light_order = {1, 2, 3};
+  std::vector<std::uint32_t> light_order = {1, 2, 3, 4};
   CaptureMode capture_mode = CaptureMode::FixedCamera;
   std::vector<RuntimeCameraConfig> cameras = {
       RuntimeCameraConfig{0, "TOP_BACK", "", "calib/simulated_v1", 64, 48, 1, "Mono8", "", "", 8, false},
@@ -45,6 +45,7 @@ struct StationConfig {
       RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F},
       RuntimeLightChannelConfig{0, 2, 2, 800, 800, 0, 1.0F, 60.0F},
       RuntimeLightChannelConfig{0, 3, 3, 800, 800, 0, 1.0F, 55.0F},
+      RuntimeLightChannelConfig{0, 4, 4, 800, 800, 0, 1.0F, 55.0F},
   };
   std::vector<RuntimeCaptureViewConfig> capture_views;
   RuntimeSignalConfig signal;

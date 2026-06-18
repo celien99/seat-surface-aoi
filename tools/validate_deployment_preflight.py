@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from python_detector.config.recipe_schema import load_recipe_file
 from tools.validate_architecture_readiness import readiness_to_dict, validate_architecture_readiness
 from tools.validate_model_assets import load_recipe_by_id_or_path, validate_recipe_model_assets
 
@@ -35,7 +36,7 @@ def validate_deployment_preflight(*, strict_production: bool = False) -> list[Pr
 
     默认模式只把当前仓库可补齐、可验证的工程缺口作为 BLOCKED；真实硬件参数、
     真实模型资产和现场平台协议以 ACTION 输出。strict_production 用于上机放行前
-    的最后门禁，会把正式生产配置和真实模型资产缺失升级为 BLOCKED。
+    的最后门禁，会把正式生产配置缺失、生产光源/配方不一致和真实模型资产缺失升级为 BLOCKED。
     """
 
     items: list[PreflightItem] = []
@@ -45,6 +46,7 @@ def validate_deployment_preflight(*, strict_production: bool = False) -> list[Pr
     items.extend(_check_package_handoff_entry())
     items.extend(_check_lab_manual_entry())
     items.extend(_check_production_runtime_configs(strict_production))
+    items.extend(_check_production_light_alignment(strict_production))
     items.extend(_check_production_model_assets(strict_production))
     items.append(
         PreflightItem(
@@ -222,13 +224,13 @@ def _check_package_handoff_entry() -> list[PreflightItem]:
 def _check_lab_manual_entry() -> list[PreflightItem]:
     path = REPO_ROOT / "cpp_controller/config/station_runtime.lab_manual.example.conf"
     config = _read_key_value_config(path)
-    if config.get("hardware_mode") != "lab" or config.get("plc.backend") != "manual_trigger":
+    if config.get("hardware_mode") != "lab" or config.get("signal.backend") != "manual_trigger":
         return [
             PreflightItem(
                 status="BLOCKED",
                 category="PLC 前手动联调路径",
                 requirement="PLC 接入前需要 lab/manual_trigger 配置验证真实相机、频闪和共享内存收图。",
-                evidence=f"hardware_mode={config.get('hardware_mode')}, plc.backend={config.get('plc.backend')}",
+                evidence=f"hardware_mode={config.get('hardware_mode')}, signal.backend={config.get('signal.backend')}",
                 owner="本仓库工程实现",
                 next_step="修复 station_runtime.lab_manual.example.conf。",
                 local_actionable=True,
@@ -239,7 +241,7 @@ def _check_lab_manual_entry() -> list[PreflightItem]:
             status="OK",
             category="PLC 前手动联调路径",
             requirement="PLC 未接入时可以先用手动触发联调真实相机、频闪和 Python 收图。",
-            evidence="station_runtime.lab_manual.example.conf 使用 hardware_mode=lab 与 plc.backend=manual_trigger。",
+            evidence="station_runtime.lab_manual.example.conf 使用 hardware_mode=lab 与 signal.backend=manual_trigger。",
             owner="本仓库工程实现",
             next_step="上机后复制为 station_runtime.lab_manual.conf，替换相机序列号和频闪接线参数。",
         )
@@ -278,6 +280,44 @@ def _check_production_runtime_configs(strict_production: bool) -> list[Preflight
             evidence=f"configs={[str(path.relative_to(REPO_ROOT)) for path in expected]}",
             owner="硬件/电气/现场集成",
             next_step="继续用 C++ --validate-config 和现场硬件低速节拍验证配置。",
+        )
+    ]
+
+
+def _check_production_light_alignment(strict_production: bool) -> list[PreflightItem]:
+    config_path = REPO_ROOT / "cpp_controller/config/station_runtime.production.conf"
+    if not config_path.exists():
+        return []
+
+    config = _read_key_value_config(config_path)
+    cxx_lights = _light_ids_from_order(_split_csv(config.get("light_order", "")))
+    recipe = load_recipe_file(REPO_ROOT / "python_detector/config/production_recipe.yaml")
+    required_lights = list(recipe.quality.required_lights)
+    missing = [light_id for light_id in required_lights if light_id not in set(cxx_lights)]
+    if not missing:
+        return [
+            PreflightItem(
+                status="OK",
+                category="生产光源配方对齐",
+                requirement="固定机位 C++ 生产采集光源必须覆盖 Python 生产配方必需光源。",
+                evidence=f"C++ lights={cxx_lights}; Python required_lights={required_lights}",
+                owner="硬件/算法/现场集成",
+                next_step="继续用 --validate-config、质量门禁和模拟 IPC 验证光源顺序。",
+            )
+        ]
+
+    status: PreflightStatus = "BLOCKED" if strict_production else "ACTION"
+    return [
+        PreflightItem(
+            status=status,
+            category="生产光源配方对齐",
+            requirement="固定机位 C++ 生产采集光源必须覆盖 Python 生产配方必需光源。",
+            evidence=(
+                f"C++ light_order={config.get('light_order')} -> {cxx_lights}; "
+                f"Python required_lights={required_lights}; missing={missing}"
+            ),
+            owner="硬件/算法/现场集成",
+            next_step="补齐第 4 路 HIGH_RIGHT 采集，或把 Python 生产配方、模型输入通道和测试降为已验证的 3 光源方案。",
         )
     ]
 
@@ -332,6 +372,27 @@ def _read_key_value_config(path: Path) -> dict[str, str]:
     return result
 
 
+def _split_csv(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _light_ids_from_order(light_order: list[str]) -> list[str]:
+    light_id_by_index = {
+        "1": "DIFFUSE",
+        "2": "POLAR_DIFFUSE",
+        "3": "HIGH_LEFT",
+        "4": "HIGH_RIGHT",
+        "5": "HIGH_FRONT",
+        "6": "HIGH_REAR",
+        "7": "LOW_LEFT",
+        "8": "LOW_RIGHT",
+        "9": "LOW_FRONT",
+        "10": "LOW_REAR",
+        "11": "NIR",
+    }
+    return [light_id_by_index.get(index, f"LIGHT_{index}") for index in light_order]
+
+
 def _count_placeholder_tokens(path: Path) -> int:
     text = _read_text(path)
     return text.count("TODO") + text.count("PLACEHOLDER")
@@ -346,7 +407,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--strict-production",
         action="store_true",
-        help="把正式生产配置和真实模型资产缺失作为 BLOCKED，适合上机放行前使用",
+        help="把正式生产配置缺失、生产光源/配方不一致和真实模型资产缺失作为 BLOCKED，适合上机放行前使用",
     )
     parser.add_argument("--json", action="store_true", help="以 JSON 输出完整预检结果")
     args = parser.parse_args(argv)

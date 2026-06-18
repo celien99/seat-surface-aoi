@@ -62,7 +62,7 @@ uv run python -m tools.validate_deployment_preflight
 uv run python -m tools.validate_deployment_preflight --strict-production
 ```
 
-默认模式确认参考链路、Windows 共享内存映射、跨平台 IPC、部署包入口和 PLC 前手动联调路径无本地阻塞；严格模式把正式生产配置和真实模型资产缺失作为阻塞。
+默认模式确认参考链路、Windows 共享内存映射、跨平台 IPC、部署包入口和 PLC 前手动联调路径无本地阻塞；严格模式把正式生产配置缺失、生产光源/配方不一致和真实模型资产缺失作为阻塞。
 
 ## IPC 与协议
 
@@ -112,7 +112,7 @@ cpp_controller/config/station_runtime.robot_flyshot.example.conf
 
 ### V4 光源映射
 
-默认生产主链路使用 4 个必需光源：
+Python 参考生产配方默认使用 4 个必需语义光源：
 
 ```yaml
 quality:
@@ -135,6 +135,8 @@ v4_lights:
 ```
 
 `DOME`、`DARKFIELD_L` 和 `DARKFIELD_R` 是必需语义；`BRIGHTFIELD` 可按现场方案映射或移除。增强光源如 `LOW_LEFT`、`LOW_RIGHT`、`HIGH_FRONT`、`HIGH_REAR`、`NIR` 只能作为 ROI 增强光源，不能成为默认输出 `OK` 的隐藏依赖。
+
+当前固定机位工控机配置 `cpp_controller/config/station_runtime.production.conf` 只采集 3 路物理光源：`1 -> DIFFUSE`、`2 -> POLAR_DIFFUSE`、`3 -> HIGH_LEFT`。这与 `production_recipe.yaml` 的 `HIGH_RIGHT` 必需光源不一致，运行生产配方时会被质量门禁判为缺帧并返回 `RECHECK`。上线前必须二选一：补齐第 4 路 `HIGH_RIGHT` 采集并同步 C++ 配置，或把生产配方、模型输入通道、特征和测试降为经过验证的 3 光源方案。
 
 ### ROI 定位与配准
 
@@ -286,7 +288,8 @@ uv run python -m tools.validate_model_assets --recipe seat_a_robot_flyshot_produ
 - `fusion_summary.json`
 - `timings.json`
 - `error.json`
-- `images/<camera_id>/<roi_name>/<light_id>.pgm`
+- `raw_images/<camera_id>/<pose_id>/<light_id>.pgm`
+- `images/<camera_id>/<pose_id>/<roi_name>/<light_id>.pgm`
 - `overlays/*.ppm`
 
 保存策略：

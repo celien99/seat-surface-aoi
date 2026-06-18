@@ -125,7 +125,7 @@ struct StationRuntimeConfig {
   std::uint32_t critical_recheck_threshold = 5;
   int max_jobs = 0;
   std::string recipe_id = "seat_a_black_leather_v1";
-  std::vector<std::uint32_t> light_order = {1, 2, 3};
+  std::vector<std::uint32_t> light_order = {1, 2, 3, 4};
   CaptureMode capture_mode = CaptureMode::FixedCamera;
   std::string trace_root = "trace";
   std::vector<RuntimeCameraConfig> cameras = {
@@ -137,6 +137,7 @@ struct StationRuntimeConfig {
       RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F},
       RuntimeLightChannelConfig{0, 2, 2, 800, 800, 0, 1.0F, 60.0F},
       RuntimeLightChannelConfig{0, 3, 3, 800, 800, 0, 1.0F, 55.0F},
+      RuntimeLightChannelConfig{0, 4, 4, 800, 800, 0, 1.0F, 55.0F},
   };
   std::vector<RuntimeCaptureViewConfig> capture_views;
   RuntimeSignalConfig signal;

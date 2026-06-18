@@ -152,13 +152,13 @@ training_tools/
 根目录 `tools/validate_architecture_readiness.py` 用于把 V4/PPT 架构要求固化成静态检查项：
 
 - `--scope reference` 校验参考实现是否具备固定机位、机器人飞拍、共享内存 v2、质量门禁、trace、ROI/ECC/ONNX/PatchCore/FAISS 接入点等能力。
-- `--scope production` 校验上线阻塞项，真实模型资产、正式生产配置仍是占位值时会返回 `BLOCKED`。
+- `--scope production` 校验上线阻塞项，真实模型资产、正式生产配置仍是占位值或固定机位光源/生产配方不一致时会返回 `BLOCKED`。
 
 根目录 `tools/validate_deployment_preflight.py` 用于 Windows 工控机上机前交接：
 
 - 默认模式确认当前环境可实现的参考链路、Windows 共享内存映射、跨平台 IPC 入口、部署包入口和 PLC 前手动联调路径无本地阻塞。
-- `--strict-production` 用于放行前，把正式生产配置和真实模型资产缺失升级为 `BLOCKED`。
-- 真实模型、现场 `production.conf`、MES/报警/监控协议属于现场 ACTION，不应在本机用占位产物伪造通过。
+- `--strict-production` 用于放行前，把正式生产配置、生产光源配方对齐和真实模型资产缺失升级为 `BLOCKED`。
+- 真实模型、现场 `production.conf`、生产光源/配方对齐、MES/报警/监控协议属于现场 ACTION，不应在本机用占位产物伪造通过。
 
 ## 关键实现说明
 
@@ -203,6 +203,8 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 配方中的 `cameras` 实际表示检测视角配置。固定机位模式下 `pose_id` 默认等于 `camera_id`；如果某个固定机位只配置默认视角，Python 检测层允许同一 `camera_id` 下动态 `pose_id` 的多张照片复用该机位的标定、ROI 和模型配置，并在特征、结果和 trace 中继续保留原始 `pose_id`。机器人飞拍模式下允许多个视角共享同一 `camera_id`，并用显式 `pose_id` 区分轨迹点、ROI、标定和模型配置，例如 `EYE_IN_HAND/T1_BACKREST`、`EYE_IN_HAND/T2_CUSHION`；这类显式 pose 配方不会把未知 `pose_id` fallback 到第一条配置。`cameras` 支持字典和列表两种写法；列表写法会按条目保序解析，不会再把相同 `camera_id` 的不同 `pose_id` 折叠覆盖，重复 `(camera_id, pose_id)` 会报配方校验错误。
 
 模型补齐后，固定机位生产任务应使用 `recipe_id=seat_a_black_leather_production_v1`，机器人飞拍生产任务应使用 `recipe_id=seat_a_robot_flyshot_production_v1`。这两个配方会启用 `onnx_yolo` Dome ROI、`ecc` 多光源配准、监督 ONNX 主检测、WideResNet50 embedding、PCA、PatchCore KNN 和可选 FAISS safety net；仓库内生产标定和 `production_full_roi.yaml` 是可校验模板，真实上线必须替换为现场标定和 ROI。
+
+当前固定机位 C++ 生产配置是双相机 + 3 光源 `light_order=1,2,3`，映射到 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。`production_recipe.yaml` 仍要求 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT/HIGH_RIGHT` 四个必需光源，因此在未补齐第 4 路光源或未把生产配方降为已验证 3 光源方案前，质量门禁会返回 `RECHECK`，不会输出 `OK`。
 
 配方 schema 会校验：
 

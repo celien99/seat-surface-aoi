@@ -581,6 +581,7 @@ seat_aoi::StationRuntimeConfig make_filled_production_runtime_config() {
   config.hardware_mode = seat_aoi::HardwareMode::Production;
   config.signal.backend = seat_aoi::HardwareBackend::ExternalSignal;
   config.camera_backend = seat_aoi::HardwareBackend::HikrobotMvs;
+  config.lights.emplace_back();
   config.lights[0].backend = seat_aoi::HardwareBackend::SerialAscii;
   config.frame_slot_size = 64 * 1024 * 1024;
   config.signal.station_id = "LINE1_AOI_01";

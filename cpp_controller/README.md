@@ -140,7 +140,7 @@ ipc_safety_checks   (依赖 seat_aoi_control)
 |------|---------|---------|
 | **Signal** (`signal_client.cpp`) | 自动生成虚拟触发信号（`SIM_SEAT_XXX`），递增 trigger_id | `--simulate-signal-result-fault` 模拟结果发布失败<br>`--simulate-trigger-timeout` 模拟触发超时 |
 | **Robot** (`robot_client.cpp`) | 在机器人飞拍模式下模拟 pose ready、SHOT_ID、TCP 位姿和机器人时间戳 | `simulate_robot_fault=true` 模拟机器人 FAULT |
-| **相机** (`camera_device.cpp`) | 生成合成图像（纹理 + 梯度 + 伪随机数据），64×48 可配置分辨率 | `--simulate-missing-frame` 模拟丢帧 |
+| **相机** (`camera_device.cpp`) | 生成合成图像（纹理 + 梯度 + 光源差异），并按当前 `light_index/light_seq_index` 写入帧元数据，64×48 可配置分辨率 | `--simulate-missing-frame` 模拟丢帧 |
 | **光源** (`light_controller.cpp`) | 模拟频闪时序，1ms sleep 模拟硬件延迟 | `--simulate-light-fault` 模拟光源故障 |
 
 当前支持的配置 backend 名称：
@@ -418,7 +418,7 @@ uv run python -m tools.validate_deployment_preflight --strict-production
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `--config <path>` | 运行时配置文件路径 | 无 |
+| `--config <path>` | 运行时配置文件路径；未提供时使用内置 simulated fallback，默认 2 视角 × 4 路光源 | 无 |
 | `--loop` | 持续循环模式 | 单次 |
 | `--once` | 单次执行（覆盖 --loop） | 默认 |
 | `--no-reset` | 不重置共享内存 | false |
@@ -459,7 +459,7 @@ critical_recheck_threshold=5
 max_jobs=1
 recipe_id=seat_a_black_leather_v1
 capture_mode=fixed_camera
-light_order=1,2,3
+light_order=1,2,3,4
 trace_root=trace
 
 # 相机配置；生产模式需要补充 serial_number、trigger_line、exposure_output_line
@@ -494,7 +494,9 @@ cp config/station_runtime.production.example.conf config/station_runtime.product
 
 该模板的 `recipe_id` 已对齐 Python 固定机位生产配方 `seat_a_black_leather_production_v1`。模型补齐后，Python detector 会按该配方启用 ONNX ROI、ECC、监督 ONNX、WideResNet50/PCA/PatchCore/FAISS safety net；相机 `calibration_id` 必须和 Python 标定文件保持一致。
 
-当前固定机位生产模板按现场已确认硬件预置：海康 MV-CH120-20GC × 2，4096 x 3072，Hikrobot MVS backend；镜头 MVL-KF0814M-12MPE，8mm F1.4，1.1"，C 接口；频闪控制器 FL-ACDH-20048-4，4 通道（使用通道 1/2/3）。双相机、Mono8、3 光源图像包约 72 MB，模板保留 `frame_slot_size=134217728`（128 MB）；如果后续增加光源或分辨率变更，应重新计算并同步 Python 共享内存配置。
+当前固定机位参考模拟配置使用 4 路光源并对齐默认 Python 配方；`tools/run_simulated_ipc.*` 默认会把 `config/station_runtime.example.conf` 同时传给 C++ 和 Python。固定机位生产模板按现场已确认硬件预置：海康 MV-CH120-20GC × 2，4096 x 3072，Hikrobot MVS backend；镜头 MVL-KF0814M-12MPE，8mm F1.4，1.1"，C 接口；频闪控制器 FL-ACDH-20048-4，4 通道（当前使用通道 1/2/3）。双相机、Mono8、3 光源图像包约 72 MB，模板保留 `frame_slot_size=134217728`（128 MB）；如果后续增加光源或分辨率变更，应重新计算并同步 Python 共享内存配置。
+
+注意：`station_runtime.production.conf` 当前 `light_order=1,2,3`，而 Python 固定机位生产配方 `seat_a_black_leather_production_v1` 仍要求 `HIGH_RIGHT` 第 4 路语义光源。正式上线前必须补齐第 4 路采集，或把 Python 生产配方、模型输入通道和测试同步降为已验证的 3 光源方案；否则 detector 会因缺少 `HIGH_RIGHT` 返回 `RECHECK`。
 
 Hikrobot MVS backend 当前按 `Mono8` 单通道实现，并已按海康 MVS C++ 示例工程对齐：进程内引用计数调用 `MV_CC_Initialize/Finalize`，枚举 GigE/USB/GenTL 设备，按 `camera.<N>.serial_number` 匹配相机，配置 `4096 x 3072`、`TriggerMode=On`、`TriggerSource=Line0`（FL-ACDH F口同步输出做硬件触发）、`Line1=ExposureStartActive`、`StrobeEnable=true`。C++ 每个光源轮次先设置曝光/增益并 arm 相机，再通过 RS232 发送 FL-ACDH 频闪序列（C→B→8→9→A→7）；FL-ACDH 的 `7` 命令同时点亮频闪并通过 F 口同步输出触发相机 Line0 曝光。取帧使用 MVS 示例里的 `nExtendWidth/nExtendHeight/nFrameLenEx` 字段，其他像素格式不会隐式转换，配置不匹配会保守失败。
 
@@ -517,7 +519,7 @@ cp config/station_runtime.robot_flyshot.production.example.conf \
 - C++ 主控固定采用视角级串行 TDM 采集路径，不再支持通过运行配置覆盖采集策略；配置文件中出现 `acquisition_strategy` 会被拒绝。
 - `capture_mode=fixed_camera` 时检测视角默认由 `camera.<N>` 自动生成；`capture_mode=robot_flyshot` 时必须显式配置 `pose.<N>.*` 采集计划。
 - 机器人飞拍模式必须配置非 simulated 的 `robot.backend`、Robot READY/FAULT/START 点位以及每个 pose 的 `shot_id_source`、`photo_trigger_input` 和标定位姿信息。
-- 生产模式必须使用 `camera_exposure_output` 或等价硬触发同步，`software` 仅用于模拟或低精度联调。
+- 生产模式必须使用相机触发线、频闪控制器同步输出或等价硬触发同步；当前 FL-ACDH 方案为控制器 F 口输出到相机 `Line0`，相机 `Line1` ExposureStartActive 保留调试。
 - `strobe_width_us` 不能大于 `exposure_us`，`frame_slot_size` 必须能容纳 `view_count x light_count` 的完整图像包。
 - 相机 `pixel_format` 只接受当前已知格式，`Mono10/Mono12/Mono16/BayerRG12` 按 2 bytes/channel 估算 frame slot 容量，避免高位深图像因容量低估写爆 slot。
 - `warning_recheck_threshold` 和 `critical_recheck_threshold` 控制连续复检报警升级，后者必须大于前者。
