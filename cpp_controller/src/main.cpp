@@ -62,13 +62,13 @@ void apply_runtime_config(const seat_aoi::StationRuntimeConfig& runtime_config,
   config->light = runtime_config.light;
   config->light_channels = runtime_config.light_channels;
   config->capture_views = runtime_config.capture_views;
-  config->plc = runtime_config.plc;
+  config->signal = runtime_config.signal;
   config->robot = runtime_config.robot;
   config->trigger_sync_mode = runtime_config.trigger_sync_mode;
   config->simulate_light_fault = runtime_config.light.simulate_fault;
   config->robot.simulate_fault = runtime_config.robot.simulate_fault;
-  config->simulate_trigger_timeout = runtime_config.plc.simulate_trigger_timeout;
-  config->simulate_plc_output_fault = runtime_config.plc.simulate_output_fault;
+  config->simulate_trigger_timeout = runtime_config.signal.simulate_trigger_timeout;
+  config->simulate_signal_result_fault = runtime_config.signal.simulate_output_fault;
   for (const auto& camera : runtime_config.cameras) {
     config->simulate_missing_frame = config->simulate_missing_frame || camera.simulate_missing_frame;
   }
@@ -124,8 +124,10 @@ int main(int argc, char** argv) {
       config.simulate_light_fault || has_arg(argc, argv, "--simulate-light-fault");
   config.simulate_missing_frame =
       config.simulate_missing_frame || has_arg(argc, argv, "--simulate-missing-frame");
-  config.simulate_plc_output_fault =
-      config.simulate_plc_output_fault || has_arg(argc, argv, "--simulate-plc-output-fault");
+  config.simulate_signal_result_fault =
+      config.simulate_signal_result_fault ||
+      has_arg(argc, argv, "--simulate-signal-result-fault") ||
+      has_arg(argc, argv, "--simulate-plc-output-fault");
   config.simulate_trigger_timeout =
       config.simulate_trigger_timeout || has_arg(argc, argv, "--simulate-trigger-timeout");
 
@@ -147,10 +149,10 @@ int main(int argc, char** argv) {
 
   int processed_jobs = 0;
   while (config.max_jobs <= 0 || processed_jobs < config.max_jobs) {
-    seat_aoi::PlcTrigger trigger;
+    seat_aoi::ExternalTrigger trigger;
     std::string error;
     if (!station.wait_for_trigger(&trigger, &error)) {
-      std::cerr << "PLC trigger wait failed: " << error << std::endl;
+      std::cerr << "external signal trigger wait failed: " << error << std::endl;
       return 1;
     }
     const auto result = station.inspect_one_seat(trigger);

@@ -13,6 +13,7 @@ enum class HardwareMode {
 enum class HardwareBackend {
   Simulated,
   ManualTrigger,
+  ExternalSignal,
   ModbusTcp,
   SiemensS7,
   EthercatIo,
@@ -30,6 +31,7 @@ const char* hardware_mode_name(HardwareMode mode);
 const char* hardware_backend_name(HardwareBackend backend);
 bool is_simulated_backend(HardwareBackend backend);
 bool is_manual_trigger_backend(HardwareBackend backend);
+bool is_external_signal_backend(HardwareBackend backend);
 bool parse_hardware_mode(const std::string& value,
                          HardwareMode* out_mode,
                          std::string* error_message);

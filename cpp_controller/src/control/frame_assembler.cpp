@@ -114,7 +114,7 @@ bool FrameAssembler::ensure_initialized() {
 }
 
 bool FrameAssembler::acquire_bundles(const Recipe& recipe,
-                                     const PlcTrigger& trigger,
+                                     const ExternalTrigger& trigger,
                                      std::uint64_t sequence_id,
                                      SeatImageBundle* out_bundle,
                                      AcquisitionError* error) {
@@ -603,7 +603,7 @@ ICamera* FrameAssembler::camera_for_index(std::uint32_t camera_index) const {
   return nullptr;
 }
 
-bool FrameAssembler::wait_robot_pose_ready(const PlcTrigger& trigger,
+bool FrameAssembler::wait_robot_pose_ready(const ExternalTrigger& trigger,
                                            const RuntimeCaptureViewConfig& view,
                                            RobotPoseStatus* out_status,
                                            AcquisitionError* error) {

@@ -7,7 +7,7 @@
 
 #include "control/frame_assembler.hpp"
 #include "control/hardware_backend.hpp"
-#include "control/iplc_client.hpp"
+#include "control/isignal_client.hpp"
 #include "control/production_event_log.hpp"
 #include "control/station_health.hpp"
 #include "control/station_runtime_config.hpp"
@@ -48,11 +48,11 @@ struct StationConfig {
       RuntimeLightChannelConfig{4, 4, 800, 800, 0, 1.0F, 60.0F},
   };
   std::vector<RuntimeCaptureViewConfig> capture_views;
-  RuntimePlcConfig plc;
+  RuntimeSignalConfig signal;
   RuntimeRobotConfig robot;
   TriggerSyncMode trigger_sync_mode = TriggerSyncMode::CameraExposureOutput;
   bool simulate_light_fault = false;
-  bool simulate_plc_output_fault = false;
+  bool simulate_signal_result_fault = false;
   bool simulate_trigger_timeout = false;
   bool simulate_missing_frame = false;
 };
@@ -61,28 +61,28 @@ class StationController {
 public:
   ~StationController();
   bool initialize(const StationConfig& config);
-  bool wait_for_trigger(PlcTrigger* out_trigger, std::string* error_message);
-  InspectionResultPayload inspect_one_seat(const PlcTrigger& trigger);
+  bool wait_for_trigger(ExternalTrigger* out_trigger, std::string* error_message);
+  InspectionResultPayload inspect_one_seat(const ExternalTrigger& trigger);
   StationHealthSnapshot health_snapshot() const;
   void cleanup_shared_memory();
 
 private:
   Recipe load_recipe(const std::string& sku) const;
-  InspectionResultPayload make_recheck_result(const PlcTrigger& trigger,
+  InspectionResultPayload make_recheck_result(const ExternalTrigger& trigger,
                                                std::uint64_t sequence_id,
                                                ErrorCode error_code,
                                                const std::string& message) const;
-  InspectionResultPayload make_and_send_recheck_result(const PlcTrigger& trigger,
+  InspectionResultPayload make_and_send_recheck_result(const ExternalTrigger& trigger,
                                                        std::uint64_t sequence_id,
                                                        ErrorCode error_code,
                                                        const std::string& message);
-  bool validate_detector_result(const PlcTrigger& trigger,
+  bool validate_detector_result(const ExternalTrigger& trigger,
                                 std::uint64_t sequence_id,
                                 const InspectionResultPayload& result,
                                 std::string* error_message) const;
   void log_result(const InspectionResultPayload& result) const;
   void record_event(const std::string& name,
-                    const PlcTrigger& trigger,
+                    const ExternalTrigger& trigger,
                     std::uint64_t sequence_id,
                     InspectionDecision decision,
                     ErrorCode error_code,
@@ -97,7 +97,7 @@ private:
   FrameRingBuffer frame_ring_;
   ResultRingBuffer result_ring_;
   FrameAssembler frame_assembler_;
-  std::unique_ptr<IPlcClient> plc_client_;
+  std::unique_ptr<ISignalClient> signal_client_;
   ProductionEventLog event_log_;
   StationHealthMonitor health_;
   std::uint64_t next_sequence_id_ = 1;

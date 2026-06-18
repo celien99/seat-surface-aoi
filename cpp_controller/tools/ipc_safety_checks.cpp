@@ -12,7 +12,7 @@
 #include "common/string_utils.hpp"
 #include "common/time_utils.hpp"
 #include "control/hardware_factory.hpp"
-#include "control/plc_client.hpp"
+#include "control/signal_client.hpp"
 #include "control/station_health.hpp"
 #include "control/station_controller.hpp"
 #include "control/station_runtime_config.hpp"
@@ -325,20 +325,20 @@ bool test_ring_layout_mismatch_fails_without_reset() {
   return passed;
 }
 
-bool test_plc_trigger_timeout_fails_closed() {
-  seat_aoi::SimPlcClient plc;
-  seat_aoi::PlcClientConfig config;
+bool test_signal_trigger_timeout_fails_closed() {
+  seat_aoi::SimSignalClient signal;
+  seat_aoi::SignalClientConfig config;
   config.simulate_trigger_timeout = true;
-  if (!plc.initialize(config)) {
-    std::cerr << "PLC initialize failed\n";
+  if (!signal.initialize(config)) {
+    std::cerr << "signal client initialize failed\n";
     return false;
   }
-  seat_aoi::PlcTrigger trigger;
+  seat_aoi::ExternalTrigger trigger;
   std::string error;
-  const bool ok = plc.wait_trigger(&trigger, 1, &error);
-  const bool passed = !ok && error == "模拟 PLC 触发超时";
+  const bool ok = signal.wait_trigger(&trigger, 1, &error);
+  const bool passed = !ok && error == "模拟外部信号触发超时";
   if (!passed) {
-    std::cerr << "PLC trigger timeout did not fail closed: " << error << "\n";
+    std::cerr << "signal trigger timeout did not fail closed: " << error << "\n";
   }
   return passed;
 }
@@ -367,7 +367,7 @@ bool test_station_fault_returns_recheck(const std::string& name,
     return false;
   }
 
-  seat_aoi::PlcTrigger trigger;
+  seat_aoi::ExternalTrigger trigger;
   trigger.trigger_id = 7001;
   trigger.seat_id = "SIM_FAULT";
   trigger.sku = "seat_a_black_leather";
@@ -423,7 +423,7 @@ bool test_frame_slot_unavailable_returns_recheck() {
     return false;
   }
 
-  seat_aoi::PlcTrigger trigger;
+  seat_aoi::ExternalTrigger trigger;
   trigger.trigger_id = 7002;
   trigger.seat_id = "SIM_SLOT_FULL";
   trigger.sku = "seat_a_black_leather";
@@ -478,7 +478,7 @@ bool test_explicit_camera_config_replaces_defaults() {
   {
     std::ofstream out(path);
     out << "hardware_mode=lab\n"
-        << "plc.backend=manual_trigger\n"
+        << "signal.backend=manual_trigger\n"
         << "camera.backend=simulated\n"
         << "light.backend=simulated\n"
         << "slot_count=4\n"
@@ -497,8 +497,8 @@ bool test_explicit_camera_config_replaces_defaults() {
         << "light_order=1,2,3,4\n"
         << "trigger_sync_mode=camera_exposure_output\n"
         << "trace_root=trace\n"
-        << "plc.station_id=LAB_AOI_01\n"
-        << "plc.sku_source=seat_a_black_leather\n"
+        << "signal.station_id=LAB_AOI_01\n"
+        << "signal.default_sku=seat_a_black_leather\n"
         << "camera.0.camera_id=TOP_BACK\n"
         << "camera.0.serial_number=MVCH120_TEST_SN\n"
         << "camera.0.calibration_id=calib/top_back_production_v1\n"
@@ -580,21 +580,13 @@ bool test_production_template_rejects_todo_placeholders() {
 seat_aoi::StationRuntimeConfig make_filled_production_runtime_config() {
   seat_aoi::StationRuntimeConfig config;
   config.hardware_mode = seat_aoi::HardwareMode::Production;
-  config.plc.backend = seat_aoi::HardwareBackend::ModbusTcp;
+  config.signal.backend = seat_aoi::HardwareBackend::ExternalSignal;
   config.camera_backend = seat_aoi::HardwareBackend::HikrobotMvs;
   config.light.backend = seat_aoi::HardwareBackend::SerialAscii;
   config.frame_slot_size = 64 * 1024 * 1024;
-  config.plc.host = "192.168.1.10";
-  config.plc.port = 502;
-  config.plc.station_id = "LINE1_AOI_01";
-  config.plc.trigger_source = "DI0";
-  config.plc.trigger_id_source = "HR100";
-  config.plc.seat_id_source = "HR120";
-  config.plc.sku_source = "HR160";
-  config.plc.ok_output = "DO0";
-  config.plc.ng_output = "DO1";
-  config.plc.recheck_output = "DO2";
-  config.plc.ack_input = "DI1";
+  config.signal.station_id = "LINE1_AOI_01";
+  config.signal.default_seat_id = "EXTERNAL_SEAT";
+  config.signal.default_sku = "seat_a_black_leather";
   config.light.device_id = "STROBE_01";
   config.light.serial_port = "/dev/ttyUSB0";
   config.light.baud_rate = 115200;
@@ -620,18 +612,9 @@ bool test_filled_production_config_validates() {
 bool test_lab_manual_trigger_config_validates() {
   auto config = make_filled_production_runtime_config();
   config.hardware_mode = seat_aoi::HardwareMode::Lab;
-  config.plc.backend = seat_aoi::HardwareBackend::ManualTrigger;
-  config.plc.host.clear();
-  config.plc.port = 0;
-  config.plc.trigger_source.clear();
-  config.plc.trigger_id_source.clear();
-  config.plc.seat_id_source.clear();
-  config.plc.ok_output.clear();
-  config.plc.ng_output.clear();
-  config.plc.recheck_output.clear();
-  config.plc.ack_input.clear();
-  config.plc.station_id = "LAB_AOI_01";
-  config.plc.sku_source = "seat_a_black_leather";
+  config.signal.backend = seat_aoi::HardwareBackend::ManualTrigger;
+  config.signal.station_id = "LAB_AOI_01";
+  config.signal.default_sku = "seat_a_black_leather";
   std::string error;
   const bool ok = seat_aoi::validate_station_runtime_config(config, &error);
   if (!ok) {
@@ -642,7 +625,7 @@ bool test_lab_manual_trigger_config_validates() {
 
 bool test_production_rejects_manual_trigger_backend() {
   auto config = make_filled_production_runtime_config();
-  config.plc.backend = seat_aoi::HardwareBackend::ManualTrigger;
+  config.signal.backend = seat_aoi::HardwareBackend::ManualTrigger;
   std::string error;
   const bool ok = seat_aoi::validate_station_runtime_config(config, &error);
   const bool passed = !ok && error.find("manual_trigger") != std::string::npos;
@@ -652,19 +635,19 @@ bool test_production_rejects_manual_trigger_backend() {
   return passed;
 }
 
-bool test_manual_trigger_plc_client_generates_trigger() {
-  seat_aoi::ManualTriggerPlcClient client;
-  seat_aoi::PlcClientConfig config;
+bool test_manual_trigger_signal_client_generates_trigger() {
+  seat_aoi::ManualSignalClient client;
+  seat_aoi::SignalClientConfig config;
   config.station_id = "LAB_AOI_01";
-  config.sku_source = "seat_a_black_leather";
+  config.default_sku = "seat_a_black_leather";
   if (!client.initialize(config)) {
     std::cerr << "manual trigger client did not initialize\n";
     return false;
   }
-  seat_aoi::PlcTrigger trigger;
+  seat_aoi::ExternalTrigger trigger;
   std::string error;
   const bool ok = client.wait_trigger(&trigger, 100, &error);
-  const bool sent = client.send_decision(
+  const bool sent = client.publish_result(
       trigger, 1, seat_aoi::InspectionDecision::Recheck, 100, &error);
   const bool passed = ok && sent && trigger.trigger_id == 9000 &&
                       trigger.seat_id == "LAB_AOI_01_MANUAL_SEAT_9000" &&
@@ -849,13 +832,13 @@ bool test_detector_timeout_fault_blocks_next_trigger() {
     return false;
   }
 
-  seat_aoi::PlcTrigger trigger;
+  seat_aoi::ExternalTrigger trigger;
   trigger.trigger_id = 7011;
   trigger.seat_id = "SIM_TIMEOUT_BLOCK";
   trigger.sku = "seat_a_black_leather";
   const auto result = station.inspect_one_seat(trigger);
   const auto fault_snapshot = station.health_snapshot();
-  seat_aoi::PlcTrigger next_trigger;
+  seat_aoi::ExternalTrigger next_trigger;
   std::string error;
   const bool can_wait = station.wait_for_trigger(&next_trigger, &error);
   station.cleanup_shared_memory();
@@ -955,7 +938,7 @@ bool test_detector_ng_with_quality_failure_is_rechecked() {
     return false;
   }
 
-  seat_aoi::PlcTrigger trigger;
+  seat_aoi::ExternalTrigger trigger;
   trigger.trigger_id = 7012;
   trigger.seat_id = "SIM_INVALID_NG";
   trigger.sku = "seat_a_black_leather";
@@ -1017,7 +1000,7 @@ bool test_station_writes_detector_timeout_event_log() {
     return false;
   }
 
-  seat_aoi::PlcTrigger trigger;
+  seat_aoi::ExternalTrigger trigger;
   trigger.trigger_id = 7010;
   trigger.seat_id = "SIM_TIMEOUT";
   trigger.sku = "seat_a_black_leather";
@@ -1049,10 +1032,10 @@ bool test_station_writes_detector_timeout_event_log() {
 }
 
 bool test_unsupported_production_backend_fails_fast() {
-  auto plc = seat_aoi::create_plc_client(seat_aoi::HardwareBackend::ModbusTcp);
-  seat_aoi::PlcClientConfig config;
-  const bool ok = plc->initialize(config);
-  const auto health = plc->get_health();
+  auto signal = seat_aoi::create_signal_client(seat_aoi::HardwareBackend::ModbusTcp);
+  seat_aoi::SignalClientConfig config;
+  const bool ok = signal->initialize(config);
+  const auto health = signal->get_health();
   const bool passed = !ok && !health.ok &&
                       health.message.find("尚未链接真实硬件驱动") != std::string::npos;
   if (!passed) {
@@ -1123,7 +1106,7 @@ int main() {
   if (!test_ring_layout_mismatch_fails_without_reset()) {
     return 1;
   }
-  if (!test_plc_trigger_timeout_fails_closed()) {
+  if (!test_signal_trigger_timeout_fails_closed()) {
     return 1;
   }
   if (!test_light_fault_returns_recheck()) {
@@ -1153,7 +1136,7 @@ int main() {
   if (!test_production_rejects_manual_trigger_backend()) {
     return 1;
   }
-  if (!test_manual_trigger_plc_client_generates_trigger()) {
+  if (!test_manual_trigger_signal_client_generates_trigger()) {
     return 1;
   }
   if (!test_hikrobot_backend_fails_without_sdk_when_not_compiled()) {

@@ -50,7 +50,7 @@ class IRobotClient {
 public:
   virtual ~IRobotClient() = default;
   virtual bool initialize(const RobotClientConfig& config) = 0;
-  virtual bool wait_pose_ready(const PlcTrigger& trigger,
+  virtual bool wait_pose_ready(const ExternalTrigger& trigger,
                                const RobotPoseRequest& request,
                                int timeout_ms,
                                RobotPoseStatus* out_status,

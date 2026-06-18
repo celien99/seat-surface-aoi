@@ -7,7 +7,7 @@
 #include "camera/hikrobot_mvs_camera.hpp"
 #include "control/hardware_backend.hpp"
 #include "control/light_controller.hpp"
-#include "control/plc_client.hpp"
+#include "control/signal_client.hpp"
 #include "control/robot_client.hpp"
 
 namespace seat_aoi {
@@ -21,36 +21,36 @@ inline std::string unsupported_driver_message(const char* device,
          "填写现场参数，并在 C++ 中接入对应厂商 SDK/协议适配器。";
 }
 
-class UnsupportedPlcClient final : public IPlcClient {
+class UnsupportedSignalClient final : public ISignalClient {
 public:
-  explicit UnsupportedPlcClient(HardwareBackend backend) : backend_(backend) {}
+  explicit UnsupportedSignalClient(HardwareBackend backend) : backend_(backend) {}
 
-  bool initialize(const PlcClientConfig& /*config*/) override {
+  bool initialize(const SignalClientConfig& /*config*/) override {
     return false;
   }
 
-  bool wait_trigger(PlcTrigger* /*out_trigger*/,
+  bool wait_trigger(ExternalTrigger* /*out_trigger*/,
                     int /*timeout_ms*/,
                     std::string* error_message) override {
     if (error_message != nullptr) {
-      *error_message = unsupported_driver_message("PLC", backend_);
+      *error_message = unsupported_driver_message("ExternalSignal", backend_);
     }
     return false;
   }
 
-  bool send_decision(const PlcTrigger& /*trigger*/,
+  bool publish_result(const ExternalTrigger& /*trigger*/,
                      std::uint64_t /*sequence_id*/,
                      InspectionDecision /*decision*/,
                      int /*timeout_ms*/,
                      std::string* error_message) override {
     if (error_message != nullptr) {
-      *error_message = unsupported_driver_message("PLC", backend_);
+      *error_message = unsupported_driver_message("ExternalSignal", backend_);
     }
     return false;
   }
 
-  PlcHealth get_health() const override {
-    return PlcHealth{false, unsupported_driver_message("PLC", backend_)};
+  SignalHealth get_health() const override {
+    return SignalHealth{false, unsupported_driver_message("ExternalSignal", backend_)};
   }
 
 private:
@@ -182,7 +182,7 @@ public:
     return false;
   }
 
-  bool wait_pose_ready(const PlcTrigger& /*trigger*/,
+  bool wait_pose_ready(const ExternalTrigger& /*trigger*/,
                        const RobotPoseRequest& /*request*/,
                        int /*timeout_ms*/,
                        RobotPoseStatus* /*out_status*/,
@@ -203,14 +203,17 @@ private:
 
 }  // namespace detail
 
-inline std::unique_ptr<IPlcClient> create_plc_client(HardwareBackend backend) {
+inline std::unique_ptr<ISignalClient> create_signal_client(HardwareBackend backend) {
   if (is_manual_trigger_backend(backend)) {
-    return std::make_unique<ManualTriggerPlcClient>();
+    return std::make_unique<ManualSignalClient>();
+  }
+  if (is_external_signal_backend(backend)) {
+    return std::make_unique<ExternalSignalClient>();
   }
   if (!is_simulated_backend(backend)) {
-    return std::make_unique<detail::UnsupportedPlcClient>(backend);
+    return std::make_unique<detail::UnsupportedSignalClient>(backend);
   }
-  return std::make_unique<SimPlcClient>();
+  return std::make_unique<SimSignalClient>();
 }
 
 inline std::unique_ptr<ILightController> create_light_controller(HardwareBackend backend) {

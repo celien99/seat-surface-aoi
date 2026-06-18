@@ -7,7 +7,7 @@ namespace seat_aoi {
 class SimRobotClient final : public IRobotClient {
 public:
   bool initialize(const RobotClientConfig& config) override;
-  bool wait_pose_ready(const PlcTrigger& trigger,
+  bool wait_pose_ready(const ExternalTrigger& trigger,
                        const RobotPoseRequest& request,
                        int timeout_ms,
                        RobotPoseStatus* out_status,

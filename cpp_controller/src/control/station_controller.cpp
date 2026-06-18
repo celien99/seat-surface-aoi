@@ -11,20 +11,13 @@ namespace seat_aoi {
 
 namespace {
 
-PlcClientConfig make_plc_client_config(const RuntimePlcConfig& config) {
-  PlcClientConfig client_config;
-  client_config.host = config.host;
-  client_config.port = config.port;
+SignalClientConfig make_signal_client_config(const RuntimeSignalConfig& config) {
+  SignalClientConfig client_config;
   client_config.station_id = config.station_id;
-  client_config.trigger_source = config.trigger_source;
-  client_config.trigger_id_source = config.trigger_id_source;
-  client_config.seat_id_source = config.seat_id_source;
-  client_config.sku_source = config.sku_source;
-  client_config.ok_output = config.ok_output;
-  client_config.ng_output = config.ng_output;
-  client_config.recheck_output = config.recheck_output;
-  client_config.ack_input = config.ack_input;
-  client_config.output_hold_ms = config.output_hold_ms;
+  client_config.default_seat_id = config.default_seat_id;
+  client_config.default_sku = config.default_sku;
+  client_config.trigger_queue_path = config.trigger_queue_path;
+  client_config.result_queue_path = config.result_queue_path;
   client_config.simulate_output_fault = config.simulate_output_fault;
   client_config.simulate_trigger_timeout = config.simulate_trigger_timeout;
   return client_config;
@@ -62,13 +55,13 @@ bool StationController::initialize(const StationConfig& config) {
   runtime_config.light = config.light;
   runtime_config.light_channels = config.light_channels;
   runtime_config.capture_views = config.capture_views;
-  runtime_config.plc = config.plc;
+  runtime_config.signal = config.signal;
   runtime_config.robot = config.robot;
   runtime_config.trigger_sync_mode = config.trigger_sync_mode;
   runtime_config.light.simulate_fault = config.simulate_light_fault;
   runtime_config.robot.simulate_fault = config.robot.simulate_fault;
-  runtime_config.plc.simulate_output_fault = config.simulate_plc_output_fault;
-  runtime_config.plc.simulate_trigger_timeout = config.simulate_trigger_timeout;
+  runtime_config.signal.simulate_output_fault = config.simulate_signal_result_fault;
+  runtime_config.signal.simulate_trigger_timeout = config.simulate_trigger_timeout;
   for (auto& camera : runtime_config.cameras) {
     camera.simulate_missing_frame = config.simulate_missing_frame;
   }
@@ -81,14 +74,15 @@ bool StationController::initialize(const StationConfig& config) {
   health_.transition_to(StationState::Initialized, "station controller initialized");
   record_system_event("station_initialized", ErrorCode::None, "station controller initialized");
   frame_assembler_.configure(runtime_config);
-  plc_client_ = create_plc_client(config.plc.backend);
-  if (!plc_client_->initialize(make_plc_client_config(runtime_config.plc))) {
-    std::cerr << "PLC 初始化失败: " << plc_client_->get_health().message << std::endl;
-    health_.record_fault(ErrorCode::DeviceFault, plc_client_->get_health().message);
-    health_.transition_to(StationState::Fault, plc_client_->get_health().message);
+  signal_client_ = create_signal_client(config.signal.backend);
+  if (!signal_client_->initialize(make_signal_client_config(runtime_config.signal))) {
+    std::cerr << "外部信号客户端初始化失败: " << signal_client_->get_health().message
+              << std::endl;
+    health_.record_fault(ErrorCode::DeviceFault, signal_client_->get_health().message);
+    health_.transition_to(StationState::Fault, signal_client_->get_health().message);
     record_system_event("station_initialize_failed",
                         ErrorCode::DeviceFault,
-                        plc_client_->get_health().message);
+                        signal_client_->get_health().message);
     return false;
   }
   const bool frames_ok = frame_ring_.initialize(kFrameShmName,
@@ -112,7 +106,7 @@ bool StationController::initialize(const StationConfig& config) {
   return true;
 }
 
-bool StationController::wait_for_trigger(PlcTrigger* out_trigger, std::string* error_message) {
+bool StationController::wait_for_trigger(ExternalTrigger* out_trigger, std::string* error_message) {
   const auto snapshot = health_.snapshot();
   if (snapshot.state == StationState::Fault) {
     if (error_message != nullptr) {
@@ -125,9 +119,9 @@ bool StationController::wait_for_trigger(PlcTrigger* out_trigger, std::string* e
                         error_message != nullptr ? *error_message : "station is in fault state");
     return false;
   }
-  if (!plc_client_->wait_trigger(out_trigger, config_.trigger_timeout_ms, error_message)) {
+  if (!signal_client_->wait_trigger(out_trigger, config_.trigger_timeout_ms, error_message)) {
     const std::string message =
-        error_message != nullptr ? *error_message : "PLC trigger wait failed";
+        error_message != nullptr ? *error_message : "external signal trigger wait failed";
     health_.record_fault(ErrorCode::DeviceFault, message);
     health_.transition_to(StationState::Fault, message);
     record_system_event("trigger_wait_failed", ErrorCode::DeviceFault, message);
@@ -137,7 +131,7 @@ bool StationController::wait_for_trigger(PlcTrigger* out_trigger, std::string* e
   return true;
 }
 
-InspectionResultPayload StationController::inspect_one_seat(const PlcTrigger& trigger) {
+InspectionResultPayload StationController::inspect_one_seat(const ExternalTrigger& trigger) {
   const std::uint64_t sequence_id = next_sequence_id_++;
   const Recipe recipe = load_recipe(trigger.sku);
   record_event("inspection_start",
@@ -187,12 +181,12 @@ InspectionResultPayload StationController::inspect_one_seat(const PlcTrigger& tr
     return make_and_send_recheck_result(trigger, sequence_id, ErrorCode::InvalidPayload, error);
   }
   const auto decision = static_cast<InspectionDecision>(result.meta.decision);
-  const InspectionDecision plc_decision =
+  const InspectionDecision published_decision =
       decision == InspectionDecision::Error ? InspectionDecision::Recheck : decision;
-  if (!plc_client_->send_decision(trigger, sequence_id, plc_decision, 200, &error)) {
+  if (!signal_client_->publish_result(trigger, sequence_id, published_decision, 200, &error)) {
     auto recheck = make_recheck_result(trigger, sequence_id, ErrorCode::DeviceFault, error);
     record_result_health(recheck, error);
-    record_event("plc_output_failed",
+    record_event("signal_result_publish_failed",
                  trigger,
                  sequence_id,
                  InspectionDecision::Recheck,
@@ -200,15 +194,15 @@ InspectionResultPayload StationController::inspect_one_seat(const PlcTrigger& tr
                  error);
     return recheck;
   }
-  record_result_health(result, "detector result accepted and PLC output sent");
+  record_result_health(result, "detector result accepted and external signal result published");
   record_event("inspection_complete",
                trigger,
                sequence_id,
                decision,
                static_cast<ErrorCode>(result.meta.error_code),
-               plc_decision == decision
-                   ? "detector result accepted and PLC output sent"
-                   : "detector ERROR mapped to PLC RECHECK output");
+               published_decision == decision
+                   ? "detector result accepted and external signal result published"
+                   : "detector ERROR mapped to external RECHECK result");
   log_result(result);
   return result;
 }
@@ -233,7 +227,7 @@ Recipe StationController::load_recipe(const std::string& /*sku*/) const {
   return recipe;
 }
 
-InspectionResultPayload StationController::make_recheck_result(const PlcTrigger& trigger,
+InspectionResultPayload StationController::make_recheck_result(const ExternalTrigger& trigger,
                                                                std::uint64_t sequence_id,
                                                                ErrorCode error_code,
                                                                const std::string& message) const {
@@ -252,23 +246,23 @@ InspectionResultPayload StationController::make_recheck_result(const PlcTrigger&
 }
 
 InspectionResultPayload StationController::make_and_send_recheck_result(
-    const PlcTrigger& trigger,
+    const ExternalTrigger& trigger,
     std::uint64_t sequence_id,
     ErrorCode error_code,
     const std::string& message) {
   auto result = make_recheck_result(trigger, sequence_id, error_code, message);
-  std::string plc_error;
-  if (!plc_client_->send_decision(trigger, sequence_id, InspectionDecision::Recheck, 200, &plc_error)) {
+  std::string publish_error;
+  if (!signal_client_->publish_result(trigger, sequence_id, InspectionDecision::Recheck, 200, &publish_error)) {
     result.meta.error_code = static_cast<std::uint32_t>(ErrorCode::DeviceFault);
-    record_result_health(result, message + "; plc_error=" + plc_error);
+    record_result_health(result, message + "; publish_error=" + publish_error);
     std::cerr << "[sequence_id=" << sequence_id << " trigger_id=" << trigger.trigger_id
-              << "] PLC RECHECK output failed: " << plc_error << std::endl;
+              << "] external RECHECK result publish failed: " << publish_error << std::endl;
     record_event("recheck_output_failed",
                  trigger,
                  sequence_id,
                  InspectionDecision::Recheck,
                  ErrorCode::DeviceFault,
-                 message + "; plc_error=" + plc_error);
+                 message + "; publish_error=" + publish_error);
     return result;
   }
   record_result_health(result, message);
@@ -281,7 +275,7 @@ InspectionResultPayload StationController::make_and_send_recheck_result(
   return result;
 }
 
-bool StationController::validate_detector_result(const PlcTrigger& trigger,
+bool StationController::validate_detector_result(const ExternalTrigger& trigger,
                                                  std::uint64_t sequence_id,
                                                  const InspectionResultPayload& result,
                                                  std::string* error_message) const {
@@ -361,7 +355,7 @@ void StationController::log_result(const InspectionResultPayload& result) const 
 }
 
 void StationController::record_event(const std::string& name,
-                                     const PlcTrigger& trigger,
+                                     const ExternalTrigger& trigger,
                                      std::uint64_t sequence_id,
                                      InspectionDecision decision,
                                      ErrorCode error_code,
@@ -382,7 +376,7 @@ void StationController::record_event(const std::string& name,
 void StationController::record_system_event(const std::string& name,
                                             ErrorCode error_code,
                                             const std::string& message) {
-  PlcTrigger trigger;
+  ExternalTrigger trigger;
   trigger.trigger_id = 0;
   trigger.seat_id = "";
   trigger.sku = "";

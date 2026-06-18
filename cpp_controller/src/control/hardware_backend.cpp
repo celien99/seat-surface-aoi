@@ -20,6 +20,8 @@ const char* hardware_backend_name(HardwareBackend backend) {
       return "simulated";
     case HardwareBackend::ManualTrigger:
       return "manual_trigger";
+    case HardwareBackend::ExternalSignal:
+      return "external_signal";
     case HardwareBackend::ModbusTcp:
       return "modbus_tcp";
     case HardwareBackend::SiemensS7:
@@ -54,6 +56,10 @@ bool is_manual_trigger_backend(HardwareBackend backend) {
   return backend == HardwareBackend::ManualTrigger;
 }
 
+bool is_external_signal_backend(HardwareBackend backend) {
+  return backend == HardwareBackend::ExternalSignal;
+}
+
 bool parse_hardware_mode(const std::string& value,
                          HardwareMode* out_mode,
                          std::string* error_message) {
@@ -85,6 +91,11 @@ bool parse_hardware_backend(const std::string& value,
   if (value == "manual_trigger" || value == "manual" || value == "keyboard" ||
       value == "button") {
     *out_backend = HardwareBackend::ManualTrigger;
+    return true;
+  }
+  if (value == "external_signal" || value == "external" || value == "line_signal" ||
+      value == "normalized_signal") {
+    *out_backend = HardwareBackend::ExternalSignal;
     return true;
   }
   if (value == "modbus_tcp" || value == "modbus") {
@@ -135,7 +146,7 @@ bool parse_hardware_backend(const std::string& value,
   if (error_message != nullptr) {
     *error_message =
         "硬件 backend 不支持: " + value +
-        "，可选 simulated/manual_trigger/modbus_tcp/siemens_s7/ethercat_io/digital_io/"
+        "，可选 simulated/manual_trigger/external_signal/modbus_tcp/siemens_s7/ethercat_io/digital_io/"
         "serial_ascii/basler_pylon/hikrobot_mvs/daheng_galaxy/"
         "flir_spinnaker/vendor_sdk/custom_sdk";
   }

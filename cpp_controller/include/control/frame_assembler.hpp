@@ -46,7 +46,7 @@ class FrameAssembler {
 public:
   void configure(const StationRuntimeConfig& config);
   bool acquire_bundles(const Recipe& recipe,
-                       const PlcTrigger& trigger,
+                       const ExternalTrigger& trigger,
                        std::uint64_t sequence_id,
                        SeatImageBundle* out_bundle,
                        AcquisitionError* error);
@@ -63,7 +63,7 @@ private:
                                   const std::vector<RuntimeCaptureViewConfig>& views,
                                   AcquisitionError* error) const;
   ICamera* camera_for_index(std::uint32_t camera_index) const;
-  bool wait_robot_pose_ready(const PlcTrigger& trigger,
+  bool wait_robot_pose_ready(const ExternalTrigger& trigger,
                              const RuntimeCaptureViewConfig& view,
                              RobotPoseStatus* out_status,
                              AcquisitionError* error);

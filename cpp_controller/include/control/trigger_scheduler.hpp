@@ -5,7 +5,7 @@
 
 namespace seat_aoi {
 
-struct PlcTrigger {
+struct ExternalTrigger {
   std::uint64_t trigger_id = 0;
   std::string seat_id = "SIM_SEAT_001";
   std::string sku = "seat_a_black_leather";
@@ -13,7 +13,7 @@ struct PlcTrigger {
 
 class TriggerScheduler {
 public:
-  PlcTrigger next_simulated_trigger();
+  ExternalTrigger next_simulated_trigger();
 
 private:
   std::uint64_t next_trigger_id_ = 1000;

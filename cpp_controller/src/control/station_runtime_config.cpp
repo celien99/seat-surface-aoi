@@ -717,8 +717,8 @@ bool load_station_runtime_config(const std::string& path,
       if (!parse_hardware_mode(value, &config.hardware_mode, error_message)) {
         return false;
       }
-    } else if (key == "plc.backend") {
-      if (!parse_hardware_backend(value, &config.plc.backend, error_message)) {
+    } else if (key == "signal.backend" || key == "plc.backend") {
+      if (!parse_hardware_backend(value, &config.signal.backend, error_message)) {
         return false;
       }
     } else if (key == "camera_backend" || key == "camera.backend") {
@@ -747,38 +747,25 @@ bool load_station_runtime_config(const std::string& path,
       config.robot.fault_input = value;
     } else if (key == "robot.start_output") {
       config.robot.start_output = value;
-    } else if (key == "plc.host") {
-      config.plc.host = value;
-    } else if (key == "plc.port") {
-      if (!parse_uint32_field("plc.port", value, false, &config.plc.port, error_message)) {
-        return false;
+    } else if (key == "signal.station_id" || key == "plc.station_id") {
+      config.signal.station_id = value;
+    } else if (key == "signal.default_seat_id") {
+      config.signal.default_seat_id = value;
+    } else if (key == "signal.default_sku" || key == "plc.sku_source") {
+      config.signal.default_sku = value;
+    } else if (key == "signal.trigger_queue_path" || key == "signal.trigger_queue") {
+      config.signal.trigger_queue_path = value;
+    } else if (key == "signal.result_queue_path" || key == "signal.result_queue") {
+      config.signal.result_queue_path = value;
+    } else if (key == "plc.host" || key == "plc.port" ||
+               key == "plc.trigger_source" || key == "plc.trigger_id_source" ||
+               key == "plc.seat_id_source" || key == "plc.ok_output" ||
+               key == "plc.ng_output" || key == "plc.recheck_output" ||
+               key == "plc.ack_input" || key == "plc.output_hold_ms") {
+      if (error_message != nullptr) {
+        *error_message = key + " 已移除；C++ 只接收外部归一化信号，请改用 signal.* 配置";
       }
-    } else if (key == "plc.station_id") {
-      config.plc.station_id = value;
-    } else if (key == "plc.trigger_source") {
-      config.plc.trigger_source = value;
-    } else if (key == "plc.trigger_id_source") {
-      config.plc.trigger_id_source = value;
-    } else if (key == "plc.seat_id_source") {
-      config.plc.seat_id_source = value;
-    } else if (key == "plc.sku_source") {
-      config.plc.sku_source = value;
-    } else if (key == "plc.ok_output") {
-      config.plc.ok_output = value;
-    } else if (key == "plc.ng_output") {
-      config.plc.ng_output = value;
-    } else if (key == "plc.recheck_output") {
-      config.plc.recheck_output = value;
-    } else if (key == "plc.ack_input") {
-      config.plc.ack_input = value;
-    } else if (key == "plc.output_hold_ms") {
-      if (!parse_uint32_field("plc.output_hold_ms",
-                              value,
-                              false,
-                              &config.plc.output_hold_ms,
-                              error_message)) {
-        return false;
-      }
+      return false;
     } else if (key == "light.device_id") {
       config.light.device_id = value;
     } else if (key == "light.host") {
@@ -905,20 +892,23 @@ bool load_station_runtime_config(const std::string& path,
       if (!parse_bool_field(key, value, &config.light.simulate_fault, error_message)) {
         return false;
       }
-    } else if (key == "simulate_plc_output_fault") {
-      if (!parse_bool_field(key, value, &config.plc.simulate_output_fault, error_message)) {
+    } else if (key == "simulate_signal_result_fault" ||
+               key == "simulate_plc_output_fault") {
+      if (!parse_bool_field(key, value, &config.signal.simulate_output_fault, error_message)) {
         return false;
       }
-    } else if (key == "plc.simulate_output_fault") {
-      if (!parse_bool_field(key, value, &config.plc.simulate_output_fault, error_message)) {
+    } else if (key == "signal.simulate_output_fault" ||
+               key == "plc.simulate_output_fault") {
+      if (!parse_bool_field(key, value, &config.signal.simulate_output_fault, error_message)) {
         return false;
       }
     } else if (key == "simulate_trigger_timeout") {
-      if (!parse_bool_field(key, value, &config.plc.simulate_trigger_timeout, error_message)) {
+      if (!parse_bool_field(key, value, &config.signal.simulate_trigger_timeout, error_message)) {
         return false;
       }
-    } else if (key == "plc.simulate_trigger_timeout") {
-      if (!parse_bool_field(key, value, &config.plc.simulate_trigger_timeout, error_message)) {
+    } else if (key == "signal.simulate_trigger_timeout" ||
+               key == "plc.simulate_trigger_timeout") {
+      if (!parse_bool_field(key, value, &config.signal.simulate_trigger_timeout, error_message)) {
         return false;
       }
     } else if (key == "simulate_robot_fault") {
@@ -1127,19 +1117,20 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
     return false;
   }
 
-  const bool plc_is_simulated = is_simulated_backend(config.plc.backend);
-  const bool plc_is_manual = is_manual_trigger_backend(config.plc.backend);
+  const bool signal_is_simulated = is_simulated_backend(config.signal.backend);
+  const bool signal_is_manual = is_manual_trigger_backend(config.signal.backend);
+  const bool signal_is_external = is_external_signal_backend(config.signal.backend);
   const bool camera_is_simulated = is_simulated_backend(config.camera_backend);
   const bool light_is_simulated = is_simulated_backend(config.light.backend);
   const bool robot_is_simulated = is_simulated_backend(config.robot.backend);
 
   if (config.hardware_mode == HardwareMode::Simulated) {
-    if (!is_simulated_backend(config.plc.backend) ||
+    if (!is_simulated_backend(config.signal.backend) ||
         !is_simulated_backend(config.camera_backend) ||
         !is_simulated_backend(config.light.backend) ||
         !is_simulated_backend(config.robot.backend)) {
       if (error_message != nullptr) {
-        *error_message = "hardware_mode=simulated 时 plc.backend/camera_backend/"
+        *error_message = "hardware_mode=simulated 时 signal.backend/camera_backend/"
                          "light.backend/robot.backend 必须都是 simulated";
       }
       return false;
@@ -1155,9 +1146,10 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
   }
 
   if (config.hardware_mode == HardwareMode::Lab) {
-    if (!plc_is_manual && !plc_is_simulated) {
+    if (!signal_is_manual && !signal_is_simulated && !signal_is_external) {
       if (error_message != nullptr) {
-        *error_message = "hardware_mode=lab 时 plc.backend 只能是 manual_trigger 或 simulated";
+        *error_message =
+            "hardware_mode=lab 时 signal.backend 只能是 manual_trigger、external_signal 或 simulated";
       }
       return false;
     }
@@ -1167,49 +1159,32 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
       }
       return false;
     }
-  } else if (plc_is_simulated || plc_is_manual || camera_is_simulated ||
+  } else if (signal_is_simulated || signal_is_manual || !signal_is_external ||
+             camera_is_simulated ||
              light_is_simulated ||
              (config.capture_mode == CaptureMode::RobotFlyshot && robot_is_simulated)) {
     if (error_message != nullptr) {
-      *error_message = "hardware_mode=production 时不能使用 simulated/manual_trigger backend；"
-                       "请填写 plc.backend、camera_backend、light.backend 和 robot.backend";
+      *error_message = "hardware_mode=production 时 signal.backend 必须是 external_signal，"
+                       "且不能使用 simulated/manual_trigger/camera/light backend；"
+                       "请填写 signal.backend、camera_backend、light.backend 和 robot.backend";
     }
     return false;
   }
 
-  if (!reject_todo_if_set("plc.host", config.plc.host, error_message) ||
-      !reject_todo_if_set("plc.station_id", config.plc.station_id, error_message) ||
-      !reject_todo_if_set("plc.ack_input", config.plc.ack_input, error_message) ||
+  if (!reject_todo_if_set("signal.station_id", config.signal.station_id, error_message) ||
+      !reject_todo_if_set("signal.default_seat_id",
+                          config.signal.default_seat_id,
+                          error_message) ||
+      !reject_todo_if_set("signal.default_sku", config.signal.default_sku, error_message) ||
       !reject_todo_if_set("light.device_id", config.light.device_id, error_message) ||
       !reject_todo_if_set("light.host", config.light.host, error_message) ||
       !reject_todo_if_set("light.serial_port", config.light.serial_port, error_message)) {
     return false;
   }
 
-  if (!plc_is_manual) {
-    if (!require_non_empty("plc.trigger_source", config.plc.trigger_source, error_message) ||
-        !require_non_empty("plc.trigger_id_source", config.plc.trigger_id_source, error_message) ||
-        !require_non_empty("plc.seat_id_source", config.plc.seat_id_source, error_message) ||
-        !require_non_empty("plc.sku_source", config.plc.sku_source, error_message) ||
-        !require_non_empty("plc.ok_output", config.plc.ok_output, error_message) ||
-        !require_non_empty("plc.ng_output", config.plc.ng_output, error_message) ||
-        !require_non_empty("plc.recheck_output", config.plc.recheck_output, error_message)) {
-      return false;
-    }
-  }
-  if (!plc_is_manual &&
-      (config.plc.backend == HardwareBackend::ModbusTcp ||
-       config.plc.backend == HardwareBackend::SiemensS7) &&
-      !require_non_empty("plc.host", config.plc.host, error_message)) {
-    return false;
-  }
-  if (!plc_is_manual &&
-      (config.plc.backend == HardwareBackend::ModbusTcp ||
-       config.plc.backend == HardwareBackend::SiemensS7) &&
-      config.plc.port == 0) {
-    if (error_message != nullptr) {
-      *error_message = "plc.port 必须大于 0";
-    }
+  if (!signal_is_manual &&
+      (!require_non_empty("signal.station_id", config.signal.station_id, error_message) ||
+       !require_non_empty("signal.default_sku", config.signal.default_sku, error_message))) {
     return false;
   }
   for (const auto& camera : config.cameras) {

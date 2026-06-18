@@ -13,7 +13,7 @@ bool SimRobotClient::initialize(const RobotClientConfig& config) {
   return true;
 }
 
-bool SimRobotClient::wait_pose_ready(const PlcTrigger& trigger,
+bool SimRobotClient::wait_pose_ready(const ExternalTrigger& trigger,
                                      const RobotPoseRequest& request,
                                      int timeout_ms,
                                      RobotPoseStatus* out_status,

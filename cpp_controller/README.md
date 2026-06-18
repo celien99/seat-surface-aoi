@@ -2,7 +2,7 @@
 
 ## 概述
 
-`cpp_controller` 是座椅表面 AOI 检测系统的 C++ 主控程序，负责工位流程编排、固定机位/机器人飞拍采集调度、PLC/Robot 信号交互，以及通过跨平台共享内存与 Python 检测引擎进行 IPC 通信。Linux/macOS 使用 POSIX 共享内存，Windows 工控机使用 Named Shared Memory。
+`cpp_controller` 是座椅表面 AOI 检测系统的 C++ 主控程序，负责工位流程编排、固定机位/机器人飞拍采集调度、外部信号/机器人信号交互，以及通过跨平台共享内存与 Python 检测引擎进行 IPC 通信。Linux/macOS 使用 POSIX 共享内存，Windows 工控机使用 Named Shared Memory。
 
 ### 核心定位
 
@@ -10,13 +10,13 @@
 ┌──────────────────────────────────────────────────────────────────┐
 │                     C++ Controller (本工程)                       │
 │                                                                  │
-│   PLC/Robot 触发 ─→ 光源时序 ─→ 相机采图 ─→ FrameRingBuffer (SHM) │
+│   外部信号/Robot 触发 ─→ 光源时序 ─→ 相机采图 ─→ FrameRingBuffer (SHM) │
 │                                          │                       │
 │                                          ↓                       │
 │                                   [Python 检测器]                 │
 │                                          │                       │
 │                                          ↓                       │
-│   PLC 输出 ←────────────── ResultRingBuffer (SHM)                │
+│   外部信号结果 ←────────────── ResultRingBuffer (SHM)                │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -39,7 +39,7 @@ cpp_controller/
 │   │   └── result_ring_buffer.cpp          # 检测结果环形缓冲区（Python → C++）
 │   │
 │   ├── control/                            # 工位控制逻辑层
-│   │   ├── plc_client.cpp                  # PLC 客户端（模拟实现）
+│   │   ├── signal_client.cpp                 # 外部信号客户端（模拟实现）
 │   │   ├── robot_client.cpp                # 机器人位姿/SHOT_ID 客户端（模拟实现）
 │   │   ├── light_controller.cpp            # 光源控制器（模拟实现）
 │   │   ├── hardware_backend.cpp            # 硬件模式和 backend 解析
@@ -69,15 +69,15 @@ cpp_controller/
 │   │   └── crc32.hpp                       # CRC32 函数声明
 │   └── control/
 │       ├── station_controller.hpp          # StationController + StationConfig
-│       ├── iplc_client.hpp                 # PLC 抽象接口
-│       ├── plc_client.hpp                  # PlcClient + PlcHealth
+│       ├── isignal_client.hpp               # 外部信号抽象接口
+│       ├── signal_client.hpp                # ExternalSignalClient + SimSignalClient + ManualSignalClient
 │       ├── irobot_client.hpp               # Robot 抽象接口
 │       ├── robot_client.hpp                # SimRobotClient
 │       ├── hardware_factory.hpp            # 模拟/生产 backend 工厂
 │       ├── hardware_backend.hpp            # 硬件模式和 backend 枚举
 │       ├── light_controller.hpp            # LightController + 光源类型定义
 │       ├── frame_assembler.hpp             # FrameAssembler + Recipe
-│       ├── trigger_scheduler.hpp           # TriggerScheduler + PlcTrigger
+│       ├── trigger_scheduler.hpp           # TriggerScheduler + ExternalTrigger
 │       ├── station_runtime_config.hpp      # StationRuntimeConfig + 配置解析
 │       └── station_health.hpp              # 工位健康状态
 │   └── camera/                             # 相机相关头文件
@@ -104,7 +104,7 @@ cpp_controller/
 | Target | 类型 | 说明 |
 |--------|------|------|
 | `seat_aoi_ipc` | 静态库 | 共享内存、环形缓冲区、CRC32 |
-| `seat_aoi_control` | 静态库 | PLC、光源、相机、工位编排 |
+| `seat_aoi_control` | 静态库 | 外部信号、光源、相机、工位编排 |
 | `seat_aoi_controller` | 可执行文件 | 主程序入口 |
 | `protocol_layout` | 可执行文件（工具） | 打印结构体大小，用于跨语言对齐校验 |
 | `ipc_safety_checks` | 可执行文件（测试） | IPC 故障注入与安全测试 |
@@ -120,7 +120,7 @@ seat_aoi_controller (依赖 seat_aoi_control)
 ipc_safety_checks   (依赖 seat_aoi_control)
 ```
 
-默认构建外部依赖为零，仅依赖 C++17 标准库和系统共享内存 API：Linux/macOS 使用 `shm_open`/`mmap`，Windows 使用 `CreateFileMappingW`/`MapViewOfFile`。`hikrobot_mvs` 相机 backend 已预留真实 MVS SDK 适配层，但必须在工控机上显式启用 SDK 构建；PLC 和频闪真实 backend 仍需按现场协议继续接入。
+默认构建外部依赖为零，仅依赖 C++17 标准库和系统共享内存 API：Linux/macOS 使用 `shm_open`/`mmap`，Windows 使用 `CreateFileMappingW`/`MapViewOfFile`。`hikrobot_mvs` 相机 backend 已预留真实 MVS SDK 适配层，但必须在工控机上显式启用 SDK 构建；外部信号网关和频闪真实 backend 仍需按现场协议继续接入。
 
 ---
 
@@ -130,15 +130,15 @@ ipc_safety_checks   (依赖 seat_aoi_control)
 
 | 模式 | 配置 | 用途 |
 |------|------|------|
-| 模拟模式 | `hardware_mode=simulated` | 不需要真实硬件，使用模拟 PLC、模拟相机、模拟频闪跑通端到端 IPC 和故障注入 |
-| 实验室联调模式 | `hardware_mode=lab` | PLC 未接入前使用 `plc.backend=manual_trigger`，配合真实相机/频闪 backend 做工控机手动触发联调 |
-| 生产模式 | `hardware_mode=production` | 强制填写 PLC、相机、频闪现场参数，禁止误用 simulated backend；当前仓库提供配置校验和 fail-fast 保护，真实 SDK 需按型号接入 |
+| 模拟模式 | `hardware_mode=simulated` | 不需要真实硬件，使用模拟外部信号、模拟相机、模拟频闪跑通端到端 IPC 和故障注入 |
+| 实验室联调模式 | `hardware_mode=lab` | 外部信号网关未接入前使用 `signal.backend=manual_trigger`，配合真实相机/频闪 backend 做工控机手动触发联调 |
+| 生产模式 | `hardware_mode=production` | 强制填写外部信号、相机、频闪现场参数，禁止误用 simulated backend；当前仓库提供配置校验和 fail-fast 保护，真实 SDK 需按型号接入 |
 
 模拟模式行为：
 
 | 模块 | 模拟行为 | 故障注入 |
 |------|---------|---------|
-| **PLC** (`plc_client.cpp`) | 自动生成虚拟触发信号（`SIM_SEAT_XXX`），递增 trigger_id | `--simulate-plc-output-fault` 模拟输出失败<br>`--simulate-trigger-timeout` 模拟触发超时 |
+| **Signal** (`signal_client.cpp`) | 自动生成虚拟触发信号（`SIM_SEAT_XXX`），递增 trigger_id | `--simulate-signal-result-fault` 模拟结果发布失败<br>`--simulate-trigger-timeout` 模拟触发超时 |
 | **Robot** (`robot_client.cpp`) | 在机器人飞拍模式下模拟 pose ready、SHOT_ID、TCP 位姿和机器人时间戳 | `simulate_robot_fault=true` 模拟机器人 FAULT |
 | **相机** (`camera_device.cpp`) | 生成合成图像（纹理 + 梯度 + 伪随机数据），64×48 可配置分辨率 | `--simulate-missing-frame` 模拟丢帧 |
 | **光源** (`light_controller.cpp`) | 模拟频闪时序，1ms sleep 模拟硬件延迟 | `--simulate-light-fault` 模拟光源故障 |
@@ -147,12 +147,12 @@ ipc_safety_checks   (依赖 seat_aoi_control)
 
 | 设备 | 可选 backend |
 |------|--------------|
-| PLC | `manual_trigger`、`modbus_tcp`、`siemens_s7`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk` |
+| Signal | `simulated`、`manual_trigger`、`external_signal`、`modbus_tcp`、`siemens_s7`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk` |
 | 相机 | `basler_pylon`、`hikrobot_mvs`、`daheng_galaxy`、`flir_spinnaker`、`vendor_sdk`、`custom_sdk` |
 | 频闪 | `serial_ascii`、`modbus_tcp`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk` |
 | Robot | `modbus_tcp`、`siemens_s7`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk` |
 
-`manual_trigger` 只能用于 `hardware_mode=lab`，它生成测试触发并记录结果，不输出真实 PLC IO。`production` 模式禁止 `manual_trigger` 和 `simulated` backend。如果选择了非 simulated backend，但 C++ 尚未链接对应真实驱动，程序会在初始化阶段明确报错并退出，不会偷偷回退到模拟硬件。
+`manual_trigger` 只能用于 `hardware_mode=lab`，它生成测试触发并记录结果，不输出真实外部 IO。`production` 模式要求 `signal.backend=external_signal`，禁止 `manual_trigger` 和 `simulated` backend。如果选择了非 simulated backend，但 C++ 尚未链接对应真实驱动，程序会在初始化阶段明确报错并退出，不会偷偷回退到模拟硬件。
 
 ## 采集方案模式
 
@@ -223,7 +223,7 @@ Empty ─→ Writing ─→ Ready ─→ Reading ─→ Empty
 - Result ring 读取时要求 `payload_size == ResultSlotHeader + defect_count * DefectResultMeta`，且 slot 头与 `InspectionResultMeta.defect_count` 一致，防止缺陷数组截断或尾部脏数据被接受。
 - 等待当前 `sequence_id` 时，旧序号的 `Ready/Corrupted/Timeout` slot 会被回收清空；当前序号的 `Corrupted` 或 `Timeout` slot 会立即转成 `CrcMismatch` 或 `DetectorTimeout`，不会继续等待到超时。
 - detector 返回结果时会校验判定语义：`OK` 必须质量通过、无错误且无缺陷，`NG` 必须质量通过、无错误且存在缺陷；语义不一致的结果按 `InvalidPayload` 转为 `RECHECK`。
-- detector 返回 `ERROR` 时，C++ 记录原始错误和健康状态，但输出给 PLC 的动作映射为 `Recheck`，避免把检测侧不确定状态输出成产线 `OK`。
+- detector 返回 `ERROR` 时，C++ 记录原始错误和健康状态，但发布给外部信号的动作映射为 `Recheck`，避免把检测侧不确定状态输出成产线 `OK`。
 
 ---
 
@@ -279,7 +279,7 @@ bash tools/package_release.sh
 
 执行前先把真实模型产物替换到根目录 `model/`，脚本会默认集成该目录。
 
-解包后可执行 `./bin/seat_aoi_controller --config cpp_controller/config/station_runtime.example.conf --once --wait-ms 8000` 启动 C++ 主控。C++ 仍只负责 PLC、相机、频闪、机器人、共享内存写入和结果读取，不包含深度学习推理。
+解包后可执行 `./bin/seat_aoi_controller --config cpp_controller/config/station_runtime.example.conf --once --wait-ms 8000` 启动 C++ 主控。C++ 仍只负责外部信号、相机、频闪、机器人、共享内存写入和结果读取，不包含深度学习推理。
 
 ### 运行
 
@@ -296,13 +296,13 @@ bash tools/package_release.sh
 # 使用机器人飞拍模拟配置
 ./build/seat_aoi_controller --config config/station_runtime.robot_flyshot.example.conf
 
-# 只校验生产配置，不启动 PLC/相机/频闪
+# 只校验生产配置，不启动外部信号/相机/频闪
 ./build/seat_aoi_controller --config config/station_runtime.production.conf --validate-config
 
 # 故障注入测试
 ./build/seat_aoi_controller --simulate-light-fault
 ./build/seat_aoi_controller --simulate-missing-frame
-./build/seat_aoi_controller --simulate-plc-output-fault
+./build/seat_aoi_controller --simulate-signal-result-fault
 ./build/seat_aoi_controller --simulate-trigger-timeout
 
 # 自定义参数
@@ -334,12 +334,12 @@ uv run python -m tools.validate_deployment_preflight --strict-production
 | `--validate-config` | 只校验运行配置后退出，不初始化共享内存和硬件 | false |
 | `--max-jobs <N>` | 最大检测任务数（0=不限） | 0 |
 | `--wait-ms <N>` | 检测结果等待超时(ms) | 5000 |
-| `--trigger-timeout-ms <N>` | PLC 触发等待超时(ms) | 1000 |
+| `--trigger-timeout-ms <N>` | 外部信号触发等待超时(ms) | 1000 |
 | `--trace-root <path>` | C++ 生产事件日志目录 | trace |
 | `--simulate-light-fault` | 模拟光源故障 | false |
 | `--simulate-missing-frame` | 模拟相机丢帧 | false |
-| `--simulate-plc-output-fault` | 模拟 PLC 输出失败 | false |
-| `--simulate-trigger-timeout` | 模拟 PLC 触发超时 | false |
+| `--simulate-signal-result-fault` | 模拟外部信号结果发布失败 | false |
+| `--simulate-trigger-timeout` | 模拟外部信号触发超时 | false |
 
 运行时配置中的布尔字段只接受 `true/false/1/0/yes/no/on/off`，拼写错误或未知布尔值会导致配置加载失败，避免故障注入或共享内存 reset 选项被静默解释为 `false`。
 
@@ -350,7 +350,7 @@ uv run python -m tools.validate_deployment_preflight --strict-production
 ```ini
 # key=value，支持 # 注释
 hardware_mode=simulated
-plc.backend=simulated
+signal.backend=simulated
 camera.backend=simulated
 light.backend=simulated
 reset_shared_memory=true
@@ -390,7 +390,7 @@ light.1.current_percent=60
 # 故障注入
 simulate_light_fault=false
 simulate_missing_frame=false
-simulate_plc_output_fault=false
+simulate_signal_result_fault=false
 simulate_trigger_timeout=false
 ```
 
@@ -407,7 +407,7 @@ cp config/station_runtime.production.example.conf config/station_runtime.product
 
 Hikrobot MVS backend 当前按 `Mono8` 单通道实现，并已按海康 MVS C++ 示例工程对齐：进程内引用计数调用 `MV_CC_Initialize/Finalize`，枚举 GigE/USB/GenTL 设备，按 `camera.0.serial_number` 匹配相机，配置 `4096 x 3072`、`TriggerMode=On`、`TriggerSource=Software`、`Line1=ExposureStartActive`、`StrobeEnable=true`。C++ 每个光源轮次先设置曝光/增益并 arm 相机，再发送 `TriggerSoftware`；真实频闪应接相机 `ExposureStartActive`/ExposureOut 输出，确保光源点亮落在曝光窗口内。取帧使用 MVS 示例里的 `nExtendWidth/nExtendHeight/nFrameLenEx` 字段，其他像素格式不会隐式转换，配置不匹配会保守失败。
 
-PLC 未确定前，使用 `config/station_runtime.lab_manual.example.conf` 做手动触发联调，只验证相机、频闪、共享内存和 Python detector 收图。该模板的 `frame_slot_size=67108864` 会被联调脚本同步传给 Python detector，避免 4096 x 3072 图像在 Python 侧仍按默认 16 MB 打开共享内存。进入生产闭环前仍必须补齐 PLC backend、触发输入、`trigger_id/seat_id/sku` 来源和 OK/NG/RECHECK 输出点位。
+外部信号网关未确定前，使用 `config/station_runtime.lab_manual.example.conf` 做手动触发联调，只验证相机、频闪、共享内存和 Python detector 收图。该模板的 `frame_slot_size=67108864` 会被联调脚本同步传给 Python detector，避免 4096 x 3072 图像在 Python 侧仍按默认 16 MB 打开共享内存。进入生产闭环前仍必须补齐 `signal.backend=external_signal`、`trigger_queue_path`/`result_queue_path` 和外部信号网关。
 
 机器人飞拍生产模板位于 `config/station_runtime.robot_flyshot.production.example.conf`，复制后需要补齐 `robot.*`、`pose.<N>.*`、末端相机和光源控制器参数：
 
@@ -440,7 +440,7 @@ cp config/station_runtime.robot_flyshot.production.example.conf \
 
 ```
 1. wait_for_trigger()
-   └─ PlcClient::wait_trigger()  → 生成 PlcTrigger (模拟)
+   └─ ISignalClient::wait_trigger()  → 生成 ExternalTrigger (模拟)
        trigger_id = auto-increment
        seat_id    = "SIM_SEAT_XXX"
        sku        = "seat_a_black_leather"
@@ -472,7 +472,7 @@ cp config/station_runtime.robot_flyshot.production.example.conf \
    │
    ├─ validate_detector_result()  (校验 sequence_id/trigger_id/CRC)
    │
-   └─ plc_client_.send_decision()  → 模拟 PLC 输出 OK/NG/Recheck
+   └─ signal_client_.publish_result()  → 发布外部信号结果 OK/NG/Recheck
 ```
 
 ### 错误处理策略
@@ -491,11 +491,11 @@ cp config/station_runtime.robot_flyshot.production.example.conf \
 | 检测超时 | DetectorTimeout | Recheck |
 | CRC 校验失败 | CrcMismatch | Recheck |
 | 结果校验失败 | InvalidPayload | Recheck |
-| PLC 输出失败 | DeviceFault | Recheck |
+| 外部信号结果发布失败 | DeviceFault | Recheck |
 
-同时，C++ 主控会把 `inspection_start`、`inspection_complete`、`inspection_recheck`、`plc_output_failed` 等事件写入 `trace_root/cpp_controller_events.jsonl`。事件包含 `timestamp_us`、`sequence_id`、`trigger_id`、`seat_id`、`sku`、`decision`、`error_code` 和错误说明，用于现场复盘采集、IPC、detector 超时和 PLC 输出故障。
+同时，C++ 主控会把 `inspection_start`、`inspection_complete`、`inspection_recheck`、`signal_result_publish_failed` 等事件写入 `trace_root/cpp_controller_events.jsonl`。事件包含 `timestamp_us`、`sequence_id`、`trigger_id`、`seat_id`、`sku`、`decision`、`error_code` 和错误说明，用于现场复盘采集、IPC、detector 超时和外部信号结果发布故障。
 
-`DetectorTimeout` 会把工位健康状态升级为 `Fault`；后续 `wait_for_trigger()` 会拒绝继续等待 PLC 触发并记录 `trigger_wait_blocked_by_fault`，直到外部复位或重新初始化。这样 detector 失联不会让产线在未知检测能力下继续放行新座椅。
+`DetectorTimeout` 会把工位健康状态升级为 `Fault`；后续 `wait_for_trigger()` 会拒绝继续等待外部信号触发并记录 `trigger_wait_blocked_by_fault`，直到外部复位或重新初始化。这样 detector 失联不会让产线在未知检测能力下继续放行新座椅。
 
 ---
 
@@ -684,10 +684,10 @@ time ─────────────────────────
 
 生产模式部署前必须完成：
 
-1. 按 `config/station_runtime.production.example.conf` 填写现场 PLC、相机、频闪参数。
+1. 按 `config/station_runtime.production.example.conf` 填写现场外部信号、相机、频闪参数。
 2. 运行 `--validate-config`，确保没有 `TODO` 占位和缺失点位。
-3. 按现场硬件型号链接真实 PLC、相机、频闪 SDK 或协议适配器。
-4. 做 PLC 断线、相机缺帧、频闪故障、detector 超时等 fail-closed 验证。
+3. 按现场硬件型号链接真实外部信号网关、相机、频闪 SDK 或协议适配器。
+4. 做外部信号断线、相机缺帧、频闪故障、detector 超时等 fail-closed 验证。
 5. 确认 `trace/cpp_controller_events.jsonl` 能按 `sequence_id` 和 `trigger_id` 记录复检原因。
 6. 运行 `bash tools/run_cpp_soak.sh --jobs 20 --wait-ms 8000` 做短时长稳压测，上线前按现场节拍扩大到 8h/24h。
 
