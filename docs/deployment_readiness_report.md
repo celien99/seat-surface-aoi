@@ -77,7 +77,6 @@
 |---|------|------|--------|------|
 | 1 | COM 端口 | `station_runtime.production.conf:123` | `COM3` | 设备管理器确认实际 COM 号 |
 | 2 | 结果回传端 IP | `station_runtime.production.conf:74` | `192.168.1.100` | 填写触发/上位机结果接收端真实 IP |
-| 3 | **C++ / Python 光源数量不一致** | 见下方详述 | 3 vs 4 | 需要决策并修改 |
 
 ### 🟡 功能项（可后补，不阻运行）
 
@@ -87,62 +86,24 @@
 | 5 | JSON 输出 | `json_output.enabled=false` | 当前关闭，无影响 |
 | 6 | 图像落盘 | `image_save.enabled=false` | 生产环境建议关闭（Python trace 已存图） |
 | 7 | 站位 ID | `signal.station_id=LINE1_AOI_01` | 可自定义 |
+| 8 | 第 4 路光源 | FL-ACDH 通道 4 | 当前预留，不属于产线必需光源 |
 
 ---
 
-## 四、光源数量不一致（需立即处理）
+## 四、三光源生产配方已对齐
 
-### 问题
-
-C++ 配置只定义了 3 个光源通道，但 Python 配方期望 4 个光源。
+当前产线明确为固定双机位 + 三光源频闪，C++ 与 Python 已按同一光源集合对齐。
 
 | 层 | 文件 | 光源配置 |
 |----|------|----------|
-| C++ config | `station_runtime.production.conf` | `light_order=1,2,3`（3 个物理通道） |
+| C++ config | `station_runtime.production.conf` | `light_order=1,2,3` |
 | C++→Python 映射 | `python_detector/ipc/shm_client.py` | `1→DIFFUSE, 2→POLAR_DIFFUSE, 3→HIGH_LEFT` |
-| Python recipe | `production_recipe.yaml` | `required_lights: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT, HIGH_RIGHT]`（4 个） |
-| Python camera | `production_recipe.yaml` | `light_order: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT, HIGH_RIGHT]`（4 个） |
+| Python recipe | `production_recipe.yaml` | `required_lights: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT]` |
+| Python model input | `production_recipe.yaml` | `ch0_diffuse/ch1_polar_diffuse/ch2_high_left` |
 
-**结果**：C++ 只采集 `light_index=1,2,3` → Python QualityGate 报告 `missing required light HIGH_RIGHT` → 质量门禁失败 → **每次检测都是 RECHECK**。
+质量门禁会要求这 3 路光源全部存在、时间戳按配置顺序单调、帧号/光源序号唯一、曝光/增益一致、亮度和配准通过。缺任一路光源、超时、CRC/协议错误或质量门禁失败仍会返回 `RECHECK` 或 `ERROR`，不会输出 `OK`。
 
-该项已同步进入根目录 README、`docs/v4_architecture_alignment.md`、`docs/cpp_controller_operations.md` 和 `docs/python_detector_operations.md`，作为固定机位生产上线前必须决策的配置/硬件对齐项。
-
-### 决策方案
-
-**方案 A：补齐第 4 路 HIGH_RIGHT 采集。**
-
-在 `cpp_controller/config/station_runtime.production.conf` 增加 `light.4.*`，把 `light_order` 改为 `1,2,3,4`，并确认 FL-ACDH 通道 4、光源安装角度、曝光、增益和频闪宽度满足算法证据要求。该方案保持 Python 生产配方、模型输入通道和 V4 语义光源定义不变。
-
-**方案 B：把固定机位生产配方降为经过验证的 3 光源方案。**
-
-如果现场暂不增加硬件，需要修改 `python_detector/config/production_recipe.yaml`，把 4 光源改为 3 光源：
-
-```yaml
-# 改前                                               # 改后
-quality:                                             quality:
-  required_lights:                                     required_lights:
-    - DIFFUSE                                            - DIFFUSE
-    - POLAR_DIFFUSE                                      - POLAR_DIFFUSE
-    - HIGH_LEFT                                          - HIGH_LEFT
-    - HIGH_RIGHT                            ← 删掉
-
-cameras:                                             cameras:
-  TOP_BACK:                                            TOP_BACK:
-    light_order:                                          light_order:
-      - DIFFUSE                                             - DIFFUSE
-      - POLAR_DIFFUSE                                       - POLAR_DIFFUSE
-      - HIGH_LEFT                                           - HIGH_LEFT
-      - HIGH_RIGHT                             ← 删掉
-
-  TOP_CUSHION:                                          TOP_CUSHION:
-    light_order:                                          light_order:
-      - DIFFUSE                                             - DIFFUSE
-      - POLAR_DIFFUSE                                       - POLAR_DIFFUSE
-      - HIGH_LEFT                                           - HIGH_LEFT
-      - HIGH_RIGHT                             ← 删掉
-```
-
-选择方案 B 时，必须同步修改模型 `input_channels`、多光源特征定义、训练/评估配置和相关测试，并用现场样本验证缺陷召回率；未验证前不能把 3 光源配置作为生产放行条件。
+如果未来新增第 4 路 `HIGH_RIGHT`，需要同时修改 C++ `light_order` 和 `light.4.*`、Python `production_recipe.yaml` 的 `required_lights`/`input_channels`、模型训练资产和相关测试。
 
 ---
 
@@ -241,7 +202,7 @@ C++ 用 `lab_manual.conf` 替代 `production.conf`（已预置好序列号）：
 | 阶段 | 内容 | 阻塞性 |
 |------|------|--------|
 | **现在（工控机组装）** | 按接线图连接硬件，确认 COM 口、相机在线 | 🔴 阻塞 |
-| **现在（配置修正）** | 填入真实 COM 口，解决光源 3/4 不一致 | 🔴 阻塞 |
+| **现在（配置确认）** | 填入真实 COM 口，确认结果回传端 IP | 🔴 阻塞 |
 | **联调阶段** | `lab_manual.conf` 手动触发，验证相机采图、频闪、共享内存、Python 收图、display_app 展示 | 🔴 阻塞 |
 | **联调阶段** | 确认触发端 IP，填入 `result_host` | 🟡 可后补 |
 | **训练阶段** | 采集样本 → 标注 → 训练 → 替换 `model/` 占位文件 | 🟠 模型迭代 |

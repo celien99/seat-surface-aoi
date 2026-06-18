@@ -50,9 +50,10 @@ class FeatureBuilder:
             "ch0_diffuse": self._required(diffuse, "ch0_diffuse"),
             "ch1_polar_diffuse": self._required(polar, "ch1_polar_diffuse"),
             "ch2_high_left": self._required(high_left, "ch2_high_left"),
-            "ch3_high_right": self._required(high_right, "ch3_high_right"),
-            "ch4_high_max_min": self._max_min([high_left, high_right]),
         }
+        if high_right is not None:
+            features["ch3_high_right"] = self._sample(high_right)
+            features["ch4_high_max_min"] = self._max_min([high_left, high_right])
         if low_left is not None and low_right is not None:
             features["optional_dark_low_lr_diff"] = self._abs_diff(low_left, low_right)
             features["optional_dark_low_max_min"] = self._max_min([low_left, low_right])

@@ -152,13 +152,13 @@ training_tools/
 根目录 `tools/validate_architecture_readiness.py` 用于把 V4/PPT 架构要求固化成静态检查项：
 
 - `--scope reference` 校验参考实现是否具备固定机位、机器人飞拍、共享内存 v2、质量门禁、trace、ROI/ECC/ONNX/PatchCore/FAISS 接入点等能力。
-- `--scope production` 校验上线阻塞项，真实模型资产、正式生产配置仍是占位值或固定机位光源/生产配方不一致时会返回 `BLOCKED`。
+- `--scope production` 校验上线阻塞项，真实模型资产、固定双机位正式生产配置仍是占位值或固定机位光源/生产配方不一致时会返回 `BLOCKED`。
 
 根目录 `tools/validate_deployment_preflight.py` 用于 Windows 工控机上机前交接：
 
 - 默认模式确认当前环境可实现的参考链路、Windows 共享内存映射、跨平台 IPC 入口、部署包入口和 PLC 前手动联调路径无本地阻塞。
-- `--strict-production` 用于放行前，把正式生产配置、生产光源配方对齐和真实模型资产缺失升级为 `BLOCKED`。
-- 真实模型、现场 `production.conf`、生产光源/配方对齐、MES/报警/监控协议属于现场 ACTION，不应在本机用占位产物伪造通过。
+- `--strict-production` 用于放行前，把固定双机位正式生产配置、生产光源配方对齐和真实模型资产缺失升级为 `BLOCKED`。
+- 真实模型、现场 `production.conf`、MES/报警/监控协议属于现场 ACTION，不应在本机用占位产物伪造通过。
 
 ## 关键实现说明
 
@@ -204,7 +204,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 模型补齐后，固定机位生产任务应使用 `recipe_id=seat_a_black_leather_production_v1`，机器人飞拍生产任务应使用 `recipe_id=seat_a_robot_flyshot_production_v1`。这两个配方会启用 `onnx_yolo` Dome ROI、`ecc` 多光源配准、监督 ONNX 主检测、WideResNet50 embedding、PCA、PatchCore KNN 和可选 FAISS safety net；仓库内生产标定和 `production_full_roi.yaml` 是可校验模板，真实上线必须替换为现场标定和 ROI。
 
-当前固定机位 C++ 生产配置是双相机 + 3 光源 `light_order=1,2,3`，映射到 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。`production_recipe.yaml` 仍要求 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT/HIGH_RIGHT` 四个必需光源，因此在未补齐第 4 路光源或未把生产配方降为已验证 3 光源方案前，质量门禁会返回 `RECHECK`，不会输出 `OK`。
+当前固定机位 C++ 生产配置是双相机 + 3 光源 `light_order=1,2,3`，映射到 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。`production_recipe.yaml` 已同步为三光源生产配方，模型输入通道为 `ch0_diffuse/ch1_polar_diffuse/ch2_high_left`；若未来补第 4 路 `HIGH_RIGHT`，必须同步生产配方、模型输入通道、训练资产和测试。
 
 配方 schema 会校验：
 
@@ -241,8 +241,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 - `ch0_diffuse`
 - `ch1_polar_diffuse`
 - `ch2_high_left`
-- `ch3_high_right`
-- `ch4_high_max_min`
+- 参考/扩展 4 光源方案可额外使用 `ch3_high_right` 和 `ch4_high_max_min`
 
 可选增强包括低角度暗场差分、局部对比和高光抑制。模型输入 tensor 使用 `NCHW`，并保留 `evidence_lights_by_channel` 供结果回写和 trace 使用。
 

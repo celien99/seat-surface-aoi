@@ -496,7 +496,7 @@ cp config/station_runtime.production.example.conf config/station_runtime.product
 
 当前固定机位参考模拟配置使用 4 路光源并对齐默认 Python 配方；`tools/run_simulated_ipc.*` 默认会把 `config/station_runtime.example.conf` 同时传给 C++ 和 Python。固定机位生产模板按现场已确认硬件预置：海康 MV-CH120-20GC × 2，4096 x 3072，Hikrobot MVS backend；镜头 MVL-KF0814M-12MPE，8mm F1.4，1.1"，C 接口；频闪控制器 FL-ACDH-20048-4，4 通道（当前使用通道 1/2/3）。双相机、Mono8、3 光源图像包约 72 MB，模板保留 `frame_slot_size=134217728`（128 MB）；如果后续增加光源或分辨率变更，应重新计算并同步 Python 共享内存配置。
 
-注意：`station_runtime.production.conf` 当前 `light_order=1,2,3`，而 Python 固定机位生产配方 `seat_a_black_leather_production_v1` 仍要求 `HIGH_RIGHT` 第 4 路语义光源。正式上线前必须补齐第 4 路采集，或把 Python 生产配方、模型输入通道和测试同步降为已验证的 3 光源方案；否则 detector 会因缺少 `HIGH_RIGHT` 返回 `RECHECK`。
+当前产线固定为 `light_order=1,2,3`，Python 固定机位生产配方 `seat_a_black_leather_production_v1` 已同步为 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 三个必需光源。若未来补第 4 路 `HIGH_RIGHT`，必须同时更新 C++ 配置、Python 生产配方、模型输入通道、训练资产和测试。
 
 Hikrobot MVS backend 当前按 `Mono8` 单通道实现，并已按海康 MVS C++ 示例工程对齐：进程内引用计数调用 `MV_CC_Initialize/Finalize`，枚举 GigE/USB/GenTL 设备，按 `camera.<N>.serial_number` 匹配相机，配置 `4096 x 3072`、`TriggerMode=On`、`TriggerSource=Line0`（FL-ACDH F口同步输出做硬件触发）、`Line1=ExposureStartActive`、`StrobeEnable=true`。C++ 每个光源轮次先设置曝光/增益并 arm 相机，再通过 RS232 发送 FL-ACDH 频闪序列（C→B→8→9→A→7）；FL-ACDH 的 `7` 命令同时点亮频闪并通过 F 口同步输出触发相机 Line0 曝光。取帧使用 MVS 示例里的 `nExtendWidth/nExtendHeight/nFrameLenEx` 字段，其他像素格式不会隐式转换，配置不匹配会保守失败。
 

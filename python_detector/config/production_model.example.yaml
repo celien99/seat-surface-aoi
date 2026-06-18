@@ -4,12 +4,10 @@ light_order:
   - DIFFUSE
   - POLAR_DIFFUSE
   - HIGH_LEFT
-  - HIGH_RIGHT
 v4_lights:
   semantic_to_light_id:
     DOME: DIFFUSE
     DARKFIELD_L: HIGH_LEFT
-    DARKFIELD_R: HIGH_RIGHT
     BRIGHTFIELD: POLAR_DIFFUSE
 cameras:
   TOP_BACK:
@@ -19,7 +17,7 @@ cameras:
     roi_template: python_detector/config/roi/default_roi.yaml
     calibration_id: calib/simulated_v1
     base_light_id: POLAR_DIFFUSE
-    light_order: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT, HIGH_RIGHT]
+    light_order: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT]
     roi_models:
       full: supervised_defect_onnx
     roi_safety_net_models:
@@ -32,14 +30,14 @@ cameras:
     roi_template: python_detector/config/roi/default_roi.yaml
     calibration_id: calib/simulated_v1
     base_light_id: POLAR_DIFFUSE
-    light_order: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT, HIGH_RIGHT]
+    light_order: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT]
     roi_models:
       full: supervised_defect_onnx
     roi_safety_net_models:
       full: patchcore_unknown_safety_net
     pixel_size_mm: 0.12
 quality:
-  required_lights: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT, HIGH_RIGHT]
+  required_lights: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT]
   max_saturation_ratio: 0.01
   min_mean_gray: 20
   max_mean_gray: 235
@@ -103,8 +101,6 @@ models:
       - ch0_diffuse
       - ch1_polar_diffuse
       - ch2_high_left
-      - ch3_high_right
-      - ch4_high_max_min
     input_scale: 255.0
     class_names: [scratch, dent]
     output_decode: ultralytics_yolo
@@ -119,8 +115,6 @@ models:
       - ch0_diffuse
       - ch1_polar_diffuse
       - ch2_high_left
-      - ch3_high_right
-      - ch4_high_max_min
     embedding_backend: onnx_wideresnet50
     embedding_model_path: model/wideresnet50/seat_wrn50_embedding.onnx
     embedding_version: wrn50_seat_v1

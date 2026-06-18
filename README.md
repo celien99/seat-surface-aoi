@@ -93,7 +93,7 @@ flowchart LR
 | 视角级串行 TDM | 每个检测视角按 `light_order` 完成多光源采集后再切换下一视角，降低频闪互相污染风险。 |
 | 共享内存 IPC | C++/Python 双端固定布局结构体、frame/result ring buffer、slot 状态机、CRC、layout/对象大小 fail-fast 和协议校验工具。 |
 | V4 算法接口 | Dome ROI YOLO、ECC 配准、WideResNet50 embedding、PCA、PatchCore KNN 和 FAISS 可选加速接入点。 |
-| 生产光源对齐 | 当前固定机位生产配置是双相机 + 3 光源 `light_order=1,2,3`，而 Python 生产配方仍要求 `HIGH_RIGHT` 第 4 路语义光源；上线前必须补齐第 4 路采集或把生产配方降为已验证的 3 光源方案。 |
+| 生产光源对齐 | 当前固定机位产线是 2 相机 + 3 光源，C++ `light_order=1,2,3` 与 Python 生产配方 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 已对齐；第 4 路 `HIGH_RIGHT` 仅作为后续扩展。 |
 | 保守判定 | 协议异常、CRC 错误、缺帧、超时、质量失败、shot/机器人位姿不一致、ROI 冲突、机器人 FAULT、候选融合溢出和模型异常返回 `RECHECK` 或 `ERROR`。 |
 | 无模型采样兜底 | 生产模型文件缺失、仍是占位文件或 ONNX/numpy 依赖未安装时，Python detector 返回 `RECHECK/CONFIGURATION_ERROR`，保存原始采集图和可用 ROI 图，不输出 `OK` 或 `NG`。 |
 | 前端展示页面 | `display_app/` 迁移 PySide6/QML 监控界面，轮询 `display_latest.json`，展示相机/视角图像、OK/NG 计数、日志、复核队列和 NG 弹窗。 |
@@ -241,7 +241,7 @@ uv run python -m tools.validate_deployment_preflight
 uv run python -m tools.validate_deployment_preflight --strict-production
 ```
 
-默认预检用于交接，验证当前仓库可实现的参考链路、Windows 共享内存映射、跨平台 IPC 入口、部署包入口和 PLC 前手动联调路径；真实生产配置、生产光源配方对齐、真实模型资产和 MES/报警/监控协议会列为现场 ACTION。`--strict-production` 用于 Windows 工控机放行前，把正式 `production.conf` 缺失、光源/配方不一致和真实模型资产缺失升级为阻塞项。
+默认预检用于交接，验证当前仓库可实现的参考链路、Windows 共享内存映射、跨平台 IPC 入口、部署包入口和 PLC 前手动联调路径；真实模型资产和 MES/报警/监控协议会列为现场 ACTION。`--strict-production` 用于 Windows 工控机放行前，把固定双机位正式 `production.conf` 缺失、生产光源/配方不一致和真实模型资产缺失升级为阻塞项。
 
 ## 在线链路
 
@@ -327,7 +327,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 C++ 生产模板已把 `recipe_id` 对齐到上述生产配方；上线前还必须用现场标定替换 `python_detector/config/calibration/*/*production*.yaml` 和 `python_detector/config/roi/production_full_roi.yaml` 的模板 ROI/矩阵。
 
-当前固定机位硬件基线已记录到 `cpp_controller/config/station_runtime.production.example.conf` 和已生成的 `cpp_controller/config/station_runtime.production.conf`：海康 MV-CH120-20GC 工业相机，4096 x 3072，Hikrobot MVS backend；MVL-KF0814M-12MPE FA 镜头，8mm F1.4，1.1"，C 接口；FL-ACDH-20048-4 四通道频闪控制器（RS232 serial_ascii backend，支持多控制器扩展）；当前接入 3 组光源，按 `light_order=1,2,3` 串行 TDM 采集。Python 固定机位生产配方目前仍要求 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT/HIGH_RIGHT` 4 个必需光源，因此这属于上线前必须处理的配置/硬件对齐项。
+当前固定机位硬件基线已记录到 `cpp_controller/config/station_runtime.production.example.conf` 和已生成的 `cpp_controller/config/station_runtime.production.conf`：海康 MV-CH120-20GC 工业相机 2 台，4096 x 3072，Hikrobot MVS backend；MVL-KF0814M-12MPE FA 镜头，8mm F1.4，1.1"，C 接口；FL-ACDH-20048-4 四通道频闪控制器（RS232 serial_ascii backend，支持多控制器扩展）；当前产线接入 3 组光源，按 `light_order=1,2,3` 串行 TDM 采集。Python 固定机位生产配方同步要求 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 三个必需光源，模型输入通道为 `ch0_diffuse/ch1_polar_diffuse/ch2_high_left`。
 
 **已实现的真实硬件后端：**
 - **相机**：Hikrobot MVS（Line0 硬件触发 + Software 软件触发），`-DSEAT_AOI_ENABLE_HIKROBOT_MVS=ON` 构建
@@ -365,7 +365,7 @@ PLC 接入前的工控机联调使用 `cpp_controller/config/station_runtime.lab
 | 参考架构检查 | `uv run python -m tools.validate_architecture_readiness --scope reference` | 参考链路能力完整。 |
 | 生产阻塞检查 | `uv run python -m tools.validate_architecture_readiness --scope production` | 占位配置或模型未替换时返回阻塞项。 |
 | 部署上机预检 | `uv run python -m tools.validate_deployment_preflight` | 当前环境可实现项无阻塞，并列出现场硬件、模型和平台 ACTION。 |
-| 严格生产预检 | `uv run python -m tools.validate_deployment_preflight --strict-production` | 正式生产配置、生产光源配方对齐或真实模型资产缺失时返回阻塞项。 |
+| 严格生产预检 | `uv run python -m tools.validate_deployment_preflight --strict-production` | 固定双机位正式生产配置、生产光源配方对齐或真实模型资产缺失时返回阻塞项。 |
 | 模型资产检查 | `uv run python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1` | 真实模型缺失时失败并列出待替换资产。 |
 | 无模型采样兜底 | `uv run pytest python_detector/tests/test_trace_and_tools.py::test_pipeline_model_error_context_is_traceable python_detector/tests/test_trace_and_tools.py::test_pipeline_roi_model_asset_unavailable_saves_raw_images display_app/tests/test_display_app_bridge.py::test_display_bridge_publishes_raw_image_when_roi_is_unavailable` | 模型/ROI 模型资产缺失时返回 `RECHECK`，trace 保存原始图，前端能显示 raw 图。 |
 | 端到端模拟 IPC | `bash tools/run_simulated_ipc.sh` 或 `uv run python tools/run_simulated_ipc.py` | C++ 和 Python 通过共享内存完成一次检测闭环；Windows 使用 Python 跨平台入口。 |

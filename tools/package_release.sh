@@ -230,7 +230,7 @@ PYTHONPATH=. uv run python -m tools.validate_deployment_preflight
 PYTHONPATH=. uv run python -m tools.validate_deployment_preflight --strict-production
 ```
 
-默认预检用于交接，会把真实模型、正式 production.conf、生产光源/配方对齐和 MES/监控接口列为现场 ACTION；`--strict-production` 用于上机放行前，会把真实模型、正式生产配置缺失和光源/配方不一致作为阻塞项。
+默认预检用于交接，会把真实模型和 MES/监控接口列为现场 ACTION；`--strict-production` 用于上机放行前，会把真实模型、固定双机位正式生产配置缺失和光源/配方不一致作为阻塞项。
 
 ## 生产模型
 

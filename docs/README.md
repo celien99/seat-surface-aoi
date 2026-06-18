@@ -11,7 +11,7 @@
 | [项目调用关系摘要](project_function_call_map.md) | 端到端调用链、关键模块边界和阅读顺序。 |
 | [C++ 主控部署与硬件运维](cpp_controller_operations.md) | PLC、相机、频闪、机器人、生产配置、上线 SOP、测试机联调和失败场景。 |
 | [Python 检测算法与模型运维](python_detector_operations.md) | Python 算法入口、配方、ROI/标定、模型后端、trace、训练样本、回放、benchmark 和上机预检。 |
-| [工控机上线补齐报告](deployment_readiness_report.md) | 当前固定双机位 + 三光源工控机交接状态、接线、阻塞项和启动流程；其中的光源 3/4 不一致是上线前必须决策的现场项。 |
+| [工控机上线补齐报告](deployment_readiness_report.md) | 当前固定双机位 + 三光源工控机交接状态、接线、待确认项和启动流程。 |
 
 辅助图片保留在 `docs/assets/`：
 

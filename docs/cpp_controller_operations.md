@@ -60,7 +60,7 @@ cpp_controller/build/seat_aoi_controller \
   --validate-config
 ```
 
-`tools.validate_deployment_preflight` 是源码树和部署包共用的上机前检查入口。默认模式用于交接，会确认本地参考链路、Windows Named Shared Memory 映射、跨平台模拟 IPC、部署包校验入口和 `lab/manual_trigger` 联调路径已经具备；真实 `production.conf`、生产光源/配方对齐、真实模型资产和 MES/报警/监控协议会作为现场 ACTION 输出。`--strict-production` 用于工控机放行前，正式生产配置缺失、光源/配方不一致或真实模型资产缺失时返回阻塞。
+`tools.validate_deployment_preflight` 是源码树和部署包共用的上机前检查入口。默认模式用于交接，会确认本地参考链路、Windows Named Shared Memory 映射、跨平台模拟 IPC、部署包校验入口和 `lab/manual_trigger` 联调路径已经具备；真实模型资产和 MES/报警/监控协议会作为现场 ACTION 输出。`--strict-production` 用于工控机放行前，固定双机位正式生产配置缺失、光源/配方不一致或真实模型资产缺失时返回阻塞。
 
 机器人飞拍生产配置：
 
@@ -144,7 +144,7 @@ cpp_controller/build/seat_aoi_controller \
 | --- | --- | --- |
 | 相机 | 海康 MV-CH120-20GC，4096 x 3072 | `camera.backend=hikrobot_mvs`，`camera.0.width=4096`，`camera.0.height=3072`。 |
 | 镜头 | MVL-KF0814M-12MPE FA 镜头，8mm F1.4，1.1"，C 接口 | 作为标定和视场参数记录，不作为当前运行配置字段解析。 |
-| 频闪控制器 | FL-ACDH-20048-4，4 通道，当前使用通道 1/2/3 | `light.device_id=FL-ACDH-20048-4`，当前 `light_order=1,2,3`，逻辑光源 1..3 映射物理通道 1..3；Python 生产配方仍要求第 4 路 `HIGH_RIGHT`，上线前必须处理该差异。 |
+| 频闪控制器 | FL-ACDH-20048-4，4 通道，当前使用通道 1/2/3 | `light.device_id=FL-ACDH-20048-4`，当前 `light_order=1,2,3`，逻辑光源 1..3 映射物理通道 1..3；Python 固定机位生产配方已同步为 3 光源。 |
 | PLC | 暂未定型 | 第一阶段可用手动/模拟触发测试相机、频闪、共享内存和 Python 收图；生产闭环前必须补齐 PLC 触发与输出点位。 |
 
 ## 必填现场参数

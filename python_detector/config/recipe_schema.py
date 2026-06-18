@@ -340,7 +340,7 @@ def _v4_lights_from_dict(data: dict[str, Any]) -> V4LightConfig:
         )
         for key, value in _dict(raw_mapping, "v4_lights.semantic_to_light_id").items()
     }
-    required_semantics = ("DOME", "DARKFIELD_L", "DARKFIELD_R")
+    required_semantics = ("DOME", "DARKFIELD_L")
     missing = [semantic for semantic in required_semantics if semantic not in mapping]
     if missing:
         raise RecipeValidationError(f"v4_lights.semantic_to_light_id 缺少 V4 语义光源: {missing}")

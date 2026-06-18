@@ -22,5 +22,7 @@ def test_production_architecture_readiness_blocks_placeholder_assets_and_configs
     items = validate_architecture_readiness("production")
     blocked_areas = {item.area for item in items if item.status == "BLOCKED"}
 
-    assert "生产运行配置" in blocked_areas
+    assert "生产运行配置" not in blocked_areas
+    assert any(item.area == "生产光源配方对齐" and item.status == "OK" for item in items)
+    assert any(item.area == "固定机位生产光源证据" and item.status == "OK" for item in items)
     assert any(item.area == "生产模型资产" and item.status in {"BLOCKED", "OK"} for item in items)

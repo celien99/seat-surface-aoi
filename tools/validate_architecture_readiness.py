@@ -208,9 +208,9 @@ def _check_production_runtime_config(scope: ReadinessScope) -> list[ReadinessIte
         return [
             _blocked(
                 "生产运行配置",
-                "固定机位和机器人飞拍都需要生产配置模板。",
+                "固定机位生产配置模板和机器人飞拍扩展模板都应保留。",
                 f"缺少: {missing}",
-                "补齐生产配置模板。",
+                "补齐缺失模板；当前产线放行以固定双机位 production.conf 为准。",
             )
         ]
 
@@ -219,30 +219,40 @@ def _check_production_runtime_config(scope: ReadinessScope) -> list[ReadinessIte
         if "TODO" in path.read_text(encoding="utf-8"):
             todo_files.append(str(path.relative_to(REPO_ROOT)))
     items: list[ReadinessItem] = []
-    if todo_files and scope == "production":
+    deployed_issues = _deployed_fixed_config_issues(fixed_deployed_path)
+    if deployed_issues and scope == "production":
         items.append(
             _blocked(
                 "生产运行配置",
-                "生产上线配置不能保留 TODO、空端口、模拟 backend 等占位值。",
-                f"仍有占位项: {todo_files}",
-                "按现场 PLC/相机/光源/机器人参数生成正式 production.conf 并运行 --validate-config。",
+                "当前固定双机位产线必须生成不含占位值的 station_runtime.production.conf。",
+                "; ".join(deployed_issues),
+                "按现场 PLC/相机/光源参数生成正式 production.conf 并运行 --validate-config。",
+            )
+        )
+    elif deployed_issues:
+        items.append(
+            _warn(
+                "生产运行配置",
+                "当前固定双机位产线放行前必须补齐正式 production.conf。",
+                "; ".join(deployed_issues),
+                "进入现场联调后生成正式 station_runtime.production.conf。",
             )
         )
     elif todo_files:
         items.append(
             _warn(
                 "生产运行配置",
-                "参考实现提供生产模板，但上线前必须替换现场参数。",
-                f"模板仍含 TODO，占位文件: {todo_files}",
-                "进入现场联调后生成正式 production.conf。",
+                "固定双机位 production.conf 已存在；模板中的 TODO 保留为复制提示或机器人扩展占位。",
+                f"模板仍含 TODO: {todo_files}",
+                "当前产线放行以 cpp_controller/config/station_runtime.production.conf 为准。",
             )
         )
     else:
         items.append(
             _ok(
                 "生产运行配置",
-                "生产配置模板需覆盖固定机位和机器人飞拍两种方案。",
-                "固定机位与机器人飞拍生产模板均存在且未发现 TODO。",
+                "当前固定双机位生产配置已生成，机器人飞拍模板保留为扩展方案。",
+                "固定机位 production.conf 存在且未发现占位值。",
             )
         )
 
@@ -260,7 +270,7 @@ def _check_production_runtime_config(scope: ReadinessScope) -> list[ReadinessIte
                     "固定机位 production.conf 的 light_order 必须覆盖 Python 生产配方 required_lights。",
                     f"C++ light_order={config.get('light_order')} -> {cxx_light_ids}; "
                     f"Python required_lights={required_lights}; missing={missing_lights}",
-                    "选择补齐第 4 路 HIGH_RIGHT 采集，或把 Python 生产配方降为已验证的 3 光源方案并同步测试。",
+                    "按当前产线真实光源数量同步 C++ light_order、Python required_lights、模型输入通道和测试。",
                 )
             )
         else:
@@ -272,6 +282,24 @@ def _check_production_runtime_config(scope: ReadinessScope) -> list[ReadinessIte
                 )
             )
     return items
+
+
+def _deployed_fixed_config_issues(path: Path) -> list[str]:
+    if not path.exists():
+        return [f"缺少 {path.relative_to(REPO_ROOT)}"]
+    text = path.read_text(encoding="utf-8")
+    if "TODO" in text or "PLACEHOLDER" in text:
+        return [f"{path.relative_to(REPO_ROOT)} 仍含 TODO/PLACEHOLDER"]
+    config = _read_key_value_config(path)
+    issues = []
+    if config.get("capture_mode") != "fixed_camera":
+        issues.append(f"capture_mode={config.get('capture_mode')}")
+    if config.get("light_order") != "1,2,3":
+        issues.append(f"当前产线应为 3 光源 light_order=1,2,3，实际={config.get('light_order')}")
+    camera_ids = _indexed_values(config, "camera", "camera_id")
+    if len(camera_ids) != 2:
+        issues.append(f"当前产线应为 2 相机，实际 camera_ids={camera_ids}")
+    return issues
 
 
 def _check_python_recipes() -> list[ReadinessItem]:
@@ -443,6 +471,25 @@ def _check_v4_algorithm_contract(scope: ReadinessScope) -> list[ReadinessItem]:
                 "生产模型配方必须同时声明监督 ONNX 与 PatchCore safety net 工程入口。",
                 f"primary_onnx={primary_onnx}; patchcore_safety_net={patchcore}",
                 "补齐 production_recipe.yaml 的模型后端声明。",
+            )
+        )
+
+    if set(recipe.quality.required_lights) == {"DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT"}:
+        items.append(
+            _ok(
+                "固定机位生产光源证据",
+                "当前固定双机位产线采用 3 路已接入光源，Python 生产配方不得要求不存在的第 4 路。",
+                f"required_lights={list(recipe.quality.required_lights)}; "
+                f"model_channels={list(recipe.models['supervised_defect_onnx'].input_channels)}",
+            )
+        )
+    else:
+        items.append(
+            _blocked(
+                "固定机位生产光源证据",
+                "当前产线事实为 2 相机 x 3 光源，生产配方必须与真实采集光源一致。",
+                f"required_lights={list(recipe.quality.required_lights)}",
+                "把 production_recipe.yaml 对齐为 DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT 三光源，或同步现场硬件变更。",
             )
         )
 

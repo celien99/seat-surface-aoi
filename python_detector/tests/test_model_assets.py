@@ -9,6 +9,12 @@ def test_production_recipe_loads_full_model_chain() -> None:
     recipe = load_recipe_by_id_or_path("seat_a_black_leather_production_v1")
 
     assert recipe.recipe_id == "seat_a_black_leather_production_v1"
+    assert recipe.quality.required_lights == ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT")
+    assert recipe.models["supervised_defect_onnx"].input_channels == (
+        "ch0_diffuse",
+        "ch1_polar_diffuse",
+        "ch2_high_left",
+    )
     assert recipe.roi_locator.backend == "onnx_yolo"
     assert recipe.models["supervised_defect_onnx"].backend == "onnx"
     assert recipe.models["patchcore_unknown_safety_net"].backend == "patchcore_knn"

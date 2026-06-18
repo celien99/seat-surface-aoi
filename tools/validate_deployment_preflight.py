@@ -36,7 +36,7 @@ def validate_deployment_preflight(*, strict_production: bool = False) -> list[Pr
 
     默认模式只把当前仓库可补齐、可验证的工程缺口作为 BLOCKED；真实硬件参数、
     真实模型资产和现场平台协议以 ACTION 输出。strict_production 用于上机放行前
-    的最后门禁，会把正式生产配置缺失、生产光源/配方不一致和真实模型资产缺失升级为 BLOCKED。
+    的最后门禁，会把固定双机位正式生产配置缺失、生产光源/配方不一致和真实模型资产缺失升级为 BLOCKED。
     """
 
     items: list[PreflightItem] = []
@@ -251,7 +251,6 @@ def _check_lab_manual_entry() -> list[PreflightItem]:
 def _check_production_runtime_configs(strict_production: bool) -> list[PreflightItem]:
     expected = [
         REPO_ROOT / "cpp_controller/config/station_runtime.production.conf",
-        REPO_ROOT / "cpp_controller/config/station_runtime.robot_flyshot.production.conf",
     ]
     existing = [path for path in expected if path.exists()]
     missing = [str(path.relative_to(REPO_ROOT)) for path in expected if not path.exists()]
@@ -266,17 +265,38 @@ def _check_production_runtime_configs(strict_production: bool) -> list[Preflight
             PreflightItem(
                 status=status,
                 category="生产运行配置",
-                requirement="正式上产线前必须生成不含 TODO/占位值的 production.conf，并通过 C++ --validate-config。",
+                requirement="当前固定双机位产线必须生成不含 TODO/占位值的 production.conf，并通过 C++ --validate-config。",
                 evidence=f"missing={missing}; placeholder_counts={todo_counts}",
                 owner="硬件/电气/现场集成",
-                next_step="从 *.production.example.conf 复制正式配置，填写 PLC、相机、频闪、机器人参数并运行 --validate-config。",
+                next_step="从 station_runtime.production.example.conf 复制正式配置，填写 PLC、相机、频闪参数并运行 --validate-config。",
+            )
+        ]
+    config = _read_key_value_config(expected[0])
+    config_issues = []
+    if config.get("capture_mode") != "fixed_camera":
+        config_issues.append(f"capture_mode={config.get('capture_mode')}")
+    if config.get("light_order") != "1,2,3":
+        config_issues.append(f"light_order={config.get('light_order')}")
+    camera_ids = _indexed_values(config, "camera", "camera_id")
+    if len(camera_ids) != 2:
+        config_issues.append(f"camera_ids={camera_ids}")
+    if config_issues:
+        status = "BLOCKED" if strict_production else "ACTION"
+        return [
+            PreflightItem(
+                status=status,
+                category="生产运行配置",
+                requirement="当前产线固定为 2 相机 x 3 光源，正式配置必须反映真实硬件。",
+                evidence="; ".join(config_issues),
+                owner="硬件/电气/现场集成",
+                next_step="修正 station_runtime.production.conf 中的 capture_mode、camera.<N> 和 light_order。",
             )
         ]
     return [
         PreflightItem(
             status="OK",
             category="生产运行配置",
-            requirement="固定机位和机器人飞拍生产配置已生成且未发现占位值。",
+            requirement="当前固定双机位生产配置已生成且未发现占位值。",
             evidence=f"configs={[str(path.relative_to(REPO_ROOT)) for path in expected]}",
             owner="硬件/电气/现场集成",
             next_step="继续用 C++ --validate-config 和现场硬件低速节拍验证配置。",
@@ -302,7 +322,7 @@ def _check_production_light_alignment(strict_production: bool) -> list[Preflight
                 requirement="固定机位 C++ 生产采集光源必须覆盖 Python 生产配方必需光源。",
                 evidence=f"C++ lights={cxx_lights}; Python required_lights={required_lights}",
                 owner="硬件/算法/现场集成",
-                next_step="继续用 --validate-config、质量门禁和模拟 IPC 验证光源顺序。",
+                next_step="继续用 --validate-config、质量门禁和现场低速节拍验证光源顺序。",
             )
         ]
 
@@ -317,7 +337,7 @@ def _check_production_light_alignment(strict_production: bool) -> list[Preflight
                 f"Python required_lights={required_lights}; missing={missing}"
             ),
             owner="硬件/算法/现场集成",
-            next_step="补齐第 4 路 HIGH_RIGHT 采集，或把 Python 生产配方、模型输入通道和测试降为已验证的 3 光源方案。",
+            next_step="按当前产线真实光源数量同步 C++ light_order、Python required_lights、模型输入通道和测试。",
         )
     ]
 
@@ -376,6 +396,15 @@ def _split_csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def _indexed_values(config: dict[str, str], prefix: str, field: str) -> list[str]:
+    values = []
+    suffix = f".{field}"
+    for key, value in sorted(config.items()):
+        if key.startswith(f"{prefix}.") and key.endswith(suffix) and value:
+            values.append(value)
+    return values
+
+
 def _light_ids_from_order(light_order: list[str]) -> list[str]:
     light_id_by_index = {
         "1": "DIFFUSE",
@@ -407,7 +436,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--strict-production",
         action="store_true",
-        help="把正式生产配置缺失、生产光源/配方不一致和真实模型资产缺失作为 BLOCKED，适合上机放行前使用",
+        help="把固定双机位正式生产配置缺失、生产光源/配方不一致和真实模型资产缺失作为 BLOCKED，适合上机放行前使用",
     )
     parser.add_argument("--json", action="store_true", help="以 JSON 输出完整预检结果")
     args = parser.parse_args(argv)
