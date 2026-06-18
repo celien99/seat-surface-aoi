@@ -459,7 +459,7 @@ critical_recheck_threshold=5
 max_jobs=1
 recipe_id=seat_a_black_leather_v1
 capture_mode=fixed_camera
-light_order=1,2,3,4
+light_order=1,2,3
 trace_root=trace
 
 # 相机配置；生产模式需要补充 serial_number、trigger_line、exposure_output_line
@@ -494,9 +494,9 @@ cp config/station_runtime.production.example.conf config/station_runtime.product
 
 该模板的 `recipe_id` 已对齐 Python 固定机位生产配方 `seat_a_black_leather_production_v1`。模型补齐后，Python detector 会按该配方启用 ONNX ROI、ECC、监督 ONNX、WideResNet50/PCA/PatchCore/FAISS safety net；相机 `calibration_id` 必须和 Python 标定文件保持一致。
 
-当前固定机位生产模板按现场已确认硬件预置：海康 MV-CH120-20GC，4096 x 3072，Hikrobot MVS backend；镜头 MVL-KF0814M-12MPE，8mm F1.4，1.1"，C 接口；频闪控制器 FL-ACDH-20048-4，4 通道。单相机、Mono8、4 光源图像包约 48 MB，模板保留 `frame_slot_size=67108864`；如果后续增加第二个同分辨率固定机位，应把 `frame_slot_size` 至少提高到 `134217728`，并同步 Python 共享内存配置。
+当前固定机位生产模板按现场已确认硬件预置：海康 MV-CH120-20GC × 2，4096 x 3072，Hikrobot MVS backend；镜头 MVL-KF0814M-12MPE，8mm F1.4，1.1"，C 接口；频闪控制器 FL-ACDH-20048-4，4 通道（使用通道 1/2/3）。双相机、Mono8、3 光源图像包约 72 MB，模板保留 `frame_slot_size=134217728`（128 MB）；如果后续增加光源或分辨率变更，应重新计算并同步 Python 共享内存配置。
 
-Hikrobot MVS backend 当前按 `Mono8` 单通道实现，并已按海康 MVS C++ 示例工程对齐：进程内引用计数调用 `MV_CC_Initialize/Finalize`，枚举 GigE/USB/GenTL 设备，按 `camera.0.serial_number` 匹配相机，配置 `4096 x 3072`、`TriggerMode=On`、`TriggerSource=Software`、`Line1=ExposureStartActive`、`StrobeEnable=true`。C++ 每个光源轮次先设置曝光/增益并 arm 相机，再发送 `TriggerSoftware`；真实频闪应接相机 `ExposureStartActive`/ExposureOut 输出，确保光源点亮落在曝光窗口内。取帧使用 MVS 示例里的 `nExtendWidth/nExtendHeight/nFrameLenEx` 字段，其他像素格式不会隐式转换，配置不匹配会保守失败。
+Hikrobot MVS backend 当前按 `Mono8` 单通道实现，并已按海康 MVS C++ 示例工程对齐：进程内引用计数调用 `MV_CC_Initialize/Finalize`，枚举 GigE/USB/GenTL 设备，按 `camera.<N>.serial_number` 匹配相机，配置 `4096 x 3072`、`TriggerMode=On`、`TriggerSource=Line0`（FL-ACDH F口同步输出做硬件触发）、`Line1=ExposureStartActive`、`StrobeEnable=true`。C++ 每个光源轮次先设置曝光/增益并 arm 相机，再通过 RS232 发送 FL-ACDH 频闪序列（C→B→8→9→A→7）；FL-ACDH 的 `7` 命令同时点亮频闪并通过 F 口同步输出触发相机 Line0 曝光。取帧使用 MVS 示例里的 `nExtendWidth/nExtendHeight/nFrameLenEx` 字段，其他像素格式不会隐式转换，配置不匹配会保守失败。
 
 外部信号网关未确定前，使用 `config/station_runtime.lab_manual.example.conf` 做手动触发联调，只验证相机、频闪、共享内存和 Python detector 收图。该模板的 `frame_slot_size=67108864` 会被联调脚本同步传给 Python detector，避免 4096 x 3072 图像在 Python 侧仍按默认 16 MB 打开共享内存。进入生产闭环前仍必须补齐 `signal.backend=external_signal`、`trigger_queue_path`/`result_queue_path` 和外部信号网关。
 
@@ -691,7 +691,7 @@ C++ 程序 (单视角单光源, FL-ACDH 硬触发)
 ### 完整时序图（时分频闪）
 
 ```
-假设: 2个检测视角 (A, B), light_order = [1, 2, 3, 4]
+假设: 2个检测视角 (A, B), light_order = [1, 2, 3]
 
 time ────────────────────────────────────────────────────────────→
 
@@ -699,25 +699,22 @@ time ─────────────────────────
     Cam A arm → Light 1 trigger (C→B→8→9→A→7) → Cam A 取图 → post_delay
     Cam A arm → Light 2 trigger → Cam A 取图 → post_delay
     Cam A arm → Light 3 trigger → Cam A 取图 → post_delay
-    Cam A arm → Light 4 trigger → Cam A 取图 → post_delay
 
   ═══════════ 视角B ═══════════
     Cam B arm → Light 1 trigger → Cam B 取图 → post_delay
-    ...
+    Cam B arm → Light 2 trigger → Cam B 取图 → post_delay
+    Cam B arm → Light 3 trigger → Cam B 取图 → post_delay
 
-最终产出: 2视角 × 4光源 = 8 张图像 → SeatImageBundle → FrameRingBuffer
+最终产出: 2视角 × 3光源 = 6 张图像 → SeatImageBundle → FrameRingBuffer
 ```
 
 ### 实际运行日志
 
 ```
-[trigger_id=1000] prepared light sequence channels=4
+[trigger_id=1000] prepared light sequence channels=3
 [trigger_id=1000 light_index=1 physical_channel=1 light_seq_index=0] simulated strobe strobe_width_us=700 post_delay_ms=50
 [trigger_id=1000 light_index=2 physical_channel=2 light_seq_index=1] simulated strobe strobe_width_us=700 post_delay_ms=50
-...
-[trigger_id=1000] prepared light sequence channels=4
-[trigger_id=1000 light_index=1 physical_channel=1 light_seq_index=0] simulated strobe ...
-...
+[trigger_id=1000 light_index=3 physical_channel=3 light_seq_index=2] simulated strobe strobe_width_us=650 post_delay_ms=50
 ```
 
 ### 关键设计要点
