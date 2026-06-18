@@ -42,10 +42,10 @@ struct StationConfig {
   };
   RuntimeLightConfig light;
   std::vector<RuntimeLightChannelConfig> light_channels = {
-      RuntimeLightChannelConfig{1, 1, 800, 800, 0, 1.0F, 60.0F},
-      RuntimeLightChannelConfig{2, 2, 800, 800, 0, 1.0F, 60.0F},
-      RuntimeLightChannelConfig{3, 3, 800, 800, 0, 1.0F, 60.0F},
-      RuntimeLightChannelConfig{4, 4, 800, 800, 0, 1.0F, 60.0F},
+      RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F},
+      RuntimeLightChannelConfig{0, 2, 2, 800, 800, 0, 1.0F, 60.0F},
+      RuntimeLightChannelConfig{0, 3, 3, 800, 800, 0, 1.0F, 60.0F},
+      RuntimeLightChannelConfig{0, 4, 4, 800, 800, 0, 1.0F, 60.0F},
   };
   std::vector<RuntimeCaptureViewConfig> capture_views;
   RuntimeSignalConfig signal;

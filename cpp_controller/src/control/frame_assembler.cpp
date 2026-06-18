@@ -66,11 +66,17 @@ bool FrameAssembler::ensure_initialized() {
   if (initialized_) {
     return true;
   }
-  if (!light_controller_) {
-    light_controller_ = create_light_controller(config_.light.backend);
-  }
-  if (!light_controller_->initialize(make_light_controller_config(config_.light))) {
-    return false;
+  if (light_controllers_.empty()) {
+    if (config_.lights.empty()) {
+      return false;
+    }
+    for (std::size_t ctrl_idx = 0; ctrl_idx < config_.lights.size(); ++ctrl_idx) {
+      auto ctrl = create_light_controller(config_.lights[ctrl_idx].backend);
+      if (!ctrl->initialize(make_light_controller_config(config_.lights[ctrl_idx]))) {
+        return false;
+      }
+      light_controllers_.push_back(std::move(ctrl));
+    }
   }
   if (!robot_client_) {
     robot_client_ = create_robot_client(config_.robot.backend);
@@ -182,14 +188,14 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
 
     RobotPoseStatus pose_status;
     if (!wait_robot_pose_ready(trigger, view, &pose_status, error)) {
-      light_controller_->shutdown_all();
+      for (auto& ctrl : light_controllers_) ctrl->shutdown_all();
       initialized_ = false;
       cameras_.clear();
       return false;
     }
 
     // 每个视角开始前重新准备光源序列
-    if (!light_controller_->prepare_sequence(sequence,
+    if (!light_controllers_[0]->prepare_sequence(sequence,
                                             trigger.trigger_id,
                                             config_.light_timeout_ms,
                                             error != nullptr ? &error->message : nullptr)) {
@@ -205,7 +211,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
                             0,
                             0,
                             detail);
-      light_controller_->shutdown_all();
+      for (auto& ctrl : light_controllers_) ctrl->shutdown_all();
       initialized_ = false;
       cameras_.clear();
       return false;
@@ -217,7 +223,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
 
       if (config_.trigger_sync_mode == TriggerSyncMode::Software) {
         // 软件触发：直接触发光源频闪
-        if (!light_controller_->trigger_channel(light_param,
+        if (!light_controllers_[light_param.controller_index]->trigger_channel(light_param,
                                                trigger.trigger_id,
                                                light_seq_index,
                                                config_.light_timeout_ms,
@@ -232,14 +238,14 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
                                 light_param.light_index,
                                 light_seq_index,
                                 detail);
-          light_controller_->shutdown_all();
+          for (auto& ctrl : light_controllers_) ctrl->shutdown_all();
           initialized_ = false;
           cameras_.clear();
           return false;
         }
       } else if (config_.trigger_sync_mode == TriggerSyncMode::CameraExposureOutput) {
         // ① 光源 arm — 进入预就绪状态
-        if (!light_controller_->arm_hardware_trigger(light_param,
+        if (!light_controllers_[light_param.controller_index]->arm_hardware_trigger(light_param,
                                                     trigger.trigger_id,
                                                     light_seq_index,
                                                     config_.light_timeout_ms,
@@ -255,7 +261,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
                                 light_param.light_index,
                                 light_seq_index,
                                 detail);
-          light_controller_->shutdown_all();
+          for (auto& ctrl : light_controllers_) ctrl->shutdown_all();
           initialized_ = false;
           cameras_.clear();
           return false;
@@ -277,7 +283,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
                                 light_param.light_index,
                                 light_seq_index,
                                 oss.str());
-          light_controller_->shutdown_all();
+          for (auto& ctrl : light_controllers_) ctrl->shutdown_all();
           initialized_ = false;
           cameras_.clear();
           return false;
@@ -299,14 +305,14 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
                                 light_param.light_index,
                                 light_seq_index,
                                 oss.str());
-          light_controller_->shutdown_all();
+          for (auto& ctrl : light_controllers_) ctrl->shutdown_all();
           initialized_ = false;
           cameras_.clear();
           return false;
         }
 
         // ④ 通知光源硬件触发完成
-        if (!light_controller_->notify_hardware_triggered(light_param,
+        if (!light_controllers_[light_param.controller_index]->notify_hardware_triggered(light_param,
                                                          trigger.trigger_id,
                                                          light_seq_index,
                                                          config_.light_timeout_ms,
@@ -322,7 +328,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
                                 light_param.light_index,
                                 light_seq_index,
                                 detail);
-          light_controller_->shutdown_all();
+          for (auto& ctrl : light_controllers_) ctrl->shutdown_all();
           initialized_ = false;
           cameras_.clear();
           return false;
@@ -336,7 +342,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
                               light_seq_index,
                               std::string("unsupported trigger sync mode ") +
                                   trigger_sync_mode_name(config_.trigger_sync_mode));
-        light_controller_->shutdown_all();
+        for (auto& ctrl : light_controllers_) ctrl->shutdown_all();
         initialized_ = false;
         cameras_.clear();
         return false;
@@ -361,7 +367,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
                               light_param.light_index,
                               light_seq_index,
                               oss.str());
-        light_controller_->shutdown_all();
+        for (auto& ctrl : light_controllers_) ctrl->shutdown_all();
         initialized_ = false;
         cameras_.clear();
         return false;
@@ -385,7 +391,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
   out_bundle->job_meta = job;
   out_bundle->frames = std::move(frames);
   if (!validate_serial_tdm_bundle(*out_bundle, sequence, capture_plan, error)) {
-    light_controller_->shutdown_all();
+    for (auto& ctrl : light_controllers_) ctrl->shutdown_all();
     initialized_ = false;
     cameras_.clear();
     return false;
@@ -439,6 +445,7 @@ bool FrameAssembler::build_light_sequence(const Recipe& recipe,
       return false;
     }
     LightChannelParam param;
+    param.controller_index = configured.controller_index;
     param.light_index = configured.light_index;
     param.physical_channel = configured.physical_channel;
     param.exposure_us = configured.exposure_us;

@@ -12,6 +12,7 @@ enum class TriggerSyncMode : std::uint32_t {
 };
 
 struct LightChannelParam {
+  std::uint32_t controller_index = 0;  // 所属控制器索引（0-based）
   std::uint32_t light_index = 0;
   std::uint32_t physical_channel = 0;
   std::uint32_t exposure_us = 0;

@@ -70,7 +70,7 @@ private:
 
   bool initialized_ = false;
   StationRuntimeConfig config_{};
-  std::unique_ptr<ILightController> light_controller_;
+  std::vector<std::unique_ptr<ILightController>> light_controllers_;
   std::unique_ptr<IRobotClient> robot_client_;
   std::vector<std::unique_ptr<ICamera>> cameras_;
 };

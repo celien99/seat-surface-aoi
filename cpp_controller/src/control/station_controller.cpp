@@ -56,13 +56,16 @@ bool StationController::initialize(const StationConfig& config) {
   runtime_config.light_order = config.light_order;
   runtime_config.capture_mode = config.capture_mode;
   runtime_config.cameras = config.cameras;
-  runtime_config.light = config.light;
+  runtime_config.lights = {config.light};
   runtime_config.light_channels = config.light_channels;
   runtime_config.capture_views = config.capture_views;
   runtime_config.signal = config.signal;
   runtime_config.robot = config.robot;
   runtime_config.trigger_sync_mode = config.trigger_sync_mode;
-  runtime_config.light.simulate_fault = config.simulate_light_fault;
+  if (runtime_config.lights.empty()) {
+    runtime_config.lights.emplace_back();
+  }
+  runtime_config.lights[0].simulate_fault = config.simulate_light_fault;
   runtime_config.robot.simulate_fault = config.robot.simulate_fault;
   runtime_config.signal.simulate_output_fault = config.simulate_signal_result_fault;
   runtime_config.signal.simulate_trigger_timeout = config.simulate_trigger_timeout;

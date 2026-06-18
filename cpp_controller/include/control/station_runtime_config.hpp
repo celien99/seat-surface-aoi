@@ -58,6 +58,7 @@ struct RuntimeLightConfig {
 };
 
 struct RuntimeLightChannelConfig {
+  std::uint32_t controller_index = 0;  // 所属控制器索引（0-based，来自 light.<M>.<N> 的 M）
   std::uint32_t light_index = 0;
   std::uint32_t physical_channel = 0;
   std::uint32_t exposure_us = 800;
@@ -117,12 +118,12 @@ struct StationRuntimeConfig {
       RuntimeCameraConfig{0, "TOP_BACK", "", "calib/simulated_v1", 64, 48, 1, "Mono8", "", "", 8, false},
       RuntimeCameraConfig{1, "TOP_CUSHION", "", "calib/simulated_v1", 64, 48, 1, "Mono8", "", "", 8, false},
   };
-  RuntimeLightConfig light;
+  std::vector<RuntimeLightConfig> lights;
   std::vector<RuntimeLightChannelConfig> light_channels = {
-      RuntimeLightChannelConfig{1, 1, 800, 800, 0, 1.0F, 60.0F},
-      RuntimeLightChannelConfig{2, 2, 800, 800, 0, 1.0F, 60.0F},
-      RuntimeLightChannelConfig{3, 3, 800, 800, 0, 1.0F, 60.0F},
-      RuntimeLightChannelConfig{4, 4, 800, 800, 0, 1.0F, 60.0F},
+      RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F},
+      RuntimeLightChannelConfig{0, 2, 2, 800, 800, 0, 1.0F, 60.0F},
+      RuntimeLightChannelConfig{0, 3, 3, 800, 800, 0, 1.0F, 60.0F},
+      RuntimeLightChannelConfig{0, 4, 4, 800, 800, 0, 1.0F, 60.0F},
   };
   std::vector<RuntimeCaptureViewConfig> capture_views;
   RuntimeSignalConfig signal;

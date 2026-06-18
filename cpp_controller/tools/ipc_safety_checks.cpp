@@ -358,7 +358,7 @@ bool test_station_fault_returns_recheck(const std::string& name,
   config.recipe_id = "seat_a_black_leather_v1";
   config.light_order = {1};
   config.light_channels = {
-      seat_aoi::RuntimeLightChannelConfig{1, 1, 800, 800, 0, 1.0F, 60.0F},
+      seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F},
   };
 
   seat_aoi::StationController station;
@@ -582,15 +582,15 @@ seat_aoi::StationRuntimeConfig make_filled_production_runtime_config() {
   config.hardware_mode = seat_aoi::HardwareMode::Production;
   config.signal.backend = seat_aoi::HardwareBackend::ExternalSignal;
   config.camera_backend = seat_aoi::HardwareBackend::HikrobotMvs;
-  config.light.backend = seat_aoi::HardwareBackend::SerialAscii;
+  config.lights[0].backend = seat_aoi::HardwareBackend::SerialAscii;
   config.frame_slot_size = 64 * 1024 * 1024;
   config.signal.station_id = "LINE1_AOI_01";
   config.signal.default_seat_id = "EXTERNAL_SEAT";
   config.signal.default_sku = "seat_a_black_leather";
-  config.light.device_id = "STROBE_01";
-  config.light.serial_port = "/dev/ttyUSB0";
-  config.light.baud_rate = 115200;
-  config.light.trigger_input_line = "TRIG_IN1";
+  config.lights[0].device_id = "STROBE_01";
+  config.lights[0].serial_port = "/dev/ttyUSB0";
+  config.lights[0].baud_rate = 115200;
+  config.lights[0].trigger_input_line = "TRIG_IN1";
   for (auto& camera : config.cameras) {
     camera.serial_number = "CAM_SN_" + std::to_string(camera.camera_index);
     camera.trigger_line = "Line0";
@@ -771,7 +771,7 @@ bool test_frame_slot_size_accounts_for_pixel_format_bytes() {
   };
   config.light_order = {1};
   config.light_channels = {
-      seat_aoi::RuntimeLightChannelConfig{1, 1, 800, 800, 0, 1.0F, 60.0F},
+      seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F},
   };
   config.frame_slot_size =
       static_cast<std::uint32_t>(seat_aoi::frame_slot_image_offset(1) + 64U * 48U);
@@ -823,7 +823,7 @@ bool test_detector_timeout_fault_blocks_next_trigger() {
   config.recipe_id = "seat_a_black_leather_v1";
   config.light_order = {1};
   config.light_channels = {
-      seat_aoi::RuntimeLightChannelConfig{1, 1, 800, 800, 0, 1.0F, 60.0F},
+      seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F},
   };
 
   seat_aoi::StationController station;
@@ -990,7 +990,7 @@ bool test_station_writes_detector_timeout_event_log() {
   config.recipe_id = "seat_a_black_leather_v1";
   config.light_order = {1};
   config.light_channels = {
-      seat_aoi::RuntimeLightChannelConfig{1, 1, 800, 800, 0, 1.0F, 60.0F},
+      seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F},
   };
   config.trace_root = trace_root.string();
 
