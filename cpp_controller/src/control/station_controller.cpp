@@ -3,6 +3,17 @@
 #include <iostream>
 #include <sstream>
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
+
+#include "control/image_writer.hpp"
+
 #include "control/hardware_factory.hpp"
 
 #include "common/string_utils.hpp"
@@ -172,6 +183,23 @@ InspectionResultPayload StationController::inspect_one_seat(const ExternalTrigge
     return make_and_send_recheck_result(trigger, sequence_id, error_code, oss.str());
   }
 
+  // 图像落盘（发布到共享内存之前保存原始图像）
+  if (config_.image_save.enabled && config_.image_save.save_original) {
+    const std::string seat_id(bundle.job_meta.seat_id);
+    for (const auto& frame : bundle.frames) {
+      const std::string camera_id(frame.meta.camera_id);
+      std::ostringstream path;
+      path << config_.image_save.root_dir << "/" << seat_id << "/"
+           << camera_id << "_" << frame.meta.timestamp_us << "_L"
+           << frame.meta.light_index << "_original.pgm";
+      std::string save_error;
+      if (!write_pgm(path.str(), frame.bytes, frame.meta.width, frame.meta.height,
+                     &save_error)) {
+        std::cerr << "图像保存失败: " << save_error << std::endl;
+      }
+    }
+  }
+
   std::uint64_t published_sequence_id = 0;
   if (!frame_ring_.publish(bundle,
                            config_.publish_timeout_ms,
@@ -218,6 +246,40 @@ InspectionResultPayload StationController::inspect_one_seat(const ExternalTrigge
                published_decision == decision
                    ? "detector result accepted and external signal result published"
                    : "detector ERROR mapped to external RECHECK result");
+
+  // JSON 详细结果输出 (detail_result_output)
+  if (config_.json_output_enabled && !config_.json_output_host.empty() &&
+      config_.json_output_port > 0) {
+    std::ostringstream json;
+    json << "{\"type\":\"inspection_result\","
+         << "\"sn\":\"" << trigger.seat_id << "\","
+         << "\"overall\":\"" << (decision == InspectionDecision::OK ? "OK"
+                               : decision == InspectionDecision::NG ? "NG"
+                               : "RECHECK") << "\","
+         << "\"overall_code\":" << static_cast<std::uint32_t>(decision) << ","
+         << "\"sequence\":" << sequence_id << ","
+         << "\"error_code\":" << result.meta.error_code << ","
+         << "\"elapsed_ms\":" << result.meta.elapsed_ms << ","
+         << "\"defect_count\":" << result.meta.defect_count << "}\n";
+    // 通过 TCP 发送（best-effort, 不阻塞主流程）
+    try {
+      // POSIX socket send
+      int sock = ::socket(AF_INET, SOCK_STREAM, 0);
+      if (sock >= 0) {
+        struct sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(static_cast<uint16_t>(config_.json_output_port));
+        if (inet_pton(AF_INET, config_.json_output_host.c_str(), &addr.sin_addr) == 1) {
+          if (::connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0) {
+            const auto& data = json.str();
+            ::send(sock, data.data(), data.size(), 0);
+          }
+        }
+        ::close(sock);
+      }
+    } catch (...) {}
+  }
+
   log_result(result);
   return result;
 }

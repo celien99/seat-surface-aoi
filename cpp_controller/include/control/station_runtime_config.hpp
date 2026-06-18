@@ -103,6 +103,12 @@ struct RuntimeRobotConfig {
   bool simulate_fault = false;
 };
 
+struct ImageSaveConfig {
+  bool enabled = false;
+  std::string root_dir = "images";
+  bool save_original = true;
+};
+
 struct StationRuntimeConfig {
   HardwareMode hardware_mode = HardwareMode::Simulated;
   HardwareBackend camera_backend = HardwareBackend::Simulated;
@@ -137,6 +143,10 @@ struct StationRuntimeConfig {
   std::vector<RuntimeCaptureViewConfig> capture_views;
   RuntimeSignalConfig signal;
   RuntimeRobotConfig robot;
+  ImageSaveConfig image_save;
+  bool json_output_enabled = false;
+  std::string json_output_host;
+  std::uint32_t json_output_port = 9002;
 };
 
 const char* capture_mode_name(CaptureMode mode);

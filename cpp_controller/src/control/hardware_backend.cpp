@@ -46,6 +46,8 @@ const char* hardware_backend_name(HardwareBackend backend) {
       return "custom_sdk";
     case HardwareBackend::TcpSignal:
       return "tcp_signal";
+    case HardwareBackend::DistanceTrigger:
+      return "distance_trigger";
   }
   return "unknown";
 }
@@ -147,6 +149,10 @@ bool parse_hardware_backend(const std::string& value,
   }
   if (value == "tcp_signal" || value == "tcp" || value == "tcp_plc") {
     *out_backend = HardwareBackend::TcpSignal;
+    return true;
+  }
+  if (value == "distance_trigger" || value == "distance" || value == "laser") {
+    *out_backend = HardwareBackend::DistanceTrigger;
     return true;
   }
   if (error_message != nullptr) {

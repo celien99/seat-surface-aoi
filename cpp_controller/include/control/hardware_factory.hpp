@@ -10,6 +10,7 @@
 #include "control/light_controller.hpp"
 #include "control/signal_client.hpp"
 #include "control/tcp_signal_client.hpp"
+#include "control/distance_trigger_signal_client.hpp"
 #include "control/robot_client.hpp"
 
 namespace seat_aoi {
@@ -214,6 +215,10 @@ inline std::unique_ptr<ISignalClient> create_signal_client(HardwareBackend backe
   }
   if (backend == HardwareBackend::TcpSignal) {
     return std::make_unique<TcpSignalClient>();
+  }
+  if (backend == HardwareBackend::DistanceTrigger) {
+    return std::make_unique<DistanceTriggerSignalClient>(
+        std::make_unique<TcpSignalClient>());
   }
   if (!is_simulated_backend(backend)) {
     return std::make_unique<detail::UnsupportedSignalClient>(backend);

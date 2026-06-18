@@ -26,6 +26,7 @@ enum class HardwareBackend {
   VendorSdk,
   CustomSdk,
   TcpSignal,
+  DistanceTrigger,
 };
 
 const char* hardware_mode_name(HardwareMode mode);

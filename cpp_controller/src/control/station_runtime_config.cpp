@@ -1002,6 +1002,18 @@ bool load_station_runtime_config(const std::string& path,
         (void)camera_index;
         camera.simulate_missing_frame = simulate_missing_frame;
       }
+    } else if (key == "json_output.enabled") {
+      if (!parse_bool_field(key, value, &config.json_output_enabled, error_message)) return false;
+    } else if (key == "json_output.host") {
+      config.json_output_host = value;
+    } else if (key == "json_output.port") {
+      if (!parse_uint32_field("json_output.port", value, false, &config.json_output_port, error_message)) return false;
+    } else if (key == "image_save.enabled") {
+      if (!parse_bool_field(key, value, &config.image_save.enabled, error_message)) return false;
+    } else if (key == "image_save.root_dir") {
+      config.image_save.root_dir = value;
+    } else if (key == "image_save.save_original") {
+      if (!parse_bool_field(key, value, &config.image_save.save_original, error_message)) return false;
     } else if (key == "trace_root") {
       config.trace_root = value;
     } else {

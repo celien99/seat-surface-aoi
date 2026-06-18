@@ -72,6 +72,10 @@ void apply_runtime_config(const seat_aoi::StationRuntimeConfig& runtime_config,
   for (const auto& camera : runtime_config.cameras) {
     config->simulate_missing_frame = config->simulate_missing_frame || camera.simulate_missing_frame;
   }
+  config->image_save = runtime_config.image_save;
+  config->json_output_enabled = runtime_config.json_output_enabled;
+  config->json_output_host = runtime_config.json_output_host;
+  config->json_output_port = runtime_config.json_output_port;
 }
 
 }  // namespace

@@ -55,6 +55,10 @@ struct StationConfig {
   bool simulate_signal_result_fault = false;
   bool simulate_trigger_timeout = false;
   bool simulate_missing_frame = false;
+  ImageSaveConfig image_save;
+  bool json_output_enabled = false;
+  std::string json_output_host;
+  std::uint32_t json_output_port = 9002;
 };
 
 class StationController {

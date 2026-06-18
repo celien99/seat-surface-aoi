@@ -49,6 +49,9 @@ add_library(seat_aoi_control
   src/control/trigger_scheduler.cpp
   src/control/frame_assembler.cpp
   src/control/station_controller.cpp
+  src/control/image_writer.cpp
+  src/control/distance_sensor.cpp
+  src/control/distance_trigger_signal_client.cpp
 )
 
 target_include_directories(seat_aoi_control PUBLIC include)
