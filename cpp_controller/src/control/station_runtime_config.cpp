@@ -757,6 +757,28 @@ bool load_station_runtime_config(const std::string& path,
       config.signal.trigger_queue_path = value;
     } else if (key == "signal.result_queue_path" || key == "signal.result_queue") {
       config.signal.result_queue_path = value;
+    } else if (key == "signal.port" || key == "plc.port") {
+      try {
+        const int parsed = std::stoi(value);
+        if (parsed <= 0 || parsed > 65535) {
+          if (error_message != nullptr) {
+            *error_message = "signal.port 端口号必须在 1-65535: " + value;
+          }
+          return false;
+        }
+        config.signal.port = static_cast<std::uint32_t>(parsed);
+      } catch (const std::exception&) {
+        if (error_message != nullptr) {
+          *error_message = "signal.port 解析失败: " + value;
+        }
+        return false;
+      }
+    } else if (key == "signal.delimiter" || key == "plc.delimiter") {
+      config.signal.delimiter = value;
+    } else if (key == "signal.terminator") {
+      config.signal.terminator = value;
+    } else if (key == "signal.ok_response") {
+      config.signal.ok_response = value;
     } else if (key == "plc.host" || key == "plc.port" ||
                key == "plc.trigger_source" || key == "plc.trigger_id_source" ||
                key == "plc.seat_id_source" || key == "plc.ok_output" ||
@@ -1120,6 +1142,8 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
   const bool signal_is_simulated = is_simulated_backend(config.signal.backend);
   const bool signal_is_manual = is_manual_trigger_backend(config.signal.backend);
   const bool signal_is_external = is_external_signal_backend(config.signal.backend);
+  const bool signal_is_tcp = config.signal.backend == HardwareBackend::TcpSignal;
+  const bool signal_is_real = signal_is_external || signal_is_tcp;
   const bool camera_is_simulated = is_simulated_backend(config.camera_backend);
   const bool light_is_simulated = is_simulated_backend(config.light.backend);
   const bool robot_is_simulated = is_simulated_backend(config.robot.backend);
@@ -1146,10 +1170,10 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
   }
 
   if (config.hardware_mode == HardwareMode::Lab) {
-    if (!signal_is_manual && !signal_is_simulated && !signal_is_external) {
+    if (!signal_is_manual && !signal_is_simulated && !signal_is_external && !signal_is_tcp) {
       if (error_message != nullptr) {
         *error_message =
-            "hardware_mode=lab 时 signal.backend 只能是 manual_trigger、external_signal 或 simulated";
+            "hardware_mode=lab 时 signal.backend 只能是 manual_trigger、external_signal、tcp_signal 或 simulated";
       }
       return false;
     }
@@ -1159,12 +1183,12 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
       }
       return false;
     }
-  } else if (signal_is_simulated || signal_is_manual || !signal_is_external ||
+  } else if (signal_is_simulated || signal_is_manual || !signal_is_real ||
              camera_is_simulated ||
              light_is_simulated ||
              (config.capture_mode == CaptureMode::RobotFlyshot && robot_is_simulated)) {
     if (error_message != nullptr) {
-      *error_message = "hardware_mode=production 时 signal.backend 必须是 external_signal，"
+      *error_message = "hardware_mode=production 时 signal.backend 必须是 external_signal 或 tcp_signal，"
                        "且不能使用 simulated/manual_trigger/camera/light backend；"
                        "请填写 signal.backend、camera_backend、light.backend 和 robot.backend";
     }
@@ -1186,6 +1210,20 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
       (!require_non_empty("signal.station_id", config.signal.station_id, error_message) ||
        !require_non_empty("signal.default_sku", config.signal.default_sku, error_message))) {
     return false;
+  }
+  if (signal_is_tcp) {
+    if (config.signal.port == 0 || config.signal.port > 65535) {
+      if (error_message != nullptr) {
+        *error_message = "signal.backend=tcp_signal 时 signal.port 必须配置 (1-65535)";
+      }
+      return false;
+    }
+    if (config.signal.station_id.empty()) {
+      if (error_message != nullptr) {
+        *error_message = "signal.backend=tcp_signal 时 signal.station_id 不能为空";
+      }
+      return false;
+    }
   }
   for (const auto& camera : config.cameras) {
     const std::string prefix = "camera." + std::to_string(camera.camera_index);

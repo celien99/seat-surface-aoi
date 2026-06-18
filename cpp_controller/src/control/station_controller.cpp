@@ -18,6 +18,10 @@ SignalClientConfig make_signal_client_config(const RuntimeSignalConfig& config) 
   client_config.default_sku = config.default_sku;
   client_config.trigger_queue_path = config.trigger_queue_path;
   client_config.result_queue_path = config.result_queue_path;
+  client_config.port = config.port;
+  client_config.delimiter = config.delimiter;
+  client_config.terminator = config.terminator;
+  client_config.ok_response = config.ok_response;
   client_config.simulate_output_fault = config.simulate_output_fault;
   client_config.simulate_trigger_timeout = config.simulate_trigger_timeout;
   return client_config;

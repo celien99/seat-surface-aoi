@@ -248,9 +248,31 @@ bool HikrobotMvsCamera::initialize(const CameraConfig& config) {
       !set_int_value(handle_, "Width", config_.width, &error) ||
       !set_int_value(handle_, "Height", config_.height, &error) ||
       !set_enum_by_string(handle_, "AcquisitionMode", "Continuous", &error) ||
-      !set_enum_by_string(handle_, "TriggerMode", "On", &error) ||
-      !set_enum_by_string(handle_, "TriggerSource", "Software", &error) ||
-      !set_enum_by_string(handle_, "LineSelector", config_.exposure_output_line, &error) ||
+      !set_enum_by_string(handle_, "TriggerMode", "On", &error)) {
+    set_error(error);
+    close();
+    return false;
+  }
+
+  // 根据配置决定触发源：trigger_line 非空时使用硬件触发（Line0 等），否则使用 Software 触发
+  const std::string trigger_source =
+      config_.trigger_line.empty() ? "Software" : config_.trigger_line;
+  if (!set_enum_by_string(handle_, "TriggerSource", trigger_source, &error)) {
+    set_error(error);
+    close();
+    return false;
+  }
+
+  // 硬件触发模式下设置触发极性
+  if (!config_.trigger_line.empty()) {
+    if (!set_enum_by_string(handle_, "TriggerActivation", "RisingEdge", &error)) {
+      set_error(error);
+      close();
+      return false;
+    }
+  }
+
+  if (!set_enum_by_string(handle_, "LineSelector", config_.exposure_output_line, &error) ||
       !set_enum_by_string(handle_, "LineSource", "ExposureStartActive", &error) ||
       !set_bool_value(handle_, "StrobeEnable", true, &error) ||
       !set_int_value(handle_, "StrobeLineDuration", 0, &error) ||
@@ -328,13 +350,20 @@ bool HikrobotMvsCamera::simulate_exposure_output(std::uint64_t trigger_id,
       armed_trigger_id_ != trigger_id ||
       armed_light_index_ != light_param.light_index ||
       armed_light_seq_index_ != light_seq_index) {
-    set_error("Hikrobot MVS software trigger 前置状态非法");
+    set_error("Hikrobot MVS 前置状态非法");
     return false;
   }
 #ifndef SEAT_AOI_ENABLE_HIKROBOT_MVS
   set_error("Hikrobot MVS SDK 未启用，无法触发真实相机");
   return false;
 #else
+  // 硬件触发模式：相机等待 Line0 外部脉冲（由 FL-ACDH 同步输出提供），
+  // 无需发送 TriggerSoftware 命令，直接返回成功。
+  // 软件触发模式：发送 TriggerSoftware 命令触发相机采集。
+  if (!config_.trigger_line.empty()) {
+    return true;
+  }
+
   const int ret = MV_CC_SetCommandValue(handle_, "TriggerSoftware");
   if (ret != kMvsOk) {
     set_error(mvs_error("TriggerSoftware", ret));

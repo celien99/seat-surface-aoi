@@ -25,6 +25,7 @@ enum class HardwareBackend {
   FlirSpinnaker,
   VendorSdk,
   CustomSdk,
+  TcpSignal,
 };
 
 const char* hardware_mode_name(HardwareMode mode);

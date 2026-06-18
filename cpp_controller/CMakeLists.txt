@@ -35,8 +35,10 @@ endif()
 
 add_library(seat_aoi_control
   src/control/hardware_backend.cpp
+  src/control/fl_acdh_light_controller.cpp
   src/control/light_controller.cpp
   src/control/signal_client.cpp
+  src/control/tcp_signal_client.cpp
   src/control/robot_client.cpp
   src/control/production_event_log.cpp
   src/control/station_health.cpp

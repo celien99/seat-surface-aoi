@@ -145,14 +145,25 @@ ipc_safety_checks   (依赖 seat_aoi_control)
 
 当前支持的配置 backend 名称：
 
-| 设备 | 可选 backend |
-|------|--------------|
-| Signal | `simulated`、`manual_trigger`、`external_signal`、`modbus_tcp`、`siemens_s7`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk` |
-| 相机 | `basler_pylon`、`hikrobot_mvs`、`daheng_galaxy`、`flir_spinnaker`、`vendor_sdk`、`custom_sdk` |
-| 频闪 | `serial_ascii`、`modbus_tcp`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk` |
-| Robot | `modbus_tcp`、`siemens_s7`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk` |
+| 设备 | 可选 backend | 已实现 |
+|------|--------------|--------|
+| Signal | `simulated`、`manual_trigger`、`external_signal`、**`tcp_signal`**、`modbus_tcp`、`siemens_s7`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk` | ✅ `simulated`、`manual_trigger`、`external_signal`、**`tcp_signal`** |
+| 相机 | `basler_pylon`、**`hikrobot_mvs`**、`daheng_galaxy`、`flir_spinnaker`、`vendor_sdk`、`custom_sdk` | ✅ `simulated`、**`hikrobot_mvs`**（含 Line0 硬件触发） |
+| 频闪 | **`serial_ascii`**、`modbus_tcp`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk` | ✅ `simulated`、**`serial_ascii`**（FL-ACDH RS232） |
+| Robot | `modbus_tcp`、`siemens_s7`、`ethercat_io`、`digital_io`、`vendor_sdk`、`custom_sdk` | ✅ `simulated` |
 
-`manual_trigger` 只能用于 `hardware_mode=lab`，它生成测试触发并记录结果，不输出真实外部 IO。`production` 模式要求 `signal.backend=external_signal`，禁止 `manual_trigger` 和 `simulated` backend。如果选择了非 simulated backend，但 C++ 尚未链接对应真实驱动，程序会在初始化阶段明确报错并退出，不会偷偷回退到模拟硬件。
+`manual_trigger` 只能用于 `hardware_mode=lab`，它生成测试触发并记录结果，不输出真实外部 IO。`production` 模式要求 `signal.backend=external_signal` 或 `tcp_signal`，禁止 `manual_trigger` 和 `simulated` backend。如果选择了非 simulated backend，但 C++ 尚未链接对应真实驱动，程序会在初始化阶段明确报错并退出，不会偷偷回退到模拟硬件。
+
+### TCP 信号客户端 (`tcp_signal`)
+
+当 `signal.backend=tcp_signal` 时，C++ 控制器作为 TCP 服务端在 `signal.port`（默认 9000）上监听，接收 PLC 发送的 SN 触发行：
+
+- **裸 SN 模式**（`signal.delimiter=""`）：接收 `SN\n`，回复 `ok\n`
+- **分隔符模式**（`signal.delimiter="|"`）：接收 `start|SN\n`，回复 `ok\n`
+
+### FL-ACDH 频闪控制器 (`serial_ascii`)
+
+当 `light.backend=serial_ascii` 时，通过 RS232 串口（`light.serial_port`、`light.baud_rate`，默认 9600 8N1）与 FL-ACDH-20048-4 通信，使用 XOR 校验和的专有 ASCII 帧协议。
 
 ## 采集方案模式
 

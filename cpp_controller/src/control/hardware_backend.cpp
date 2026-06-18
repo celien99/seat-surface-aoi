@@ -44,6 +44,8 @@ const char* hardware_backend_name(HardwareBackend backend) {
       return "vendor_sdk";
     case HardwareBackend::CustomSdk:
       return "custom_sdk";
+    case HardwareBackend::TcpSignal:
+      return "tcp_signal";
   }
   return "unknown";
 }
@@ -143,10 +145,14 @@ bool parse_hardware_backend(const std::string& value,
     *out_backend = HardwareBackend::CustomSdk;
     return true;
   }
+  if (value == "tcp_signal" || value == "tcp" || value == "tcp_plc") {
+    *out_backend = HardwareBackend::TcpSignal;
+    return true;
+  }
   if (error_message != nullptr) {
     *error_message =
         "硬件 backend 不支持: " + value +
-        "，可选 simulated/manual_trigger/external_signal/modbus_tcp/siemens_s7/ethercat_io/digital_io/"
+        "，可选 simulated/manual_trigger/external_signal/tcp_signal/modbus_tcp/siemens_s7/ethercat_io/digital_io/"
         "serial_ascii/basler_pylon/hikrobot_mvs/daheng_galaxy/"
         "flir_spinnaker/vendor_sdk/custom_sdk";
   }

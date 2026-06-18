@@ -6,8 +6,10 @@
 #include "camera/camera_worker.hpp"
 #include "camera/hikrobot_mvs_camera.hpp"
 #include "control/hardware_backend.hpp"
+#include "control/fl_acdh_light_controller.hpp"
 #include "control/light_controller.hpp"
 #include "control/signal_client.hpp"
+#include "control/tcp_signal_client.hpp"
 #include "control/robot_client.hpp"
 
 namespace seat_aoi {
@@ -210,6 +212,9 @@ inline std::unique_ptr<ISignalClient> create_signal_client(HardwareBackend backe
   if (is_external_signal_backend(backend)) {
     return std::make_unique<ExternalSignalClient>();
   }
+  if (backend == HardwareBackend::TcpSignal) {
+    return std::make_unique<TcpSignalClient>();
+  }
   if (!is_simulated_backend(backend)) {
     return std::make_unique<detail::UnsupportedSignalClient>(backend);
   }
@@ -217,6 +222,9 @@ inline std::unique_ptr<ISignalClient> create_signal_client(HardwareBackend backe
 }
 
 inline std::unique_ptr<ILightController> create_light_controller(HardwareBackend backend) {
+  if (backend == HardwareBackend::SerialAscii) {
+    return std::make_unique<FlAcdhLightController>();
+  }
   if (!is_simulated_backend(backend)) {
     return std::make_unique<detail::UnsupportedLightController>(backend);
   }

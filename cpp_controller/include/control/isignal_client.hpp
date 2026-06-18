@@ -14,6 +14,10 @@ struct SignalClientConfig {
   std::string default_sku = "seat_a_black_leather";
   std::string trigger_queue_path;
   std::string result_queue_path;
+  std::uint32_t port = 0;
+  std::string delimiter;
+  std::string terminator = "\n";
+  std::string ok_response = "ok\n";
   bool simulate_output_fault = false;
   bool simulate_trigger_timeout = false;
 };
