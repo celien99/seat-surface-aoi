@@ -55,6 +55,7 @@ uv run python -m python_detector.detector_main \
 根目录 `tools/package_release.sh` 会把 Python 在线检测层和模型目录一起放入离线部署包。包内 Python 相关内容包括：
 
 - `python_detector/`：在线 detector、IPC 客户端、配方、标定、ROI 模板、算法流水线、模型后端和测试。
+- `display_app/`：PySide6/QML 展示前端，读取 detector display 通道；运行前需要安装 `display` extra。
 - `training_tools/`：离线回放、benchmark、embedding、PCA/PatchCore/FAISS 资产生成工具。
 - `model/`：默认集成根目录 `model/`；生产打包前必须先把真实模型产物替换到该目录。
 - `pyproject.toml` 和 `uv.lock`：用于在目标环境恢复 Python detector 依赖。
@@ -184,7 +185,14 @@ uv run python -m python_detector.detector_main \
 - `display_latest.json`：最近一次 Python detector 判定，原子替换，适合 PySide6/QML 轮询。
 - `display_events.jsonl`：检测结果追加日志，适合前端日志页或回放。
 
-事件字段包含 `sequence_id`、`trigger_id`、`seat_id`、`sku`、`recipe_id`、`decision`、`quality_pass`、`error_code`、`elapsed_ms`、缺陷列表、质量/错误消息、`trace_dir`、ROI PGM 图和 overlay PPM 图路径。展示通道只供 `online-detection-app` 读取显示，不读写现有 C++/Python 共享内存 slot；如果展示 JSON 落盘失败，只打印告警，不改变已写回 C++ 的检测结果。采集失败、detector timeout 等 C++ 侧保守结果仍由前端读取 `trace_root/cpp_controller_events.jsonl` 补充显示。
+事件字段包含 `sequence_id`、`trigger_id`、`seat_id`、`sku`、`recipe_id`、`decision`、`quality_pass`、`error_code`、`elapsed_ms`、缺陷列表、质量/错误消息、`trace_dir`、ROI PGM 图和 overlay PPM 图路径。展示通道由本仓库 `display_app/` 的 PySide6/QML 前端只读消费，也可供外部 `online-detection-app` 对接；它不读写现有 C++/Python 共享内存 slot。如果展示 JSON 落盘失败，只打印告警，不改变已写回 C++ 的检测结果。采集失败、detector timeout 等 C++ 侧保守结果后续可由前端读取 `trace_root/cpp_controller_events.jsonl` 补充显示。
+
+当前仓库已内置 `display_app/` 作为展示通道消费方，迁移并收敛了 `/Users/yyh/code/online-detection-app` 的 PySide6/QML 监控页面。它只轮询 `display_latest.json`、读取 trace PGM/PPM 图像并更新 QML ViewModel，不启动原项目的相机、PLC、触发服务、模型部署或 `seat_defect_core`。
+
+```bash
+uv sync --extra display
+uv run seat-aoi-display --trace-root trace --line-id AOI-1
+```
 
 ### 配方与标定
 

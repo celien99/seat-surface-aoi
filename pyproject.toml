@@ -13,6 +13,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+display = [
+  "numpy>=1.24",
+  "PySide6>=6.6",
+]
 onnx = [
   "numpy>=1.24",
   "onnxruntime>=1.16",
@@ -25,6 +29,7 @@ faiss = [
 [dependency-groups]
 test = [
   "numpy>=1.24",
+  "PySide6>=6.6",
   "pytest>=8.0",
 ]
 training = [
@@ -38,22 +43,25 @@ training = [
 ]
 dev = [
   "numpy>=1.24",
+  "PySide6>=6.6",
   "pytest>=8.0",
   "ruff>=0.8.0",
 ]
 
 [project.scripts]
 seat-aoi-detector = "python_detector.detector_main:main"
+seat-aoi-display = "display_app.main:main"
 
 [tool.setuptools.packages.find]
-include = ["python_detector*", "training_tools*"]
+include = ["python_detector*", "training_tools*", "display_app*"]
 exclude = ["cpp_controller*", "docs*", "tools*"]
 
 [tool.setuptools.package-data]
 python_detector = ["py.typed", "config/**/*.yaml"]
+display_app = ["qml/**/*.qml", "resources/styles/*"]
 
 [tool.pytest.ini_options]
-testpaths = ["python_detector/tests"]
+testpaths = ["python_detector/tests", "display_app/tests"]
 pythonpath = ["."]
 
 [tool.ruff]

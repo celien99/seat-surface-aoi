@@ -19,6 +19,7 @@ usage() {
   - bin/：已构建的 C++ 主控与 IPC 诊断工具
   - cpp_controller/：C++ 主控源码、配置和 CMake 工程
   - python_detector/：Python 在线检测进程、配方、标定和测试
+  - display_app/：PySide6/QML 展示前端源码和样式资源
   - training_tools/：离线回放、benchmark 和模型资产生成工具
   - model/：根目录 model/ 下的模型目录结构或真实模型产物
   - tools/：协议、模型资产、架构检查和模拟 IPC 脚本
@@ -197,6 +198,7 @@ write_package_readme() {
 bin/                 # 已构建 C++ 可执行文件
 cpp_controller/      # C++ 主控源码、配置、CMake 工程和工具源码
 python_detector/     # Python 在线检测进程、配方、标定、算法和测试
+display_app/         # PySide6/QML 展示前端，只读 detector display 通道
 training_tools/      # 离线回放、benchmark、训练样本和模型资产工具
 model/               # 模型目录结构或真实部署模型资产
 tools/               # 协议、模型资产、架构检查和模拟 IPC 脚本
@@ -237,6 +239,10 @@ PYTHONPATH=. uv run python -m tools.validate_deployment_preflight --strict-produ
 
 # Python detector
 PYTHONPATH=. uv run python -m python_detector.detector_main --once --timeout-ms 8000
+
+# PySide6/QML 展示前端，需要安装 display extra
+uv sync --extra display
+PYTHONPATH=. uv run seat-aoi-display --trace-root trace --line-id AOI-1
 ```
 
 在线图像和检测结果只能通过共享内存交换，不使用 TCP；Windows 工控机使用 Named Shared Memory。任何缺帧、超时、协议错误、CRC 错误、质量门禁失败或模型异常都不能输出 OK。
@@ -346,6 +352,7 @@ write_manifest() {
     "bin/ipc_safety_checks",
     "cpp_controller",
     "python_detector",
+    "display_app",
     "training_tools",
     "model",
     "tools",
@@ -392,6 +399,7 @@ cp "${BUILD_DIR}/ipc_safety_checks" "${STAGE_DIR}/bin/"
 
 copy_tree "${ROOT_DIR}/cpp_controller" "${STAGE_DIR}/cpp_controller"
 copy_tree "${ROOT_DIR}/python_detector" "${STAGE_DIR}/python_detector"
+copy_tree "${ROOT_DIR}/display_app" "${STAGE_DIR}/display_app"
 copy_tree "${ROOT_DIR}/training_tools" "${STAGE_DIR}/training_tools"
 copy_tree "${MODEL_DIR}" "${STAGE_DIR}/model"
 if [[ ! -f "${STAGE_DIR}/model/README.md" && -f "${ROOT_DIR}/model/README.md" ]]; then

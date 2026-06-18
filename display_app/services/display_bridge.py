@@ -1,0 +1,139 @@
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from display_app.infrastructure.image_provider import CameraImageProvider
+from display_app.services.image_loader import NetpbmImageError, load_netpbm_bgr
+
+
+DISPLAY_EVENT_SCHEMA = "seat_surface_aoi.display_event.v1"
+
+
+@dataclass(slots=True)
+class DisplayDefect:
+    defect_id: str
+    class_name: str
+    severity: str
+    camera_id: str
+    pose_id: str
+    roi_name: str
+    score: float
+    decision: str
+
+
+@dataclass(slots=True)
+class DisplayEvent:
+    sequence_id: int
+    trigger_id: int
+    seat_id: str
+    sku: str
+    recipe_id: str
+    decision: str
+    quality_pass: bool
+    error_code: int
+    elapsed_ms: float
+    defect_count: int
+    defects: list[DisplayDefect] = field(default_factory=list)
+    message: str = ""
+    trace_dir: str = ""
+    images: list[dict[str, Any]] = field(default_factory=list)
+    overlays: list[dict[str, Any]] = field(default_factory=list)
+    timestamp_ms: int = 0
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def event_key(self) -> tuple[int, int, int]:
+        return self.sequence_id, self.trigger_id, self.timestamp_ms
+
+
+class DisplayBridge:
+    """Read detector display files and update the QML image provider."""
+
+    def __init__(self, trace_root: str | Path, image_provider: CameraImageProvider) -> None:
+        self.trace_root = Path(trace_root)
+        self.image_provider = image_provider
+        self.latest_path = self.trace_root / "display_latest.json"
+
+    def read_latest(self) -> DisplayEvent | None:
+        if not self.latest_path.exists():
+            return None
+        try:
+            payload = json.loads(self.latest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if payload.get("schema") != DISPLAY_EVENT_SCHEMA:
+            return None
+        return _event_from_payload(payload)
+
+    def publish_images(self, event: DisplayEvent) -> list[str]:
+        camera_ids: list[str] = []
+        for image in event.images:
+            camera_id = _asset_camera_id(image)
+            path = image.get("path")
+            if not camera_id or not path:
+                continue
+            try:
+                self.image_provider.update_frame(camera_id, load_netpbm_bgr(path))
+            except (OSError, NetpbmImageError):
+                continue
+            camera_ids.append(camera_id)
+
+        for overlay in event.overlays:
+            camera_id = _asset_camera_id(overlay)
+            path = overlay.get("path")
+            if not camera_id or not path:
+                continue
+            try:
+                self.image_provider.update_overlay(camera_id, load_netpbm_bgr(path))
+            except (OSError, NetpbmImageError):
+                continue
+            camera_ids.append(camera_id)
+
+        return sorted(set(camera_ids))
+
+
+def _event_from_payload(payload: dict[str, Any]) -> DisplayEvent:
+    defects = [
+        DisplayDefect(
+            defect_id=str(item.get("defect_id", "")),
+            class_name=str(item.get("class_name", "")),
+            severity=str(item.get("severity", "")),
+            camera_id=str(item.get("camera_id", "")),
+            pose_id=str(item.get("pose_id") or item.get("camera_id") or ""),
+            roi_name=str(item.get("roi_name", "")),
+            score=float(item.get("score", 0.0) or 0.0),
+            decision=str(item.get("decision", "")),
+        )
+        for item in payload.get("defects", [])
+        if isinstance(item, dict)
+    ]
+    return DisplayEvent(
+        sequence_id=int(payload.get("sequence_id", 0) or 0),
+        trigger_id=int(payload.get("trigger_id", 0) or 0),
+        seat_id=str(payload.get("seat_id", "")),
+        sku=str(payload.get("sku", "")),
+        recipe_id=str(payload.get("recipe_id", "")),
+        decision=str(payload.get("decision", "RECHECK") or "RECHECK"),
+        quality_pass=bool(payload.get("quality_pass", False)),
+        error_code=int(payload.get("error_code", 0) or 0),
+        elapsed_ms=float(payload.get("elapsed_ms", 0.0) or 0.0),
+        defect_count=int(payload.get("defect_count", len(defects)) or 0),
+        defects=defects,
+        message=str(payload.get("message", "")),
+        trace_dir=str(payload.get("trace_dir", "")),
+        images=[item for item in payload.get("images", []) if isinstance(item, dict)],
+        overlays=[item for item in payload.get("overlays", []) if isinstance(item, dict)],
+        timestamp_ms=int(payload.get("timestamp_ms", 0) or 0),
+        raw=payload,
+    )
+
+
+def _asset_camera_id(asset: dict[str, Any]) -> str:
+    camera_id = str(asset.get("camera_id", ""))
+    pose_id = str(asset.get("pose_id", ""))
+    if pose_id and pose_id != camera_id:
+        return f"{camera_id}/{pose_id}"
+    return camera_id
