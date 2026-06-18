@@ -61,7 +61,8 @@ display_app/
 
 - `trace/display_latest.json`：最近一次 Python detector 输出，前端轮询。
 - `trace/display_events.jsonl`：检测事件追加日志，当前版本保留为后续持久化/回放扩展。
+- `trace/<date>/<seat>_<sequence>/raw_images/**/*.pgm`：原始采集图；模型资产未就绪或 ROI 未产出时用于直接展示。
 - `trace/<date>/<seat>_<sequence>/images/**/*.pgm`：ROI 原图。
 - `trace/<date>/<seat>_<sequence>/overlays/*.ppm`：缺陷叠加图。
 
-如果某次检测没有保存 trace 图像，前端仍会展示 OK/NG/RECHECK/ERROR、统计和日志；图像区域会等待下一次带图像的事件。
+展示桥会优先选择 ROI 图，缺少 ROI 图时回退到 raw 原始采集图；同一相机/视角下优先展示 `DIFFUSE`，再回退到其它光源。如果某次检测没有保存 trace 图像，前端仍会展示 OK/NG/RECHECK/ERROR、统计和日志；图像区域会等待下一次带图像的事件。

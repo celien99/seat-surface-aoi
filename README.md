@@ -93,8 +93,9 @@ flowchart LR
 | 共享内存 IPC | C++/Python 双端固定布局结构体、frame/result ring buffer、slot 状态机、CRC、layout/对象大小 fail-fast 和协议校验工具。 |
 | V4 算法接口 | Dome ROI YOLO、ECC 配准、WideResNet50 embedding、PCA、PatchCore KNN 和 FAISS 可选加速接入点。 |
 | 保守判定 | 协议异常、CRC 错误、缺帧、超时、质量失败、shot/机器人位姿不一致、ROI 冲突、机器人 FAULT、候选融合溢出和模型异常返回 `RECHECK` 或 `ERROR`。 |
+| 无模型采样兜底 | 生产模型文件缺失、仍是占位文件或 ONNX/numpy 依赖未安装时，Python detector 返回 `RECHECK/CONFIGURATION_ERROR`，保存原始采集图和可用 ROI 图，不输出 `OK` 或 `NG`。 |
 | 前端展示页面 | `display_app/` 迁移 PySide6/QML 监控界面，轮询 `display_latest.json`，展示相机/视角图像、OK/NG 计数、日志、复核队列和 NG 弹窗。 |
-| 前端展示通道 | Python detector 成功写回共享内存后，额外输出 `display_latest.json` 和 `display_events.jsonl`，供 PySide6/QML 前端只读显示。 |
+| 前端展示通道 | Python detector 成功写回共享内存后，额外输出 `display_latest.json` 和 `display_events.jsonl`，供 PySide6/QML 前端只读显示；展示桥优先显示 ROI 图，缺 ROI 时显示原始采集图。 |
 | 数据闭环 | trace、按 `camera_id/pose_id` 隔离的 ROI 图、overlay、manifest、embedding、PCA/PatchCore/FAISS 资产训练、回放与 benchmark。 |
 
 ## 快速开始
@@ -259,6 +260,8 @@ main.cpp
 
 C++ 侧负责生产节拍和设备安全，不能实现深度学习推理。当前仓库提供模拟 backend、Hikrobot MVS 相机 backend、生产配置 fail-fast 校验和故障注入路径；PLC、频闪和机器人真实 backend 仍需按现场协议或 SDK 接入。
 
+常驻生产闭环是：`seat_aoi_controller` 启动后持续等待 PLC/手动触发，按 Capture Plan 控制相机和频闪采集多光源图，写入共享内存 Frame Ring；Python detector 常驻读取 READY slot，完成检测或采样兜底后写 Result Ring；C++ 读取结果并输出给 PLC。`ERROR` 会被 C++ 映射为 PLC 侧 `RECHECK` 输出，避免产线误放行。
+
 ### Python 检测链路
 
 ```text
@@ -276,9 +279,9 @@ python_detector.detector_main
   -> ShmClient.publish_result()
 ```
 
-Python 侧只处理检测链路。任意输入不可信、配方不一致、模型缺失、输出越界或质量失败，都会进入保守结果，不用 `OK` 掩盖异常。
+Python 侧只处理检测链路。任意输入不可信、配方不一致、输出越界或质量失败，都会进入保守结果，不用 `OK` 掩盖异常。生产模型文件缺失、仍是占位文件、ONNX/numpy 依赖未安装、PCA 或 PatchCore memory bank 未就绪时，当前任务返回 `RECHECK` 并带 `CONFIGURATION_ERROR`，同时写 trace 样本用于后续训练；这类资产未就绪状态不会被报成 `NG`。
 
-Python detector 默认启用前端展示通道。每次检测完成并成功写回共享内存结果后，会在 `trace_root` 下追加 `display_events.jsonl`，并原子更新 `display_latest.json`。事件字段包括 `sequence_id`、`trigger_id`、`seat_id`、`sku`、`recipe_id`、`decision`、`quality_pass`、`error_code`、`elapsed_ms`、缺陷列表、质量/错误消息、`trace_dir`、ROI PGM 图路径和 overlay PPM 路径。该通道由本仓库 `display_app/` 的 PySide6/QML 展示前端只读消费，也可供外部 `online-detection-app` 对接；它不参与 C++/Python 在线共享内存协议。展示通道落盘失败只会打印告警，不改变 detector 已写回 C++ 的判定结果。C++ 侧采集失败或 detector timeout 等没有 Python 结果的场景，前端后续可继续读取 `trace_root/cpp_controller_events.jsonl` 补充主控事件。
+Python detector 默认启用前端展示通道。每次检测完成并成功写回共享内存结果后，会在 `trace_root` 下追加 `display_events.jsonl`，并原子更新 `display_latest.json`。事件字段包括 `sequence_id`、`trigger_id`、`seat_id`、`sku`、`recipe_id`、`decision`、`quality_pass`、`error_code`、`elapsed_ms`、缺陷列表、质量/错误消息、`trace_dir`、原始采集 PGM 图、ROI PGM 图路径和 overlay PPM 路径。该通道由本仓库 `display_app/` 的 PySide6/QML 展示前端只读消费，也可供外部 `online-detection-app` 对接；它不参与 C++/Python 在线共享内存协议。展示通道落盘失败只会打印告警，不改变 detector 已写回 C++ 的判定结果。C++ 侧采集失败或 detector timeout 等没有 Python 结果的场景，前端后续可继续读取 `trace_root/cpp_controller_events.jsonl` 补充主控事件。
 
 ### PySide6/QML 展示前端
 
@@ -289,7 +292,7 @@ uv sync --extra display
 uv run seat-aoi-display --trace-root trace --line-id AOI-1
 ```
 
-展示前端读取 `trace/display_latest.json`，按事件中的 ROI PGM 和 overlay PPM 路径更新 `image://camera/<camera_id>` 图像源。若事件没有 trace 图像，页面仍会更新状态、计数和日志；图像区域等待下一次带图像的检测事件。
+展示前端读取 `trace/display_latest.json`，按事件中的图片路径更新 `image://camera/<camera_id>` 图像源。正常检测优先显示 ROI PGM 和 overlay PPM；模型资产未就绪或 ROI 未产出时，前端会显示 `raw_images/<camera_id>/<pose_id>/<light_id>.pgm` 中的原始采集图。若事件没有 trace 图像，页面仍会更新状态、计数和日志；图像区域等待下一次带图像的检测事件。
 
 ### 共享内存协议
 
@@ -354,6 +357,7 @@ PLC 接入前的工控机联调使用 `cpp_controller/config/station_runtime.lab
 | 部署上机预检 | `uv run python -m tools.validate_deployment_preflight` | 当前环境可实现项无阻塞，并列出现场硬件、模型和平台 ACTION。 |
 | 严格生产预检 | `uv run python -m tools.validate_deployment_preflight --strict-production` | 正式生产配置或真实模型资产缺失时返回阻塞项。 |
 | 模型资产检查 | `uv run python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1` | 真实模型缺失时失败并列出待替换资产。 |
+| 无模型采样兜底 | `uv run pytest python_detector/tests/test_trace_and_tools.py::test_pipeline_model_error_context_is_traceable python_detector/tests/test_trace_and_tools.py::test_pipeline_roi_model_asset_unavailable_saves_raw_images display_app/tests/test_display_app_bridge.py::test_display_bridge_publishes_raw_image_when_roi_is_unavailable` | 模型/ROI 模型资产缺失时返回 `RECHECK`，trace 保存原始图，前端能显示 raw 图。 |
 | 端到端模拟 IPC | `bash tools/run_simulated_ipc.sh` 或 `uv run python tools/run_simulated_ipc.py` | C++ 和 Python 通过共享内存完成一次检测闭环；Windows 使用 Python 跨平台入口。 |
 
 ## 文档地图
@@ -375,7 +379,7 @@ PLC 接入前的工控机联调使用 `cpp_controller/config/station_runtime.lab
 - C++ 主控不实现深度学习推理。
 - 在线图像和结果不走 TCP，必须使用共享内存。
 - PySide6/QML 展示前端只读 `display_latest.json`、`display_events.jsonl`、trace 图和后续 C++ 事件日志，不参与设备控制和检测判定。
-- 任意不确定状态、超时、缺帧、协议错误、CRC 错误、质量门禁失败或模型异常都不能输出 `OK`。
+- 任意不确定状态、超时、缺帧、协议错误、CRC 错误、质量门禁失败或模型异常都不能输出 `OK`；模型资产未就绪时返回 `RECHECK` 并保存样本，不直接输出 `NG`。
 - 修改共享内存协议必须同步更新 C++、Python、校验工具、测试和协议文档。
 - 真实生产配置不得静默回退到 simulated backend。
 

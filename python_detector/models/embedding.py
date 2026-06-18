@@ -5,6 +5,7 @@ import math
 from pathlib import Path
 
 from python_detector.config.recipe_schema import ModelConfig
+from python_detector.models.asset_errors import ModelAssetUnavailableError
 from python_detector.models.onnx_runtime import create_onnx_session, numpy_module, run_first_input
 from python_detector.pipeline.feature_builder import FeatureGroup
 
@@ -58,10 +59,20 @@ class EmbeddingExtractor:
 
     def _onnx_embedding(self, feature_group: FeatureGroup, config: ModelConfig) -> tuple[float, ...]:
         if not config.embedding_model_path:
-            raise RuntimeError("WideResNet50 embedding 模型路径不能为空")
+            raise ModelAssetUnavailableError(
+                "WideResNet50 embedding 模型路径不能为空",
+                asset_kind="onnx_model",
+                asset_path="",
+                reason="path_not_configured",
+            )
         path = Path(config.embedding_model_path)
         if not path.exists():
-            raise RuntimeError(f"WideResNet50 embedding 模型文件不存在: {config.embedding_model_path}")
+            raise ModelAssetUnavailableError(
+                f"WideResNet50 embedding 模型文件不存在: {config.embedding_model_path}",
+                asset_kind="onnx_model",
+                asset_path=config.embedding_model_path,
+                reason="missing",
+            )
         if feature_group.tensor_nchw is None:
             raise RuntimeError("WideResNet50 embedding 输入 tensor 缺失")
         np = numpy_module("WideResNet50 embedding")

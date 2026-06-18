@@ -5,7 +5,13 @@ import time
 from python_detector.config.recipe_schema import Recipe
 from python_detector.ipc.data_types import InspectionResult, SeatInspectionJob
 from python_detector.ipc.shm_protocol import ErrorCode
-from python_detector.models.inference_engine import InferenceEngine, ModelInferenceError, ModelRegistry
+from python_detector.models.asset_errors import ModelAssetUnavailableError
+from python_detector.models.inference_engine import (
+    InferenceEngine,
+    ModelAssetUnavailableInferenceError,
+    ModelInferenceError,
+    ModelRegistry,
+)
 from python_detector.pipeline.feature_builder import FeatureBuilder
 from python_detector.pipeline.fusion_engine import FusionEngine
 from python_detector.pipeline.preprocessor import PreprocessRecheckError, Preprocessor
@@ -84,26 +90,7 @@ class InspectionPipeline:
                     bundle.roi_location_report for bundle in prepared if bundle.roi_location_report is not None
                 ],
                 "registration_reports": [cube.registration for cube in cubes],
-                "feature_summary": [
-                    {
-                        "camera_id": group.camera_id,
-                        "pose_id": group.pose_id,
-                        "roi_name": group.roi_name,
-                        "model_key": group.model_key,
-                        "feature_names": sorted(group.features),
-                        "tensor_channel_names": list(group.tensor_channel_names),
-                        "tensor_shape_nchw": [
-                            1,
-                            len(group.tensor_channel_names),
-                            group.feature_shape_hw[0],
-                            group.feature_shape_hw[1],
-                        ],
-                        "embedding_summary": group.embedding_summary,
-                        "pca_summary": group.pca_summary,
-                        "anomaly_summary": group.anomaly_summary,
-                    }
-                    for group in features
-                ],
+                "feature_summary": self._feature_summary(features),
                 "fusion_summary": {
                     "input_count": len(candidates),
                     "output_count": len(fused.candidates),
@@ -113,6 +100,10 @@ class InspectionPipeline:
                 "timings": timings,
             }
             return self.rule_engine.decide(job, fused, quality_report, recipe, elapsed_ms)
+        except ModelAssetUnavailableInferenceError as exc:
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
+            timings["total_ms"] = elapsed_ms
+            return self._make_model_asset_unavailable_result(job, elapsed_ms, timings, exc.context(), locals())
         except ModelInferenceError as exc:
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             timings["total_ms"] = elapsed_ms
@@ -137,6 +128,16 @@ class InspectionPipeline:
                 },
             }
             return self.rule_engine.make_quality_fail_result(job, quality_report, elapsed_ms)
+        except ModelAssetUnavailableError as exc:
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
+            timings["total_ms"] = elapsed_ms
+            error_context = {
+                "type": exc.__class__.__name__,
+                "message": str(exc),
+                "asset_unavailable": True,
+                "asset": exc.context(),
+            }
+            return self._make_model_asset_unavailable_result(job, elapsed_ms, timings, error_context, locals())
         except Exception as exc:
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             timings["total_ms"] = elapsed_ms
@@ -148,3 +149,61 @@ class InspectionPipeline:
                 },
             }
             return self.rule_engine.make_error_result(job, ErrorCode.INTERNAL_ERROR, elapsed_ms)
+
+    def _make_model_asset_unavailable_result(
+        self,
+        job: SeatInspectionJob,
+        elapsed_ms: float,
+        timings: dict[str, float],
+        error_context: dict[str, object],
+        scope: dict[str, object],
+    ) -> InspectionResult:
+        quality_report = scope.get("quality_report")
+        prepared = scope.get("prepared", [])
+        cubes = scope.get("cubes", [])
+        self.last_context = {
+            "quality_report": quality_report,
+            "prepared_bundles": prepared,
+            "roi_location_reports": [
+                bundle.roi_location_report
+                for bundle in prepared
+                if getattr(bundle, "roi_location_report", None) is not None
+            ],
+            "registration_reports": [cube.registration for cube in cubes],
+            "feature_summary": self._feature_summary(scope.get("features", [])),
+            "timings": timings,
+            "error": error_context,
+            "sample_collection": {
+                "enabled": True,
+                "reason": "model_asset_unavailable",
+                "decision": "RECHECK",
+            },
+        }
+        return self.rule_engine.make_recheck_result(
+            job,
+            ErrorCode.CONFIGURATION_ERROR,
+            elapsed_ms,
+            quality_pass=bool(getattr(quality_report, "is_pass", False)),
+        )
+
+    def _feature_summary(self, features: object) -> list[dict[str, object]]:
+        return [
+            {
+                "camera_id": group.camera_id,
+                "pose_id": group.pose_id,
+                "roi_name": group.roi_name,
+                "model_key": group.model_key,
+                "feature_names": sorted(group.features),
+                "tensor_channel_names": list(group.tensor_channel_names),
+                "tensor_shape_nchw": [
+                    1,
+                    len(group.tensor_channel_names),
+                    group.feature_shape_hw[0],
+                    group.feature_shape_hw[1],
+                ],
+                "embedding_summary": group.embedding_summary,
+                "pca_summary": group.pca_summary,
+                "anomaly_summary": group.anomaly_summary,
+            }
+            for group in features
+        ]

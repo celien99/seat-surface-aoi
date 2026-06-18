@@ -70,7 +70,7 @@ class DisplayBridge:
 
     def publish_images(self, event: DisplayEvent) -> list[str]:
         camera_ids: list[str] = []
-        for image in event.images:
+        for image in _select_display_images(event.images):
             camera_id = _asset_camera_id(image)
             path = image.get("path")
             if not camera_id or not path:
@@ -137,3 +137,26 @@ def _asset_camera_id(asset: dict[str, Any]) -> str:
     if pose_id and pose_id != camera_id:
         return f"{camera_id}/{pose_id}"
     return camera_id
+
+
+def _select_display_images(images: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_camera: dict[str, dict[str, Any]] = {}
+    for image in images:
+        camera_id = _asset_camera_id(image)
+        if not camera_id:
+            continue
+        current = by_camera.get(camera_id)
+        if current is None or _image_priority(image) < _image_priority(current):
+            by_camera[camera_id] = image
+    return list(by_camera.values())
+
+
+def _image_priority(image: dict[str, Any]) -> tuple[int, int, str]:
+    kind_rank = 0 if image.get("kind") == "roi_image" else 1
+    light_rank = {
+        "DIFFUSE": 0,
+        "POLAR_DIFFUSE": 1,
+        "HIGH_LEFT": 2,
+        "HIGH_RIGHT": 3,
+    }.get(str(image.get("light_id", "")), 9)
+    return kind_rank, light_rank, str(image.get("path", ""))

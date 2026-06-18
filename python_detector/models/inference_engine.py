@@ -5,6 +5,7 @@ import math
 from typing import Any, Protocol
 
 from python_detector.config.recipe_schema import ModelConfig, Recipe
+from python_detector.models.asset_errors import ModelAssetUnavailableError
 from python_detector.models.embedding import EmbeddingExtractor
 from python_detector.models.onnx_runtime import create_onnx_session, numpy_module, run_first_input
 from python_detector.models.patchcore import PatchCoreKnnIndex
@@ -58,6 +59,36 @@ class ModelInferenceError(RuntimeError):
         }
 
 
+class ModelAssetUnavailableInferenceError(ModelInferenceError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        model_key: str,
+        backend: str,
+        camera_id: str,
+        roi_name: str,
+        tensor_shape_nchw: tuple[int, int, int, int] | None,
+        asset_error: ModelAssetUnavailableError,
+    ) -> None:
+        super().__init__(
+            message,
+            model_key=model_key,
+            backend=backend,
+            camera_id=camera_id,
+            roi_name=roi_name,
+            tensor_shape_nchw=tensor_shape_nchw,
+            cause_type=asset_error.__class__.__name__,
+        )
+        self.asset_error = asset_error
+
+    def context(self) -> dict[str, Any]:
+        context = super().context()
+        context["asset_unavailable"] = True
+        context["asset"] = self.asset_error.context()
+        return context
+
+
 class ModelBackend(Protocol):
     def run(self, feature_group: FeatureGroup) -> list[DefectCandidate]:
         ...
@@ -102,7 +133,12 @@ class FakeModel:
 class OnnxModel:
     def __init__(self, config: ModelConfig) -> None:
         if not config.model_path:
-            raise RuntimeError("ONNX 模型路径不能为空")
+            raise ModelAssetUnavailableError(
+                "ONNX 模型路径不能为空",
+                asset_kind="onnx_model",
+                asset_path="",
+                reason="path_not_configured",
+            )
         self.session = create_onnx_session(config.model_path, "ONNX detection")
         self.config = config
 
@@ -121,7 +157,7 @@ class OnnxModel:
 
     def _decode_detection_rows(self, outputs: list[Any], feature_group: FeatureGroup) -> list[DefectCandidate]:
         try:
-            import numpy as np  # type: ignore
+            import numpy  # type: ignore  # noqa: F401
         except Exception as exc:
             raise RuntimeError("numpy 未安装，无法解析 ONNX 输出") from exc
         if not outputs:
@@ -208,7 +244,12 @@ class PatchCoreModel:
         if config.embedding_backend == "none":
             raise RuntimeError("PatchCore 必须配置 embedding_backend")
         if not config.memory_bank_path:
-            raise RuntimeError("PatchCore memory_bank_path 不能为空")
+            raise ModelAssetUnavailableError(
+                "PatchCore memory_bank_path 不能为空",
+                asset_kind="patchcore_memory_bank",
+                asset_path="",
+                reason="path_not_configured",
+            )
         self.config = config
         self.embedding_extractor = embedding_extractor or EmbeddingExtractor()
         self.pca_projector = pca_projector or PcaProjector()
@@ -296,7 +337,12 @@ class ModelRegistry:
     def get_model(self, model_key: str, recipe: Recipe) -> ModelBackend:
         config = recipe.models.get(model_key)
         if config is None:
-            raise RuntimeError(f"配方引用了不存在的模型: {model_key}")
+            raise ModelAssetUnavailableError(
+                f"配方引用了不存在的模型: {model_key}",
+                asset_kind="model_config",
+                asset_path=model_key,
+                reason="model_key_missing",
+            )
         cache_key = self._cache_key(model_key, config)
         if cache_key not in self._cache:
             self._cache[cache_key] = self._create_model(config)
@@ -352,6 +398,16 @@ class InferenceEngine:
             try:
                 model = self.model_registry.get_model(group.model_key, recipe)
                 candidates.extend(model.run(group))
+            except ModelAssetUnavailableError as exc:
+                raise ModelAssetUnavailableInferenceError(
+                    f"{group.camera_id}/{group.roi_name}/{group.model_key}: 模型资产未就绪，保存采集样本: {exc}",
+                    model_key=group.model_key,
+                    backend=backend,
+                    camera_id=group.camera_id,
+                    roi_name=group.roi_name,
+                    tensor_shape_nchw=_tensor_shape_nchw(group),
+                    asset_error=exc,
+                ) from exc
             except ModelInferenceError:
                 raise
             except Exception as exc:

@@ -12,10 +12,13 @@ from training_tools.job_fixture import make_simulated_job
 
 def test_build_display_event_includes_result_and_trace_assets(tmp_path: Path) -> None:
     trace_dir = tmp_path / "trace" / "20260618" / "SIM_1_1"
+    raw_dir = trace_dir / "raw_images" / "TOP_BACK" / "TOP_BACK"
     image_dir = trace_dir / "images" / "TOP_BACK" / "TOP_BACK" / "full"
     overlay_dir = trace_dir / "overlays"
+    raw_dir.mkdir(parents=True)
     image_dir.mkdir(parents=True)
     overlay_dir.mkdir()
+    (raw_dir / "DIFFUSE.pgm").write_bytes(b"P5\n1 1\n255\n\x08")
     (image_dir / "DIFFUSE.pgm").write_bytes(b"P5\n1 1\n255\n\x10")
     (overlay_dir / "D1_TOP_BACK_TOP_BACK_full.ppm").write_bytes(b"P6\n1 1\n255\n\xff\x00\x00")
     job = make_simulated_job()
@@ -50,7 +53,9 @@ def test_build_display_event_includes_result_and_trace_assets(tmp_path: Path) ->
     assert event["schema"] == DISPLAY_EVENT_SCHEMA
     assert event["decision"] == "NG"
     assert event["defects"][0]["class_name"] == "scratch"
-    assert event["images"][0]["path"].endswith("DIFFUSE.pgm")
+    assert event["images"][0]["kind"] == "raw_image"
+    assert event["images"][1]["kind"] == "roi_image"
+    assert event["images"][1]["path"].endswith("DIFFUSE.pgm")
     assert event["overlays"][0]["path"].endswith(".ppm")
 
 

@@ -6,6 +6,8 @@ import math
 from pathlib import Path
 from typing import Any
 
+from python_detector.models.asset_errors import ModelAssetUnavailableError
+
 
 @dataclass(frozen=True)
 class PatchCoreBank:
@@ -87,7 +89,19 @@ class PatchCoreKnnIndex:
             return self._cache[path_value]
         path = Path(path_value)
         if not path.exists():
-            raise RuntimeError(f"PatchCore memory bank 不存在: {path_value}")
+            raise ModelAssetUnavailableError(
+                f"PatchCore memory bank 不存在: {path_value}",
+                asset_kind="patchcore_memory_bank",
+                asset_path=path_value,
+                reason="missing",
+            )
+        if path.stat().st_size <= 1:
+            raise ModelAssetUnavailableError(
+                f"PatchCore memory bank 为空或仍是占位文件: {path_value}",
+                asset_kind="patchcore_memory_bank",
+                asset_path=path_value,
+                reason="empty_or_placeholder",
+            )
         raw = json.loads(path.read_text(encoding="utf-8"))
         bank = self._parse(raw, path_value)
         self._cache[path_value] = bank

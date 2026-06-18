@@ -3,28 +3,55 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from python_detector.models.asset_errors import ModelAssetUnavailableError
+
 
 def create_onnx_session(model_path: str, purpose: str) -> Any:
     path = Path(model_path)
     if not path.exists():
-        raise RuntimeError(f"{purpose} 模型文件不存在: {model_path}")
+        raise ModelAssetUnavailableError(
+            f"{purpose} 模型文件不存在: {model_path}",
+            asset_kind="onnx_model",
+            asset_path=model_path,
+            reason="missing",
+        )
     if path.stat().st_size <= 1:
-        raise RuntimeError(f"{purpose} 模型文件为空或仍是占位文件: {model_path}")
+        raise ModelAssetUnavailableError(
+            f"{purpose} 模型文件为空或仍是占位文件: {model_path}",
+            asset_kind="onnx_model",
+            asset_path=model_path,
+            reason="empty_or_placeholder",
+        )
     try:
         import onnxruntime as ort  # type: ignore
     except Exception as exc:
-        raise RuntimeError(f"onnxruntime 未安装，无法启用 {purpose} 后端") from exc
+        raise ModelAssetUnavailableError(
+            f"onnxruntime 未安装，无法启用 {purpose} 后端",
+            asset_kind="python_dependency",
+            asset_path="onnxruntime",
+            reason="dependency_missing",
+        ) from exc
     try:
         return ort.InferenceSession(str(path))
     except Exception as exc:
-        raise RuntimeError(f"{purpose} ONNX session 创建失败: {exc}") from exc
+        raise ModelAssetUnavailableError(
+            f"{purpose} ONNX session 创建失败: {exc}",
+            asset_kind="onnx_model",
+            asset_path=model_path,
+            reason="session_create_failed",
+        ) from exc
 
 
 def numpy_module(purpose: str) -> Any:
     try:
         import numpy as np  # type: ignore
     except Exception as exc:
-        raise RuntimeError(f"numpy 未安装，无法构建 {purpose} 输入") from exc
+        raise ModelAssetUnavailableError(
+            f"numpy 未安装，无法构建 {purpose} 输入",
+            asset_kind="python_dependency",
+            asset_path="numpy",
+            reason="dependency_missing",
+        ) from exc
     return np
 
 

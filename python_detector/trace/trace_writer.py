@@ -41,6 +41,7 @@ class TraceWriter:
         self._write_json(trace_dir / "fusion_summary.json", context.get("fusion_summary", {}))
         self._write_json(trace_dir / "timings.json", context.get("timings", {}))
         self._write_json(trace_dir / "error.json", context.get("error", {}))
+        self._write_raw_images(trace_dir, job)
         self._write_roi_images(trace_dir, context.get("prepared_bundles", []))
         self._write_defect_overlays(trace_dir, result, context.get("prepared_bundles", []))
         return trace_dir
@@ -83,6 +84,19 @@ class TraceWriter:
                         / f"{_safe_name(light_id)}.pgm",
                         frame,
                     )
+
+    def _write_raw_images(self, trace_dir: Path, job: SeatInspectionJob) -> None:
+        for bundle in job.camera_bundles:
+            pose_id = bundle.pose_id or bundle.camera_id
+            for light_id, frame in bundle.light_frames.items():
+                self._write_pgm(
+                    trace_dir
+                    / "raw_images"
+                    / _safe_name(bundle.camera_id)
+                    / _safe_name(pose_id)
+                    / f"{_safe_name(light_id)}.pgm",
+                    frame,
+                )
 
     def _write_defect_overlays(self, trace_dir: Path, result: InspectionResult, prepared_bundles: Any) -> None:
         if not result.defects:

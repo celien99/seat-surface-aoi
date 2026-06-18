@@ -26,8 +26,10 @@ def test_load_netpbm_bgr_supports_pgm_and_ppm(tmp_path: Path) -> None:
 
 
 def test_display_bridge_reads_latest_and_publishes_images(tmp_path: Path) -> None:
+    raw_path = tmp_path / "raw.pgm"
     image_path = tmp_path / "roi.pgm"
     overlay_path = tmp_path / "overlay.ppm"
+    raw_path.write_bytes(b"P5\n2 1\n255\n\x09\x09")
     image_path.write_bytes(b"P5\n2 1\n255\n\x01\x02")
     overlay_path.write_bytes(b"P6\n1 1\n255\n\xff\x00\x00")
     _write_latest(
@@ -46,7 +48,23 @@ def test_display_bridge_reads_latest_and_publishes_images(tmp_path: Path) -> Non
                     "decision": "NG",
                 }
             ],
-            "images": [{"camera_id": "CAM_FRONT", "pose_id": "POSE_A", "path": str(image_path)}],
+            "images": [
+                {
+                    "kind": "raw_image",
+                    "camera_id": "CAM_FRONT",
+                    "pose_id": "POSE_A",
+                    "light_id": "DIFFUSE",
+                    "path": str(raw_path),
+                },
+                {
+                    "kind": "roi_image",
+                    "camera_id": "CAM_FRONT",
+                    "pose_id": "POSE_A",
+                    "roi_name": "seat",
+                    "light_id": "DIFFUSE",
+                    "path": str(image_path),
+                },
+            ],
             "overlays": [{"camera_id": "CAM_FRONT", "pose_id": "POSE_A", "path": str(overlay_path)}],
         },
     )
@@ -59,6 +77,39 @@ def test_display_bridge_reads_latest_and_publishes_images(tmp_path: Path) -> Non
     assert event.decision == "NG"
     assert event.defects[0].class_name == "scratch"
     assert bridge.publish_images(event) == ["CAM_FRONT/POSE_A"]
+    assert provider._frames["CAM_FRONT/POSE_A"][0, 0].tolist() == [1, 1, 1]
+
+
+def test_display_bridge_publishes_raw_image_when_roi_is_unavailable(tmp_path: Path) -> None:
+    raw_path = tmp_path / "raw.pgm"
+    raw_path.write_bytes(b"P5\n2 1\n255\n\x09\x0a")
+    _write_latest(
+        tmp_path,
+        {
+            "decision": "RECHECK",
+            "quality_pass": True,
+            "error_code": 13,
+            "message": "模型资产未就绪，保存采集样本",
+            "images": [
+                {
+                    "kind": "raw_image",
+                    "camera_id": "CAM_FRONT",
+                    "pose_id": "POSE_A",
+                    "light_id": "DIFFUSE",
+                    "path": str(raw_path),
+                }
+            ],
+        },
+    )
+    provider = CameraImageProvider()
+    bridge = DisplayBridge(tmp_path, provider)
+
+    event = bridge.read_latest()
+
+    assert event is not None
+    assert event.decision == "RECHECK"
+    assert bridge.publish_images(event) == ["CAM_FRONT/POSE_A"]
+    assert provider._frames["CAM_FRONT/POSE_A"][0, 0].tolist() == [9, 9, 9]
 
 
 def test_main_view_model_updates_from_display_event(tmp_path: Path) -> None:

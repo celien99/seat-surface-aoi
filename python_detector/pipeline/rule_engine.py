@@ -93,3 +93,22 @@ class RuleEngine:
             error_code=error_code,
             elapsed_ms=elapsed_ms,
         )
+
+    def make_recheck_result(
+        self,
+        job: SeatInspectionJob,
+        error_code: int,
+        elapsed_ms: float = 0.0,
+        *,
+        quality_pass: bool = False,
+    ) -> InspectionResult:
+        return InspectionResult(
+            sequence_id=job.sequence_id,
+            trigger_id=job.trigger_id,
+            seat_id=job.seat_id,
+            decision="RECHECK",
+            defects=[],
+            quality_pass=quality_pass,
+            error_code=error_code,
+            elapsed_ms=elapsed_ms,
+        )

@@ -3,7 +3,14 @@ from dataclasses import replace
 import pytest
 
 from python_detector.config.recipe_schema import ModelConfig, RecipeManager
-from python_detector.models.inference_engine import FakeModel, InferenceEngine, ModelInferenceError, ModelRegistry, OnnxModel
+from python_detector.models.inference_engine import (
+    FakeModel,
+    InferenceEngine,
+    ModelAssetUnavailableInferenceError,
+    ModelInferenceError,
+    ModelRegistry,
+    OnnxModel,
+)
 from python_detector.pipeline.feature_builder import FeatureGroup
 
 
@@ -52,17 +59,25 @@ def test_fake_model_modes_cover_ok_recheck_ng() -> None:
 def test_onnx_missing_model_path_fails_conservatively() -> None:
     recipe = RecipeManager().load("seat_a_black_leather_v1")
     recipe = replace(recipe, models={"fake_default": ModelConfig(backend="onnx", model_path="missing.onnx")})
-    with pytest.raises(ModelInferenceError) as exc_info:
+    with pytest.raises(ModelAssetUnavailableInferenceError) as exc_info:
         InferenceEngine(ModelRegistry()).infer([_feature_group()], recipe)
     assert exc_info.value.context() == {
-        "type": "ModelInferenceError",
-        "message": "TOP_BACK/full/fake_default: 模型推理失败: ONNX detection 模型文件不存在: missing.onnx",
+        "type": "ModelAssetUnavailableInferenceError",
+        "message": "TOP_BACK/full/fake_default: 模型资产未就绪，保存采集样本: ONNX detection 模型文件不存在: missing.onnx",
         "model_key": "fake_default",
         "backend": "onnx",
         "camera_id": "TOP_BACK",
         "roi_name": "full",
         "tensor_shape_nchw": [1, 1, 48, 64],
-        "cause_type": "RuntimeError",
+        "cause_type": "ModelAssetUnavailableError",
+        "asset_unavailable": True,
+        "asset": {
+            "type": "ModelAssetUnavailableError",
+            "message": "ONNX detection 模型文件不存在: missing.onnx",
+            "asset_kind": "onnx_model",
+            "asset_path": "missing.onnx",
+            "reason": "missing",
+        },
     }
 
 

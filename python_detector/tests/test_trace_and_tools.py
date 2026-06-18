@@ -50,6 +50,7 @@ def test_trace_writer_generates_result_files(tmp_path: Path) -> None:
     assert (trace_dir / "fusion_summary.json").exists()
     assert (trace_dir / "timings.json").exists()
     assert (trace_dir / "error.json").exists()
+    assert (trace_dir / "raw_images" / "TOP_BACK" / "TOP_BACK" / "DIFFUSE.pgm").exists()
     assert (trace_dir / "images" / "TOP_BACK" / "TOP_BACK" / "full" / "DIFFUSE.pgm").exists()
 
 
@@ -190,18 +191,49 @@ def test_pipeline_model_error_context_is_traceable(tmp_path: Path) -> None:
     result = pipeline.process(job, recipe)
     trace_dir = TraceWriter(recipe.trace.root_dir).write(job, recipe, result, pipeline.last_context)
 
-    assert result.decision == "ERROR"
-    assert result.quality_pass is False
-    assert pipeline.last_context["error"]["type"] == "ModelInferenceError"
+    assert result.decision == "RECHECK"
+    assert result.quality_pass is True
+    assert result.error_code == 13
+    assert pipeline.last_context["sample_collection"] == {
+        "enabled": True,
+        "reason": "model_asset_unavailable",
+        "decision": "RECHECK",
+    }
+    assert pipeline.last_context["error"]["type"] == "ModelAssetUnavailableInferenceError"
+    assert pipeline.last_context["error"]["asset_unavailable"] is True
     assert pipeline.last_context["error"]["model_key"] == "fake_default"
     assert pipeline.last_context["error"]["backend"] == "onnx"
     assert pipeline.last_context["error"]["camera_id"] == "TOP_BACK"
     assert pipeline.last_context["error"]["roi_name"] == "full"
     assert pipeline.last_context["error"]["tensor_shape_nchw"] == [1, 5, 48, 64]
     assert trace_dir is not None
+    assert (trace_dir / "raw_images" / "TOP_BACK" / "TOP_BACK" / "DIFFUSE.pgm").exists()
+    assert (trace_dir / "images" / "TOP_BACK" / "TOP_BACK" / "full" / "DIFFUSE.pgm").exists()
     error = json.loads((trace_dir / "error.json").read_text(encoding="utf-8"))
-    assert error["type"] == "ModelInferenceError"
+    assert error["type"] == "ModelAssetUnavailableInferenceError"
     assert error["model_key"] == "fake_default"
+    assert error["asset"]["reason"] == "missing"
+
+
+def test_pipeline_roi_model_asset_unavailable_saves_raw_images(tmp_path: Path) -> None:
+    recipe = _recipe(tmp_path, save_ok_ratio=1.0)
+    recipe = replace(
+        recipe,
+        roi_locator=replace(recipe.roi_locator, backend="onnx_yolo", model_path="missing_roi.onnx"),
+    )
+    pipeline = InspectionPipeline()
+    job = make_simulated_job()
+
+    result = pipeline.process(job, recipe)
+    trace_dir = TraceWriter(recipe.trace.root_dir).write(job, recipe, result, pipeline.last_context)
+
+    assert result.decision == "RECHECK"
+    assert result.quality_pass is True
+    assert result.error_code == 13
+    assert pipeline.last_context["error"]["asset"]["asset_path"] == "missing_roi.onnx"
+    assert trace_dir is not None
+    assert (trace_dir / "raw_images" / "TOP_BACK" / "TOP_BACK" / "DIFFUSE.pgm").exists()
+    assert not (trace_dir / "images").exists()
 
 
 def test_replay_report_includes_quality_and_error_context() -> None:

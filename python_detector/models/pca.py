@@ -6,6 +6,8 @@ import math
 from pathlib import Path
 from typing import Any
 
+from python_detector.models.asset_errors import ModelAssetUnavailableError
+
 
 @dataclass(frozen=True)
 class PcaProjectionResult:
@@ -53,7 +55,19 @@ class PcaProjector:
             return self._cache[path_value]
         path = Path(path_value)
         if not path.exists():
-            raise RuntimeError(f"PCA 参数文件不存在: {path_value}")
+            raise ModelAssetUnavailableError(
+                f"PCA 参数文件不存在: {path_value}",
+                asset_kind="pca_parameters",
+                asset_path=path_value,
+                reason="missing",
+            )
+        if path.stat().st_size <= 1:
+            raise ModelAssetUnavailableError(
+                f"PCA 参数文件为空或仍是占位文件: {path_value}",
+                asset_kind="pca_parameters",
+                asset_path=path_value,
+                reason="empty_or_placeholder",
+            )
         raw = json.loads(path.read_text(encoding="utf-8"))
         params = self._parse(raw, path_value)
         self._cache[path_value] = params

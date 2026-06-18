@@ -104,6 +104,37 @@ def _defect_event(defect: DefectResult) -> dict[str, Any]:
 
 
 def _image_assets(trace_dir: Path) -> list[dict[str, Any]]:
+    assets = _raw_image_assets(trace_dir)
+    assets.extend(_roi_image_assets(trace_dir))
+    return assets
+
+
+def _raw_image_assets(trace_dir: Path) -> list[dict[str, Any]]:
+    image_root = trace_dir / "raw_images"
+    if not image_root.is_dir():
+        return []
+    assets: list[dict[str, Any]] = []
+    for path in sorted(image_root.rglob("*.pgm")):
+        rel = path.relative_to(image_root)
+        parts = rel.parts
+        if len(parts) != 3:
+            continue
+        camera_id, pose_id = parts[0], parts[1]
+        light_id = Path(parts[-1]).stem
+        assets.append(
+            {
+                "kind": "raw_image",
+                "camera_id": camera_id,
+                "pose_id": pose_id,
+                "roi_name": "",
+                "light_id": light_id,
+                "path": str(path.resolve()),
+            }
+        )
+    return assets
+
+
+def _roi_image_assets(trace_dir: Path) -> list[dict[str, Any]]:
     image_root = trace_dir / "images"
     if not image_root.is_dir():
         return []

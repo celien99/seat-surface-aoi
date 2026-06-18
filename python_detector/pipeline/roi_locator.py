@@ -7,6 +7,7 @@ import math
 from python_detector.config.calibration_manager import RoiTemplate
 from python_detector.config.recipe_schema import Recipe
 from python_detector.ipc.data_types import LightFrame
+from python_detector.models.asset_errors import ModelAssetUnavailableError
 from python_detector.models.onnx_runtime import create_onnx_session, numpy_module, run_first_input
 from python_detector.models.yolo_decode import decode_yolo_rows
 
@@ -103,7 +104,12 @@ class RoiLocator:
     def _onnx_yolo_rows(self, dome_frame: LightFrame, recipe: Recipe) -> list[list[float]]:
         model_path = recipe.roi_locator.model_path
         if not model_path:
-            raise RuntimeError("YOLO ROI 模型路径不能为空")
+            raise ModelAssetUnavailableError(
+                "YOLO ROI 模型路径不能为空",
+                asset_kind="onnx_model",
+                asset_path="",
+                reason="path_not_configured",
+            )
         np = numpy_module("YOLO ROI")
         session = create_onnx_session(model_path, "YOLO ROI")
         tensor = self._frame_to_nchw(dome_frame, np)

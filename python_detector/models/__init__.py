@@ -1,10 +1,12 @@
 """模型运行时抽象。"""
 
+from python_detector.models.asset_errors import ModelAssetUnavailableError
 from python_detector.models.embedding import EmbeddingExtractor, UnifiedEmbedding
 from python_detector.models.inference_engine import (
     DefectCandidate,
     FakeModel,
     InferenceEngine,
+    ModelAssetUnavailableInferenceError,
     ModelBackend,
     ModelInferenceError,
     ModelRegistry,
@@ -20,6 +22,8 @@ __all__ = [
     "EmbeddingExtractor",
     "FakeModel",
     "InferenceEngine",
+    "ModelAssetUnavailableError",
+    "ModelAssetUnavailableInferenceError",
     "ModelBackend",
     "ModelInferenceError",
     "ModelRegistry",
