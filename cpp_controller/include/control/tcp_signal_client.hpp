@@ -59,11 +59,16 @@ private:
                           std::string* error_message);
   /// 发送 ok_response 给客户端
   void send_ok();
+  /// 通过 TCP 发送结果回传行
+  bool send_result_line(const std::string& seat_id, const std::string& decision_text,
+                        int timeout_ms, std::string* error_message);
 
   /// 平台相关 socket 操作
   void close_socket();
   bool set_socket_timeout(int timeout_ms);
   int read_socket(void* buffer, std::size_t size, int timeout_ms);
+  socket_t connect_to(const std::string& host, std::uint32_t port,
+                      std::string* error_message);
 
   bool initialized_ = false;
   bool simulate_output_fault_ = false;
@@ -76,6 +81,16 @@ private:
   std::string station_id_;
   std::string default_seat_id_ = "EXTERNAL_SEAT";
   std::string default_sku_ = "seat_a_black_leather";
+
+  // TCP 结果回传
+  std::string result_host_;
+  std::uint32_t result_port_ = 0;
+  std::string result_prefix_ = "result";
+  std::string result_delimiter_ = "|";
+  std::string ok_text_ = "OK";
+  std::string ng_text_ = "NG";
+  std::string recheck_text_ = "RECHECK";
+  std::string error_text_ = "ERROR";
 
   std::uint64_t next_trigger_id_ = 1;
 

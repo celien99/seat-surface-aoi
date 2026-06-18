@@ -812,6 +812,22 @@ bool load_station_runtime_config(const std::string& path,
       config.signal.terminator = value;
     } else if (key == "signal.ok_response") {
       config.signal.ok_response = value;
+    } else if (key == "signal.result_host") {
+      config.signal.result_host = value;
+    } else if (key == "signal.result_port") {
+      if (!parse_uint32_field("signal.result_port", value, false, &config.signal.result_port, error_message)) { return false; }
+    } else if (key == "signal.result_prefix") {
+      config.signal.result_prefix = value;
+    } else if (key == "signal.result_delimiter") {
+      config.signal.result_delimiter = value;
+    } else if (key == "signal.ok_text") {
+      config.signal.ok_text = value;
+    } else if (key == "signal.ng_text") {
+      config.signal.ng_text = value;
+    } else if (key == "signal.recheck_text") {
+      config.signal.recheck_text = value;
+    } else if (key == "signal.error_text") {
+      config.signal.error_text = value;
     } else if (key == "plc.host" || key == "plc.port" ||
                key == "plc.trigger_source" || key == "plc.trigger_id_source" ||
                key == "plc.seat_id_source" || key == "plc.ok_output" ||

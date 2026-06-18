@@ -18,6 +18,15 @@ struct SignalClientConfig {
   std::string delimiter;
   std::string terminator = "\n";
   std::string ok_response = "ok\n";
+  // TCP 结果回传 (result_notify)
+  std::string result_host;
+  std::uint32_t result_port = 0;
+  std::string result_prefix = "result";
+  std::string result_delimiter = "|";
+  std::string ok_text = "OK";
+  std::string ng_text = "NG";
+  std::string recheck_text = "RECHECK";
+  std::string error_text = "ERROR";
   bool simulate_output_fault = false;
   bool simulate_trigger_timeout = false;
 };

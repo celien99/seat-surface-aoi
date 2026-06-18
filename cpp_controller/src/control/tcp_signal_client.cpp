@@ -437,6 +437,14 @@ bool TcpSignalClient::initialize(const SignalClientConfig& config) {
   delimiter_ = config.delimiter;
   terminator_ = config.terminator.empty() ? "\n" : config.terminator;
   ok_response_ = config.ok_response.empty() ? "ok\n" : config.ok_response;
+  result_host_ = config.result_host;
+  result_port_ = config.result_port;
+  result_prefix_ = config.result_prefix.empty() ? "result" : config.result_prefix;
+  result_delimiter_ = config.result_delimiter.empty() ? "|" : config.result_delimiter;
+  ok_text_ = config.ok_text.empty() ? "OK" : config.ok_text;
+  ng_text_ = config.ng_text.empty() ? "NG" : config.ng_text;
+  recheck_text_ = config.recheck_text.empty() ? "RECHECK" : config.recheck_text;
+  error_text_ = config.error_text.empty() ? "ERROR" : config.error_text;
   station_id_ = config.station_id.empty() ? "TCP_AOI" : config.station_id;
   default_seat_id_ = config.default_seat_id.empty() ? "EXTERNAL_SEAT"
                                                      : config.default_seat_id;
@@ -530,26 +538,112 @@ bool TcpSignalClient::publish_result(const ExternalTrigger& trigger,
     return false;
   }
 
-  const char* decision_name = "UNKNOWN";
+  std::string decision_text;
   switch (decision) {
-    case InspectionDecision::OK:
-      decision_name = "OK";
-      break;
-    case InspectionDecision::NG:
-      decision_name = "NG";
-      break;
-    case InspectionDecision::Recheck:
-      decision_name = "RECHECK";
-      break;
-    case InspectionDecision::Error:
-      decision_name = "ERROR";
-      break;
+    case InspectionDecision::OK:      decision_text = ok_text_;      break;
+    case InspectionDecision::NG:      decision_text = ng_text_;      break;
+    case InspectionDecision::Recheck: decision_text = recheck_text_; break;
+    case InspectionDecision::Error:   decision_text = error_text_;   break;
   }
 
+  const std::string seat_id(trigger.seat_id);
   std::cout << "TCP 信号 sequence_id=" << sequence_id
             << " trigger_id=" << trigger.trigger_id
-            << " seat_id=" << trigger.seat_id
-            << " decision=" << decision_name << std::endl;
+            << " seat_id=" << seat_id
+            << " decision=" << decision_text << std::endl;
+
+  // 尝试通过 result_host:result_port 发送结果
+  std::string send_error;
+  if (!result_host_.empty() && result_port_ > 0) {
+    if (send_result_line(seat_id, decision_text, timeout_ms, &send_error)) {
+      return true;
+    }
+    std::cerr << "TCP result notify failed: " << send_error
+              << " (will not block main flow)" << std::endl;
+  }
+
+  // 回退：尝试通过已有 PLC 连接发送
+  if (client_sock_ != kInvalidSocket) {
+    const std::string line = result_prefix_ + result_delimiter_ +
+                             seat_id + result_delimiter_ +
+                             decision_text + terminator_;
+    set_socket_timeout(timeout_ms);
+    const int sent = static_cast<int>(
+        ::send(static_cast<int>(client_sock_), line.data(), line.size(), 0));
+    if (sent == static_cast<int>(line.size())) {
+      return true;
+    }
+  }
+
+  // 无有效 TCP 通道时仅日志，不报错
+  return true;
+}
+
+TcpSignalClient::socket_t TcpSignalClient::connect_to(const std::string& host,
+                                                       std::uint32_t port,
+                                                       std::string* error_message) {
+#ifdef _WIN32
+  socket_t sock = static_cast<socket_t>(::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP));
+#else
+  socket_t sock = ::socket(AF_INET, SOCK_STREAM, 0);
+#endif
+  if (sock == kInvalidSocket) {
+    if (error_message != nullptr) *error_message = "result notify socket 创建失败";
+    return kInvalidSocket;
+  }
+
+  struct sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(static_cast<uint16_t>(port));
+  if (inet_pton(AF_INET, host.c_str(), &addr.sin_addr) != 1) {
+    close_socket_impl(sock);
+    if (error_message != nullptr)
+      *error_message = "result notify host 解析失败: " + host;
+    return kInvalidSocket;
+  }
+
+  if (::connect(static_cast<int>(sock),
+                reinterpret_cast<struct sockaddr*>(&addr),
+                sizeof(addr)) != 0) {
+    close_socket_impl(sock);
+    if (error_message != nullptr)
+      *error_message = "result notify 连接失败 " + host + ":" + std::to_string(port);
+    return kInvalidSocket;
+  }
+  return sock;
+}
+
+bool TcpSignalClient::send_result_line(const std::string& seat_id,
+                                        const std::string& decision_text,
+                                        int timeout_ms,
+                                        std::string* error_message) {
+  socket_t sock = connect_to(result_host_, result_port_, error_message);
+  if (sock == kInvalidSocket) return false;
+
+  const std::string line = result_prefix_ + result_delimiter_ +
+                           seat_id + result_delimiter_ +
+                           decision_text + terminator_;
+
+  // 设置发送超时
+#ifdef _WIN32
+  const DWORD tv = static_cast<DWORD>(timeout_ms);
+  ::setsockopt(static_cast<SOCKET>(sock), SOL_SOCKET, SO_SNDTIMEO,
+               reinterpret_cast<const char*>(&tv), sizeof(tv));
+#else
+  struct timeval tv{};
+  tv.tv_sec = timeout_ms / 1000;
+  tv.tv_usec = (timeout_ms % 1000) * 1000;
+  ::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+#endif
+
+  const int sent = static_cast<int>(
+      ::send(static_cast<int>(sock), line.data(), line.size(), 0));
+  close_socket_impl(sock);
+  if (sent != static_cast<int>(line.size())) {
+    if (error_message != nullptr)
+      *error_message = "result notify 发送失败";
+    return false;
+  }
   return true;
 }
 

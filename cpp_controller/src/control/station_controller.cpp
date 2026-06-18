@@ -22,6 +22,14 @@ SignalClientConfig make_signal_client_config(const RuntimeSignalConfig& config) 
   client_config.delimiter = config.delimiter;
   client_config.terminator = config.terminator;
   client_config.ok_response = config.ok_response;
+  client_config.result_host = config.result_host;
+  client_config.result_port = config.result_port;
+  client_config.result_prefix = config.result_prefix;
+  client_config.result_delimiter = config.result_delimiter;
+  client_config.ok_text = config.ok_text;
+  client_config.ng_text = config.ng_text;
+  client_config.recheck_text = config.recheck_text;
+  client_config.error_text = config.error_text;
   client_config.simulate_output_fault = config.simulate_output_fault;
   client_config.simulate_trigger_timeout = config.simulate_trigger_timeout;
   return client_config;
