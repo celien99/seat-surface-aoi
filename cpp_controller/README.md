@@ -460,7 +460,6 @@ max_jobs=1
 recipe_id=seat_a_black_leather_v1
 capture_mode=fixed_camera
 light_order=1,2,3,4
-trigger_sync_mode=camera_exposure_output
 trace_root=trace
 
 # 相机配置；生产模式需要补充 serial_number、trigger_line、exposure_output_line
@@ -666,70 +665,45 @@ for (const auto& view : capture_plan) {
 }
 ```
 
-### 两种触发同步模式
+### 频闪采集时序（对齐 Deploy）
 
-项目支持两种光源触发模式，由 `trigger_sync_mode` 配置：
-
-#### 模式 A：Software（软件触发）
+每个光源步骤 = arm 相机 → 频闪完整序列 (C→B→8→9→A→7) → 取图 → post_delay：
 
 ```
-C++ 程序
+C++ 程序 (单视角单光源, FL-ACDH 硬触发)
   │
-  ├──①──→ light_controller_.trigger_channel(光源N)
-  │        └─ 模拟频闪脉冲 (simulated strobe, sleep 1ms)
+  ├──①──→ camera.arm(光源N)
+  │        └─ 设置相机曝光时间/增益
   │
-  ├──②──→ camera.wait_frame()    ← 单视角串行采集
-  │        └─ CameraDevice::capture() → 生成合成图像 (sleep 2ms)
+  ├──②──→ light_controller_.trigger_channel(光源N)
+  │        └─ FL-ACDH: C→B→8→9→A→7 完整序列
+  │           C: 联动模式=0   B: 触发边沿=1   8: 触发模式=0
+  │           9: 频闪脉宽     A: 相机延迟      7: 点火!
+  │           └─ F口同步输出 → 相机 Line0 → 曝光采集
   │
-  └──③──→ 下一个光源 (light_seq_index++) 或下一个视角
-```
-
-#### 模式 B：CameraExposureOutput（相机曝光输出硬触发，默认模式）
-
-模拟真实硬件的 GPIO 联动——相机开始曝光时通过 Strobe Out 引脚发出脉冲信号，触发光源频闪：
-
-```
-C++ 程序 (单视角单光源)
+  ├──③──→ camera.wait_frame()     ← 从 MVS SDK 取图
   │
-  ├──①──→ light_controller_.arm_hardware_trigger(光源N)
-  │        └─ 光源进入"预就绪"状态，等待曝光输出信号
+  ├──④──→ sleep(post_delay_ms)    ← 光源间等待（默认 50ms）
   │
-  ├──②──→ camera.arm(光源N)      ← 仅当前视角对应相机 arm
-  │        └─ CameraDevice 记录 armed_trigger_id / armed_light_index
-  │
-  ├──③──→ camera.simulate_exposure_output(光源N)
-  │        └─ 当前视角相机模拟曝光输出信号 (sleep 1ms)
-  │        └─ 真实场景：相机开始曝光 → GPIO Strobe Out → 光源频闪
-  │
-  ├──④──→ light_controller_.notify_hardware_triggered(光源N)
-  │        └─ 光源确认已收到硬件触发，执行频闪 (sleep 1ms)
-  │
-  ├──⑤──→ camera.wait_frame(光源N)   ← 单相机串行采集
-  │        └─ CameraDevice::capture() → 生成合成图像 (sleep 2ms)
-  │
-  └──⑥──→ 下一个光源 或 下一个视角
+  └──⑤──→ 下一个光源 或下一个视角
 ```
 
 ### 完整时序图（时分频闪）
 
 ```
-假设: 2个检测视角 (A, B), light_order = [1, 2, 3, 4], 模式 = CameraExposureOutput
+假设: 2个检测视角 (A, B), light_order = [1, 2, 3, 4]
 
-time ────────────────────────────────────────────────────────────────────────→
+time ────────────────────────────────────────────────────────────→
 
-  ═══════════ 视角A (固定机位 Camera 0 或机器人 pose T1) ═══════════
-  prepare_sequence ─→
-    Light 1 arm ─→ Cam A arm ─→ Cam A 曝光输出 ─→ Light 1 频闪 ─→ Cam A 采图
-    Light 2 arm ─→ Cam A arm ─→ Cam A 曝光输出 ─→ Light 2 频闪 ─→ Cam A 采图
-    Light 3 arm ─→ Cam A arm ─→ Cam A 曝光输出 ─→ Light 3 频闪 ─→ Cam A 采图
-    Light 4 arm ─→ Cam A arm ─→ Cam A 曝光输出 ─→ Light 4 频闪 ─→ Cam A 采图
+  ═══════════ 视角A ═══════════
+    Cam A arm → Light 1 trigger (C→B→8→9→A→7) → Cam A 取图 → post_delay
+    Cam A arm → Light 2 trigger → Cam A 取图 → post_delay
+    Cam A arm → Light 3 trigger → Cam A 取图 → post_delay
+    Cam A arm → Light 4 trigger → Cam A 取图 → post_delay
 
-  ═══════════ 视角B (固定机位 Camera 1 或机器人 pose T2) ═══════════
-  prepare_sequence ─→
-    Light 1 arm ─→ Cam B arm ─→ Cam B 曝光输出 ─→ Light 1 频闪 ─→ Cam B 采图
-    Light 2 arm ─→ Cam B arm ─→ Cam B 曝光输出 ─→ Light 2 频闪 ─→ Cam B 采图
-    Light 3 arm ─→ Cam B arm ─→ Cam B 曝光输出 ─→ Light 3 频闪 ─→ Cam B 采图
-    Light 4 arm ─→ Cam B arm ─→ Cam B 曝光输出 ─→ Light 4 频闪 ─→ Cam B 采图
+  ═══════════ 视角B ═══════════
+    Cam B arm → Light 1 trigger → Cam B 取图 → post_delay
+    ...
 
 最终产出: 2视角 × 4光源 = 8 张图像 → SeatImageBundle → FrameRingBuffer
 ```
@@ -737,17 +711,12 @@ time ─────────────────────────
 ### 实际运行日志
 
 ```
-[trigger_id=1000] prepared light sequence channels=4         ← 视角A 开始
-[trigger_id=1000 light_index=1 physical_channel=1 light_seq_index=0] arm ...    ← 光源1
-[trigger_id=1000 light_index=1 physical_channel=1 light_seq_index=0] camera exposure output fired strobe
-[trigger_id=1000 light_index=2 physical_channel=2 light_seq_index=1] arm ...    ← 光源2
-[trigger_id=1000 light_index=2 physical_channel=2 light_seq_index=1] camera exposure output fired strobe
-[trigger_id=1000 light_index=3 physical_channel=3 light_seq_index=2] arm ...    ← 光源3
-[trigger_id=1000 light_index=3 physical_channel=3 light_seq_index=2] camera exposure output fired strobe
-[trigger_id=1000 light_index=4 physical_channel=4 light_seq_index=3] arm ...    ← 光源4
-[trigger_id=1000 light_index=4 physical_channel=4 light_seq_index=3] camera exposure output fired strobe
-[trigger_id=1000] prepared light sequence channels=4         ← 视角B 开始
-[trigger_id=1000 light_index=1 physical_channel=1 light_seq_index=0] arm ...    ← 光源1
+[trigger_id=1000] prepared light sequence channels=4
+[trigger_id=1000 light_index=1 physical_channel=1 light_seq_index=0] simulated strobe strobe_width_us=700 post_delay_ms=50
+[trigger_id=1000 light_index=2 physical_channel=2 light_seq_index=1] simulated strobe strobe_width_us=700 post_delay_ms=50
+...
+[trigger_id=1000] prepared light sequence channels=4
+[trigger_id=1000 light_index=1 physical_channel=1 light_seq_index=0] simulated strobe ...
 ...
 ```
 
