@@ -134,7 +134,7 @@ Windows 工控机或希望使用跨平台入口时运行：
 uv run python tools/run_simulated_ipc.py
 ```
 
-Windows/MSVC 环境需要先进入 x64 VS 开发命令环境，确保 `cl.exe`、`nmake.exe` 和 `MSBuild.exe` 在 `PATH` 中；C++ 工程已为 MSVC 固化 `/utf-8` 编译选项，避免中文日志字符串在本地代码页下被误解析。
+Windows 跨平台入口会显式探测 CMake 生成器：优先使用 Ninja，其次使用已安装的 Visual Studio/MSBuild 生成器，再在可用时回退到 `clang++`/`g++` 直接编译；不会因为 CMake 默认选中缺失的 `nmake.exe` 而提前失败。若需手动指定构建环境，仍可进入 x64 VS 开发命令环境后运行同一命令。C++ 工程已为 MSVC 固化 `/utf-8` 编译选项，避免中文日志字符串在本地代码页下被误解析。
 
 模拟 IPC 会构建 C++ 主控，默认使用 `cpp_controller/config/station_runtime.example.conf` 发布一次多视角四光源图像包，Python detector 从共享内存读取任务并写回结果。正常模拟链路应返回 `OK`；故障注入、协议错误或 detector 超时必须返回 `RECHECK` 或 `ERROR`。
 
@@ -375,7 +375,7 @@ PLC 接入前的工控机联调使用 `cpp_controller/config/station_runtime.lab
 | 严格生产预检 | `uv run python -m tools.validate_deployment_preflight --strict-production` | 固定双机位正式生产配置、生产光源配方对齐或真实模型资产缺失时返回阻塞项。 |
 | 模型资产检查 | `uv run python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1` | 真实模型缺失时失败并列出待替换资产。 |
 | 无模型采样兜底 | `uv run pytest python_detector/tests/test_trace_and_tools.py::test_pipeline_model_error_context_is_traceable python_detector/tests/test_trace_and_tools.py::test_pipeline_roi_model_asset_unavailable_saves_raw_images display_app/tests/test_display_app_bridge.py::test_display_bridge_publishes_raw_image_when_roi_is_unavailable` | 模型/ROI 模型资产缺失时返回 `RECHECK`，trace 保存原始图，前端能显示 raw 图。 |
-| 端到端模拟 IPC | `bash tools/run_simulated_ipc.sh` 或 `uv run python tools/run_simulated_ipc.py` | C++ 和 Python 通过共享内存完成一次检测闭环；Windows 使用 Python 跨平台入口。 |
+| 端到端模拟 IPC | `bash tools/run_simulated_ipc.sh` 或 `uv run python tools/run_simulated_ipc.py` | C++ 和 Python 通过共享内存完成一次检测闭环；Windows 使用 Python 跨平台入口，并自动选择可用的 CMake/MSBuild 或直接编译回退路径。 |
 
 ## 文档地图
 
