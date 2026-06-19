@@ -252,7 +252,7 @@ bool TcpSignalClient::accept_client(int timeout_ms,
     tv.tv_usec = static_cast<long>((remaining_ms % 1000) * 1000);
     if (tv.tv_sec < 0) tv.tv_sec = 0;
     if (tv.tv_usec < 0) tv.tv_usec = 0;
-    const int select_ret = ::select(0, &readfds, nullptr, nullptr, &tv);
+    const int poll_ret = ::select(0, &readfds, nullptr, nullptr, &tv);
 #else
     struct pollfd pfd{};
     pfd.fd = listen_sock_;
@@ -265,7 +265,6 @@ bool TcpSignalClient::accept_client(int timeout_ms,
                                 remaining_ms < 0 ? 0 : static_cast<int>(remaining_ms));
 #endif
     if (poll_ret < 0) {
-      // 从宏展开看，poll_ret 在 Win32 上是 select_ret
       break;
     }
     if (poll_ret == 0) {

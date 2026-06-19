@@ -22,6 +22,20 @@ namespace seat_aoi {
 
 namespace {
 
+#ifdef _WIN32
+using JsonSocket = SOCKET;
+constexpr JsonSocket kInvalidJsonSocket = INVALID_SOCKET;
+void close_json_socket(JsonSocket sock) {
+  ::closesocket(sock);
+}
+#else
+using JsonSocket = int;
+constexpr JsonSocket kInvalidJsonSocket = -1;
+void close_json_socket(JsonSocket sock) {
+  ::close(sock);
+}
+#endif
+
 SignalClientConfig make_signal_client_config(const RuntimeSignalConfig& config) {
   SignalClientConfig client_config;
   client_config.station_id = config.station_id;
@@ -263,8 +277,13 @@ InspectionResultPayload StationController::inspect_one_seat(const ExternalTrigge
     // 通过 TCP 发送（best-effort, 不阻塞主流程）
     try {
       // POSIX socket send
-      int sock = ::socket(AF_INET, SOCK_STREAM, 0);
-      if (sock >= 0) {
+      JsonSocket sock =
+#ifdef _WIN32
+          ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+#else
+          ::socket(AF_INET, SOCK_STREAM, 0);
+#endif
+      if (sock != kInvalidJsonSocket) {
         struct sockaddr_in addr{};
         addr.sin_family = AF_INET;
         addr.sin_port = htons(static_cast<uint16_t>(config_.json_output_port));
@@ -274,7 +293,7 @@ InspectionResultPayload StationController::inspect_one_seat(const ExternalTrigge
             ::send(sock, data.data(), data.size(), 0);
           }
         }
-        ::close(sock);
+        close_json_socket(sock);
       }
     } catch (...) {}
   }

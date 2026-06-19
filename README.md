@@ -134,6 +134,8 @@ Windows 工控机或希望使用跨平台入口时运行：
 uv run python tools/run_simulated_ipc.py
 ```
 
+Windows/MSVC 环境需要先进入 x64 VS 开发命令环境，确保 `cl.exe`、`nmake.exe` 和 `MSBuild.exe` 在 `PATH` 中；C++ 工程已为 MSVC 固化 `/utf-8` 编译选项，避免中文日志字符串在本地代码页下被误解析。
+
 模拟 IPC 会构建 C++ 主控，默认使用 `cpp_controller/config/station_runtime.example.conf` 发布一次多视角四光源图像包，Python detector 从共享内存读取任务并写回结果。正常模拟链路应返回 `OK`；故障注入、协议错误或 detector 超时必须返回 `RECHECK` 或 `ERROR`。
 
 ## 常用入口

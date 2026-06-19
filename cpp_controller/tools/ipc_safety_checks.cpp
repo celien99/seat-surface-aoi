@@ -312,12 +312,13 @@ bool test_ring_layout_mismatch_fails_without_reset() {
     std::cerr << "initial frame ring initialize failed\n";
     return false;
   }
-  first.close();
 
   seat_aoi::FrameRingBuffer second;
   const bool ok = second.initialize(kName, 1, 8192, false);
   second.unlink_name();
   second.close();
+  first.unlink_name();
+  first.close();
   const bool passed = !ok;
   if (!passed) {
     std::cerr << "frame ring layout mismatch did not fail without reset\n";
@@ -474,7 +475,10 @@ bool test_runtime_light_channel_config_parses() {
 }
 
 bool test_explicit_camera_config_replaces_defaults() {
-  const std::string path = "/tmp/seat_aoi_single_camera_config.conf";
+  const std::string path =
+      (std::filesystem::temp_directory_path() /
+       ("seat_aoi_single_camera_config_" + std::to_string(seat_aoi::now_us()) + ".conf"))
+          .string();
   {
     std::ofstream out(path);
     out << "hardware_mode=lab\n"

@@ -7,6 +7,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+if(MSVC)
+  add_compile_options(/utf-8)
+endif()
+
 option(SEAT_AOI_ENABLE_HIKROBOT_MVS "Enable Hikrobot MVS camera SDK backend" OFF)
 set(SEAT_AOI_HIKROBOT_MVS_INCLUDE_DIR "" CACHE PATH "Hikrobot MVS SDK include directory")
 set(SEAT_AOI_HIKROBOT_MVS_LIBRARY "" CACHE FILEPATH "Hikrobot MVS SDK library")

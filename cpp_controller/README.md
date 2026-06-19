@@ -335,6 +335,16 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
+Windows/MSVC 构建需要先进入 x64 VS 开发命令环境，使 `cl.exe`、`nmake.exe` 和 `MSBuild.exe` 可被 CMake 找到。当前 CMake 工程会在 MSVC 下自动添加 `/utf-8`，避免中文日志字符串在本地代码页下触发编译错误：
+
+```powershell
+& "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+cmake -S cpp_controller -B cpp_controller/build -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release
+cmake --build cpp_controller/build --config Release
+```
+
+`ipc_safety_checks` 使用跨平台临时目录生成运行配置，并会在 Windows Named Shared Memory 仍被进程持有时校验 slot 布局不匹配必须失败；测试结束后再释放 mapping，避免把 Windows “最后一个 handle 关闭即消失”的生命周期误判为协议允许重建。
+
 Windows 工控机已安装海康 MVS 时，可启用 MV-CH120-20GC 真实相机 backend：
 
 ```powershell
