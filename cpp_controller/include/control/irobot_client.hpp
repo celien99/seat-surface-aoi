@@ -3,8 +3,8 @@
 #include <cstdint>
 #include <string>
 
+#include "control/external_trigger.hpp"
 #include "control/hardware_backend.hpp"
-#include "control/trigger_scheduler.hpp"
 
 namespace seat_aoi {
 

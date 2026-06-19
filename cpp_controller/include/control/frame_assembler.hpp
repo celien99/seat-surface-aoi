@@ -7,10 +7,10 @@
 
 #include "camera/icamera.hpp"
 #include "common/error_code.hpp"
+#include "control/external_trigger.hpp"
 #include "control/ilight_controller.hpp"
 #include "control/irobot_client.hpp"
 #include "control/station_runtime_config.hpp"
-#include "control/trigger_scheduler.hpp"
 #include "ipc/frame_ring_buffer.hpp"
 
 namespace seat_aoi {

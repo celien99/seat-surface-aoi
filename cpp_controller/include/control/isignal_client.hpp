@@ -4,7 +4,7 @@
 #include <string>
 
 #include "common/inspection_types.hpp"
-#include "control/trigger_scheduler.hpp"
+#include "control/external_trigger.hpp"
 
 namespace seat_aoi {
 

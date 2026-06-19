@@ -198,7 +198,7 @@ seat-surface-aoi/
 
 | 目录 | 读者入口 | 主要关注点 |
 | --- | --- | --- |
-| `cpp_controller/` | [C++ 主控 README](cpp_controller/README.md) | PLC/Robot/Camera/Light 抽象、Capture Plan、共享内存发布、故障注入。 |
+| `cpp_controller/` | [C++ 主控 README](cpp_controller/README.md) | PLC/Robot/Camera/Light 抽象、ExternalTrigger 触发数据边界、Capture Plan、共享内存发布、故障注入。 |
 | `python_detector/` | [Python 检测算法层导览](python_detector/README.md) | 质量门禁、ROI、ECC、多光源特征、模型后端、融合、规则、trace。 |
 | `display_app/` | [PySide6/QML 展示前端](display_app/README.md) | 读取 `display_latest.json`、C++ 主控事件和 trace 图，显示监控/统计/日志/复核页面并持久化操作员动作。 |
 | `training_tools/` | [Python 运维文档](docs/python_detector_operations.md) | 离线样本、embedding、PCA、PatchCore/FAISS、回放、benchmark。 |

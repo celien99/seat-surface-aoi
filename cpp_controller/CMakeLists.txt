@@ -50,7 +50,6 @@ add_library(seat_aoi_control
   src/camera/camera_device.cpp
   src/camera/hikrobot_mvs_camera.cpp
   src/camera/camera_worker.cpp
-  src/control/trigger_scheduler.cpp
   src/control/frame_assembler.cpp
   src/control/station_controller.cpp
   src/control/image_writer.cpp

@@ -5,13 +5,13 @@
 #include <string>
 #include <vector>
 
+#include "control/external_trigger.hpp"
 #include "control/frame_assembler.hpp"
 #include "control/hardware_backend.hpp"
 #include "control/isignal_client.hpp"
 #include "control/production_event_log.hpp"
 #include "control/station_health.hpp"
 #include "control/station_runtime_config.hpp"
-#include "control/trigger_scheduler.hpp"
 #include "ipc/frame_ring_buffer.hpp"
 #include "ipc/result_ring_buffer.hpp"
 

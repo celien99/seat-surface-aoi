@@ -55,7 +55,7 @@
 
 当前状态：
 
-- `cpp_controller` 已实现 C++ 主控、PLC 抽象、RobotClient 抽象、相机 worker、光源控制器、触发调度、frame/result ring buffer。
+- `cpp_controller` 已实现 C++ 主控、PLC 抽象、RobotClient 抽象、相机 worker、光源控制器、外部触发接入、frame/result ring buffer。
 - `python_detector` 通过共享内存读取任务并写回检测结果，按 `(camera_id, pose_id)` 组包。
 - C++ 侧会校验 `sequence_id`、`trigger_id`、`seat_id`、decision、质量状态、错误码和缺陷数量。
 - detector 超时、slot 不可用、缺帧、机器人异常和协议异常会保守返回 `RECHECK` 或 `ERROR`。

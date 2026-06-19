@@ -48,7 +48,6 @@ cpp_controller/
 │   │   ├── production_event_log.cpp        # C++ 生产事件 JSONL
 │   │   ├── image_writer.cpp                # PGM 原图落盘、日期分目录和低容量旧数据清理
 │   │   ├── frame_assembler.cpp             # 固定机位/机器人飞拍采集编排器
-│   │   ├── trigger_scheduler.cpp           # 触发信号调度器
 │   │   └── station_runtime_config.cpp      # 运行时配置文件解析
 │   │
 │   └── camera/                             # 相机模拟层与 Hikrobot MVS 适配层
@@ -79,7 +78,7 @@ cpp_controller/
 │       ├── light_controller.hpp            # LightController + 光源类型定义
 │       ├── image_writer.hpp                # C++ 原图落盘路径和清理接口
 │       ├── frame_assembler.hpp             # FrameAssembler + Recipe
-│       ├── trigger_scheduler.hpp           # TriggerScheduler + ExternalTrigger
+│       ├── external_trigger.hpp            # ExternalTrigger 触发数据结构
 │       ├── station_runtime_config.hpp      # StationRuntimeConfig + 配置解析
 │       └── station_health.hpp              # 工位健康状态
 │   └── camera/                             # 相机相关头文件

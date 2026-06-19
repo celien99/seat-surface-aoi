@@ -174,7 +174,6 @@ def common_cpp_sources() -> list[Path]:
         CPP_DIR / "src" / "camera" / "camera_device.cpp",
         CPP_DIR / "src" / "camera" / "hikrobot_mvs_camera.cpp",
         CPP_DIR / "src" / "camera" / "camera_worker.cpp",
-        CPP_DIR / "src" / "control" / "trigger_scheduler.cpp",
         CPP_DIR / "src" / "control" / "frame_assembler.cpp",
         CPP_DIR / "src" / "control" / "station_controller.cpp",
         CPP_DIR / "src" / "control" / "image_writer.cpp",

@@ -53,7 +53,6 @@ elif command -v clang++ >/dev/null 2>&1; then
     "${ROOT_DIR}/cpp_controller/src/camera/camera_device.cpp" \
     "${ROOT_DIR}/cpp_controller/src/camera/hikrobot_mvs_camera.cpp" \
     "${ROOT_DIR}/cpp_controller/src/camera/camera_worker.cpp" \
-    "${ROOT_DIR}/cpp_controller/src/control/trigger_scheduler.cpp" \
     "${ROOT_DIR}/cpp_controller/src/control/frame_assembler.cpp" \
     "${ROOT_DIR}/cpp_controller/src/control/station_controller.cpp" \
     "${ROOT_DIR}/cpp_controller/src/control/image_writer.cpp" \
@@ -78,7 +77,6 @@ elif command -v clang++ >/dev/null 2>&1; then
     "${ROOT_DIR}/cpp_controller/src/camera/camera_device.cpp" \
     "${ROOT_DIR}/cpp_controller/src/camera/hikrobot_mvs_camera.cpp" \
     "${ROOT_DIR}/cpp_controller/src/camera/camera_worker.cpp" \
-    "${ROOT_DIR}/cpp_controller/src/control/trigger_scheduler.cpp" \
     "${ROOT_DIR}/cpp_controller/src/control/frame_assembler.cpp" \
     "${ROOT_DIR}/cpp_controller/src/control/station_controller.cpp" \
     "${ROOT_DIR}/cpp_controller/src/control/image_writer.cpp" \

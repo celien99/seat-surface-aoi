@@ -11,12 +11,4 @@ struct ExternalTrigger {
   std::string sku = "seat_a_black_leather";
 };
 
-class TriggerScheduler {
-public:
-  ExternalTrigger next_simulated_trigger();
-
-private:
-  std::uint64_t next_trigger_id_ = 1000;
-};
-
 }  // namespace seat_aoi
