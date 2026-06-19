@@ -67,3 +67,4 @@ sample_images/
 
 # Spec docs (local only)
 docs/superpowers/
+.codex_tmp/
