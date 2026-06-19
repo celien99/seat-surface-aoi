@@ -46,6 +46,7 @@ cpp_controller/
 │   │   ├── station_controller.cpp          # 工位主控协调器（核心编排）
 │   │   ├── station_health.cpp              # 连续复检和健康报警状态
 │   │   ├── production_event_log.cpp        # C++ 生产事件 JSONL
+│   │   ├── image_writer.cpp                # PGM 原图落盘、日期分目录和低容量旧数据清理
 │   │   ├── frame_assembler.cpp             # 固定机位/机器人飞拍采集编排器
 │   │   ├── trigger_scheduler.cpp           # 触发信号调度器
 │   │   └── station_runtime_config.cpp      # 运行时配置文件解析
@@ -76,6 +77,7 @@ cpp_controller/
 │       ├── hardware_factory.hpp            # 模拟/生产 backend 工厂
 │       ├── hardware_backend.hpp            # 硬件模式和 backend 枚举
 │       ├── light_controller.hpp            # LightController + 光源类型定义
+│       ├── image_writer.hpp                # C++ 原图落盘路径和清理接口
 │       ├── frame_assembler.hpp             # FrameAssembler + Recipe
 │       ├── trigger_scheduler.hpp           # TriggerScheduler + ExternalTrigger
 │       ├── station_runtime_config.hpp      # StationRuntimeConfig + 配置解析
@@ -211,9 +213,13 @@ signal.error_text=ERROR              # ERROR 文本
 image_save.enabled=true              # 启用存图
 image_save.root_dir=images           # 存储根目录
 image_save.save_original=true        # 保存采集原图
+image_save.cleanup_enabled=true      # 磁盘低水位时清理旧日期目录
+image_save.cleanup_min_free_ratio=0.20 # 可用容量低于 20% 时触发清理
 ```
 
-采集成功后自动保存 PGM 格式原图：`{root_dir}/{seat_id}/{camera_id}_{timestamp}_L{light_index}_original.pgm`。PGM (P5 binary) 纯 C++ 实现，无需外部库依赖。存图失败只打日志不阻断主流程。
+采集成功后自动保存 PGM 格式原图：`{root_dir}/YYYYMMDD/{seat_id}/{camera_id}_{timestamp}_L{light_index}_original.pgm`。PGM (P5 binary) 纯 C++ 实现，无需外部库依赖。存图失败只打日志不阻断主流程。
+
+启用清理后，C++ 主控会在每次原图落盘前检查 `image_save.root_dir` 所在磁盘的可用容量比例；低于 `cleanup_min_free_ratio` 时，只按日期目录从旧到新删除早于当天的 `YYYYMMDD` 目录，跳过当天目录和非日期命名目录。生产环境默认仍建议关闭原图落盘，Python trace 已保存检测样本图。
 
 ### JSON 详细结果输出
 

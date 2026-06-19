@@ -11,6 +11,7 @@
 
 #include "common/string_utils.hpp"
 #include "common/time_utils.hpp"
+#include "control/image_writer.hpp"
 #include "control/hardware_factory.hpp"
 #include "control/signal_client.hpp"
 #include "control/station_health.hpp"
@@ -467,9 +468,68 @@ bool test_runtime_light_channel_config_parses() {
                       config.light_channels[2].light_index == 3 &&
                       config.light_channels[2].physical_channel == 3 &&
                       config.light_channels[2].strobe_width_us == 650 &&
-                      config.light_channels[2].current_percent == 55.0F;
+                      config.light_channels[2].current_percent == 55.0F &&
+                      config.image_save.cleanup_enabled &&
+                      config.image_save.cleanup_min_free_ratio == 0.20F;
   if (!passed) {
     std::cerr << "runtime light channel config did not parse expected values\n";
+  }
+  return passed;
+}
+
+bool test_image_save_path_uses_date_directory() {
+  seat_aoi::ImageSaveConfig config;
+  config.enabled = true;
+  config.root_dir = "images";
+  seat_aoi::CapturedFrame frame;
+  frame.meta.timestamp_us = 1234567;
+  frame.meta.light_index = 2;
+  seat_aoi::copy_cstr(frame.meta.camera_id, "TOP/BACK");
+
+  const std::string path =
+      seat_aoi::build_original_image_path(config, "20260619", "SEAT:001", frame);
+
+  const bool passed =
+      path.find("images") != std::string::npos &&
+      path.find("20260619") != std::string::npos &&
+      path.find("SEAT_001") != std::string::npos &&
+      path.find("TOP_BACK_1234567_L2_original.pgm") != std::string::npos;
+  if (!passed) {
+    std::cerr << "image save path did not include sanitized date/seat/camera: " << path
+              << "\n";
+  }
+  return passed;
+}
+
+bool test_image_save_cleanup_removes_old_date_dirs() {
+  const auto root = std::filesystem::temp_directory_path() /
+                    ("seat_aoi_image_cleanup_" + std::to_string(seat_aoi::now_us()));
+  std::filesystem::create_directories(root / "20250101" / "OLD_SEAT");
+  std::filesystem::create_directories(root / "20260619" / "CURRENT_SEAT");
+  std::filesystem::create_directories(root / "misc");
+  {
+    std::ofstream(root / "20250101" / "OLD_SEAT" / "old.pgm") << "old";
+    std::ofstream(root / "20260619" / "CURRENT_SEAT" / "current.pgm") << "current";
+    std::ofstream(root / "misc" / "keep.txt") << "keep";
+  }
+
+  seat_aoi::ImageSaveConfig config;
+  config.enabled = true;
+  config.save_original = true;
+  config.cleanup_enabled = true;
+  config.cleanup_min_free_ratio = 1.0F;
+  config.root_dir = root.string();
+  std::string message;
+  const bool ok = seat_aoi::cleanup_old_image_data_if_needed(config, "20260619", &message);
+
+  const bool passed = ok &&
+                      !std::filesystem::exists(root / "20250101") &&
+                      std::filesystem::exists(root / "20260619" / "CURRENT_SEAT" / "current.pgm") &&
+                      std::filesystem::exists(root / "misc" / "keep.txt");
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+  if (!passed) {
+    std::cerr << "image cleanup did not remove only old date dirs: " << message << "\n";
   }
   return passed;
 }
@@ -1123,6 +1183,12 @@ int main() {
     return 1;
   }
   if (!test_runtime_light_channel_config_parses()) {
+    return 1;
+  }
+  if (!test_image_save_path_uses_date_directory()) {
+    return 1;
+  }
+  if (!test_image_save_cleanup_removes_old_date_dirs()) {
     return 1;
   }
   if (!test_explicit_camera_config_replaces_defaults()) {

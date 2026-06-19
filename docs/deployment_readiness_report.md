@@ -84,7 +84,7 @@
 |---|------|------|------|
 | 4 | 标定对齐矩阵 | `python_detector/config/calibration/` | 当前全单位阵，多光源配准无偏移 |
 | 5 | JSON 输出 | `json_output.enabled=false` | 当前关闭，无影响 |
-| 6 | 图像落盘 | `image_save.enabled=false` | 生产环境建议关闭（Python trace 已存图） |
+| 6 | 图像落盘 | `image_save.enabled=false` | 生产环境建议关闭；启用时写入 `images/YYYYMMDD/<seat_id>/`，可用容量低于 20% 时只清理旧日期目录 |
 | 7 | 站位 ID | `signal.station_id=LINE1_AOI_01` | 可自定义 |
 | 8 | 第 4 路光源 | FL-ACDH 通道 4 | 当前预留，不属于产线必需光源 |
 

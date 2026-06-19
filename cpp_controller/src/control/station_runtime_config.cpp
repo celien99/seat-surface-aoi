@@ -158,6 +158,28 @@ bool parse_int_field(const std::string& field_name,
   }
 }
 
+bool parse_float_field(const std::string& field_name,
+                       const std::string& value,
+                       float min_value,
+                       float max_value,
+                       float* out_value,
+                       std::string* error_message) {
+  try {
+    const float parsed = std::stof(value);
+    if (parsed < min_value || parsed > max_value) {
+      throw std::invalid_argument(field_name);
+    }
+    *out_value = parsed;
+    return true;
+  } catch (const std::exception&) {
+    if (error_message != nullptr) {
+      *error_message = field_name + " 必须在 " + std::to_string(min_value) + " 到 " +
+                       std::to_string(max_value) + " 之间: " + value;
+    }
+    return false;
+  }
+}
+
 RuntimeLightChannelConfig default_light_channel_config(std::uint32_t light_index) {
   RuntimeLightChannelConfig config;
   config.light_index = light_index;
@@ -992,6 +1014,17 @@ bool load_station_runtime_config(const std::string& path,
       config.image_save.root_dir = value;
     } else if (key == "image_save.save_original") {
       if (!parse_bool_field(key, value, &config.image_save.save_original, error_message)) return false;
+    } else if (key == "image_save.cleanup_enabled") {
+      if (!parse_bool_field(key, value, &config.image_save.cleanup_enabled, error_message)) return false;
+    } else if (key == "image_save.cleanup_min_free_ratio") {
+      if (!parse_float_field(key,
+                             value,
+                             0.0F,
+                             1.0F,
+                             &config.image_save.cleanup_min_free_ratio,
+                             error_message)) {
+        return false;
+      }
     } else if (key == "trace_root") {
       config.trace_root = value;
     } else {
@@ -1092,6 +1125,19 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
   if (config.cameras.empty()) {
     if (error_message != nullptr) {
       *error_message = "至少需要配置 1 台相机";
+    }
+    return false;
+  }
+  if (config.image_save.enabled && config.image_save.root_dir.empty()) {
+    if (error_message != nullptr) {
+      *error_message = "image_save.root_dir 不能为空";
+    }
+    return false;
+  }
+  if (config.image_save.cleanup_min_free_ratio < 0.0F ||
+      config.image_save.cleanup_min_free_ratio > 1.0F) {
+    if (error_message != nullptr) {
+      *error_message = "image_save.cleanup_min_free_ratio 必须在 0 到 1 之间";
     }
     return false;
   }

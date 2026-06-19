@@ -107,6 +107,8 @@ struct ImageSaveConfig {
   bool enabled = false;
   std::string root_dir = "images";
   bool save_original = true;
+  bool cleanup_enabled = true;
+  float cleanup_min_free_ratio = 0.20F;
 };
 
 struct StationRuntimeConfig {

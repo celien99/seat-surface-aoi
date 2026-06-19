@@ -198,16 +198,19 @@ InspectionResultPayload StationController::inspect_one_seat(const ExternalTrigge
 
   // 图像落盘（发布到共享内存之前保存原始图像）
   if (config_.image_save.enabled && config_.image_save.save_original) {
-    const std::string seat_id(bundle.job_meta.seat_id);
+    const std::string date_dir = image_save_date_dir();
+    std::string cleanup_message;
+    if (!cleanup_old_image_data_if_needed(config_.image_save, date_dir, &cleanup_message)) {
+      std::cerr << "图片旧数据清理失败: " << cleanup_message << std::endl;
+    } else if (!cleanup_message.empty()) {
+      std::cout << cleanup_message << std::endl;
+    }
+    const std::string seat_id = fixed_cstr_to_string(bundle.job_meta.seat_id, kStringIdSize);
     for (const auto& frame : bundle.frames) {
-      const std::string camera_id(frame.meta.camera_id);
-      std::ostringstream path;
-      path << config_.image_save.root_dir << "/" << seat_id << "/"
-           << camera_id << "_" << frame.meta.timestamp_us << "_L"
-           << frame.meta.light_index << "_original.pgm";
+      const std::string path =
+          build_original_image_path(config_.image_save, date_dir, seat_id, frame);
       std::string save_error;
-      if (!write_pgm(path.str(), frame.bytes, frame.meta.width, frame.meta.height,
-                     &save_error)) {
+      if (!write_pgm(path, frame.bytes, frame.meta.width, frame.meta.height, &save_error)) {
         std::cerr << "图像保存失败: " << save_error << std::endl;
       }
     }
