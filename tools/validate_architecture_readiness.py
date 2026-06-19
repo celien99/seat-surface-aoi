@@ -403,11 +403,11 @@ def _check_recipe_light_quality_trace(recipe: Recipe, area: str) -> list[Readine
 def _check_v4_algorithm_contract(scope: ReadinessScope) -> list[ReadinessItem]:
     recipe = load_recipe_file(REPO_ROOT / "python_detector/config/production_recipe.yaml")
     items: list[ReadinessItem] = []
-    if recipe.roi_locator.backend == "onnx_yolo" and recipe.roi_locator.model_path:
+    if recipe.roi_locator.backend in {"onnx_yolo", "onnx_yolo_seg"} and recipe.roi_locator.model_path:
         items.append(
             _ok(
                 "V4 ROI 定位",
-                "Dome ROI 定位需支持 ONNX YOLO 后端和明确输出解码。",
+                "Dome ROI 定位需支持 ONNX YOLO/seg 后端和明确输出解码。",
                 f"backend={recipe.roi_locator.backend}; model_path={recipe.roi_locator.model_path}; "
                 f"decode={recipe.roi_locator.output_decode}",
             )
@@ -416,9 +416,9 @@ def _check_v4_algorithm_contract(scope: ReadinessScope) -> list[ReadinessItem]:
         items.append(
             _blocked(
                 "V4 ROI 定位",
-                "生产模型配方必须声明 onnx_yolo ROI 定位入口。",
+                "生产模型配方必须声明 ONNX ROI 定位入口。",
                 f"backend={recipe.roi_locator.backend}, model_path={recipe.roi_locator.model_path}",
-                "补齐 roi_locator.backend=onnx_yolo 和 model_path。",
+                "补齐 roi_locator.backend=onnx_yolo 或 onnx_yolo_seg 和 model_path。",
             )
         )
 

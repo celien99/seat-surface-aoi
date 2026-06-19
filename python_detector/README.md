@@ -109,7 +109,7 @@ python_detector/
 │   ├── pipeline.py             # InspectionPipeline 主编排
 │   ├── quality_gate.py         # 图像质量门禁：缺帧、曝光、锐度、运动模糊、时间戳等
 │   ├── preprocessor.py         # 元数据断言、标定匹配、ROI 裁剪和透视展开
-│   ├── roi_locator.py          # Dome 语义光源 ROI 定位，支持 template/fake_yolo/onnx_yolo
+│   ├── roi_locator.py          # Dome 语义光源 ROI 定位，支持 template/fake_yolo/onnx_yolo/onnx_yolo_seg
 │   ├── reflectance_cube.py     # 多光源 ROI 对齐后的 ReflectanceCube 构建
 │   ├── ecc_registration.py     # ECC 风格平移搜索和非基准光源 ROI 重采样
 │   ├── feature_builder.py      # 多光源特征和 NCHW tensor 构建
@@ -139,7 +139,7 @@ training_tools/
 ├── train_patchcore_assets.py   # 串联 embedding、PCA、PatchCore memory bank 和可选 FAISS 索引
 ├── build_faiss_index.py        # 从 PatchCore memory bank 构建 FAISS 索引
 ├── evaluate_pipeline.py        # 用 manifest 标注和真实 ROI 图评估当前配方模型
-├── train_roi_yolo.py           # 训练 Dome ROI YOLO 并导出 ONNX
+├── train_roi_yolo.py           # 训练 Dome ROI YOLO segmentation 或 bbox 模型并导出 ONNX
 ├── train_supervised_yolo.py    # 训练已知缺陷监督 YOLO 并导出 ONNX
 ├── export_wideresnet_embedding.py # 导出 PatchCore 所需 WideResNet50 embedding ONNX
 ├── replay_dataset.py           # 调用检测流水线做模拟回放
@@ -202,7 +202,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 配方中的 `cameras` 实际表示检测视角配置。固定机位模式下 `pose_id` 默认等于 `camera_id`；如果某个固定机位只配置默认视角，Python 检测层允许同一 `camera_id` 下动态 `pose_id` 的多张照片复用该机位的标定、ROI 和模型配置，并在特征、结果和 trace 中继续保留原始 `pose_id`。机器人飞拍模式下允许多个视角共享同一 `camera_id`，并用显式 `pose_id` 区分轨迹点、ROI、标定和模型配置，例如 `EYE_IN_HAND/T1_BACKREST`、`EYE_IN_HAND/T2_CUSHION`；这类显式 pose 配方不会把未知 `pose_id` fallback 到第一条配置。`cameras` 支持字典和列表两种写法；列表写法会按条目保序解析，不会再把相同 `camera_id` 的不同 `pose_id` 折叠覆盖，重复 `(camera_id, pose_id)` 会报配方校验错误。
 
-模型补齐后，固定机位生产任务应使用 `recipe_id=seat_a_black_leather_production_v1`，机器人飞拍生产任务应使用 `recipe_id=seat_a_robot_flyshot_production_v1`。这两个配方会启用 `onnx_yolo` Dome ROI、`ecc` 多光源配准、监督 ONNX 主检测、WideResNet50 embedding、PCA、PatchCore KNN 和可选 FAISS safety net；仓库内生产标定和 `production_full_roi.yaml` 是可校验模板，真实上线必须替换为现场标定和 ROI。
+模型补齐后，固定机位生产任务应使用 `recipe_id=seat_a_black_leather_production_v1`，机器人飞拍生产任务应使用 `recipe_id=seat_a_robot_flyshot_production_v1`。这两个配方会启用 `onnx_yolo_seg` Dome ROI segmentation、`ecc` 多光源配准、监督 ONNX 主检测、WideResNet50 embedding、PCA、PatchCore KNN 和可选 FAISS safety net；仓库内生产标定和 `production_full_roi.yaml` 是可校验模板，其中 ROI `polygon_xy` 作为安全边界和 `output_size` 约束，真实 ROI polygon 由 segmentation mask 在线生成。
 
 当前固定机位 C++ 生产配置是双相机 + 3 光源 `light_order=1,2,3`，映射到 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。`production_recipe.yaml` 已同步为三光源生产配方，模型输入通道为 `ch0_diffuse/ch1_polar_diffuse/ch2_high_left`；若未来补第 4 路 `HIGH_RIGHT`，必须同步生产配方、模型输入通道、训练资产和测试。
 
@@ -230,7 +230,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 `ImageQualityGate` 在进入模型前拦截不可靠输入，包括缺少必需机位/光源、未启用的显式机器人 pose、非单调时间戳、重复帧号、曝光/增益漂移、过曝欠曝、锐度不足、光源亮度漂移，以及同一视角必需光源间的 `shot_id`、机器人时间戳、TCP 坐标和 RPY 姿态不一致。固定机位默认配置可接收同一机位的动态 `pose_id`，但仍要求每个动态视角自己的必需光源完整、时序一致、质量通过；固定机位可以保留空的机器人字段，一旦任一光源携带机器人字段，其余必需光源必须保持一致。失败结果进入 `RuleEngine.make_quality_fail_result()`，不会输出 `OK`。
 
-`Preprocessor` 只接受当前实现支持的 `MONO8` / `UINT8` / 单通道图像，并显式检查 stride、图像长度、标定版本和图像尺寸。ROI 可以是轴对齐矩形裁剪，也可以是四点透视展开。Dome ROI 定位会按 `roi_name` 聚合同名候选，优先选择置信度最高、姿态误差最低的候选；同名 ROI 出现互相冲突的框时返回 `RECHECK`，避免重复检测静默覆盖 ROI。
+`Preprocessor` 只接受当前实现支持的 `MONO8` / `UINT8` / 单通道图像，并显式检查 stride、图像长度、标定版本和图像尺寸。ROI 可以是轴对齐矩形裁剪，也可以是四点透视展开。Dome ROI 定位会按 `roi_name` 聚合同名候选，优先选择置信度最高、姿态误差最低的候选；bbox 后端输出矩形 ROI，seg 后端从 mask 自动生成运行时 `polygon_xy`，并用模板边界、mask 面积和重复候选冲突保护不确定状态。同名 ROI 出现互相冲突的框或 mask 时返回 `RECHECK`，避免重复检测静默覆盖 ROI。
 
 ### 多光源特征
 
@@ -322,7 +322,7 @@ uv run python -m training_tools.export_wideresnet_embedding --output model/wider
 uv run python -m training_tools.extract_embeddings --manifest datasets/seat_trace_v1/dataset_manifest.jsonl --output datasets/seat_trace_v1/embeddings.jsonl --backend statistical
 uv run python -m training_tools.train_patchcore_assets --manifest datasets/seat_trace_v1/dataset_manifest.jsonl --output-dir model/patchcore --split train --pca-components 3 --coreset-ratio 0.1
 uv run python -m training_tools.evaluate_pipeline --manifest datasets/seat_trace_v1/dataset_manifest.jsonl --output reports/evaluation_report.json --split test
-uv run python -m training_tools.train_roi_yolo --data datasets/roi_yolo/dataset.yaml --output model/roi_yolo/seat_roi_yolo.onnx
+uv run python -m training_tools.train_roi_yolo --data datasets/roi_seg/dataset.yaml --task segment --imgsz 1024 --output model/roi_yolo/seat_roi_seg.onnx
 uv run python -m training_tools.train_supervised_yolo --data datasets/supervised_defect_yolo/dataset.yaml --output model/supervised_defect/seat_defect_detector.onnx
 ```
 

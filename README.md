@@ -92,7 +92,7 @@ flowchart LR
 | 同机位多角度输入 | 固定机位默认配置可接收同一 `camera_id` 下动态 `pose_id` 的多张照片，按同一机位配方、标定、模型处理并在 trace/result 中保留原始 `pose_id`；显式机器人飞拍 pose 仍必须精确匹配配方。 |
 | 视角级串行 TDM | 每个检测视角按 `light_order` 完成多光源采集后再切换下一视角，降低频闪互相污染风险。 |
 | 共享内存 IPC | C++/Python 双端固定布局结构体、frame/result ring buffer、slot 状态机、CRC、layout/对象大小 fail-fast 和协议校验工具。 |
-| V4 算法接口 | Dome ROI YOLO、ECC 配准、WideResNet50 embedding、PCA、PatchCore KNN 和 FAISS 可选加速接入点。 |
+| V4 算法接口 | Dome ROI YOLO segmentation 自动生成 ROI polygon、ECC 配准、WideResNet50 embedding、PCA、PatchCore KNN 和 FAISS 可选加速接入点。 |
 | 生产光源对齐 | 当前固定机位产线是 2 相机 + 3 光源，C++ `light_order=1,2,3` 与 Python 生产配方 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 已对齐；第 4 路 `HIGH_RIGHT` 仅作为后续扩展。 |
 | 保守判定 | 协议异常、CRC 错误、缺帧、超时、质量失败、shot/机器人位姿不一致、ROI 冲突、机器人 FAULT、候选融合溢出和模型异常返回 `RECHECK` 或 `ERROR`。 |
 | 无模型采样兜底 | 生产模型文件缺失、仍是占位文件或 ONNX/numpy 依赖未安装时，Python detector 返回 `RECHECK/CONFIGURATION_ERROR`，保存原始采集图和可用 ROI 图，不输出 `OK` 或 `NG`。 |
@@ -318,7 +318,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 | 产物 | 默认路径 | 用途 |
 | --- | --- | --- |
-| Dome ROI YOLO | `model/roi_yolo/seat_roi_yolo.onnx` | 从 Dome 语义光源定位座椅 ROI。 |
+| Dome ROI YOLO segmentation | `model/roi_yolo/seat_roi_seg.onnx` | 从 Dome 语义光源分割座椅 ROI，并自动生成运行时 `polygon_xy`。 |
 | 监督缺陷检测 | `model/supervised_defect/seat_defect_detector.onnx` | 已知缺陷检测 ONNX。 |
 | WideResNet50 embedding | `model/wideresnet50/seat_wrn50_embedding.onnx` | 多光源 ROI embedding。 |
 | PCA | `model/patchcore/seat_pca.json` | unified embedding 降维。 |

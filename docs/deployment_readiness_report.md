@@ -111,7 +111,7 @@
 
 | 文件 | 当前大小 | 用途 | 替换来源 |
 |------|----------|------|----------|
-| `model/roi_yolo/seat_roi_yolo.onnx` | 1 字节 | Dome 光源 ROI 定位 | YOLO 训练导出 |
+| `model/roi_yolo/seat_roi_seg.onnx` | 缺失/占位 | Dome 光源 ROI segmentation 定位 | YOLO segmentation 训练导出 |
 | `model/supervised_defect/seat_defect_detector.onnx` | 1 字节 | 缺陷检测（scratch/dent） | YOLO 训练导出 |
 | `model/wideresnet50/seat_wrn50_embedding.onnx` | 1 字节 | 多光源 ROI 特征提取 | WideResNet50 训练导出 |
 | `model/patchcore/seat_pca.json` | 1 字节 | embedding 降维参数 | PCA 训练脚本 |

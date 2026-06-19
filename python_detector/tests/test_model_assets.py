@@ -15,7 +15,8 @@ def test_production_recipe_loads_full_model_chain() -> None:
         "ch1_polar_diffuse",
         "ch2_high_left",
     )
-    assert recipe.roi_locator.backend == "onnx_yolo"
+    assert recipe.roi_locator.backend == "onnx_yolo_seg"
+    assert recipe.roi_locator.model_path == "model/roi_yolo/seat_roi_seg.onnx"
     assert recipe.models["supervised_defect_onnx"].backend == "onnx"
     assert recipe.models["patchcore_unknown_safety_net"].backend == "patchcore_knn"
 
@@ -25,14 +26,14 @@ def test_production_robot_recipe_uses_patchcore_safety_net() -> None:
 
     assert recipe.recipe_id == "seat_a_robot_flyshot_production_v1"
     assert recipe.registration.method == "ecc"
-    assert recipe.roi_locator.backend == "onnx_yolo"
+    assert recipe.roi_locator.backend == "onnx_yolo_seg"
     assert recipe.safety_net_model_keys_for("EYE_IN_HAND", "full", "T1_BACKREST") == (
         "patchcore_unknown_safety_net",
     )
 
 
 def test_validate_model_assets_reports_placeholder_files(tmp_path: Path) -> None:
-    roi_yolo = tmp_path / "seat_roi_yolo.onnx"
+    roi_yolo = tmp_path / "seat_roi_seg.onnx"
     detector = tmp_path / "seat_defect_detector.onnx"
     embedding = tmp_path / "seat_wrn50_embedding.onnx"
     pca = tmp_path / "seat_pca.json"
@@ -47,8 +48,9 @@ recipe_id: placeholder_assets
 sku: sku
 light_order: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT, HIGH_RIGHT]
 roi_locator:
-  backend: onnx_yolo
+  backend: onnx_yolo_seg
   model_path: {roi_yolo}
+  output_decode: ultralytics_yolo_seg
 cameras:
   TOP:
     model_key: detector
@@ -81,7 +83,7 @@ models:
 
     messages = [issue.message for issue in validate_recipe_model_assets(recipe)]
 
-    assert any("YOLO ROI ONNX 文件为空或仍是占位文件" in message for message in messages)
+    assert any("YOLO ROI segmentation ONNX 文件为空或仍是占位文件" in message for message in messages)
     assert any("ONNX detection 文件为空或仍是占位文件" in message for message in messages)
     assert any("WideResNet50 embedding ONNX 文件为空或仍是占位文件" in message for message in messages)
     assert any("PCA 参数文件为空或仍是占位文件" in message for message in messages)

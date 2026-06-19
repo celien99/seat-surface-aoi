@@ -8,7 +8,8 @@
 model/
 ├── roi_yolo/
 │   ├── .gitkeep
-│   └── seat_roi_yolo.onnx              # 真实 Dome ROI YOLO ONNX，部署时放入
+│   ├── seat_roi_seg.onnx               # 推荐：真实 Dome ROI YOLO segmentation ONNX，部署时放入
+│   └── seat_roi_yolo.onnx              # 兼容：bbox ROI YOLO ONNX，部署时放入
 ├── supervised_defect/
 │   ├── .gitkeep
 │   └── seat_defect_detector.onnx       # 已知缺陷监督检测 ONNX，部署时放入
@@ -24,7 +25,8 @@ model/
 
 ## 产物要求
 
-- `seat_roi_yolo.onnx`：输入 Dome 语义光源图，输出 `[x1, y1, x2, y2, score, class_id]` 行表，或使用 `output_decode: ultralytics_yolo` 直接接 Ultralytics ONNX 输出；类别需与 `roi_locator.class_names` 一致。
+- `seat_roi_seg.onnx`：推荐 ROI 定位产物。输入 Dome 语义光源图，输出 YOLO segmentation mask；在线链路用 mask 自动生成运行时 `polygon_xy`，`roi_templates` 只作为安全边界和 `output_size` 约束。类别需与 `roi_locator.class_names` 一致。
+- `seat_roi_yolo.onnx`：兼容 bbox ROI 产物。输入 Dome 语义光源图，输出 `[x1, y1, x2, y2, score, class_id]` 行表，或使用 `output_decode: ultralytics_yolo` 直接接 Ultralytics ONNX 输出。
 - `seat_defect_detector.onnx`：输入 ROI 多光源特征 `NCHW` tensor，输出 `[x1, y1, x2, y2, score, class_id]` 行表，或使用 `output_decode: ultralytics_yolo` 直接接 Ultralytics ONNX 输出；类别需与配方 `class_names` 和 `thresholds` 一致。
 - `seat_wrn50_embedding.onnx`：输出一维 embedding，维度需与 `embedding_dim` 一致。
 - `seat_pca.json`：包含 `version`、`mean`、`components`，版本需与 `pca_version` 一致。
@@ -49,10 +51,13 @@ uv run python -m tools.validate_model_assets --recipe production_model_example
 当前仓库可生成 `python_detector` 生产配方直接消费的模型资产：
 
 ```bash
-# Dome ROI YOLO
+# Dome ROI YOLO segmentation
 uv run python -m training_tools.train_roi_yolo \
-  --data datasets/roi_yolo/dataset.yaml \
-  --output model/roi_yolo/seat_roi_yolo.onnx
+  --data datasets/roi_seg/dataset.yaml \
+  --task segment \
+  --model yolov8n-seg.pt \
+  --imgsz 1024 \
+  --output model/roi_yolo/seat_roi_seg.onnx
 
 # 已知缺陷监督 YOLO
 uv run python -m training_tools.train_supervised_yolo \

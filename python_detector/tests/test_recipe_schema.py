@@ -13,7 +13,12 @@ def test_recipe_manager_loads_default_yaml() -> None:
 def test_recipe_manager_loads_production_yaml() -> None:
     recipe = RecipeManager().load("seat_a_black_leather_production_v1")
 
-    assert recipe.roi_locator.backend == "onnx_yolo"
+    assert recipe.roi_locator.backend == "onnx_yolo_seg"
+    assert recipe.roi_locator.output_decode == "ultralytics_yolo_seg"
+    assert recipe.roi_locator.mask_threshold == 0.5
+    assert recipe.roi_locator.input_width == 1024
+    assert recipe.roi_locator.input_height == 1024
+    assert recipe.roi_locator.input_channels == 3
     assert recipe.registration.method == "ecc"
     assert recipe.models["supervised_defect_onnx"].backend == "onnx"
     assert recipe.models["patchcore_unknown_safety_net"].backend == "patchcore_knn"
@@ -220,6 +225,81 @@ def test_recipe_accepts_ultralytics_yolo_decode_for_training_exports() -> None:
 
     assert recipe.roi_locator.output_decode == "ultralytics_yolo"
     assert recipe.models["detector"].output_decode == "ultralytics_yolo"
+
+
+def test_recipe_accepts_yolo_seg_roi_locator() -> None:
+    recipe = recipe_from_dict(
+        {
+            "recipe_id": "seg_roi_recipe",
+            "sku": "sku",
+            "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+            "roi_locator": {
+                "backend": "onnx_yolo_seg",
+                "model_path": "model/roi_yolo/seat_roi_seg.onnx",
+                "output_decode": "ultralytics_yolo_seg",
+                "mask_threshold": 0.45,
+                "min_mask_area_px": 32,
+                "max_mask_area_ratio": 0.80,
+                "input_width": 1024,
+                "input_height": 1024,
+                "input_channels": 3,
+            },
+            "cameras": {"TOP": {"model_key": "detector"}},
+            "thresholds": {"scratch": {"ng_score": 0.35, "recheck_score": 0.2}},
+            "models": {
+                "detector": {
+                    "backend": "fake",
+                    "role": "primary",
+                    "class_names": ["scratch"],
+                }
+            },
+        }
+    )
+
+    assert recipe.roi_locator.backend == "onnx_yolo_seg"
+    assert recipe.roi_locator.model_path == "model/roi_yolo/seat_roi_seg.onnx"
+    assert recipe.roi_locator.output_decode == "ultralytics_yolo_seg"
+    assert recipe.roi_locator.min_mask_area_px == 32
+    assert recipe.roi_locator.input_channels == 3
+
+
+def test_recipe_rejects_yolo_seg_with_bbox_decode() -> None:
+    with pytest.raises(RecipeValidationError, match="onnx_yolo_seg"):
+        recipe_from_dict(
+            {
+                "recipe_id": "bad_seg_decode",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                "roi_locator": {
+                    "backend": "onnx_yolo_seg",
+                    "model_path": "model/roi_yolo/seat_roi_seg.onnx",
+                    "output_decode": "ultralytics_yolo",
+                },
+                "cameras": {"TOP": {"model_key": "detector"}},
+                "thresholds": {"scratch": {"ng_score": 0.35, "recheck_score": 0.2}},
+                "models": {"detector": {"backend": "fake", "role": "primary", "class_names": ["scratch"]}},
+            }
+        )
+
+
+def test_recipe_rejects_invalid_roi_locator_input_channels() -> None:
+    with pytest.raises(RecipeValidationError, match="input_channels"):
+        recipe_from_dict(
+            {
+                "recipe_id": "bad_roi_channels",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                "roi_locator": {
+                    "backend": "onnx_yolo_seg",
+                    "model_path": "model/roi_yolo/seat_roi_seg.onnx",
+                    "output_decode": "ultralytics_yolo_seg",
+                    "input_channels": 2,
+                },
+                "cameras": {"TOP": {"model_key": "detector"}},
+                "thresholds": {"scratch": {"ng_score": 0.35, "recheck_score": 0.2}},
+                "models": {"detector": {"backend": "fake", "role": "primary", "class_names": ["scratch"]}},
+            }
+        )
 
 
 def test_recipe_parses_patchcore_faiss_index_path() -> None:

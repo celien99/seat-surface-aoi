@@ -8,8 +8,9 @@ from training_tools.training_errors import OnnxExportError, TrainingDataError
 
 def train_roi_yolo(
     data_path: Path,
-    model: str = "yolov8n.pt",
+    model: str = "yolov8n-seg.pt",
     *,
+    task: str = "segment",
     epochs: int = 100,
     imgsz: int = 640,
     batch: int = 16,
@@ -17,6 +18,8 @@ def train_roi_yolo(
     opset: int = 17,
 ) -> dict:
     """训练 YOLO 模型并导出 ONNX。"""
+    if task not in {"detect", "segment"}:
+        raise TrainingDataError(f"不支持的 YOLO task: {task}")
     if not data_path.exists():
         raise TrainingDataError(f"数据集配置文件不存在: {data_path}")
 
@@ -29,6 +32,7 @@ def train_roi_yolo(
     yolo_model = YOLO(model)
     results = yolo_model.train(
         data=str(data_path),
+        task=task,
         epochs=epochs,
         imgsz=imgsz,
         batch=batch,
@@ -56,13 +60,14 @@ def train_roi_yolo(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="训练 Dome ROI YOLO 检测模型并导出 ONNX")
+    parser = argparse.ArgumentParser(description="训练 Dome ROI YOLO 分割模型并导出 ONNX")
     parser.add_argument("--data", required=True, type=Path, help="YOLO 格式 dataset.yaml")
-    parser.add_argument("--model", default="yolov8n.pt", help="预训练权重或 checkpoint")
+    parser.add_argument("--model", default="yolov8n-seg.pt", help="预训练权重或 checkpoint")
+    parser.add_argument("--task", default="segment", choices=["detect", "segment"], help="ROI 训练任务类型")
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--imgsz", type=int, default=640)
     parser.add_argument("--batch", type=int, default=16)
-    parser.add_argument("--output", type=Path, default=Path("model/roi_yolo/seat_roi_yolo.onnx"))
+    parser.add_argument("--output", type=Path, default=Path("model/roi_yolo/seat_roi_seg.onnx"))
     parser.add_argument("--opset", type=int, default=17)
     args = parser.parse_args(argv)
 
@@ -70,6 +75,7 @@ def main(argv: list[str] | None = None) -> int:
         metrics = train_roi_yolo(
             data_path=args.data,
             model=args.model,
+            task=args.task,
             epochs=args.epochs,
             imgsz=args.imgsz,
             batch=args.batch,

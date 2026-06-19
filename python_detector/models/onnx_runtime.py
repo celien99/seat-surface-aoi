@@ -15,7 +15,7 @@ def create_onnx_session(model_path: str, purpose: str) -> Any:
             asset_path=model_path,
             reason="missing",
         )
-    if path.stat().st_size <= 1:
+    if path.stat().st_size <= 1 or _is_blank_placeholder(path):
         raise ModelAssetUnavailableError(
             f"{purpose} 模型文件为空或仍是占位文件: {model_path}",
             asset_kind="onnx_model",
@@ -40,6 +40,15 @@ def create_onnx_session(model_path: str, purpose: str) -> Any:
             asset_path=model_path,
             reason="session_create_failed",
         ) from exc
+
+
+def _is_blank_placeholder(path: Path) -> bool:
+    if path.stat().st_size > 1024:
+        return False
+    try:
+        return path.read_bytes().strip() in {b"", b"0"}
+    except OSError:
+        return False
 
 
 def numpy_module(purpose: str) -> Any:

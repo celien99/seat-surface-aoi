@@ -9,7 +9,16 @@ from python_detector.config.recipe_schema import Recipe
 from python_detector.ipc.data_types import LightFrame
 from python_detector.models.asset_errors import ModelAssetUnavailableError
 from python_detector.models.onnx_runtime import create_onnx_session, numpy_module, run_first_input
-from python_detector.models.yolo_decode import decode_yolo_rows
+from python_detector.models.yolo_decode import SegmentationCandidate, decode_yolo_rows, decode_yolo_segmentation
+
+
+@dataclass(frozen=True)
+class RoiInputTransform:
+    width: int
+    height: int
+    scale: float
+    pad_x: float
+    pad_y: float
 
 
 @dataclass(frozen=True)
@@ -58,6 +67,16 @@ class RoiLocator:
             detections = self._fake_yolo_rows(templates, recipe)
         elif config.backend == "onnx_yolo":
             detections = self._onnx_yolo_rows(dome_frame, recipe)
+        elif config.backend == "onnx_yolo_seg":
+            detections = self._onnx_yolo_segmentation(dome_frame, recipe)
+            return self._locations_from_segmentations(
+                camera_id,
+                dome_light_id,
+                detections,
+                dome_frame,
+                templates,
+                recipe,
+            )
         else:
             raise ValueError(f"不支持的 ROI 定位后端: {config.backend}")
         return self._locations_from_detections(camera_id, dome_light_id, detections, dome_frame, templates, recipe)
@@ -112,7 +131,7 @@ class RoiLocator:
             )
         np = numpy_module("YOLO ROI")
         session = create_onnx_session(model_path, "YOLO ROI")
-        tensor = self._frame_to_nchw(dome_frame, np)
+        tensor, _ = self._frame_to_nchw(dome_frame, recipe, np)
         outputs = run_first_input(session, tensor, "YOLO ROI")
         return decode_yolo_rows(
             outputs[0],
@@ -120,13 +139,109 @@ class RoiLocator:
             output_decode=recipe.roi_locator.output_decode,
         )
 
-    def _frame_to_nchw(self, frame: LightFrame, np: Any) -> Any:
-        rows = []
-        for y in range(frame.height):
-            start = y * frame.stride_bytes
-            rows.append([float(value) / 255.0 for value in frame.image[start : start + frame.width]])
+    def _onnx_yolo_segmentation(self, dome_frame: LightFrame, recipe: Recipe) -> list[SegmentationCandidate]:
+        model_path = recipe.roi_locator.model_path
+        if not model_path:
+            raise ModelAssetUnavailableError(
+                "YOLO ROI segmentation 模型路径不能为空",
+                asset_kind="onnx_model",
+                asset_path="",
+                reason="path_not_configured",
+        )
+        np = numpy_module("YOLO ROI segmentation")
+        session = create_onnx_session(model_path, "YOLO ROI segmentation")
+        tensor, transform = self._frame_to_nchw(dome_frame, recipe, np)
+        outputs = run_first_input(session, tensor, "YOLO ROI segmentation")
+        candidates = decode_yolo_segmentation(
+            outputs,
+            confidence_threshold=recipe.roi_locator.min_confidence,
+            mask_threshold=recipe.roi_locator.mask_threshold,
+            output_decode=recipe.roi_locator.output_decode,
+        )
+        return [
+            SegmentationCandidate(
+                bbox_xyxy=self._bbox_from_model_input(candidate.bbox_xyxy, transform, dome_frame),
+                score=candidate.score,
+                class_id=candidate.class_id,
+                mask=candidate.mask,
+                mask_bbox_xyxy=self._bbox_from_model_input(
+                    candidate.mask_bbox_xyxy or candidate.bbox_xyxy,
+                    transform,
+                    dome_frame,
+                ),
+            )
+            for candidate in candidates
+        ]
+
+    def _frame_to_nchw(self, frame: LightFrame, recipe: Recipe, np: Any) -> tuple[Any, RoiInputTransform]:
+        target_width = recipe.roi_locator.input_width or frame.width
+        target_height = recipe.roi_locator.input_height or frame.height
+        channels = recipe.roi_locator.input_channels
+        if target_width == frame.width and target_height == frame.height:
+            transform = RoiInputTransform(
+                width=target_width,
+                height=target_height,
+                scale=1.0,
+                pad_x=0.0,
+                pad_y=0.0,
+            )
+            rows = [
+                [float(value) / 255.0 for value in frame.image[y * frame.stride_bytes : y * frame.stride_bytes + frame.width]]
+                for y in range(frame.height)
+            ]
+        else:
+            rows, transform = self._letterbox_rows(frame, target_width, target_height)
         array = np.asarray(rows, dtype=np.float32)
-        return array.reshape(1, 1, frame.height, frame.width)
+        if channels == 1:
+            return array.reshape(1, 1, target_height, target_width), transform
+        stacked = np.stack([array] * channels, axis=0)
+        return stacked.reshape(1, channels, target_height, target_width), transform
+
+    def _letterbox_rows(
+        self,
+        frame: LightFrame,
+        target_width: int,
+        target_height: int,
+    ) -> tuple[list[list[float]], RoiInputTransform]:
+        scale = min(float(target_width) / float(frame.width), float(target_height) / float(frame.height))
+        resized_width = max(1, int(round(float(frame.width) * scale)))
+        resized_height = max(1, int(round(float(frame.height) * scale)))
+        pad_x = (float(target_width - resized_width)) / 2.0
+        pad_y = (float(target_height - resized_height)) / 2.0
+        rows: list[list[float]] = []
+        for y in range(target_height):
+            row: list[float] = []
+            source_y = (float(y) - pad_y) / scale
+            sy = int(round(source_y))
+            for x in range(target_width):
+                source_x = (float(x) - pad_x) / scale
+                sx = int(round(source_x))
+                if sx < 0 or sy < 0 or sx >= frame.width or sy >= frame.height:
+                    row.append(0.0)
+                else:
+                    row.append(float(frame.image[sy * frame.stride_bytes + sx]) / 255.0)
+            rows.append(row)
+        return rows, RoiInputTransform(
+            width=target_width,
+            height=target_height,
+            scale=scale,
+            pad_x=pad_x,
+            pad_y=pad_y,
+        )
+
+    def _bbox_from_model_input(
+        self,
+        bbox_xyxy: tuple[float, float, float, float],
+        transform: RoiInputTransform,
+        frame: LightFrame,
+    ) -> tuple[float, float, float, float]:
+        x0, y0, x1, y1 = bbox_xyxy
+        return (
+            max(0.0, min(float(frame.width - 1), (x0 - transform.pad_x) / transform.scale)),
+            max(0.0, min(float(frame.height - 1), (y0 - transform.pad_y) / transform.scale)),
+            max(0.0, min(float(frame.width - 1), (x1 - transform.pad_x) / transform.scale)),
+            max(0.0, min(float(frame.height - 1), (y1 - transform.pad_y) / transform.scale)),
+        )
 
     def _locations_from_detections(
         self,
@@ -236,11 +351,176 @@ class RoiLocator:
             source=recipe.roi_locator.backend,
         )
 
+    def _locations_from_segmentations(
+        self,
+        camera_id: str,
+        dome_light_id: str,
+        candidates: list[SegmentationCandidate],
+        dome_frame: LightFrame,
+        templates: dict[str, RoiTemplate],
+        recipe: Recipe,
+    ) -> tuple[dict[str, RoiTemplate], RoiLocationReport]:
+        by_class_id = {
+            index: templates[roi_name]
+            for index, roi_name in enumerate(recipe.roi_locator.class_names)
+            if roi_name in templates
+        }
+        locations: list[RoiLocation] = []
+        located_templates: dict[str, RoiTemplate] = {}
+        errors: list[str] = []
+        candidates_by_roi: dict[str, list[RoiLocation]] = {}
+        for candidate in candidates:
+            try:
+                location = self._location_from_segmentation(candidate, dome_frame, by_class_id, recipe)
+            except ValueError as exc:
+                errors.append(str(exc))
+                continue
+            if location.confidence < recipe.roi_locator.min_confidence:
+                continue
+            if location.pose_error_px > recipe.roi_locator.max_pose_error_px:
+                errors.append(
+                    f"{location.roi_name}: mask boundary error {location.pose_error_px:.3f}px exceeds "
+                    f"{recipe.roi_locator.max_pose_error_px:.3f}px"
+                )
+                continue
+            candidates_by_roi.setdefault(location.roi_name, []).append(location)
+
+        for roi_name, roi_candidates in candidates_by_roi.items():
+            roi_candidates.sort(key=lambda item: (-item.confidence, item.pose_error_px))
+            best = roi_candidates[0]
+            conflicting = [candidate for candidate in roi_candidates[1:] if candidate.polygon_xy != best.polygon_xy]
+            if conflicting:
+                errors.append(f"{roi_name}: duplicate conflicting ROI segmentations")
+            locations.append(best)
+            located_templates[roi_name] = RoiTemplate(
+                roi_name=best.roi_name,
+                polygon_xy=best.polygon_xy,
+                output_size=best.output_size,
+            )
+
+        missing = [roi_name for roi_name in templates if roi_name not in located_templates]
+        is_pass = not missing and not errors and bool(located_templates)
+        message = "Dome YOLO segmentation ROI pass" if is_pass else "; ".join(
+            errors + [f"missing ROI segmentations: {missing}"]
+        )
+        return located_templates, RoiLocationReport(
+            camera_id=camera_id,
+            dome_light_id=dome_light_id,
+            backend=recipe.roi_locator.backend,
+            is_pass=is_pass,
+            message=message,
+            locations=tuple(locations),
+        )
+
+    def _location_from_segmentation(
+        self,
+        candidate: SegmentationCandidate,
+        dome_frame: LightFrame,
+        by_class_id: dict[int, RoiTemplate],
+        recipe: Recipe,
+    ) -> RoiLocation:
+        if candidate.score < 0.0 or candidate.score > 1.0:
+            raise ValueError(f"YOLO segmentation confidence 越界: {candidate.score}")
+        template = by_class_id.get(candidate.class_id)
+        if template is None:
+            raise ValueError(f"YOLO segmentation class_id 未映射到模板: {candidate.class_id}")
+        mask_bbox = self._mask_bbox(candidate.mask)
+        if mask_bbox is None:
+            raise ValueError(f"{template.roi_name}: segmentation mask 为空")
+        mask_width = int(getattr(candidate.mask, "shape", (0, 0))[1])
+        mask_height = int(getattr(candidate.mask, "shape", (0, 0))[0])
+        if mask_width <= 0 or mask_height <= 0:
+            raise ValueError(f"{template.roi_name}: segmentation mask 尺寸无效")
+        x0, y0, x1, y1 = mask_bbox
+        bbox_x0, bbox_y0, bbox_x1, bbox_y1 = candidate.mask_bbox_xyxy or candidate.bbox_xyxy
+        bbox_width = max(1.0, bbox_x1 - bbox_x0 + 1.0)
+        bbox_height = max(1.0, bbox_y1 - bbox_y0 + 1.0)
+        scale_x = bbox_width / float(mask_width)
+        scale_y = bbox_height / float(mask_height)
+        polygon = (
+            (int(round(bbox_x0 + x0 * scale_x)), int(round(bbox_y0 + y0 * scale_y))),
+            (int(round(bbox_x0 + (x1 + 1) * scale_x)) - 1, int(round(bbox_y0 + y0 * scale_y))),
+            (
+                int(round(bbox_x0 + (x1 + 1) * scale_x)) - 1,
+                int(round(bbox_y0 + (y1 + 1) * scale_y)) - 1,
+            ),
+            (int(round(bbox_x0 + x0 * scale_x)), int(round(bbox_y0 + (y1 + 1) * scale_y)) - 1),
+        )
+        polygon = tuple(
+            (
+                max(0, min(dome_frame.width - 1, x)),
+                max(0, min(dome_frame.height - 1, y)),
+            )
+            for x, y in polygon
+        )
+        mask_area = self._mask_area(candidate.mask)
+        scaled_area = mask_area * scale_x * scale_y
+        max_area = float(dome_frame.width * dome_frame.height) * recipe.roi_locator.max_mask_area_ratio
+        if scaled_area < recipe.roi_locator.min_mask_area_px:
+            raise ValueError(
+                f"{template.roi_name}: mask area {scaled_area:.1f}px below "
+                f"{recipe.roi_locator.min_mask_area_px}px"
+            )
+        if scaled_area > max_area:
+            raise ValueError(
+                f"{template.roi_name}: mask area ratio exceeds {recipe.roi_locator.max_mask_area_ratio:.3f}"
+            )
+        pose_error = self._safety_boundary_error_px(template, polygon)
+        return RoiLocation(
+            roi_name=template.roi_name,
+            confidence=candidate.score,
+            polygon_xy=polygon,
+            output_size=template.output_size,
+            pose_error_px=pose_error,
+            source=recipe.roi_locator.backend,
+        )
+
+    def _mask_bbox(self, mask: Any) -> tuple[int, int, int, int] | None:
+        height = int(getattr(mask, "shape", (0, 0))[0])
+        width = int(getattr(mask, "shape", (0, 0))[1]) if len(getattr(mask, "shape", ())) >= 2 else 0
+        if width <= 0 or height <= 0:
+            return None
+        x0 = width
+        y0 = height
+        x1 = -1
+        y1 = -1
+        for y in range(height):
+            for x in range(width):
+                if float(mask[y][x]) > 0.0:
+                    x0 = min(x0, x)
+                    y0 = min(y0, y)
+                    x1 = max(x1, x)
+                    y1 = max(y1, y)
+        if x1 < x0 or y1 < y0:
+            return None
+        return x0, y0, x1, y1
+
+    def _mask_area(self, mask: Any) -> int:
+        height = int(getattr(mask, "shape", (0, 0))[0])
+        width = int(getattr(mask, "shape", (0, 0))[1]) if len(getattr(mask, "shape", ())) >= 2 else 0
+        area = 0
+        for y in range(height):
+            for x in range(width):
+                if float(mask[y][x]) > 0.0:
+                    area += 1
+        return area
+
     def _bbox_pose_error_px(self, template: RoiTemplate, polygon: tuple[tuple[int, int], ...]) -> float:
         template_bbox = self._bbox(template.polygon_xy)
         located_bbox = self._bbox(polygon)
         deltas = [float(a - b) for a, b in zip(template_bbox, located_bbox)]
         return max(abs(delta) for delta in deltas)
+
+    def _safety_boundary_error_px(self, template: RoiTemplate, polygon: tuple[tuple[int, int], ...]) -> float:
+        tx0, ty0, tx1, ty1 = self._bbox(template.polygon_xy)
+        x0, y0, x1, y1 = self._bbox(polygon)
+        return max(
+            float(tx0 - x0),
+            float(ty0 - y0),
+            float(x1 - tx1),
+            float(y1 - ty1),
+            0.0,
+        )
 
     def _bbox(self, polygon: tuple[tuple[int, int], ...]) -> tuple[int, int, int, int]:
         xs = [point[0] for point in polygon]

@@ -33,10 +33,10 @@ def yolo_dataset(tmp_path: Path) -> Path:
         img.save(ds_root / "images" / split / f"img_{idx:04d}.png")
 
     for idx in range(7):
-        label = "0 0.5 0.5 0.3 0.3\n"
+        label = "0 0.35 0.35 0.65 0.35 0.65 0.65 0.35 0.65\n"
         (ds_root / "labels" / "train" / f"img_{idx:04d}.txt").write_text(label)
     for idx in range(7, 10):
-        label = "0 0.5 0.5 0.3 0.3\n"
+        label = "0 0.35 0.35 0.65 0.35 0.65 0.65 0.35 0.65\n"
         (ds_root / "labels" / "val" / f"img_{idx:04d}.txt").write_text(label)
 
     yaml_content = f"""path: {ds_root}
@@ -57,7 +57,8 @@ def test_train_yolo_minimal(tmp_path: Path, yolo_dataset: Path) -> None:
     output = tmp_path / "roi_yolo.onnx"
     result = train_roi_yolo(
         data_path=yolo_dataset,
-        model="yolov8n.pt",
+        model="yolov8n-seg.pt",
+        task="segment",
         epochs=1,
         imgsz=64,
         batch=2,
@@ -80,7 +81,8 @@ def test_train_yolo_onnx_valid(tmp_path: Path, yolo_dataset: Path) -> None:
     output = tmp_path / "roi_yolo.onnx"
     train_roi_yolo(
         data_path=yolo_dataset,
-        model="yolov8n.pt",
+        model="yolov8n-seg.pt",
+        task="segment",
         epochs=1,
         imgsz=64,
         batch=2,
@@ -120,6 +122,7 @@ def test_train_supervised_yolo_delegates_to_shared_export(monkeypatch: pytest.Mo
     assert metrics["metrics/mAP50(B)"] == 0.7
     assert calls["data_path"] == data
     assert calls["output"] == output
+    assert calls["task"] == "detect"
 
 
 def test_export_wideresnet_embedding_reports_missing_dependencies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

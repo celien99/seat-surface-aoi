@@ -51,12 +51,18 @@ quality:
   require_monotonic_timestamps: true
   require_unique_frame_indices: true
 roi_locator:
-  backend: onnx_yolo
+  backend: onnx_yolo_seg
   dome_semantic_light: DOME
-  model_path: model/roi_yolo/seat_roi_yolo.onnx
+  model_path: model/roi_yolo/seat_roi_seg.onnx
   min_confidence: 0.50
+  mask_threshold: 0.50
+  min_mask_area_px: 50000
+  max_mask_area_ratio: 0.95
+  input_width: 1024
+  input_height: 1024
+  input_channels: 3
   max_pose_error_px: 4.0
-  output_decode: ultralytics_yolo
+  output_decode: ultralytics_yolo_seg
   bbox_format: xyxy_pixel
   class_names: [full]
   fail_policy: RECHECK

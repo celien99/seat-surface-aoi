@@ -77,9 +77,9 @@
 当前状态：
 
 - 已支持 ROI 模板加载、轴对齐矩形裁剪和四点多边形透视展开。
-- 已增加 `RoiLocator`，支持 `template`、`fake_yolo` 和 `onnx_yolo` 后端。
-- 已在根目录 `model/roi_yolo/seat_roi_yolo.onnx` 预留真实 ROI YOLO 产物路径，并提供 `production_model.example.yaml` 配方模板和 `tools.validate_model_assets` 校验。
-- ROI 定位只读取 `DOME` 语义光源映射出的图像；YOLO 输出按 `[x1, y1, x2, y2, score, class_id]` 解码，并通过 `roi_locator.class_names` 映射到 ROI 模板。
+- 已增加 `RoiLocator`，支持 `template`、`fake_yolo`、`onnx_yolo` 和 `onnx_yolo_seg` 后端。
+- 已在根目录 `model/roi_yolo/seat_roi_seg.onnx` 预留真实 ROI YOLO segmentation 产物路径，并提供 `production_model.example.yaml` 配方模板和 `tools.validate_model_assets` 校验。
+- ROI 定位只读取 `DOME` 语义光源映射出的图像；YOLO segmentation 输出按 mask 自动生成运行时 `polygon_xy`，并通过 `roi_locator.class_names` 映射到 ROI 模板安全边界和 `output_size`。
 - ROI 置信度不足、姿态误差超差、输出越界或缺 Dome 图会返回 `RECHECK`，不会输出 `OK`。
 
 差距：

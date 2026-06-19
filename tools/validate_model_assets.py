@@ -24,8 +24,9 @@ class AssetIssue:
 
 def validate_recipe_model_assets(recipe: Recipe) -> list[AssetIssue]:
     issues: list[AssetIssue] = []
-    if recipe.roi_locator.backend == "onnx_yolo":
-        issues.extend(_validate_binary_file(recipe.roi_locator.model_path, "roi_locator.model_path", "YOLO ROI ONNX"))
+    if recipe.roi_locator.backend in {"onnx_yolo", "onnx_yolo_seg"}:
+        label = "YOLO ROI segmentation ONNX" if recipe.roi_locator.backend == "onnx_yolo_seg" else "YOLO ROI ONNX"
+        issues.extend(_validate_binary_file(recipe.roi_locator.model_path, "roi_locator.model_path", label))
     for model_key, model in recipe.models.items():
         issues.extend(_validate_model_asset(model_key, model))
     return issues

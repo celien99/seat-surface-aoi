@@ -31,6 +31,12 @@ class RoiLocatorConfig:
     model_path: str | None = None
     min_confidence: float = 0.5
     max_pose_error_px: float = 4.0
+    mask_threshold: float = 0.5
+    min_mask_area_px: int = 1
+    max_mask_area_ratio: float = 1.0
+    input_width: int = 0
+    input_height: int = 0
+    input_channels: int = 1
     output_decode: str = "yolo_xyxy_rows"
     bbox_format: str = "xyxy_pixel"
     class_names: tuple[str, ...] = ("full",)
@@ -349,11 +355,21 @@ def _v4_lights_from_dict(data: dict[str, Any]) -> V4LightConfig:
 
 def _roi_locator_from_dict(data: dict[str, Any]) -> RoiLocatorConfig:
     backend = _str(data.get("backend", "template"), "roi_locator.backend")
-    if backend not in {"template", "fake_yolo", "onnx_yolo"}:
+    if backend not in {"template", "fake_yolo", "onnx_yolo", "onnx_yolo_seg"}:
         raise RecipeValidationError(f"roi_locator.backend 不支持: {backend}")
     output_decode = _str(data.get("output_decode", "yolo_xyxy_rows"), "roi_locator.output_decode")
-    if output_decode not in {"yolo_xyxy_rows", "ultralytics_yolo"}:
-        raise RecipeValidationError("roi_locator.output_decode 必须是 yolo_xyxy_rows 或 ultralytics_yolo")
+    if output_decode not in {"yolo_xyxy_rows", "ultralytics_yolo", "segmentation_rows", "ultralytics_yolo_seg"}:
+        raise RecipeValidationError(
+            "roi_locator.output_decode 必须是 yolo_xyxy_rows、ultralytics_yolo、"
+            "segmentation_rows 或 ultralytics_yolo_seg"
+        )
+    if backend == "onnx_yolo_seg" and output_decode not in {"segmentation_rows", "ultralytics_yolo_seg"}:
+        raise RecipeValidationError("roi_locator.backend=onnx_yolo_seg 必须使用 segmentation_rows 或 ultralytics_yolo_seg")
+    if backend in {"fake_yolo", "onnx_yolo"} and output_decode not in {"yolo_xyxy_rows", "ultralytics_yolo"}:
+        raise RecipeValidationError("roi_locator bbox 后端必须使用 yolo_xyxy_rows 或 ultralytics_yolo")
+    input_channels = _positive_int(data.get("input_channels", 1), "roi_locator.input_channels")
+    if input_channels not in {1, 3}:
+        raise RecipeValidationError("roi_locator.input_channels 必须是 1 或 3")
     bbox_format = _bbox_format(data.get("bbox_format", "xyxy_pixel"), "roi_locator.bbox_format")
     return RoiLocatorConfig(
         backend=backend,
@@ -363,6 +379,12 @@ def _roi_locator_from_dict(data: dict[str, Any]) -> RoiLocatorConfig:
         else _str(data.get("model_path"), "roi_locator.model_path"),
         min_confidence=_ratio(data.get("min_confidence", 0.5), "roi_locator.min_confidence"),
         max_pose_error_px=_non_negative_float(data.get("max_pose_error_px", 4.0), "roi_locator.max_pose_error_px"),
+        mask_threshold=_ratio(data.get("mask_threshold", 0.5), "roi_locator.mask_threshold"),
+        min_mask_area_px=_positive_int(data.get("min_mask_area_px", 1), "roi_locator.min_mask_area_px"),
+        max_mask_area_ratio=_ratio(data.get("max_mask_area_ratio", 1.0), "roi_locator.max_mask_area_ratio"),
+        input_width=_non_negative_int(data.get("input_width", 0), "roi_locator.input_width"),
+        input_height=_non_negative_int(data.get("input_height", 0), "roi_locator.input_height"),
+        input_channels=input_channels,
         output_decode=output_decode,
         bbox_format=bbox_format,
         class_names=_unique_str_tuple(data.get("class_names", ("full",)), "roi_locator.class_names"),
@@ -573,7 +595,7 @@ def _validate_roi_locator_light(
             f"roi_locator.dome_semantic_light 映射光源不在 light_order 中: "
             f"{roi_locator.dome_semantic_light}->{dome_light}"
         )
-    if roi_locator.backend in {"fake_yolo", "onnx_yolo"} and roi_locator.model_path in (None, ""):
+    if roi_locator.backend in {"fake_yolo", "onnx_yolo", "onnx_yolo_seg"} and roi_locator.model_path in (None, ""):
         raise RecipeValidationError(f"roi_locator.backend={roi_locator.backend} 必须配置 model_path")
 
 

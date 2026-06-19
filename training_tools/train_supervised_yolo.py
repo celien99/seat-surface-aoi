@@ -21,6 +21,7 @@ def train_supervised_yolo(
     return train_roi_yolo(
         data_path=data_path,
         model=model,
+        task="detect",
         epochs=epochs,
         imgsz=imgsz,
         batch=batch,

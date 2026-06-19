@@ -5,10 +5,12 @@ import json
 from pathlib import Path
 
 import pytest
+import numpy as np
 
-from python_detector.config.calibration_manager import Calibration
+from python_detector.config.calibration_manager import Calibration, RoiTemplate
 from python_detector.config.recipe_schema import ModelConfig, RecipeManager, RecipeValidationError, recipe_from_dict
 from python_detector.ipc.data_types import LightFrame, SeatInspectionJob
+from python_detector.models.yolo_decode import SegmentationCandidate
 from python_detector.models.inference_engine import InferenceEngine, ModelRegistry
 from python_detector.pipeline.pipeline import InspectionPipeline
 from python_detector.pipeline.preprocessor import PreparedBundle, Preprocessor
@@ -67,6 +69,31 @@ class DuplicateRoiLocator(RoiLocator):
         ]
 
 
+class SegRoiLocator(RoiLocator):
+    def __init__(
+        self,
+        mask: np.ndarray,
+        *,
+        bbox_xyxy: tuple[float, float, float, float] | None = None,
+        mask_bbox_xyxy: tuple[float, float, float, float] | None = None,
+    ) -> None:
+        super().__init__()
+        self.mask = mask
+        self.bbox_xyxy = bbox_xyxy
+        self.mask_bbox_xyxy = mask_bbox_xyxy
+
+    def _onnx_yolo_segmentation(self, dome_frame, recipe):  # type: ignore[no-untyped-def]
+        return [
+            SegmentationCandidate(
+                bbox_xyxy=self.bbox_xyxy or (0.0, 0.0, float(dome_frame.width - 1), float(dome_frame.height - 1)),
+                score=0.97,
+                class_id=0,
+                mask=self.mask,
+                mask_bbox_xyxy=self.mask_bbox_xyxy,
+            )
+        ]
+
+
 def test_dome_roi_locator_rechecks_duplicate_conflicting_detections() -> None:
     recipe = RecipeManager().load("seat_a_black_leather_v1")
     recipe = replace(
@@ -84,6 +111,95 @@ def test_dome_roi_locator_rechecks_duplicate_conflicting_detections() -> None:
 
     assert result.decision == "RECHECK"
     assert "full: duplicate conflicting ROI detections" in pipeline.last_context["error"]["message"]
+
+
+def test_dome_roi_locator_yolo_seg_generates_runtime_polygon() -> None:
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    mask = np.zeros((8, 8), dtype=np.uint8)
+    mask[2:6, 1:7] = 1
+    recipe = replace(
+        recipe,
+        roi_locator=replace(
+            recipe.roi_locator,
+            backend="onnx_yolo_seg",
+            model_path="simulated-seg.onnx",
+            output_decode="segmentation_rows",
+            min_confidence=0.5,
+            min_mask_area_px=4,
+            max_pose_error_px=0.0,
+        ),
+    )
+    pipeline = InspectionPipeline(preprocessor=Preprocessor(roi_locator=SegRoiLocator(mask)))
+
+    result = pipeline.process(make_simulated_job(), recipe)
+
+    assert result.decision == "OK"
+    report = pipeline.last_context["roi_location_reports"][0]
+    assert report.backend == "onnx_yolo_seg"
+    assert report.is_pass is True
+    assert report.locations[0].polygon_xy == ((8, 12), (55, 12), (55, 35), (8, 35))
+    assert report.locations[0].source == "onnx_yolo_seg"
+
+
+def test_dome_roi_locator_yolo_seg_input_letterbox_transform() -> None:
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    recipe = replace(
+        recipe,
+        roi_locator=replace(
+            recipe.roi_locator,
+            backend="onnx_yolo_seg",
+            model_path="simulated-seg.onnx",
+            output_decode="segmentation_rows",
+            input_width=128,
+            input_height=128,
+            input_channels=3,
+            min_confidence=0.5,
+            min_mask_area_px=4,
+            max_pose_error_px=0.0,
+        ),
+    )
+    frame = make_simulated_job().camera_bundles[0].light_frames["DIFFUSE"]
+    locator = RoiLocator()
+
+    tensor, transform = locator._frame_to_nchw(frame, recipe, np)  # noqa: SLF001
+    mapped = locator._bbox_from_model_input((32.0, 40.0, 95.0, 87.0), transform, frame)  # noqa: SLF001
+
+    assert tensor.shape == (1, 3, 128, 128)
+    assert transform.scale == pytest.approx(2.0)
+    assert transform.pad_y == pytest.approx(16.0)
+    assert mapped == pytest.approx((16.0, 12.0, 47.5, 35.5))
+
+
+def test_dome_roi_locator_yolo_seg_rechecks_outside_safety_template() -> None:
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    mask = np.zeros((8, 8), dtype=np.uint8)
+    mask[0:4, 0:4] = 1
+    recipe = replace(
+        recipe,
+        roi_locator=replace(
+            recipe.roi_locator,
+            backend="onnx_yolo_seg",
+            model_path="simulated-seg.onnx",
+            output_decode="segmentation_rows",
+            min_confidence=0.5,
+            min_mask_area_px=4,
+            max_pose_error_px=1.0,
+        ),
+    )
+    job = make_simulated_job()
+    frame = job.camera_bundles[0].light_frames["DIFFUSE"]
+    templates = {
+        "full": RoiTemplate(
+            roi_name="full",
+            polygon_xy=((16, 12), (47, 12), (47, 35), (16, 35)),
+            output_size=(64, 48),
+        )
+    }
+
+    _, report = SegRoiLocator(mask).locate("TOP_BACK", {"DIFFUSE": frame}, templates, recipe)
+
+    assert report.is_pass is False
+    assert "mask boundary error" in report.message
 
 
 def test_dome_roi_locator_missing_light_returns_error_not_ok() -> None:
