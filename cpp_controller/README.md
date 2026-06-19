@@ -213,13 +213,13 @@ signal.error_text=ERROR              # ERROR 文本
 image_save.enabled=true              # 启用存图
 image_save.root_dir=images           # 存储根目录
 image_save.save_original=true        # 保存采集原图
-image_save.cleanup_enabled=true      # 磁盘低水位时清理旧日期目录
+image_save.cleanup_enabled=true      # 磁盘低水位时清理最早图片文件
 image_save.cleanup_min_free_ratio=0.20 # 可用容量低于 20% 时触发清理
 ```
 
 采集成功后自动保存 PGM 格式原图：`{root_dir}/YYYYMMDD/{seat_id}/{camera_id}_{timestamp}_L{light_index}_original.pgm`。PGM (P5 binary) 纯 C++ 实现，无需外部库依赖。存图失败只打日志不阻断主流程。
 
-启用清理后，C++ 主控会在每次原图落盘前检查 `image_save.root_dir` 所在磁盘的可用容量比例；低于 `cleanup_min_free_ratio` 时，只按日期目录从旧到新删除早于当天的 `YYYYMMDD` 目录，跳过当天目录和非日期命名目录。生产环境默认仍建议关闭原图落盘，Python trace 已保存检测样本图。
+启用清理后，C++ 主控会在每次原图落盘前检查 `image_save.root_dir` 所在磁盘的可用容量比例；低于 `cleanup_min_free_ratio` 时，只扫描 `YYYYMMDD` 日期目录下的图片文件，按文件最后修改时间从早到晚逐个删除，直到容量恢复或没有可清理文件。非日期目录不会被扫描，空的座椅子目录会被清理。生产环境默认仍建议关闭原图落盘，Python trace 已保存检测样本图。
 
 ### JSON 详细结果输出
 

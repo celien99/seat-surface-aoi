@@ -42,6 +42,11 @@ bool is_date_dir_name(const std::string& value) {
   });
 }
 
+struct ImageFileEntry {
+  std::filesystem::path path;
+  std::filesystem::file_time_type write_time;
+};
+
 double free_ratio(const std::filesystem::space_info& info) {
   if (info.capacity == 0U) {
     return 1.0;
@@ -95,7 +100,6 @@ std::string build_original_image_path(const ImageSaveConfig& config,
 }
 
 bool cleanup_old_image_data_if_needed(const ImageSaveConfig& config,
-                                      const std::string& current_date_dir,
                                       std::string* message) {
   if (!config.enabled || !config.save_original || !config.cleanup_enabled ||
       config.cleanup_min_free_ratio <= 0.0F) {
@@ -124,7 +128,7 @@ bool cleanup_old_image_data_if_needed(const ImageSaveConfig& config,
     return true;
   }
 
-  std::vector<std::filesystem::path> old_date_dirs;
+  std::vector<ImageFileEntry> old_files;
   for (const auto& entry : std::filesystem::directory_iterator(root, ec)) {
     if (ec) {
       break;
@@ -133,8 +137,29 @@ bool cleanup_old_image_data_if_needed(const ImageSaveConfig& config,
       continue;
     }
     const std::string name = entry.path().filename().string();
-    if (is_date_dir_name(name) && name < current_date_dir) {
-      old_date_dirs.push_back(entry.path());
+    if (!is_date_dir_name(name)) {
+      continue;
+    }
+    std::error_code walk_ec;
+    for (const auto& file_entry : std::filesystem::recursive_directory_iterator(entry.path(), walk_ec)) {
+      if (walk_ec) {
+        break;
+      }
+      if (!file_entry.is_regular_file(walk_ec)) {
+        continue;
+      }
+      std::error_code time_ec;
+      const auto write_time = file_entry.last_write_time(time_ec);
+      if (time_ec) {
+        continue;
+      }
+      old_files.push_back(ImageFileEntry{file_entry.path(), write_time});
+    }
+    if (walk_ec) {
+      if (message != nullptr) {
+        *message = "扫描图片文件失败: " + entry.path().string() + " error=" + walk_ec.message();
+      }
+      return false;
     }
   }
   if (ec) {
@@ -143,20 +168,26 @@ bool cleanup_old_image_data_if_needed(const ImageSaveConfig& config,
     }
     return false;
   }
-  std::sort(old_date_dirs.begin(), old_date_dirs.end());
+  std::sort(old_files.begin(), old_files.end(), [](const ImageFileEntry& lhs, const ImageFileEntry& rhs) {
+    if (lhs.write_time == rhs.write_time) {
+      return lhs.path.string() < rhs.path.string();
+    }
+    return lhs.write_time < rhs.write_time;
+  });
 
-  std::uintmax_t removed_dirs = 0;
-  std::uintmax_t removed_items = 0;
-  for (const auto& dir : old_date_dirs) {
+  std::uintmax_t removed_files = 0;
+  for (const auto& file : old_files) {
     std::error_code remove_ec;
-    removed_items += std::filesystem::remove_all(dir, remove_ec);
-    if (remove_ec) {
+    const bool removed = std::filesystem::remove(file.path, remove_ec);
+    if (remove_ec && std::filesystem::exists(file.path)) {
       if (message != nullptr) {
-        *message = "删除旧图片目录失败: " + dir.string() + " error=" + remove_ec.message();
+        *message = "删除旧图片文件失败: " + file.path.string() + " error=" + remove_ec.message();
       }
       return false;
     }
-    ++removed_dirs;
+    if (removed) {
+      ++removed_files;
+    }
     space = std::filesystem::space(root, ec);
     if (ec) {
       if (message != nullptr) {
@@ -169,16 +200,45 @@ bool cleanup_old_image_data_if_needed(const ImageSaveConfig& config,
     }
   }
 
-  if (message != nullptr && removed_dirs > 0U) {
+  std::vector<std::filesystem::path> empty_dirs;
+  for (const auto& entry : std::filesystem::directory_iterator(root, ec)) {
+    if (ec) {
+      break;
+    }
+    if (!entry.is_directory(ec) || !is_date_dir_name(entry.path().filename().string())) {
+      continue;
+    }
+    std::error_code walk_ec;
+    for (const auto& dir_entry : std::filesystem::recursive_directory_iterator(entry.path(), walk_ec)) {
+      if (walk_ec) {
+        break;
+      }
+      if (dir_entry.is_directory(walk_ec)) {
+        empty_dirs.push_back(dir_entry.path());
+      }
+    }
+  }
+  std::sort(empty_dirs.begin(), empty_dirs.end(), [](const auto& lhs, const auto& rhs) {
+    return lhs.string().size() > rhs.string().size();
+  });
+  for (const auto& dir : empty_dirs) {
+    std::error_code empty_ec;
+    if (std::filesystem::is_empty(dir, empty_ec)) {
+      std::error_code remove_empty_ec;
+      std::filesystem::remove(dir, remove_empty_ec);
+    }
+  }
+
+  if (message != nullptr && removed_files > 0U) {
     std::ostringstream out;
     out << "图片磁盘可用容量低于 " << static_cast<int>(config.cleanup_min_free_ratio * 100.0F)
-        << "%，已清理旧日期目录 " << removed_dirs << " 个，删除条目 " << removed_items
+        << "%，已按时间清理最早图片文件 " << removed_files
         << " 个，当前可用比例 " << std::fixed << std::setprecision(3) << free_ratio(space);
     *message = out.str();
   } else if (message != nullptr && free_ratio(space) < min_free_ratio) {
     std::ostringstream out;
     out << "图片磁盘可用容量低于 " << static_cast<int>(config.cleanup_min_free_ratio * 100.0F)
-        << "%，但没有早于 " << current_date_dir << " 的可清理日期目录";
+        << "%，但没有可清理的历史图片文件";
     *message = out.str();
   }
   return true;

@@ -200,7 +200,7 @@ InspectionResultPayload StationController::inspect_one_seat(const ExternalTrigge
   if (config_.image_save.enabled && config_.image_save.save_original) {
     const std::string date_dir = image_save_date_dir();
     std::string cleanup_message;
-    if (!cleanup_old_image_data_if_needed(config_.image_save, date_dir, &cleanup_message)) {
+    if (!cleanup_old_image_data_if_needed(config_.image_save, &cleanup_message)) {
       std::cerr << "图片旧数据清理失败: " << cleanup_message << std::endl;
     } else if (!cleanup_message.empty()) {
       std::cout << cleanup_message << std::endl;

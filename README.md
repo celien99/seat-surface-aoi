@@ -99,7 +99,7 @@ flowchart LR
 | 前端展示页面 | `display_app/` 迁移 PySide6/QML 监控界面，轮询 `display_latest.json` 与 C++ 主控事件，展示相机/视角图像、OK/NG/复检/异常计数、采样模式、日志、复核队列和 NG 弹窗。 |
 | 前端展示通道 | Python detector 成功写回共享内存后，额外输出 `display_latest.json` 和 `display_events.jsonl`；C++ 主控输出 `cpp_controller_events.jsonl`；展示桥优先显示 ROI 图，缺 ROI 时显示原始采集图。 |
 | 操作员追溯 | `display_app` 持久化 `display_operator_events.jsonl` 与 `display_review_queue.json`，记录主控告警、复核队列和操作员确认/忽略动作，便于训练标注闭环。 |
-| 数据闭环 | trace、按 `camera_id/pose_id` 隔离的 ROI 图、overlay、manifest、embedding、PCA/PatchCore/FAISS 资产训练、回放与 benchmark；C++ 原图可落盘到 `images/YYYYMMDD/<seat_id>/`，并在可用容量低于 20% 时清理旧日期目录。 |
+| 数据闭环 | trace、按 `camera_id/pose_id` 隔离的 ROI 图、overlay、manifest、embedding、PCA/PatchCore/FAISS 资产训练、回放与 benchmark；C++ 原图可落盘到 `images/YYYYMMDD/<seat_id>/`，并在可用容量低于 20% 时按文件时间清理最早图片。 |
 
 ## 快速开始
 
@@ -340,7 +340,7 @@ C++ 生产模板已把 `recipe_id` 对齐到上述生产配方；上线前还必
 - **相机**：Hikrobot MVS（Line0 硬件触发 + Software 软件触发），`-DSEAT_AOI_ENABLE_HIKROBOT_MVS=ON` 构建
 - **频闪**：FL-ACDH RS232 串口 ASCII 协议（XOR 校验和，多控制器 `light.<M>.<N>.<field>` 格式）
 - **信号**：TCP 信号客户端（SN 接收 + `result|seat_id|OK\n` 结果回传）、距离传感器触发（JK-LRD Modbus RTU，消抖触发状态机）
-- **辅助**：图像落盘 PGM（纯 C++ 零依赖，路径 `images/YYYYMMDD/<seat_id>/`，可用容量低于 20% 时清理旧日期目录）、JSON 详细结果 TCP 输出、生产配置 fail-fast 校验
+- **辅助**：图像落盘 PGM（纯 C++ 零依赖，路径 `images/YYYYMMDD/<seat_id>/`，可用容量低于 20% 时按文件时间清理最早图片）、JSON 详细结果 TCP 输出、生产配置 fail-fast 校验
 
 测试阶段可先用手动/模拟触发验证相机、频闪、共享内存和 Python 收图链路。
 

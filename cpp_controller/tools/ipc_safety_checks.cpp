@@ -501,35 +501,51 @@ bool test_image_save_path_uses_date_directory() {
   return passed;
 }
 
-bool test_image_save_cleanup_removes_old_date_dirs() {
+bool test_image_save_cleanup_removes_files_without_deleting_date_dirs() {
   const auto root = std::filesystem::temp_directory_path() /
                     ("seat_aoi_image_cleanup_" + std::to_string(seat_aoi::now_us()));
+  constexpr std::size_t kOldestFileBytes = 16U * 1024U * 1024U;
   std::filesystem::create_directories(root / "20250101" / "OLD_SEAT");
   std::filesystem::create_directories(root / "20260619" / "CURRENT_SEAT");
   std::filesystem::create_directories(root / "misc");
   {
-    std::ofstream(root / "20250101" / "OLD_SEAT" / "old.pgm") << "old";
+    std::ofstream oldest(root / "20250101" / "OLD_SEAT" / "oldest.pgm", std::ios::binary);
+    const std::string chunk(1024U * 1024U, '\0');
+    for (std::size_t written = 0; written < kOldestFileBytes; written += chunk.size()) {
+      oldest.write(chunk.data(), static_cast<std::streamsize>(chunk.size()));
+    }
+    std::ofstream(root / "20250101" / "OLD_SEAT" / "newer.pgm") << "newer";
     std::ofstream(root / "20260619" / "CURRENT_SEAT" / "current.pgm") << "current";
     std::ofstream(root / "misc" / "keep.txt") << "keep";
   }
+  const auto base_time = std::filesystem::file_time_type::clock::now();
+  std::filesystem::last_write_time(root / "20250101" / "OLD_SEAT" / "oldest.pgm",
+                                   base_time - std::chrono::hours(4));
+  std::filesystem::last_write_time(root / "20250101" / "OLD_SEAT" / "newer.pgm",
+                                   base_time - std::chrono::hours(3));
+  std::filesystem::last_write_time(root / "20260619" / "CURRENT_SEAT" / "current.pgm",
+                                   base_time - std::chrono::hours(1));
 
   seat_aoi::ImageSaveConfig config;
   config.enabled = true;
   config.save_original = true;
   config.cleanup_enabled = true;
-  config.cleanup_min_free_ratio = 1.0F;
   config.root_dir = root.string();
+  config.cleanup_min_free_ratio = 1.0F;
   std::string message;
-  const bool ok = seat_aoi::cleanup_old_image_data_if_needed(config, "20260619", &message);
+  const bool ok = seat_aoi::cleanup_old_image_data_if_needed(config, &message);
 
   const bool passed = ok &&
-                      !std::filesystem::exists(root / "20250101") &&
-                      std::filesystem::exists(root / "20260619" / "CURRENT_SEAT" / "current.pgm") &&
+                      !std::filesystem::exists(root / "20250101" / "OLD_SEAT" / "oldest.pgm") &&
+                      !std::filesystem::exists(root / "20250101" / "OLD_SEAT" / "newer.pgm") &&
+                      !std::filesystem::exists(root / "20260619" / "CURRENT_SEAT" / "current.pgm") &&
+                      std::filesystem::exists(root / "20250101") &&
+                      std::filesystem::exists(root / "20260619") &&
                       std::filesystem::exists(root / "misc" / "keep.txt");
   std::error_code ec;
   std::filesystem::remove_all(root, ec);
   if (!passed) {
-    std::cerr << "image cleanup did not remove only old date dirs: " << message << "\n";
+    std::cerr << "image cleanup did not remove files while keeping date roots: " << message << "\n";
   }
   return passed;
 }
@@ -1188,7 +1204,7 @@ int main() {
   if (!test_image_save_path_uses_date_directory()) {
     return 1;
   }
-  if (!test_image_save_cleanup_removes_old_date_dirs()) {
+  if (!test_image_save_cleanup_removes_files_without_deleting_date_dirs()) {
     return 1;
   }
   if (!test_explicit_camera_config_replaces_defaults()) {

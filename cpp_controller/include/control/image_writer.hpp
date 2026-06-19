@@ -30,9 +30,8 @@ std::string build_original_image_path(const ImageSaveConfig& config,
                                       const std::string& seat_id,
                                       const CapturedFrame& frame);
 
-/// 当图片根目录所在磁盘可用容量低于阈值时，按日期目录从旧到新删除旧数据。
+/// 当图片根目录所在磁盘可用容量低于阈值时，按文件时间从旧到新删除历史图片。
 bool cleanup_old_image_data_if_needed(const ImageSaveConfig& config,
-                                      const std::string& current_date_dir,
                                       std::string* message);
 
 }  // namespace seat_aoi
