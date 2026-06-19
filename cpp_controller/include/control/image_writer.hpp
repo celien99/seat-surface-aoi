@@ -34,4 +34,15 @@ std::string build_original_image_path(const ImageSaveConfig& config,
 bool cleanup_old_image_data_if_needed(const ImageSaveConfig& config,
                                       std::string* message);
 
+/// 检测前统一治理业务存储目录：C++ 原图目录与 Python trace 日期目录。
+/// 低水位时只清理 YYYYMMDD 日期目录下的历史文件，不删除非业务目录。
+bool cleanup_runtime_storage_if_needed(const ImageSaveConfig& config,
+                                       const std::string& trace_root,
+                                       std::string* message);
+
+/// 清理后仍低于水位时返回 false，用于阻断当前检测并输出 RECHECK。
+bool runtime_storage_has_required_free_ratio(const ImageSaveConfig& config,
+                                             const std::string& trace_root,
+                                             std::string* message);
+
 }  // namespace seat_aoi

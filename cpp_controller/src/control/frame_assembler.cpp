@@ -48,8 +48,7 @@ LightControllerConfig make_light_controller_config(const RuntimeLightConfig& con
 
 void FrameAssembler::configure(const StationRuntimeConfig& config) {
   config_ = config;
-  initialized_ = false;
-  cameras_.clear();
+  reset_devices();
 }
 
 bool FrameAssembler::ensure_initialized() {
@@ -63,6 +62,7 @@ bool FrameAssembler::ensure_initialized() {
     for (std::size_t ctrl_idx = 0; ctrl_idx < config_.lights.size(); ++ctrl_idx) {
       auto ctrl = create_light_controller(config_.lights[ctrl_idx].backend);
       if (!ctrl->initialize(make_light_controller_config(config_.lights[ctrl_idx]))) {
+        reset_devices();
         return false;
       }
       light_controllers_.push_back(std::move(ctrl));
@@ -81,6 +81,7 @@ bool FrameAssembler::ensure_initialized() {
   robot_config.start_output = config_.robot.start_output;
   robot_config.simulate_fault = config_.robot.simulate_fault;
   if (!robot_client_->initialize(robot_config)) {
+    reset_devices();
     return false;
   }
   cameras_.clear();
@@ -100,6 +101,7 @@ bool FrameAssembler::ensure_initialized() {
     config.simulate_missing_frame = runtime_camera.simulate_missing_frame;
     auto camera = create_camera(config_.camera_backend);
     if (!camera->initialize(config)) {
+      reset_devices();
       return false;
     }
     camera->start();
@@ -178,33 +180,43 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
 
     RobotPoseStatus pose_status;
     if (!wait_robot_pose_ready(trigger, view, &pose_status, error)) {
-      for (auto& ctrl : light_controllers_) ctrl->shutdown_all();
-      initialized_ = false;
-      cameras_.clear();
+      reset_devices();
       return false;
     }
 
-    // 每个视角开始前重新准备光源序列
-    if (!light_controllers_[0]->prepare_sequence(sequence,
-                                            trigger.trigger_id,
-                                            config_.light_timeout_ms,
-                                            error != nullptr ? &error->message : nullptr)) {
-      std::ostringstream oss;
-      oss << "simulated light sequence prepare failed pose_id=" << view.pose_id
-          << " camera_index=" << view.camera_index;
-      const std::string detail =
-          error != nullptr && !error->message.empty() ? error->message : oss.str();
-      set_acquisition_error(error,
-                            ErrorCode::LightFault,
-                            AcquisitionStage::ConfigureLightSequence,
-                            view.camera_index,
-                            0,
-                            0,
-                            detail);
-      for (auto& ctrl : light_controllers_) ctrl->shutdown_all();
-      initialized_ = false;
-      cameras_.clear();
-      return false;
+    // 每个视角开始前按控制器分别准备对应光源序列。
+    for (std::size_t controller_index = 0; controller_index < light_controllers_.size();
+         ++controller_index) {
+      LightSequence controller_sequence;
+      for (const auto& channel : sequence.channels) {
+        if (channel.controller_index == controller_index) {
+          controller_sequence.channels.push_back(channel);
+        }
+      }
+      if (controller_sequence.channels.empty()) {
+        continue;
+      }
+      if (!light_controllers_[controller_index]->prepare_sequence(
+              controller_sequence,
+              trigger.trigger_id,
+              config_.light_timeout_ms,
+              error != nullptr ? &error->message : nullptr)) {
+        std::ostringstream oss;
+        oss << "light sequence prepare failed pose_id=" << view.pose_id
+            << " camera_index=" << view.camera_index
+            << " controller_index=" << controller_index;
+        const std::string detail =
+            error != nullptr && !error->message.empty() ? error->message : oss.str();
+        set_acquisition_error(error,
+                              ErrorCode::LightFault,
+                              AcquisitionStage::ConfigureLightSequence,
+                              view.camera_index,
+                              0,
+                              0,
+                              detail);
+        reset_devices();
+        return false;
+      }
     }
 
     for (std::uint32_t light_seq_index = 0; light_seq_index < sequence.channels.size();
@@ -222,8 +234,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
             << " light_index=" << light_param.light_index;
         set_acquisition_error(error, ErrorCode::CameraFault, AcquisitionStage::ArmCamera,
                               view.camera_index, light_param.light_index, light_seq_index, oss.str());
-        for (auto& ctrl : light_controllers_) ctrl->shutdown_all();
-        initialized_ = false; cameras_.clear();
+        reset_devices();
         return false;
       }
 
@@ -234,8 +245,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
                                        ? error->message : "light channel trigger failed";
         set_acquisition_error(error, ErrorCode::LightFault, AcquisitionStage::TriggerLight,
                               view.camera_index, light_param.light_index, light_seq_index, detail);
-        for (auto& ctrl : light_controllers_) ctrl->shutdown_all();
-        initialized_ = false; cameras_.clear();
+        reset_devices();
         return false;
       }
 
@@ -255,9 +265,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
                               light_param.light_index,
                               light_seq_index,
                               oss.str());
-        for (auto& ctrl : light_controllers_) ctrl->shutdown_all();
-        initialized_ = false;
-        cameras_.clear();
+        reset_devices();
         return false;
       }
       frame.meta.camera_index = view.camera_index;
@@ -279,12 +287,22 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
   out_bundle->job_meta = job;
   out_bundle->frames = std::move(frames);
   if (!validate_serial_tdm_bundle(*out_bundle, sequence, capture_plan, error)) {
-    for (auto& ctrl : light_controllers_) ctrl->shutdown_all();
-    initialized_ = false;
-    cameras_.clear();
+    reset_devices();
     return false;
   }
   return true;
+}
+
+void FrameAssembler::reset_devices() {
+  for (auto& ctrl : light_controllers_) {
+    if (ctrl) {
+      ctrl->shutdown_all();
+    }
+  }
+  light_controllers_.clear();
+  robot_client_.reset();
+  cameras_.clear();
+  initialized_ = false;
 }
 
 bool FrameAssembler::build_light_sequence(const Recipe& recipe,
@@ -320,6 +338,16 @@ bool FrameAssembler::build_light_sequence(const Recipe& recipe,
       return false;
     }
     const auto& configured = iter->second;
+    if (configured.controller_index >= config_.lights.size()) {
+      set_acquisition_error(error,
+                            ErrorCode::ConfigurationError,
+                            AcquisitionStage::Configuration,
+                            0,
+                            light_index,
+                            light_seq_index,
+                            "light channel references missing controller config");
+      return false;
+    }
     if (configured.physical_channel == 0 || configured.exposure_us == 0 ||
         configured.strobe_width_us == 0 || configured.gain <= 0.0F ||
         configured.current_percent <= 0.0F || configured.current_percent > 100.0F) {

@@ -185,7 +185,7 @@ uv run python -m python_detector.detector_main \
 - `display_latest.json`：最近一次 Python detector 判定，原子替换，适合 PySide6/QML 轮询。
 - `display_events.jsonl`：检测结果追加日志，适合前端日志页或回放。
 
-事件字段包含 `sequence_id`、`trigger_id`、`seat_id`、`sku`、`recipe_id`、`decision`、`quality_pass`、`error_code`、`elapsed_ms`、缺陷列表、质量/错误消息、`sample_collection`、`trace_dir`、原始采集 PGM 图、ROI PGM 图和 overlay PPM 图路径。展示通道由本仓库 `display_app/` 的 PySide6/QML 前端只读消费，也可供外部 `online-detection-app` 对接；它不读写现有 C++/Python 共享内存 slot。如果展示 JSON 落盘失败，只打印告警，不改变已写回 C++ 的检测结果。采集失败、detector timeout 等 C++ 侧保守结果可由前端读取 `trace_root/cpp_controller_events.jsonl` 补充显示。
+事件字段包含 `sequence_id`、`trigger_id`、`seat_id`、`sku`、`recipe_id`、`decision`、`quality_pass`、`error_code`、`elapsed_ms`、缺陷列表、质量/错误消息、`sample_collection`、`trace_dir`、原始采集 PGM 图、ROI PGM 图和 overlay PPM 图路径。展示通道由本仓库 `display_app/` 的 PySide6/QML 前端只读消费，也可供外部 `online-detection-app` 对接；它不读写现有 C++/Python 共享内存 slot。如果展示 JSON 落盘失败，只打印告警，不改变已写回 C++ 的检测结果。检测 trace、原始采集图、ROI 图或 overlay 写入失败会在写回共享内存前把当前件改为 `RECHECK/DEVICE_FAULT`，避免磁盘异常时继续输出 `OK`。采集失败、detector timeout 等 C++ 侧保守结果可由前端读取 `trace_root/cpp_controller_events.jsonl` 补充显示。
 
 当 ONNX 模型文件不存在、仍是 1 字节占位文件、ONNX/numpy 依赖缺失、PCA 参数或 PatchCore memory bank 未就绪时，pipeline 会返回 `RECHECK` + `CONFIGURATION_ERROR`，并在 `error.json` 中写入 `asset_unavailable=true` 和具体资产路径。这类状态表示“当前没有足够模型能力判定”，不会输出 `OK`，也不会直接输出 `NG`；trace 会保存 `raw_images/` 原始采集图，前端可直接显示，后续训练工具可继续从 trace/manifest 生成训练样本。
 
@@ -282,6 +282,8 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 - `timings.json`
 - `error.json`
 - 原始采集 PGM 图、ROI PGM 图和缺陷 overlay PPM 图；原始图路径为 `raw_images/<camera_id>/<pose_id>/<light_id>.pgm`，ROI 图路径为 `images/<camera_id>/<pose_id>/<roi_name>/<light_id>.pgm`，overlay 文件名也包含 `pose_id`。
+
+在线 `SeatSurfaceAoiAlgorithm` 调用 `TraceWriter` 时，如果任一 JSON、原始图、ROI 图或 overlay 写入失败，会记录 `context["trace_error"]`，并把当前结果改为 `RECHECK`、`error_code=DEVICE_FAULT`、`quality_pass=false` 后再交给 `ShmClient` 写回 C++。展示通道 `display_latest.json` / `display_events.jsonl` 属于结果发布后的只读前端辅助输出，失败只打印告警，不反向修改已经发布的共享内存结果。
 
 ## 扩展规则
 

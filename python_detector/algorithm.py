@@ -60,8 +60,19 @@ class SeatSurfaceAoiAlgorithm:
                 self.trace_writer.root_dir = Path(recipe.trace.root_dir)
                 trace_dir = self.trace_writer.write(job, recipe, result, self.pipeline.last_context)
             except Exception as exc:
-                self.pipeline.last_context.setdefault("trace_error", {
+                trace_error = {
                     "type": exc.__class__.__name__,
                     "message": str(exc),
-                })
+                }
+                self.pipeline.last_context.setdefault("trace_error", trace_error)
+                result = InspectionResult(
+                    sequence_id=job.sequence_id,
+                    trigger_id=job.trigger_id,
+                    seat_id=job.seat_id,
+                    decision="RECHECK",
+                    defects=[],
+                    quality_pass=False,
+                    error_code=ErrorCode.DEVICE_FAULT,
+                    elapsed_ms=result.elapsed_ms,
+                )
         return AlgorithmRun(result=result, context=self.pipeline.last_context, trace_dir=trace_dir)

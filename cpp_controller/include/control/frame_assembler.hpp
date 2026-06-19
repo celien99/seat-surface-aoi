@@ -62,6 +62,7 @@ private:
                                   const LightSequence& sequence,
                                   const std::vector<RuntimeCaptureViewConfig>& views,
                                   AcquisitionError* error) const;
+  void reset_devices();
   ICamera* camera_for_index(std::uint32_t camera_index) const;
   bool wait_robot_pose_ready(const ExternalTrigger& trigger,
                              const RuntimeCaptureViewConfig& view,

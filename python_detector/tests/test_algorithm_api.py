@@ -27,6 +27,22 @@ def test_algorithm_public_api_fails_closed_for_missing_recipe() -> None:
     assert run.context["error"]["type"] == "RecipeValidationError"
 
 
+def test_algorithm_fails_closed_when_trace_write_fails() -> None:
+    class FailingTraceWriter:
+        root_dir = "trace"
+
+        def write(self, *_args, **_kwargs):
+            raise OSError("disk full")
+
+    run = SeatSurfaceAoiAlgorithm(trace_writer=FailingTraceWriter()).process(make_simulated_job())
+
+    assert run.result.decision == "RECHECK"
+    assert run.result.quality_pass is False
+    assert run.result.error_code == ErrorCode.DEVICE_FAULT
+    assert run.trace_dir is None
+    assert run.context["trace_error"]["type"] == "OSError"
+
+
 def test_recipe_manager_default_path_is_independent_from_cwd(monkeypatch, tmp_path) -> None:
     monkeypatch.chdir(tmp_path)
 

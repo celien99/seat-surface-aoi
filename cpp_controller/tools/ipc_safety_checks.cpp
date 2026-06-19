@@ -477,6 +477,179 @@ bool test_runtime_light_channel_config_parses() {
   return passed;
 }
 
+bool test_runtime_multi_light_controller_config_parses() {
+  const std::string path =
+      (std::filesystem::temp_directory_path() /
+       ("seat_aoi_multi_light_config_" + std::to_string(seat_aoi::now_us()) + ".conf"))
+          .string();
+  {
+    std::ofstream out(path);
+    out << "hardware_mode=simulated\n"
+        << "signal.backend=simulated\n"
+        << "camera.backend=simulated\n"
+        << "light.backend=simulated\n"
+        << "light.1.backend=simulated\n"
+        << "robot.backend=simulated\n"
+        << "slot_count=4\n"
+        << "frame_slot_size=16777216\n"
+        << "result_slot_size=65536\n"
+        << "publish_timeout_ms=1000\n"
+        << "detector_timeout_ms=5000\n"
+        << "trigger_timeout_ms=1000\n"
+        << "camera_timeout_ms=200\n"
+        << "light_timeout_ms=200\n"
+        << "warning_recheck_threshold=3\n"
+        << "critical_recheck_threshold=5\n"
+        << "light_order=1,2\n"
+        << "light.1.physical_channel=1\n"
+        << "light.1.exposure_us=800\n"
+        << "light.1.strobe_width_us=700\n"
+        << "light.1.trigger_delay_us=10\n"
+        << "light.1.gain=1.0\n"
+        << "light.1.current_percent=60\n"
+        << "light.1.2.physical_channel=1\n"
+        << "light.1.2.exposure_us=900\n"
+        << "light.1.2.strobe_width_us=750\n"
+        << "light.1.2.trigger_delay_us=20\n"
+        << "light.1.2.gain=1.1\n"
+        << "light.1.2.current_percent=55\n";
+  }
+  seat_aoi::StationRuntimeConfig config;
+  std::string error;
+  const bool ok = seat_aoi::load_station_runtime_config(path, &config, &error);
+  std::remove(path.c_str());
+  const bool passed = ok && config.lights.size() >= 2 &&
+                      config.light_channels.size() >= 2 &&
+                      config.light_channels[0].controller_index == 0 &&
+                      config.light_channels[0].light_index == 1 &&
+                      config.light_channels[1].controller_index == 1 &&
+                      config.light_channels[1].light_index == 2 &&
+                      config.light_channels[1].physical_channel == 1 &&
+                      config.light_channels[1].strobe_width_us == 750;
+  if (!passed) {
+    std::cerr << "multi light controller config did not parse: " << error << "\n";
+  }
+  return passed;
+}
+
+bool test_station_multi_light_controller_acquisition_reaches_detector_timeout() {
+  seat_aoi::StationConfig config;
+  config.reset_shared_memory = true;
+  config.slot_count = 1;
+  config.frame_slot_size = 65536;
+  config.result_slot_size = 4096;
+  config.publish_timeout_ms = 5;
+  config.detector_timeout_ms = 5;
+  config.trigger_timeout_ms = 5;
+  config.camera_timeout_ms = 5;
+  config.light_timeout_ms = 5;
+  config.recipe_id = "seat_a_black_leather_v1";
+  config.light_order = {1, 2};
+  config.lights = {seat_aoi::RuntimeLightConfig{}, seat_aoi::RuntimeLightConfig{}};
+  config.light_channels = {
+      seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F},
+      seat_aoi::RuntimeLightChannelConfig{1, 2, 1, 800, 800, 0, 1.0F, 60.0F},
+  };
+
+  seat_aoi::StationController station;
+  if (!station.initialize(config)) {
+    std::cerr << "multi light station initialize failed\n";
+    return false;
+  }
+  seat_aoi::ExternalTrigger trigger;
+  trigger.trigger_id = 7020;
+  trigger.seat_id = "SIM_MULTI_LIGHT";
+  trigger.sku = "seat_a_black_leather";
+  const auto result = station.inspect_one_seat(trigger);
+  station.cleanup_shared_memory();
+
+  const bool passed =
+      static_cast<seat_aoi::InspectionDecision>(result.meta.decision) ==
+          seat_aoi::InspectionDecision::Recheck &&
+      static_cast<seat_aoi::ErrorCode>(result.meta.error_code) ==
+          seat_aoi::ErrorCode::DetectorTimeout;
+  if (!passed) {
+    std::cerr << "multi light controller acquisition failed before detector wait: decision="
+              << result.meta.decision << " error=" << result.meta.error_code << "\n";
+  }
+  return passed;
+}
+
+bool test_station_storage_failure_returns_recheck_before_capture() {
+  const auto root = std::filesystem::temp_directory_path() /
+                    ("seat_aoi_storage_fail_" + std::to_string(seat_aoi::now_us()));
+  const auto trace_root = root / "trace";
+  const auto image_root = root / "images_as_file";
+  std::filesystem::create_directories(trace_root);
+  {
+    std::ofstream(image_root) << "not a directory";
+  }
+  seat_aoi::StationConfig config;
+  config.reset_shared_memory = true;
+  config.slot_count = 1;
+  config.frame_slot_size = 8192;
+  config.result_slot_size = 4096;
+  config.publish_timeout_ms = 5;
+  config.detector_timeout_ms = 5;
+  config.trigger_timeout_ms = 5;
+  config.camera_timeout_ms = 5;
+  config.light_timeout_ms = 5;
+  config.recipe_id = "seat_a_black_leather_v1";
+  config.light_order = {1};
+  config.light_channels = {
+      seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F},
+  };
+  config.trace_root = trace_root.string();
+  config.image_save.enabled = true;
+  config.image_save.root_dir = image_root.string();
+  config.image_save.cleanup_enabled = true;
+  config.image_save.cleanup_trace_root = true;
+  config.image_save.cleanup_min_free_ratio = 0.20F;
+
+  seat_aoi::StationController station;
+  if (!station.initialize(config)) {
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    std::cerr << "storage failure station initialize failed\n";
+    return false;
+  }
+  seat_aoi::ExternalTrigger trigger;
+  trigger.trigger_id = 7021;
+  trigger.seat_id = "SIM_STORAGE_FAIL";
+  trigger.sku = "seat_a_black_leather";
+  const auto result = station.inspect_one_seat(trigger);
+  station.cleanup_shared_memory();
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+
+  const bool passed =
+      static_cast<seat_aoi::InspectionDecision>(result.meta.decision) ==
+          seat_aoi::InspectionDecision::Recheck &&
+      static_cast<seat_aoi::ErrorCode>(result.meta.error_code) ==
+          seat_aoi::ErrorCode::DeviceFault;
+  if (!passed) {
+    std::cerr << "storage failure did not return device RECHECK: decision="
+              << result.meta.decision << " error=" << result.meta.error_code << "\n";
+  }
+  return passed;
+}
+
+bool test_missing_light_controller_config_rejected() {
+  seat_aoi::StationRuntimeConfig config;
+  config.light_order = {1};
+  config.light_channels = {
+      seat_aoi::RuntimeLightChannelConfig{1, 1, 1, 800, 800, 0, 1.0F, 60.0F},
+  };
+  config.lights = {seat_aoi::RuntimeLightConfig{}};
+  std::string error;
+  const bool ok = seat_aoi::validate_station_runtime_config(config, &error);
+  const bool passed = !ok && error.find("频闪控制器") != std::string::npos;
+  if (!passed) {
+    std::cerr << "missing light controller config was not rejected: " << error << "\n";
+  }
+  return passed;
+}
+
 bool test_image_save_path_uses_date_directory() {
   seat_aoi::ImageSaveConfig config;
   config.enabled = true;
@@ -546,6 +719,42 @@ bool test_image_save_cleanup_removes_files_without_deleting_date_dirs() {
   std::filesystem::remove_all(root, ec);
   if (!passed) {
     std::cerr << "image cleanup did not remove files while keeping date roots: " << message << "\n";
+  }
+  return passed;
+}
+
+bool test_runtime_storage_cleanup_removes_trace_date_files() {
+  const auto root = std::filesystem::temp_directory_path() /
+                    ("seat_aoi_trace_cleanup_" + std::to_string(seat_aoi::now_us()));
+  const auto image_root = root / "unused_images";
+  const auto trace_root = root / "trace";
+  std::filesystem::create_directories(trace_root / "20250101" / "OLD_SEAT_1");
+  std::filesystem::create_directories(trace_root / "misc");
+  {
+    std::ofstream(trace_root / "20250101" / "OLD_SEAT_1" / "raw.pgm") << "raw";
+    std::ofstream(trace_root / "display_latest.json") << "{}";
+    std::ofstream(trace_root / "misc" / "keep.txt") << "keep";
+  }
+  seat_aoi::ImageSaveConfig config;
+  config.enabled = false;
+  config.root_dir = image_root.string();
+  config.cleanup_enabled = true;
+  config.cleanup_trace_root = true;
+  config.cleanup_min_free_ratio = 1.0F;
+  std::string message;
+  const bool ok = seat_aoi::cleanup_runtime_storage_if_needed(
+      config, trace_root.string(), &message);
+  const bool passed = ok &&
+                      !std::filesystem::exists(trace_root / "20250101" / "OLD_SEAT_1" / "raw.pgm") &&
+                      std::filesystem::exists(trace_root / "20250101") &&
+                      std::filesystem::exists(trace_root / "display_latest.json") &&
+                      std::filesystem::exists(trace_root / "misc" / "keep.txt") &&
+                      !std::filesystem::exists(image_root);
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+  if (!passed) {
+    std::cerr << "runtime storage cleanup did not clean trace date files safely: "
+              << message << "\n";
   }
   return passed;
 }
@@ -1201,10 +1410,25 @@ int main() {
   if (!test_runtime_light_channel_config_parses()) {
     return 1;
   }
+  if (!test_runtime_multi_light_controller_config_parses()) {
+    return 1;
+  }
+  if (!test_station_multi_light_controller_acquisition_reaches_detector_timeout()) {
+    return 1;
+  }
+  if (!test_station_storage_failure_returns_recheck_before_capture()) {
+    return 1;
+  }
+  if (!test_missing_light_controller_config_rejected()) {
+    return 1;
+  }
   if (!test_image_save_path_uses_date_directory()) {
     return 1;
   }
   if (!test_image_save_cleanup_removes_files_without_deleting_date_dirs()) {
+    return 1;
+  }
+  if (!test_runtime_storage_cleanup_removes_trace_date_files()) {
     return 1;
   }
   if (!test_explicit_camera_config_replaces_defaults()) {

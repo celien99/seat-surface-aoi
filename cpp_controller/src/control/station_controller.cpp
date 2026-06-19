@@ -89,7 +89,8 @@ bool StationController::initialize(const StationConfig& config) {
   runtime_config.light_order = config.light_order;
   runtime_config.capture_mode = config.capture_mode;
   runtime_config.cameras = config.cameras;
-  runtime_config.lights = {config.light};
+  runtime_config.lights = config.lights.empty() ? std::vector<RuntimeLightConfig>{config.light}
+                                                : config.lights;
   runtime_config.light_channels = config.light_channels;
   runtime_config.capture_views = config.capture_views;
   runtime_config.signal = config.signal;
@@ -97,7 +98,11 @@ bool StationController::initialize(const StationConfig& config) {
   if (runtime_config.lights.empty()) {
     runtime_config.lights.emplace_back();
   }
-  runtime_config.lights[0].simulate_fault = config.simulate_light_fault;
+  if (config.simulate_light_fault) {
+    for (auto& light : runtime_config.lights) {
+      light.simulate_fault = true;
+    }
+  }
   runtime_config.robot.simulate_fault = config.robot.simulate_fault;
   runtime_config.signal.simulate_output_fault = config.simulate_signal_result_fault;
   runtime_config.signal.simulate_trigger_timeout = config.simulate_trigger_timeout;
@@ -179,6 +184,27 @@ InspectionResultPayload StationController::inspect_one_seat(const ExternalTrigge
                InspectionDecision::Recheck,
                ErrorCode::None,
                "start serial_tdm inspection");
+  std::string storage_message;
+  if (!cleanup_runtime_storage_if_needed(config_.image_save, config_.trace_root, &storage_message)) {
+    return make_and_send_recheck_result(
+        trigger, sequence_id, ErrorCode::DeviceFault, storage_message);
+  }
+  if (!storage_message.empty()) {
+    record_event("storage_cleanup",
+                 trigger,
+                 sequence_id,
+                 InspectionDecision::Recheck,
+                 ErrorCode::None,
+                 storage_message);
+  }
+  storage_message.clear();
+  if (!runtime_storage_has_required_free_ratio(config_.image_save,
+                                               config_.trace_root,
+                                               &storage_message)) {
+    return make_and_send_recheck_result(
+        trigger, sequence_id, ErrorCode::DeviceFault, storage_message);
+  }
+
   SeatImageBundle bundle;
   std::string error;
   AcquisitionError acquisition_error;
@@ -199,19 +225,18 @@ InspectionResultPayload StationController::inspect_one_seat(const ExternalTrigge
   // 图像落盘（发布到共享内存之前保存原始图像）
   if (config_.image_save.enabled && config_.image_save.save_original) {
     const std::string date_dir = image_save_date_dir();
-    std::string cleanup_message;
-    if (!cleanup_old_image_data_if_needed(config_.image_save, &cleanup_message)) {
-      std::cerr << "图片旧数据清理失败: " << cleanup_message << std::endl;
-    } else if (!cleanup_message.empty()) {
-      std::cout << cleanup_message << std::endl;
-    }
     const std::string seat_id = fixed_cstr_to_string(bundle.job_meta.seat_id, kStringIdSize);
     for (const auto& frame : bundle.frames) {
       const std::string path =
           build_original_image_path(config_.image_save, date_dir, seat_id, frame);
       std::string save_error;
       if (!write_pgm(path, frame.bytes, frame.meta.width, frame.meta.height, &save_error)) {
-        std::cerr << "图像保存失败: " << save_error << std::endl;
+        const std::string message = "图像保存失败: " + save_error;
+        if (config_.image_save.fail_on_save_error) {
+          return make_and_send_recheck_result(
+              trigger, sequence_id, ErrorCode::DeviceFault, message);
+        }
+        std::cerr << message << std::endl;
       }
     }
   }

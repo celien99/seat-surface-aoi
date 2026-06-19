@@ -47,11 +47,176 @@ struct ImageFileEntry {
   std::filesystem::file_time_type write_time;
 };
 
+struct StorageCleanupStats {
+  std::uintmax_t removed_files = 0;
+  double free_ratio_after = 1.0;
+};
+
 double free_ratio(const std::filesystem::space_info& info) {
   if (info.capacity == 0U) {
     return 1.0;
   }
   return static_cast<double>(info.available) / static_cast<double>(info.capacity);
+}
+
+bool cleanup_date_tree_if_needed(const std::filesystem::path& root,
+                                 float cleanup_min_free_ratio,
+                                 StorageCleanupStats* stats,
+                                 std::string* error) {
+  std::error_code ec;
+  std::filesystem::create_directories(root, ec);
+  if (ec) {
+    if (error != nullptr) {
+      *error = "创建存储根目录失败: " + root.string() + " error=" + ec.message();
+    }
+    return false;
+  }
+
+  auto space = std::filesystem::space(root, ec);
+  if (ec) {
+    if (error != nullptr) {
+      *error = "读取存储磁盘容量失败: " + root.string() + " error=" + ec.message();
+    }
+    return false;
+  }
+  const double min_free_ratio = static_cast<double>(cleanup_min_free_ratio);
+  if (stats != nullptr) {
+    stats->free_ratio_after = free_ratio(space);
+  }
+  if (free_ratio(space) >= min_free_ratio) {
+    return true;
+  }
+
+  std::vector<ImageFileEntry> old_files;
+  for (const auto& entry : std::filesystem::directory_iterator(root, ec)) {
+    if (ec) {
+      break;
+    }
+    if (!entry.is_directory(ec)) {
+      continue;
+    }
+    const std::string name = entry.path().filename().string();
+    if (!is_date_dir_name(name)) {
+      continue;
+    }
+    std::error_code walk_ec;
+    for (const auto& file_entry : std::filesystem::recursive_directory_iterator(entry.path(), walk_ec)) {
+      if (walk_ec) {
+        break;
+      }
+      if (!file_entry.is_regular_file(walk_ec)) {
+        continue;
+      }
+      std::error_code time_ec;
+      const auto write_time = file_entry.last_write_time(time_ec);
+      if (time_ec) {
+        continue;
+      }
+      old_files.push_back(ImageFileEntry{file_entry.path(), write_time});
+    }
+    if (walk_ec) {
+      if (error != nullptr) {
+        *error = "扫描业务文件失败: " + entry.path().string() + " error=" + walk_ec.message();
+      }
+      return false;
+    }
+  }
+  if (ec) {
+    if (error != nullptr) {
+      *error = "扫描业务目录失败: " + root.string() + " error=" + ec.message();
+    }
+    return false;
+  }
+  std::sort(old_files.begin(), old_files.end(), [](const ImageFileEntry& lhs, const ImageFileEntry& rhs) {
+    if (lhs.write_time == rhs.write_time) {
+      return lhs.path.string() < rhs.path.string();
+    }
+    return lhs.write_time < rhs.write_time;
+  });
+
+  for (const auto& file : old_files) {
+    std::error_code remove_ec;
+    const bool removed = std::filesystem::remove(file.path, remove_ec);
+    if (remove_ec && std::filesystem::exists(file.path)) {
+      if (error != nullptr) {
+        *error = "删除旧业务文件失败: " + file.path.string() + " error=" + remove_ec.message();
+      }
+      return false;
+    }
+    if (removed && stats != nullptr) {
+      ++stats->removed_files;
+    }
+    space = std::filesystem::space(root, ec);
+    if (ec) {
+      if (error != nullptr) {
+        *error = "重新读取存储磁盘容量失败: " + root.string() + " error=" + ec.message();
+      }
+      return false;
+    }
+    if (stats != nullptr) {
+      stats->free_ratio_after = free_ratio(space);
+    }
+    if (free_ratio(space) >= min_free_ratio) {
+      break;
+    }
+  }
+
+  std::vector<std::filesystem::path> empty_dirs;
+  for (const auto& entry : std::filesystem::directory_iterator(root, ec)) {
+    if (ec) {
+      break;
+    }
+    if (!entry.is_directory(ec) || !is_date_dir_name(entry.path().filename().string())) {
+      continue;
+    }
+    std::error_code walk_ec;
+    for (const auto& dir_entry : std::filesystem::recursive_directory_iterator(entry.path(), walk_ec)) {
+      if (walk_ec) {
+        break;
+      }
+      if (dir_entry.is_directory(walk_ec)) {
+        empty_dirs.push_back(dir_entry.path());
+      }
+    }
+  }
+  std::sort(empty_dirs.begin(), empty_dirs.end(), [](const auto& lhs, const auto& rhs) {
+    return lhs.string().size() > rhs.string().size();
+  });
+  for (const auto& dir : empty_dirs) {
+    std::error_code empty_ec;
+    if (std::filesystem::is_empty(dir, empty_ec)) {
+      std::error_code remove_empty_ec;
+      std::filesystem::remove(dir, remove_empty_ec);
+    }
+  }
+
+  return true;
+}
+
+bool has_required_free_ratio(const std::filesystem::path& root,
+                             float min_free_ratio,
+                             double* out_ratio,
+                             std::string* error) {
+  std::error_code ec;
+  std::filesystem::create_directories(root, ec);
+  if (ec) {
+    if (error != nullptr) {
+      *error = "创建存储根目录失败: " + root.string() + " error=" + ec.message();
+    }
+    return false;
+  }
+  const auto space = std::filesystem::space(root, ec);
+  if (ec) {
+    if (error != nullptr) {
+      *error = "读取存储磁盘容量失败: " + root.string() + " error=" + ec.message();
+    }
+    return false;
+  }
+  const double ratio = free_ratio(space);
+  if (out_ratio != nullptr) {
+    *out_ratio = ratio;
+  }
+  return ratio >= static_cast<double>(min_free_ratio);
 }
 
 }  // namespace
@@ -106,140 +271,108 @@ bool cleanup_old_image_data_if_needed(const ImageSaveConfig& config,
     return true;
   }
 
-  std::error_code ec;
   const std::filesystem::path root(config.root_dir);
-  std::filesystem::create_directories(root, ec);
-  if (ec) {
+  StorageCleanupStats stats;
+  std::string cleanup_error;
+  if (!cleanup_date_tree_if_needed(root, config.cleanup_min_free_ratio, &stats, &cleanup_error)) {
     if (message != nullptr) {
-      *message = "创建图片根目录失败: " + root.string() + " error=" + ec.message();
+      *message = cleanup_error;
     }
     return false;
   }
-
-  auto space = std::filesystem::space(root, ec);
-  if (ec) {
-    if (message != nullptr) {
-      *message = "读取图片磁盘容量失败: " + root.string() + " error=" + ec.message();
-    }
-    return false;
-  }
-  const double min_free_ratio = static_cast<double>(config.cleanup_min_free_ratio);
-  if (free_ratio(space) >= min_free_ratio) {
-    return true;
-  }
-
-  std::vector<ImageFileEntry> old_files;
-  for (const auto& entry : std::filesystem::directory_iterator(root, ec)) {
-    if (ec) {
-      break;
-    }
-    if (!entry.is_directory(ec)) {
-      continue;
-    }
-    const std::string name = entry.path().filename().string();
-    if (!is_date_dir_name(name)) {
-      continue;
-    }
-    std::error_code walk_ec;
-    for (const auto& file_entry : std::filesystem::recursive_directory_iterator(entry.path(), walk_ec)) {
-      if (walk_ec) {
-        break;
-      }
-      if (!file_entry.is_regular_file(walk_ec)) {
-        continue;
-      }
-      std::error_code time_ec;
-      const auto write_time = file_entry.last_write_time(time_ec);
-      if (time_ec) {
-        continue;
-      }
-      old_files.push_back(ImageFileEntry{file_entry.path(), write_time});
-    }
-    if (walk_ec) {
-      if (message != nullptr) {
-        *message = "扫描图片文件失败: " + entry.path().string() + " error=" + walk_ec.message();
-      }
-      return false;
-    }
-  }
-  if (ec) {
-    if (message != nullptr) {
-      *message = "扫描旧图片目录失败: " + root.string() + " error=" + ec.message();
-    }
-    return false;
-  }
-  std::sort(old_files.begin(), old_files.end(), [](const ImageFileEntry& lhs, const ImageFileEntry& rhs) {
-    if (lhs.write_time == rhs.write_time) {
-      return lhs.path.string() < rhs.path.string();
-    }
-    return lhs.write_time < rhs.write_time;
-  });
-
-  std::uintmax_t removed_files = 0;
-  for (const auto& file : old_files) {
-    std::error_code remove_ec;
-    const bool removed = std::filesystem::remove(file.path, remove_ec);
-    if (remove_ec && std::filesystem::exists(file.path)) {
-      if (message != nullptr) {
-        *message = "删除旧图片文件失败: " + file.path.string() + " error=" + remove_ec.message();
-      }
-      return false;
-    }
-    if (removed) {
-      ++removed_files;
-    }
-    space = std::filesystem::space(root, ec);
-    if (ec) {
-      if (message != nullptr) {
-        *message = "重新读取图片磁盘容量失败: " + root.string() + " error=" + ec.message();
-      }
-      return false;
-    }
-    if (free_ratio(space) >= min_free_ratio) {
-      break;
-    }
-  }
-
-  std::vector<std::filesystem::path> empty_dirs;
-  for (const auto& entry : std::filesystem::directory_iterator(root, ec)) {
-    if (ec) {
-      break;
-    }
-    if (!entry.is_directory(ec) || !is_date_dir_name(entry.path().filename().string())) {
-      continue;
-    }
-    std::error_code walk_ec;
-    for (const auto& dir_entry : std::filesystem::recursive_directory_iterator(entry.path(), walk_ec)) {
-      if (walk_ec) {
-        break;
-      }
-      if (dir_entry.is_directory(walk_ec)) {
-        empty_dirs.push_back(dir_entry.path());
-      }
-    }
-  }
-  std::sort(empty_dirs.begin(), empty_dirs.end(), [](const auto& lhs, const auto& rhs) {
-    return lhs.string().size() > rhs.string().size();
-  });
-  for (const auto& dir : empty_dirs) {
-    std::error_code empty_ec;
-    if (std::filesystem::is_empty(dir, empty_ec)) {
-      std::error_code remove_empty_ec;
-      std::filesystem::remove(dir, remove_empty_ec);
-    }
-  }
-
-  if (message != nullptr && removed_files > 0U) {
+  if (message != nullptr && stats.removed_files > 0U) {
     std::ostringstream out;
     out << "图片磁盘可用容量低于 " << static_cast<int>(config.cleanup_min_free_ratio * 100.0F)
-        << "%，已按时间清理最早图片文件 " << removed_files
-        << " 个，当前可用比例 " << std::fixed << std::setprecision(3) << free_ratio(space);
+        << "%，已按时间清理最早图片文件 " << stats.removed_files
+        << " 个，当前可用比例 " << std::fixed << std::setprecision(3) << stats.free_ratio_after;
     *message = out.str();
-  } else if (message != nullptr && free_ratio(space) < min_free_ratio) {
+  } else if (message != nullptr &&
+             stats.free_ratio_after < static_cast<double>(config.cleanup_min_free_ratio)) {
     std::ostringstream out;
     out << "图片磁盘可用容量低于 " << static_cast<int>(config.cleanup_min_free_ratio * 100.0F)
         << "%，但没有可清理的历史图片文件";
     *message = out.str();
+  }
+  return true;
+}
+
+bool cleanup_runtime_storage_if_needed(const ImageSaveConfig& config,
+                                       const std::string& trace_root,
+                                       std::string* message) {
+  if (!config.cleanup_enabled || config.cleanup_min_free_ratio <= 0.0F) {
+    return true;
+  }
+  std::vector<std::string> messages;
+  const auto cleanup_one = [&](const std::filesystem::path& root, const char* label) -> bool {
+    StorageCleanupStats stats;
+    std::string error;
+    if (!cleanup_date_tree_if_needed(root, config.cleanup_min_free_ratio, &stats, &error)) {
+      if (message != nullptr) {
+        *message = std::string(label) + "清理失败: " + error;
+      }
+      return false;
+    }
+    if (stats.removed_files > 0U) {
+      std::ostringstream out;
+      out << label << "低水位清理 " << stats.removed_files
+          << " 个历史文件，当前可用比例 " << std::fixed << std::setprecision(3)
+          << stats.free_ratio_after;
+      messages.push_back(out.str());
+    }
+    return true;
+  };
+  if (config.enabled || std::filesystem::exists(config.root_dir)) {
+    if (!cleanup_one(config.root_dir, "图片目录")) {
+      return false;
+    }
+  }
+  if (config.cleanup_trace_root && !trace_root.empty()) {
+    if (!cleanup_one(trace_root, "trace目录")) {
+      return false;
+    }
+  }
+  if (message != nullptr && !messages.empty()) {
+    std::ostringstream out;
+    for (std::size_t index = 0; index < messages.size(); ++index) {
+      if (index > 0) {
+        out << "; ";
+      }
+      out << messages[index];
+    }
+    *message = out.str();
+  }
+  return true;
+}
+
+bool runtime_storage_has_required_free_ratio(const ImageSaveConfig& config,
+                                             const std::string& trace_root,
+                                             std::string* message) {
+  if (!config.cleanup_enabled || config.cleanup_min_free_ratio <= 0.0F) {
+    return true;
+  }
+  const auto check_one = [&](const std::filesystem::path& root, const char* label) -> bool {
+    double ratio = 1.0;
+    std::string error;
+    if (!has_required_free_ratio(root, config.cleanup_min_free_ratio, &ratio, &error)) {
+      if (message != nullptr) {
+        std::ostringstream out;
+        out << label << "可用容量比例 " << std::fixed << std::setprecision(3) << ratio
+            << " 低于阈值 " << config.cleanup_min_free_ratio;
+        if (!error.empty()) {
+          out << ": " << error;
+        }
+        *message = out.str();
+      }
+      return false;
+    }
+    return true;
+  };
+  if ((config.enabled || std::filesystem::exists(config.root_dir)) &&
+      !check_one(config.root_dir, "图片目录")) {
+    return false;
+  }
+  if (config.cleanup_trace_root && !trace_root.empty() && !check_one(trace_root, "trace目录")) {
+    return false;
   }
   return true;
 }

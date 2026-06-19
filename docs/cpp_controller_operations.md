@@ -1,6 +1,6 @@
 # C++ 主控部署与硬件运维
 
-本文整合原硬件对接、生产配置快速上手、生产上线 SOP、部署说明和测试机集成清单。当前仓库提供 C++ 主控框架、模拟驱动、Hikrobot MVS 相机 backend、FL-ACDH RS232 频闪 backend、TCP 信号 backend、生产配置校验和 fail-fast 保护；真实 PLC/外部信号网关、机器人和其它设备仍需要按现场 SDK 或协议接入。
+本文整合原硬件对接、生产配置快速上手、生产上线 SOP、部署说明和测试机集成清单。当前仓库提供 C++ 主控框架、模拟驱动、Hikrobot MVS 相机 backend、FL-ACDH RS232 多控制器频闪 backend、TCP 信号 backend、生产配置校验、业务存储低水位治理和 fail-fast 保护；真实 PLC/外部信号网关、机器人和其它设备仍需要按现场 SDK 或协议接入。
 
 ## 边界
 
@@ -233,6 +233,37 @@ light.1.current_percent=60
 ```
 
 要求 `strobe_width_us <= exposure_us`，电流、脉宽和触发延时不得超过控制器与光源规格。
+
+多控制器频闪使用控制器级 `light.<M>.<field>` 与通道级 `light.<M>.<N>.<field>`：
+
+```ini
+light.0.backend=serial_ascii
+light.0.serial_port=COM3
+light.0.baud_rate=115200
+light.0.trigger_input_line=Line1
+light.0.1.physical_channel=1
+
+light.1.backend=serial_ascii
+light.1.serial_port=COM4
+light.1.baud_rate=115200
+light.1.trigger_input_line=Line1
+light.1.3.physical_channel=1
+```
+
+C++ 会按 `controller_index` 分别准备频闪序列并派发触发；生产校验会拒绝引用未配置控制器的 `light.<M>.<N>`。
+
+### 存储治理
+
+生产配置建议保留默认存储保护：
+
+```ini
+image_save.cleanup_enabled=true
+image_save.cleanup_min_free_ratio=0.20
+image_save.cleanup_trace_root=true
+image_save.fail_on_save_error=true
+```
+
+每次检测前 C++ 会检查 `image_save.root_dir` 和 `trace_root` 所在磁盘水位；低于阈值时只清理 `YYYYMMDD` 日期目录下的历史业务文件。`display_latest.json`、前端操作日志、非日期目录和其它配置文件不会被扫描删除。清理后容量仍不足，或启用原图落盘时 PGM 写入失败，当前任务必须输出 `RECHECK/DeviceFault`，避免磁盘写满后继续运行。
 
 ### 机器人飞拍
 

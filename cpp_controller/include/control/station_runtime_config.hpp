@@ -109,6 +109,8 @@ struct ImageSaveConfig {
   bool save_original = true;
   bool cleanup_enabled = true;
   float cleanup_min_free_ratio = 0.20F;
+  bool cleanup_trace_root = true;
+  bool fail_on_save_error = true;
 };
 
 struct StationRuntimeConfig {
@@ -134,7 +136,7 @@ struct StationRuntimeConfig {
       RuntimeCameraConfig{0, "TOP_BACK", "", "calib/simulated_v1", 64, 48, 1, "Mono8", "", "", 8, false},
       RuntimeCameraConfig{1, "TOP_CUSHION", "", "calib/simulated_v1", 64, 48, 1, "Mono8", "", "", 8, false},
   };
-  std::vector<RuntimeLightConfig> lights;
+  std::vector<RuntimeLightConfig> lights = {RuntimeLightConfig{}};
   std::vector<RuntimeLightChannelConfig> light_channels = {
       RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F},
       RuntimeLightChannelConfig{0, 2, 2, 800, 800, 0, 1.0F, 60.0F},

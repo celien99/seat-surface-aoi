@@ -182,13 +182,17 @@ light.1.physical_channel=1    # light.<N>.<field> → controller 0
 ```ini
 light.0.backend=serial_ascii
 light.0.serial_port=/dev/ttyUSB0
+light.0.baud_rate=115200
+light.0.trigger_input_line=Line1
 light.0.1.physical_channel=1  # light.<M>.<N>.<field>：控制器 M, 光源索引 N
 light.1.backend=serial_ascii
 light.1.serial_port=/dev/ttyUSB1
+light.1.baud_rate=115200
+light.1.trigger_input_line=Line1
 light.1.3.physical_channel=1  # 第二台控制器通道 1, 光源索引 3
 ```
 
-每个 `RuntimeLightChannelConfig` 记录 `controller_index`，`FrameAssembler` 内部管理多个 `ILightController` 实例并按索引派发。
+每个 `RuntimeLightChannelConfig` 记录 `controller_index`，`FrameAssembler` 内部管理多个 `ILightController` 实例，按控制器分别 `prepare_sequence()`，再按通道的 `controller_index` 派发触发。生产校验会拒绝引用未配置控制器的 `light.<M>.<N>`，避免运行期越界或漏触发。
 
 ### TCP 结果回传
 
@@ -213,13 +217,17 @@ signal.error_text=ERROR              # ERROR 文本
 image_save.enabled=true              # 启用存图
 image_save.root_dir=images           # 存储根目录
 image_save.save_original=true        # 保存采集原图
-image_save.cleanup_enabled=true      # 磁盘低水位时清理最早图片文件
+image_save.cleanup_enabled=true      # 检测前做业务存储低水位治理
 image_save.cleanup_min_free_ratio=0.20 # 可用容量低于 20% 时触发清理
+image_save.cleanup_trace_root=true   # 同步清理 trace/YYYYMMDD 历史检测样本
+image_save.fail_on_save_error=true   # 原图落盘失败时输出 RECHECK/DeviceFault
 ```
 
-采集成功后自动保存 PGM 格式原图：`{root_dir}/YYYYMMDD/{seat_id}/{camera_id}_{timestamp}_L{light_index}_original.pgm`。PGM (P5 binary) 纯 C++ 实现，无需外部库依赖。存图失败只打日志不阻断主流程。
+采集成功后自动保存 PGM 格式原图：`{root_dir}/YYYYMMDD/{seat_id}/{camera_id}_{timestamp}_L{light_index}_original.pgm`。PGM (P5 binary) 纯 C++ 实现，无需外部库依赖。默认配置下存图失败会保守输出 `RECHECK/DeviceFault`，不继续把当前件当作正常检测结果处理。
 
-启用清理后，C++ 主控会在每次原图落盘前检查 `image_save.root_dir` 所在磁盘的可用容量比例；低于 `cleanup_min_free_ratio` 时，只扫描 `YYYYMMDD` 日期目录下的图片文件，按文件最后修改时间从早到晚逐个删除，直到容量恢复或没有可清理文件。非日期目录不会被扫描，空的座椅子目录会被清理。生产环境默认仍建议关闭原图落盘，Python trace 已保存检测样本图。
+启用清理后，C++ 主控会在每次检测前检查 `image_save.root_dir` 与 `trace_root` 所在磁盘的可用容量比例；低于 `cleanup_min_free_ratio` 时，只扫描 `YYYYMMDD` 日期目录下的业务文件，按文件最后修改时间从早到晚逐个删除，直到容量恢复或没有可清理文件。非日期目录、`display_latest.json`、前端操作员日志和其它配置文件不会被扫描删除。清理后容量仍低于阈值会直接输出 `RECHECK/DeviceFault`，避免磁盘写满后继续运行。
+
+`image_save.fail_on_save_error=true` 时，启用原图落盘后任何 PGM 写入失败都会让当前任务输出 `RECHECK/DeviceFault`。如果仅作临时调试且允许丢原图，可以显式改为 `false`，但生产追溯场景建议保持默认值。
 
 ### JSON 详细结果输出
 

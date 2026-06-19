@@ -41,6 +41,7 @@ struct StationConfig {
       RuntimeCameraConfig{1, "TOP_CUSHION", "", "calib/simulated_v1", 64, 48, 1, "Mono8", "", "", 8, false},
   };
   RuntimeLightConfig light;
+  std::vector<RuntimeLightConfig> lights;
   std::vector<RuntimeLightChannelConfig> light_channels = {
       RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F},
       RuntimeLightChannelConfig{0, 2, 2, 800, 800, 0, 1.0F, 60.0F},
