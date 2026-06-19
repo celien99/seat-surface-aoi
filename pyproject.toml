@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["uv_build>=0.11.22,<0.12"]
+build-backend = "uv_build"
 
 [project]
 name = "seat-surface-aoi-python-detector"
@@ -52,13 +52,9 @@ dev = [
 seat-aoi-detector = "python_detector.detector_main:main"
 seat-aoi-display = "display_app.main:main"
 
-[tool.setuptools.packages.find]
-include = ["python_detector*", "training_tools*", "display_app*"]
-exclude = ["cpp_controller*", "docs*", "tools*"]
-
-[tool.setuptools.package-data]
-python_detector = ["py.typed", "config/**/*.yaml"]
-display_app = ["qml/**/*.qml", "resources/styles/*"]
+[tool.uv.build-backend]
+module-name = ["python_detector", "training_tools", "display_app"]
+module-root = ""
 
 [tool.pytest.ini_options]
 testpaths = ["python_detector/tests", "display_app/tests"]

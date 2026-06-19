@@ -109,6 +109,10 @@ flowchart LR
 uv sync --group dev
 ```
 
+Windows 工控机与中文区域设置环境下，项目使用 `uv_build` 作为 Python 包构建后端，避免 `setuptools.build_meta`
+在 editable 构建阶段输出 `running egg_info` 日志时被 uv 误解析为构建协议 JSON，导致
+`expected value at line 1 column 1`。如遇到历史虚拟环境残留，可先删除 `.venv/` 后重新执行上述命令。
+
 ### 2. 跑单元测试和协议校验
 
 ```bash
