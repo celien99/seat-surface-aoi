@@ -92,6 +92,25 @@ bool parse_capture_mode_value(const std::string& value,
   return false;
 }
 
+bool parse_capture_schedule_value(const std::string& value,
+                                  CaptureSchedule* out_schedule,
+                                  std::string* error_message) {
+  if (value == "view_serial_tdm" || value == "view_serial" || value == "serial_tdm") {
+    *out_schedule = CaptureSchedule::ViewSerialTdm;
+    return true;
+  }
+  if (value == "shared_light_parallel" || value == "light_parallel" ||
+      value == "parallel_light") {
+    *out_schedule = CaptureSchedule::SharedLightParallel;
+    return true;
+  }
+  if (error_message != nullptr) {
+    *error_message =
+        "capture_schedule 只能是 view_serial_tdm 或 shared_light_parallel: " + value;
+  }
+  return false;
+}
+
 bool parse_uint32_field(const std::string& field_name,
                         const std::string& value,
                         bool allow_zero,
@@ -767,10 +786,26 @@ const char* capture_mode_name(CaptureMode mode) {
   return "unknown";
 }
 
+const char* capture_schedule_name(CaptureSchedule schedule) {
+  switch (schedule) {
+    case CaptureSchedule::ViewSerialTdm:
+      return "view_serial_tdm";
+    case CaptureSchedule::SharedLightParallel:
+      return "shared_light_parallel";
+  }
+  return "unknown";
+}
+
 bool parse_capture_mode(const std::string& value,
                         CaptureMode* out_mode,
                         std::string* error_message) {
   return parse_capture_mode_value(value, out_mode, error_message);
+}
+
+bool parse_capture_schedule(const std::string& value,
+                            CaptureSchedule* out_schedule,
+                            std::string* error_message) {
+  return parse_capture_schedule_value(value, out_schedule, error_message);
 }
 
 bool load_station_runtime_config(const std::string& path,
@@ -1024,6 +1059,10 @@ bool load_station_runtime_config(const std::string& path,
       if (!parse_capture_mode_value(value, &config.capture_mode, error_message)) {
         return false;
       }
+    } else if (key == "capture_schedule") {
+      if (!parse_capture_schedule_value(value, &config.capture_schedule, error_message)) {
+        return false;
+      }
     } else if (key == "reset_shared_memory") {
       if (!parse_bool_field(key, value, &config.reset_shared_memory, error_message)) {
         return false;
@@ -1263,6 +1302,33 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
   if (!validate_capture_views(config, error_message)) {
     return false;
   }
+  if (config.capture_schedule == CaptureSchedule::SharedLightParallel &&
+      config.capture_mode != CaptureMode::FixedCamera) {
+    if (error_message != nullptr) {
+      *error_message = "capture_schedule=shared_light_parallel 仅支持 capture_mode=fixed_camera";
+    }
+    return false;
+  }
+  if (config.capture_schedule == CaptureSchedule::SharedLightParallel) {
+    std::map<std::uint32_t, bool> camera_in_parallel_shot;
+    if (config.capture_views.empty()) {
+      for (const auto& camera : config.cameras) {
+        camera_in_parallel_shot[camera.camera_index] = true;
+      }
+    } else {
+      for (const auto& view : config.capture_views) {
+        if (camera_in_parallel_shot[view.camera_index]) {
+          if (error_message != nullptr) {
+            *error_message =
+                "capture_schedule=shared_light_parallel 不允许同一相机在多个视角中同时采图: camera_index=" +
+                std::to_string(view.camera_index);
+          }
+          return false;
+        }
+        camera_in_parallel_shot[view.camera_index] = true;
+      }
+    }
+  }
   const std::uint64_t expected_frame_count =
       effective_view_count(config) * config.light_order.size();
   if (expected_frame_count == 0 || expected_frame_count > kMaxFramesPerJob) {
@@ -1316,7 +1382,7 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
   }
   if (estimated_payload_size > config.frame_slot_size) {
     if (error_message != nullptr) {
-      *error_message = "frame_slot_size 太小，无法容纳串行 TDM 采集图像包";
+      *error_message = "frame_slot_size 太小，无法容纳多机位多光源采集图像包";
     }
     return false;
   }

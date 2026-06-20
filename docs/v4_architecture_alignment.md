@@ -33,8 +33,8 @@
 
 - 已在 C++ 配置和 Python 配方中支持固定机位和机器人飞拍两类采集方案。
 - 固定机位配置通过 `capture_mode=fixed_camera` 生成相机视角；机器人飞拍配置通过 `capture_mode=robot_flyshot` 显式声明 `pose.<N>`。
-- C++ 主控固定采用视角级串行 TDM：当前视角完成全部 `light_order` 后再切换下一视角，避免多视角并行频闪污染。
-- 参考算法配方和模拟运行配置使用 `DIFFUSE`、`POLAR_DIFFUSE`、`HIGH_LEFT`、`HIGH_RIGHT` 四个 V4 语义光源；当前固定机位产线硬件已经按 2 相机 + 3 光源落地为 `light_order=1,2,3`，Python 生产配方同步为 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。
+- C++ 主控通过 `capture_schedule` 区分采集调度：默认 `view_serial_tdm` 保持视角级串行；当前固定机位生产配置使用 `shared_light_parallel`，同一路共享光源频闪时 2 个固定机位相机同时曝光，机器人飞拍仍保持 pose 级串行。
+- 参考算法配方和模拟运行配置使用 `DIFFUSE`、`POLAR_DIFFUSE`、`HIGH_LEFT`、`HIGH_RIGHT` 四个 V4 语义光源；当前固定机位产线硬件已经按 2 相机 + 3 共享光源落地为 `light_order=1,2,3` 与 `capture_schedule=shared_light_parallel`，Python 生产配方同步为 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。
 - Python 配方通过 `v4_lights.semantic_to_light_id` 统一 V4 语义光源；当前固定机位生产映射为 `DOME -> DIFFUSE`、`DARKFIELD_L -> HIGH_LEFT`、`BRIGHTFIELD -> POLAR_DIFFUSE`，`DARKFIELD_R/HIGH_RIGHT` 保留为扩展光源。
 - Python 检测层把 `cameras` 视为检测视角配置，固定机位通常 `pose_id == camera_id`；机器人飞拍允许多个 `pose_id` 共享同一个末端相机 `camera_id=EYE_IN_HAND`。
 - C++ 运行配置通过相机 `trigger_line`、`exposure_output_line` 和频闪 `trigger_input_line` 记录触发接线；当前 FL-ACDH 方案以控制器 F 口同步输出触发相机 Line0，Line1 ExposureStartActive 保留用于调试或后续 GPIO 同步方案。

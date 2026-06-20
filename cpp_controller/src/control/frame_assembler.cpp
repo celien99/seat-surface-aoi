@@ -159,85 +159,104 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
   std::vector<CapturedFrame> frames;
   frames.reserve(capture_plan.size() * sequence.channels.size());
 
-  // 时分频闪方案：外层按检测视角串行，内层按光源串行。
-  // fixed_camera 模式下视角等同于固定机位；robot_flyshot 模式下视角等同于机器人 pose。
-  for (const auto& view : capture_plan) {
-    auto* camera_ptr = camera_for_index(view.camera_index);
-    if (camera_ptr == nullptr) {
+  bool acquired = false;
+  if (config_.capture_schedule == CaptureSchedule::SharedLightParallel) {
+    acquired = acquire_shared_light_parallel_frames(sequence, trigger, capture_plan, &frames, error);
+  } else {
+    acquired = acquire_view_serial_tdm_frames(sequence, trigger, capture_plan, &frames, error);
+  }
+  if (!acquired) {
+    return false;
+  }
+
+  job.frame_count = static_cast<std::uint32_t>(frames.size());
+  out_bundle->job_meta = job;
+  out_bundle->frames = std::move(frames);
+  if (!validate_serial_tdm_bundle(*out_bundle, sequence, capture_plan, error)) {
+    reset_devices();
+    return false;
+  }
+  return true;
+}
+
+bool FrameAssembler::prepare_light_sequence_for_view(const LightSequence& sequence,
+                                                     std::uint64_t trigger_id,
+                                                     const RuntimeCaptureViewConfig& view,
+                                                     AcquisitionError* error) {
+  for (std::size_t controller_index = 0; controller_index < light_controllers_.size();
+       ++controller_index) {
+    LightSequence controller_sequence;
+    for (const auto& channel : sequence.channels) {
+      if (channel.controller_index == controller_index) {
+        controller_sequence.channels.push_back(channel);
+      }
+    }
+    if (controller_sequence.channels.empty()) {
+      continue;
+    }
+    if (!light_controllers_[controller_index]->prepare_sequence(
+            controller_sequence,
+            trigger_id,
+            config_.light_timeout_ms,
+            error != nullptr ? &error->message : nullptr)) {
       std::ostringstream oss;
-      oss << "capture view references missing camera_index=" << view.camera_index
-          << " pose_id=" << view.pose_id;
+      oss << "light sequence prepare failed pose_id=" << view.pose_id
+          << " camera_index=" << view.camera_index
+          << " controller_index=" << controller_index;
+      const std::string detail =
+          error != nullptr && !error->message.empty() ? error->message : oss.str();
       set_acquisition_error(error,
-                            ErrorCode::ConfigurationError,
-                            AcquisitionStage::Configuration,
+                            ErrorCode::LightFault,
+                            AcquisitionStage::ConfigureLightSequence,
                             view.camera_index,
                             0,
                             0,
-                            oss.str());
+                            detail);
+      reset_devices();
       return false;
     }
-    auto& camera = *camera_ptr;
+  }
+  return true;
+}
 
+bool FrameAssembler::acquire_view_serial_tdm_frames(
+    const LightSequence& sequence,
+    const ExternalTrigger& trigger,
+    const std::vector<RuntimeCaptureViewConfig>& capture_plan,
+    std::vector<CapturedFrame>* frames,
+    AcquisitionError* error) {
+  if (frames == nullptr) {
+    set_acquisition_error(error,
+                          ErrorCode::InternalError,
+                          AcquisitionStage::Configuration,
+                          0,
+                          0,
+                          0,
+                          "frames output is null");
+    return false;
+  }
+
+  // 默认时分频闪方案：外层按检测视角串行，内层按光源串行。
+  for (const auto& view : capture_plan) {
     RobotPoseStatus pose_status;
     if (!wait_robot_pose_ready(trigger, view, &pose_status, error)) {
       reset_devices();
       return false;
     }
-
-    // 每个视角开始前按控制器分别准备对应光源序列。
-    for (std::size_t controller_index = 0; controller_index < light_controllers_.size();
-         ++controller_index) {
-      LightSequence controller_sequence;
-      for (const auto& channel : sequence.channels) {
-        if (channel.controller_index == controller_index) {
-          controller_sequence.channels.push_back(channel);
-        }
-      }
-      if (controller_sequence.channels.empty()) {
-        continue;
-      }
-      if (!light_controllers_[controller_index]->prepare_sequence(
-              controller_sequence,
-              trigger.trigger_id,
-              config_.light_timeout_ms,
-              error != nullptr ? &error->message : nullptr)) {
-        std::ostringstream oss;
-        oss << "light sequence prepare failed pose_id=" << view.pose_id
-            << " camera_index=" << view.camera_index
-            << " controller_index=" << controller_index;
-        const std::string detail =
-            error != nullptr && !error->message.empty() ? error->message : oss.str();
-        set_acquisition_error(error,
-                              ErrorCode::LightFault,
-                              AcquisitionStage::ConfigureLightSequence,
-                              view.camera_index,
-                              0,
-                              0,
-                              detail);
-        reset_devices();
-        return false;
-      }
+    if (!prepare_light_sequence_for_view(sequence, trigger.trigger_id, view, error)) {
+      return false;
     }
 
-    for (std::uint32_t light_seq_index = 0; light_seq_index < sequence.channels.size();
+    for (std::uint32_t light_seq_index = 0;
+         light_seq_index < sequence.channels.size();
          ++light_seq_index) {
       const auto light_param = sequence.channels[light_seq_index];
-
-      // 对齐 Deploy：臂相机 → 频闪 C→B→8→9→A→7 → 取图 → post_delay
       if (!light_param.enabled) continue;
 
-      if (!camera.arm(trigger.trigger_id,
-                      light_param, light_seq_index,
-                      config_.camera_timeout_ms)) {
-        std::ostringstream oss;
-        oss << "camera arm failed camera_index=" << view.camera_index
-            << " light_index=" << light_param.light_index;
-        set_acquisition_error(error, ErrorCode::CameraFault, AcquisitionStage::ArmCamera,
-                              view.camera_index, light_param.light_index, light_seq_index, oss.str());
+      if (!arm_view_camera(trigger, view, light_param, light_seq_index, error)) {
         reset_devices();
         return false;
       }
-
       if (!light_controllers_[light_param.controller_index]->trigger_channel(
               light_param, trigger.trigger_id, light_seq_index,
               config_.light_timeout_ms, error != nullptr ? &error->message : nullptr)) {
@@ -250,46 +269,209 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
       }
 
       CapturedFrame frame;
-      if (!camera.wait_frame(trigger.trigger_id,
-                             light_param, light_seq_index,
-                             &frame, config_.camera_timeout_ms)) {
-        std::ostringstream oss;
-        oss << "simulated camera frame timeout pose_id=" << view.pose_id
-            << " camera_index=" << view.camera_index
-            << " light_index=" << light_param.light_index
-            << " light_seq_index=" << light_seq_index;
-        set_acquisition_error(error,
-                              ErrorCode::MissingFrame,
-                              AcquisitionStage::WaitFrame,
-                              view.camera_index,
-                              light_param.light_index,
-                              light_seq_index,
-                              oss.str());
+      if (!wait_view_light_frame(trigger, view, light_param, light_seq_index, pose_status,
+                                 &frame, error)) {
         reset_devices();
         return false;
       }
-      frame.meta.camera_index = view.camera_index;
-      frame.meta.pose_index = view.pose_index;
-      frame.meta.shot_id = pose_status.shot_id;
-      frame.meta.robot_timestamp_us = pose_status.robot_timestamp_us;
-      for (int index = 0; index < 3; ++index) {
-        frame.meta.robot_tcp_xyz_mm[index] = pose_status.tcp_xyz_mm[index];
-        frame.meta.robot_rpy_deg[index] = pose_status.rpy_deg[index];
-      }
-      copy_cstr(frame.meta.camera_id, view.camera_id);
-      copy_cstr(frame.meta.pose_id, view.pose_id);
-      copy_cstr(frame.meta.calibration_id, view.calibration_id);
-      frames.push_back(std::move(frame));
+      frames->push_back(std::move(frame));
+    }
+  }
+  return true;
+}
+
+bool FrameAssembler::acquire_shared_light_parallel_frames(
+    const LightSequence& sequence,
+    const ExternalTrigger& trigger,
+    const std::vector<RuntimeCaptureViewConfig>& capture_plan,
+    std::vector<CapturedFrame>* frames,
+    AcquisitionError* error) {
+  if (frames == nullptr) {
+    set_acquisition_error(error,
+                          ErrorCode::InternalError,
+                          AcquisitionStage::Configuration,
+                          0,
+                          0,
+                          0,
+                          "frames output is null");
+    return false;
+  }
+  if (capture_plan.empty()) {
+    set_acquisition_error(error,
+                          ErrorCode::ConfigurationError,
+                          AcquisitionStage::Configuration,
+                          0,
+                          0,
+                          0,
+                          "shared light parallel capture requires at least one view");
+    return false;
+  }
+  if (!prepare_light_sequence_for_view(sequence, trigger.trigger_id, capture_plan.front(), error)) {
+    return false;
+  }
+
+  std::vector<RobotPoseStatus> pose_statuses(capture_plan.size());
+  for (std::size_t view_index = 0; view_index < capture_plan.size(); ++view_index) {
+    if (!wait_robot_pose_ready(trigger, capture_plan[view_index], &pose_statuses[view_index],
+                               error)) {
+      reset_devices();
+      return false;
     }
   }
 
-  job.frame_count = static_cast<std::uint32_t>(frames.size());
-  out_bundle->job_meta = job;
-  out_bundle->frames = std::move(frames);
-  if (!validate_serial_tdm_bundle(*out_bundle, sequence, capture_plan, error)) {
-    reset_devices();
+  std::vector<std::vector<CapturedFrame>> frames_by_view(
+      capture_plan.size(), std::vector<CapturedFrame>(sequence.channels.size()));
+  std::vector<std::vector<bool>> captured(
+      capture_plan.size(), std::vector<bool>(sequence.channels.size(), false));
+
+  // 共享光源并行方案：外层按光源串行；每路光源触发前先 arm 所有固定机位相机。
+  for (std::uint32_t light_seq_index = 0;
+       light_seq_index < sequence.channels.size();
+       ++light_seq_index) {
+    const auto light_param = sequence.channels[light_seq_index];
+    if (!light_param.enabled) continue;
+
+    for (const auto& view : capture_plan) {
+      if (!arm_view_camera(trigger, view, light_param, light_seq_index, error)) {
+        reset_devices();
+        return false;
+      }
+    }
+    if (!light_controllers_[light_param.controller_index]->trigger_channel(
+            light_param, trigger.trigger_id, light_seq_index,
+            config_.light_timeout_ms, error != nullptr ? &error->message : nullptr)) {
+      const std::string detail = error != nullptr && !error->message.empty()
+                                     ? error->message : "light channel trigger failed";
+      set_acquisition_error(error,
+                            ErrorCode::LightFault,
+                            AcquisitionStage::TriggerLight,
+                            capture_plan.front().camera_index,
+                            light_param.light_index,
+                            light_seq_index,
+                            detail);
+      reset_devices();
+      return false;
+    }
+
+    for (std::size_t view_index = 0; view_index < capture_plan.size(); ++view_index) {
+      if (!wait_view_light_frame(trigger, capture_plan[view_index], light_param,
+                                 light_seq_index, pose_statuses[view_index],
+                                 &frames_by_view[view_index][light_seq_index], error)) {
+        reset_devices();
+        return false;
+      }
+      captured[view_index][light_seq_index] = true;
+    }
+  }
+
+  // 共享光源并行只是物理调度优化；发布给 Python 的帧包仍保持视角优先顺序。
+  for (std::size_t view_index = 0; view_index < capture_plan.size(); ++view_index) {
+    for (std::uint32_t light_seq_index = 0;
+         light_seq_index < sequence.channels.size();
+         ++light_seq_index) {
+      if (!captured[view_index][light_seq_index]) {
+        set_acquisition_error(error,
+                              ErrorCode::MissingFrame,
+                              AcquisitionStage::WaitFrame,
+                              capture_plan[view_index].camera_index,
+                              sequence.channels[light_seq_index].light_index,
+                              light_seq_index,
+                              "shared light parallel capture missed an expected frame");
+        reset_devices();
+        return false;
+      }
+      frames->push_back(std::move(frames_by_view[view_index][light_seq_index]));
+    }
+  }
+  return true;
+}
+
+bool FrameAssembler::arm_view_camera(const ExternalTrigger& trigger,
+                                     const RuntimeCaptureViewConfig& view,
+                                     const LightChannelParam& light_param,
+                                     std::uint32_t light_seq_index,
+                                     AcquisitionError* error) {
+  auto* camera_ptr = camera_for_index(view.camera_index);
+  if (camera_ptr == nullptr) {
+    std::ostringstream oss;
+    oss << "capture view references missing camera_index=" << view.camera_index
+        << " pose_id=" << view.pose_id;
+    set_acquisition_error(error,
+                          ErrorCode::ConfigurationError,
+                          AcquisitionStage::Configuration,
+                          view.camera_index,
+                          light_param.light_index,
+                          light_seq_index,
+                          oss.str());
     return false;
   }
+  if (!camera_ptr->arm(trigger.trigger_id,
+                       light_param,
+                       light_seq_index,
+                       config_.camera_timeout_ms)) {
+    std::ostringstream oss;
+    oss << "camera arm failed camera_index=" << view.camera_index
+        << " light_index=" << light_param.light_index;
+    set_acquisition_error(error,
+                          ErrorCode::CameraFault,
+                          AcquisitionStage::ArmCamera,
+                          view.camera_index,
+                          light_param.light_index,
+                          light_seq_index,
+                          oss.str());
+    return false;
+  }
+  return true;
+}
+
+bool FrameAssembler::wait_view_light_frame(const ExternalTrigger& trigger,
+                                           const RuntimeCaptureViewConfig& view,
+                                           const LightChannelParam& light_param,
+                                           std::uint32_t light_seq_index,
+                                           const RobotPoseStatus& pose_status,
+                                           CapturedFrame* out_frame,
+                                           AcquisitionError* error) {
+  auto* camera_ptr = camera_for_index(view.camera_index);
+  if (camera_ptr == nullptr || out_frame == nullptr) {
+    set_acquisition_error(error,
+                          ErrorCode::ConfigurationError,
+                          AcquisitionStage::Configuration,
+                          view.camera_index,
+                          light_param.light_index,
+                          light_seq_index,
+                          "capture view references missing camera or output frame");
+    return false;
+  }
+  if (!camera_ptr->wait_frame(trigger.trigger_id,
+                              light_param,
+                              light_seq_index,
+                              out_frame,
+                              config_.camera_timeout_ms)) {
+    std::ostringstream oss;
+    oss << "camera frame timeout pose_id=" << view.pose_id
+        << " camera_index=" << view.camera_index
+        << " light_index=" << light_param.light_index
+        << " light_seq_index=" << light_seq_index;
+    set_acquisition_error(error,
+                          ErrorCode::MissingFrame,
+                          AcquisitionStage::WaitFrame,
+                          view.camera_index,
+                          light_param.light_index,
+                          light_seq_index,
+                          oss.str());
+    return false;
+  }
+  out_frame->meta.camera_index = view.camera_index;
+  out_frame->meta.pose_index = view.pose_index;
+  out_frame->meta.shot_id = pose_status.shot_id;
+  out_frame->meta.robot_timestamp_us = pose_status.robot_timestamp_us;
+  for (int index = 0; index < 3; ++index) {
+    out_frame->meta.robot_tcp_xyz_mm[index] = pose_status.tcp_xyz_mm[index];
+    out_frame->meta.robot_rpy_deg[index] = pose_status.rpy_deg[index];
+  }
+  copy_cstr(out_frame->meta.camera_id, view.camera_id);
+  copy_cstr(out_frame->meta.pose_id, view.pose_id);
+  copy_cstr(out_frame->meta.calibration_id, view.calibration_id);
   return true;
 }
 

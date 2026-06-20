@@ -163,6 +163,60 @@ def test_recipe_accepts_roi_primary_and_safety_net_models() -> None:
     assert recipe.safety_net_model_keys_for("TOP_BACK", "full") == ("unknown_safety_net",)
 
 
+def test_recipe_applies_camera_defaults_to_reduce_per_camera_repetition() -> None:
+    recipe = recipe_from_dict(
+        {
+            "recipe_id": "camera_defaults_recipe",
+            "sku": "sku",
+            "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT"],
+            "v4_lights": {
+                "semantic_to_light_id": {
+                    "DOME": "DIFFUSE",
+                    "DARKFIELD_L": "HIGH_LEFT",
+                    "BRIGHTFIELD": "POLAR_DIFFUSE",
+                }
+            },
+            "camera_defaults": {
+                "model_key": "detector",
+                "safety_net_model_key": "patchcore",
+                "roi_template": "python_detector/config/roi/production_full_roi.yaml",
+                "base_light_id": "POLAR_DIFFUSE",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT"],
+                "roi_models": {"full": "detector"},
+                "roi_safety_net_models": {"full": "patchcore"},
+            },
+            "quality": {"required_lights": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT"]},
+            "cameras": {
+                "TOP_BACK": {"calibration_id": "calib/top_back_production_v1"},
+                "TOP_CUSHION": {"calibration_id": "calib/top_cushion_production_v1"},
+            },
+            "thresholds": {
+                "scratch": {"ng_score": 0.35, "recheck_score": 0.20},
+                "unknown_anomaly": {"ng_score": 0.55, "recheck_score": 0.20},
+            },
+            "models": {
+                "detector": {"backend": "fake", "role": "primary", "class_names": ["scratch"]},
+                "patchcore": {
+                    "backend": "fake",
+                    "model_family": "patchcore",
+                    "role": "safety_net",
+                    "class_names": ["unknown_anomaly"],
+                },
+            },
+        }
+    )
+
+    top_back = recipe.camera("TOP_BACK")
+    assert top_back is not None
+    assert top_back.model_key == "detector"
+    assert top_back.safety_net_model_key == "patchcore"
+    assert top_back.roi_template == "python_detector/config/roi/production_full_roi.yaml"
+    assert top_back.calibration_id == "calib/top_back_production_v1"
+    assert top_back.light_order == ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT")
+    assert recipe.model_key_for("TOP_CUSHION", "full") == "detector"
+    assert recipe.safety_net_model_keys_for("TOP_CUSHION", "full") == ("patchcore",)
+
+
 def test_recipe_parses_onnx_model_io_contract() -> None:
     recipe = recipe_from_dict(
         {

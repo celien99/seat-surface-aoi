@@ -88,6 +88,7 @@ bool StationController::initialize(const StationConfig& config) {
   runtime_config.trace_root = config.trace_root;
   runtime_config.light_order = config.light_order;
   runtime_config.capture_mode = config.capture_mode;
+  runtime_config.capture_schedule = config.capture_schedule;
   runtime_config.cameras = config.cameras;
   runtime_config.lights = config.lights.empty() ? std::vector<RuntimeLightConfig>{config.light}
                                                 : config.lights;

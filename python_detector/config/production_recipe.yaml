@@ -9,33 +9,21 @@ v4_lights:
     DOME: DIFFUSE
     DARKFIELD_L: HIGH_LEFT
     BRIGHTFIELD: POLAR_DIFFUSE
+camera_defaults:
+  model_key: supervised_defect_onnx
+  safety_net_model_key: patchcore_unknown_safety_net
+  roi_template: python_detector/config/roi/production_full_roi.yaml
+  base_light_id: POLAR_DIFFUSE
+  light_order: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT]
+  roi_models:
+    full: supervised_defect_onnx
+  roi_safety_net_models:
+    full: patchcore_unknown_safety_net
 cameras:
   TOP_BACK:
-    enabled: true
-    model_key: supervised_defect_onnx
-    safety_net_model_key: patchcore_unknown_safety_net
-    roi_template: python_detector/config/roi/production_full_roi.yaml
     calibration_id: calib/top_back_production_v1
-    base_light_id: POLAR_DIFFUSE
-    light_order: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT]
-    roi_models:
-      full: supervised_defect_onnx
-    roi_safety_net_models:
-      full: patchcore_unknown_safety_net
-    pixel_size_mm: 0.12
   TOP_CUSHION:
-    enabled: true
-    model_key: supervised_defect_onnx
-    safety_net_model_key: patchcore_unknown_safety_net
-    roi_template: python_detector/config/roi/production_full_roi.yaml
     calibration_id: calib/top_cushion_production_v1
-    base_light_id: POLAR_DIFFUSE
-    light_order: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT]
-    roi_models:
-      full: supervised_defect_onnx
-    roi_safety_net_models:
-      full: patchcore_unknown_safety_net
-    pixel_size_mm: 0.12
 quality:
   required_lights: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT]
   max_saturation_ratio: 0.01

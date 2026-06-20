@@ -36,6 +36,7 @@ struct StationConfig {
   std::string trace_root = "trace";
   std::vector<std::uint32_t> light_order = {1, 2, 3, 4};
   CaptureMode capture_mode = CaptureMode::FixedCamera;
+  CaptureSchedule capture_schedule = CaptureSchedule::ViewSerialTdm;
   std::vector<RuntimeCameraConfig> cameras = {
       RuntimeCameraConfig{0, "TOP_BACK", "", "calib/simulated_v1", 64, 48, 1, "Mono8", "", "", 8, false},
       RuntimeCameraConfig{1, "TOP_CUSHION", "", "calib/simulated_v1", 64, 48, 1, "Mono8", "", "", 8, false},
