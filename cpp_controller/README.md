@@ -121,7 +121,7 @@ seat_aoi_controller (依赖 seat_aoi_control)
 ipc_safety_checks   (依赖 seat_aoi_control)
 ```
 
-默认构建外部依赖为零，仅依赖 C++17 标准库和系统共享内存 API：Linux/macOS 使用 `shm_open`/`mmap`，Windows 使用 `CreateFileMappingW`/`MapViewOfFile`。`hikrobot_mvs` 相机 backend 已预留真实 MVS SDK 适配层，但必须在工控机上显式启用 SDK 构建；外部信号网关和频闪真实 backend 仍需按现场协议继续接入。
+默认构建外部依赖为零，仅依赖 C++17 标准库和系统 API：Linux/macOS 使用 `shm_open`/`mmap`，Windows 使用 `CreateFileMappingW`/`MapViewOfFile`；TCP 信号客户端在 Windows 上链接系统库 `ws2_32`（WinSock2），Linux 链接 `rt`/`pthread`。`hikrobot_mvs` 相机 backend 已预留真实 MVS SDK 适配层，但必须在工控机上显式启用 SDK 构建；外部信号网关和频闪真实 backend 仍需按现场协议继续接入。
 
 ---
 

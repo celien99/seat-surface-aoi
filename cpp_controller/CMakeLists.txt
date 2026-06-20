@@ -59,6 +59,9 @@ add_library(seat_aoi_control
 
 target_include_directories(seat_aoi_control PUBLIC include)
 target_link_libraries(seat_aoi_control PUBLIC seat_aoi_ipc)
+if(WIN32)
+  target_link_libraries(seat_aoi_control PUBLIC ws2_32)
+endif()
 if(SEAT_AOI_ENABLE_HIKROBOT_MVS)
   if(NOT SEAT_AOI_HIKROBOT_MVS_INCLUDE_DIR)
     find_path(SEAT_AOI_HIKROBOT_MVS_INCLUDE_DIR
