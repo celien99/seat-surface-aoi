@@ -111,6 +111,25 @@ bool parse_capture_schedule_value(const std::string& value,
   return false;
 }
 
+bool parse_light_acquisition_mode_value(const std::string& value,
+                                        LightAcquisitionMode* out_mode,
+                                        std::string* error_message) {
+  if (value == "strobe" || value == "flash") {
+    *out_mode = LightAcquisitionMode::Strobe;
+    return true;
+  }
+  if (value == "ambient" || value == "constant" || value == "constant_light" ||
+      value == "no_strobe") {
+    *out_mode = LightAcquisitionMode::Ambient;
+    return true;
+  }
+  if (error_message != nullptr) {
+    *error_message =
+        "light acquisition_mode 只能是 strobe 或 ambient: " + value;
+  }
+  return false;
+}
+
 bool parse_uint32_field(const std::string& field_name,
                         const std::string& value,
                         bool allow_zero,
@@ -403,7 +422,7 @@ bool apply_light_channel_value(RuntimeLightChannelConfig* channel,
   try {
     if (field == "physical_channel") {
       const int parsed = std::stoi(value);
-      if (parsed <= 0) {
+      if (parsed < 0) {
         throw std::invalid_argument("physical_channel");
       }
       channel->physical_channel = static_cast<std::uint32_t>(parsed);
@@ -415,7 +434,7 @@ bool apply_light_channel_value(RuntimeLightChannelConfig* channel,
       channel->exposure_us = static_cast<std::uint32_t>(parsed);
     } else if (field == "strobe_width_us") {
       const int parsed = std::stoi(value);
-      if (parsed <= 0) {
+      if (parsed < 0) {
         throw std::invalid_argument("strobe_width_us");
       }
       channel->strobe_width_us = static_cast<std::uint32_t>(parsed);
@@ -433,10 +452,13 @@ bool apply_light_channel_value(RuntimeLightChannelConfig* channel,
       channel->gain = parsed;
     } else if (field == "current_percent") {
       const float parsed = std::stof(value);
-      if (parsed <= 0.0F || parsed > 100.0F) {
+      if (parsed < 0.0F || parsed > 100.0F) {
         throw std::invalid_argument("current_percent");
       }
       channel->current_percent = parsed;
+    } else if (field == "acquisition_mode") {
+      return parse_light_acquisition_mode_value(
+          value, &channel->acquisition_mode, error_message);
     } else {
       if (error_message != nullptr) {
         *error_message = "未知光源配置字段: light." + std::to_string(channel->light_index) +
@@ -639,6 +661,15 @@ bool validate_light_channels(const std::vector<std::uint32_t>& light_order,
       return false;
     }
     const auto& channel = iter->second;
+    if (channel.acquisition_mode == LightAcquisitionMode::Ambient) {
+      if (channel.exposure_us == 0 || channel.gain <= 0.0F) {
+        if (error_message != nullptr) {
+          *error_message = "常亮采图配置非法: light." + std::to_string(light_index);
+        }
+        return false;
+      }
+      continue;
+    }
     if (channel.controller_index >= lights.size()) {
       if (error_message != nullptr) {
         *error_message = "光源引用的频闪控制器不存在: light." +
@@ -1400,6 +1431,9 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
   for (std::uint32_t light_index : config.light_order) {
     const auto iter = configured_light_channels.find(light_index);
     if (iter == configured_light_channels.end()) {
+      continue;
+    }
+    if (iter->second.acquisition_mode == LightAcquisitionMode::Ambient) {
       continue;
     }
     used_light_controllers[iter->second.controller_index] = true;

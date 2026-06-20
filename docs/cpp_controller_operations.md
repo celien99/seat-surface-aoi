@@ -144,7 +144,7 @@ cpp_controller/build/seat_aoi_controller `
 | --- | --- | --- |
 | 相机 | 海康 MV-CH120-20GC，4096 x 3072 | `camera.backend=hikrobot_mvs`，`camera.0.width=4096`，`camera.0.height=3072`。 |
 | 镜头 | MVL-KF0814M-12MPE FA 镜头，8mm F1.4，1.1"，C 接口 | 作为标定和视场参数记录，不作为当前运行配置字段解析。 |
-| 频闪控制器 | FL-ACDH-20048-4，4 通道，当前使用通道 1/2/3 | `light.device_id=FL-ACDH-20048-4`，当前 `light_order=1,2,3` 且生产固定机位使用 `capture_schedule=shared_light_parallel`；Python 固定机位生产配方已同步为 3 光源。 |
+| 频闪控制器 | FL-ACDH-20048-4，4 通道，当前使用通道 1/2/3；工位顶部 Dome 主光常亮且不受本程序控制 | `light.device_id=FL-ACDH-20048-4`，当前 `light_order=12,1,2,3` 且生产固定机位使用 `capture_schedule=shared_light_parallel`；`12` 为常亮 Dome ROI 采图，Python 固定机位生产配方已同步为 `DOME_ROI + 3` 个检测光源。 |
 | PLC | 暂未定型 | 第一阶段可用手动/模拟触发测试相机、频闪、共享内存和 Python 收图；生产闭环前必须补齐 PLC 触发与输出点位。 |
 
 ## 必填现场参数
@@ -225,7 +225,14 @@ light.trigger_input_line=TriggerIn1
 
 capture_mode=fixed_camera
 capture_schedule=shared_light_parallel
-light_order=1,2,3
+light_order=12,1,2,3
+light.12.acquisition_mode=ambient
+light.12.physical_channel=0
+light.12.exposure_us=1200
+light.12.strobe_width_us=0
+light.12.trigger_delay_us=0
+light.12.gain=1.0
+light.12.current_percent=0
 light.1.physical_channel=1
 light.1.exposure_us=800
 light.1.strobe_width_us=700
@@ -233,6 +240,8 @@ light.1.trigger_delay_us=10
 light.1.gain=1.0
 light.1.current_percent=60
 ```
+
+`light.<N>.acquisition_mode` 默认为 `strobe`，会校验 `physical_channel/strobe_width_us/current_percent` 并触发频闪控制器；`ambient` 用于常亮 Dome ROI 采图，只校验曝光和增益，C++ 不会准备或触发频闪控制器，Hikrobot MVS 后端会改用 `TriggerSource=Software` 取图。
 
 要求 `strobe_width_us <= exposure_us`，电流、脉宽和触发延时不得超过控制器与光源规格。
 

@@ -71,6 +71,7 @@ struct RuntimeLightChannelConfig {
   std::uint32_t trigger_delay_us = 0;
   float gain = 1.0F;
   float current_percent = 60.0F;
+  LightAcquisitionMode acquisition_mode = LightAcquisitionMode::Strobe;
 };
 
 struct RuntimeSignalConfig {
@@ -144,10 +145,10 @@ struct StationRuntimeConfig {
   };
   std::vector<RuntimeLightConfig> lights = {RuntimeLightConfig{}};
   std::vector<RuntimeLightChannelConfig> light_channels = {
-      RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F},
-      RuntimeLightChannelConfig{0, 2, 2, 800, 800, 0, 1.0F, 60.0F},
-      RuntimeLightChannelConfig{0, 3, 3, 800, 800, 0, 1.0F, 55.0F},
-      RuntimeLightChannelConfig{0, 4, 4, 800, 800, 0, 1.0F, 55.0F},
+      RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F, LightAcquisitionMode::Strobe},
+      RuntimeLightChannelConfig{0, 2, 2, 800, 800, 0, 1.0F, 60.0F, LightAcquisitionMode::Strobe},
+      RuntimeLightChannelConfig{0, 3, 3, 800, 800, 0, 1.0F, 55.0F, LightAcquisitionMode::Strobe},
+      RuntimeLightChannelConfig{0, 4, 4, 800, 800, 0, 1.0F, 55.0F, LightAcquisitionMode::Strobe},
   };
   std::vector<RuntimeCaptureViewConfig> capture_views;
   RuntimeSignalConfig signal;

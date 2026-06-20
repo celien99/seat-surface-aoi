@@ -6,6 +6,11 @@
 
 namespace seat_aoi {
 
+enum class LightAcquisitionMode : std::uint32_t {
+  Strobe = 1,
+  Ambient = 2,
+};
+
 struct LightChannelParam {
   std::uint32_t controller_index = 0;  // 所属控制器索引（0-based）
   std::uint32_t light_index = 0;
@@ -17,6 +22,7 @@ struct LightChannelParam {
   float current_percent = 0.0F;
   bool enabled = true;                  // 单步跳过（对齐 Deploy lights[].enabled）
   std::uint32_t post_delay_ms = 50;     // 步骤后等待（对齐 Deploy lights[].post_delay_ms）
+  LightAcquisitionMode acquisition_mode = LightAcquisitionMode::Strobe;
 };
 
 struct LightSequence {

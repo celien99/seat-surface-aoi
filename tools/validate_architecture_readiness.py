@@ -294,8 +294,8 @@ def _deployed_fixed_config_issues(path: Path) -> list[str]:
     issues = []
     if config.get("capture_mode") != "fixed_camera":
         issues.append(f"capture_mode={config.get('capture_mode')}")
-    if config.get("light_order") != "1,2,3":
-        issues.append(f"当前产线应为 3 光源 light_order=1,2,3，实际={config.get('light_order')}")
+    if config.get("light_order") != "12,1,2,3":
+        issues.append(f"当前产线应为常亮 Dome ROI + 3 检测光源 light_order=12,1,2,3，实际={config.get('light_order')}")
     camera_ids = _indexed_values(config, "camera", "camera_id")
     if len(camera_ids) != 2:
         issues.append(f"当前产线应为 2 相机，实际 camera_ids={camera_ids}")
@@ -478,7 +478,7 @@ def _check_v4_algorithm_contract(scope: ReadinessScope) -> list[ReadinessItem]:
         items.append(
             _ok(
                 "固定机位生产光源证据",
-                "当前固定双机位产线采用 3 路已接入光源，Python 生产配方不得要求不存在的第 4 路。",
+                "当前固定双机位产线采用常亮 Dome ROI + 3 路检测光源，Python 生产配方不得把 ROI 图当作第 4 路检测特征。",
                 f"required_lights={list(recipe.quality.required_lights)}; "
                 f"model_channels={list(recipe.models['supervised_defect_onnx'].input_channels)}",
             )
@@ -487,7 +487,7 @@ def _check_v4_algorithm_contract(scope: ReadinessScope) -> list[ReadinessItem]:
         items.append(
             _blocked(
                 "固定机位生产光源证据",
-                "当前产线事实为 2 相机 x 3 光源，生产配方必须与真实采集光源一致。",
+                "当前产线事实为 2 相机 x 常亮 Dome ROI + 3 检测光源，生产配方必须与真实检测光源一致。",
                 f"required_lights={list(recipe.quality.required_lights)}",
                 "把 production_recipe.yaml 对齐为 DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT 三光源，或同步现场硬件变更。",
             )
@@ -654,6 +654,7 @@ def _light_ids_from_order(light_order: list[str]) -> list[str]:
         "9": "LOW_FRONT",
         "10": "LOW_REAR",
         "11": "NIR",
+        "12": "DOME_ROI",
     }
     return [light_id_by_index.get(index, f"LIGHT_{index}") for index in light_order]
 

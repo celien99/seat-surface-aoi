@@ -44,6 +44,10 @@ LightControllerConfig make_light_controller_config(const RuntimeLightConfig& con
   return controller_config;
 }
 
+bool uses_strobe_controller(const LightChannelParam& channel) {
+  return channel.acquisition_mode == LightAcquisitionMode::Strobe;
+}
+
 }  // namespace
 
 void FrameAssembler::configure(const StationRuntimeConfig& config) {
@@ -187,7 +191,7 @@ bool FrameAssembler::prepare_light_sequence_for_view(const LightSequence& sequen
        ++controller_index) {
     LightSequence controller_sequence;
     for (const auto& channel : sequence.channels) {
-      if (channel.controller_index == controller_index) {
+      if (uses_strobe_controller(channel) && channel.controller_index == controller_index) {
         controller_sequence.channels.push_back(channel);
       }
     }
@@ -257,15 +261,17 @@ bool FrameAssembler::acquire_view_serial_tdm_frames(
         reset_devices();
         return false;
       }
-      if (!light_controllers_[light_param.controller_index]->trigger_channel(
-              light_param, trigger.trigger_id, light_seq_index,
-              config_.light_timeout_ms, error != nullptr ? &error->message : nullptr)) {
-        const std::string detail = error != nullptr && !error->message.empty()
-                                       ? error->message : "light channel trigger failed";
-        set_acquisition_error(error, ErrorCode::LightFault, AcquisitionStage::TriggerLight,
-                              view.camera_index, light_param.light_index, light_seq_index, detail);
-        reset_devices();
-        return false;
+      if (uses_strobe_controller(light_param)) {
+        if (!light_controllers_[light_param.controller_index]->trigger_channel(
+                light_param, trigger.trigger_id, light_seq_index,
+                config_.light_timeout_ms, error != nullptr ? &error->message : nullptr)) {
+          const std::string detail = error != nullptr && !error->message.empty()
+                                         ? error->message : "light channel trigger failed";
+          set_acquisition_error(error, ErrorCode::LightFault, AcquisitionStage::TriggerLight,
+                                view.camera_index, light_param.light_index, light_seq_index, detail);
+          reset_devices();
+          return false;
+        }
       }
 
       CapturedFrame frame;
@@ -337,20 +343,22 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
         return false;
       }
     }
-    if (!light_controllers_[light_param.controller_index]->trigger_channel(
-            light_param, trigger.trigger_id, light_seq_index,
-            config_.light_timeout_ms, error != nullptr ? &error->message : nullptr)) {
-      const std::string detail = error != nullptr && !error->message.empty()
-                                     ? error->message : "light channel trigger failed";
-      set_acquisition_error(error,
-                            ErrorCode::LightFault,
-                            AcquisitionStage::TriggerLight,
-                            capture_plan.front().camera_index,
-                            light_param.light_index,
-                            light_seq_index,
-                            detail);
-      reset_devices();
-      return false;
+    if (uses_strobe_controller(light_param)) {
+      if (!light_controllers_[light_param.controller_index]->trigger_channel(
+              light_param, trigger.trigger_id, light_seq_index,
+              config_.light_timeout_ms, error != nullptr ? &error->message : nullptr)) {
+        const std::string detail = error != nullptr && !error->message.empty()
+                                       ? error->message : "light channel trigger failed";
+        set_acquisition_error(error,
+                              ErrorCode::LightFault,
+                              AcquisitionStage::TriggerLight,
+                              capture_plan.front().camera_index,
+                              light_param.light_index,
+                              light_seq_index,
+                              detail);
+        reset_devices();
+        return false;
+      }
     }
 
     for (std::size_t view_index = 0; view_index < capture_plan.size(); ++view_index) {
@@ -520,7 +528,8 @@ bool FrameAssembler::build_light_sequence(const Recipe& recipe,
       return false;
     }
     const auto& configured = iter->second;
-    if (configured.controller_index >= config_.lights.size()) {
+    if (configured.acquisition_mode == LightAcquisitionMode::Strobe &&
+        configured.controller_index >= config_.lights.size()) {
       set_acquisition_error(error,
                             ErrorCode::ConfigurationError,
                             AcquisitionStage::Configuration,
@@ -530,9 +539,10 @@ bool FrameAssembler::build_light_sequence(const Recipe& recipe,
                             "light channel references missing controller config");
       return false;
     }
-    if (configured.physical_channel == 0 || configured.exposure_us == 0 ||
-        configured.strobe_width_us == 0 || configured.gain <= 0.0F ||
-        configured.current_percent <= 0.0F || configured.current_percent > 100.0F) {
+    if (configured.exposure_us == 0 || configured.gain <= 0.0F ||
+        (configured.acquisition_mode == LightAcquisitionMode::Strobe &&
+         (configured.physical_channel == 0 || configured.strobe_width_us == 0 ||
+          configured.current_percent <= 0.0F || configured.current_percent > 100.0F))) {
       set_acquisition_error(error,
                             ErrorCode::ConfigurationError,
                             AcquisitionStage::Configuration,
@@ -551,6 +561,7 @@ bool FrameAssembler::build_light_sequence(const Recipe& recipe,
     param.trigger_delay_us = configured.trigger_delay_us;
     param.gain = configured.gain;
     param.current_percent = configured.current_percent;
+    param.acquisition_mode = configured.acquisition_mode;
     out_sequence->channels.push_back(param);
   }
   return true;

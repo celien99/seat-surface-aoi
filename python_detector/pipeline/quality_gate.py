@@ -73,6 +73,7 @@ class ImageQualityGate:
         return reports
 
     def _check_capture_consistency(self, bundle: CameraBundle, recipe: Recipe, messages: list[str]) -> None:
+        self._check_light_sequence(bundle, recipe, messages)
         frames = [
             bundle.light_frames[light_id]
             for light_id in recipe.quality.required_lights
@@ -103,10 +104,13 @@ class ImageQualityGate:
         if len(set(light_seq_indices)) != len(light_seq_indices):
             messages.append(f"{bundle.camera_id}: duplicate light_seq_index in required lights")
         self._check_robot_pose_consistency(bundle, frames, messages)
-        camera_recipe = recipe.camera(bundle.camera_id, bundle.pose_id)
-        light_order = camera_recipe.light_order if camera_recipe is not None else recipe.light_order
+        self._check_required_light_capture_params(bundle, frames, recipe, messages)
+
+    def _check_light_sequence(self, bundle: CameraBundle, recipe: Recipe, messages: list[str]) -> None:
+        light_order = recipe.light_order
         light_seq_by_id = {light_id: index for index, light_id in enumerate(light_order)}
-        for frame in frames:
+        seen_indices: set[int] = set()
+        for frame in bundle.light_frames.values():
             expected_seq_index = light_seq_by_id.get(frame.light_id)
             if expected_seq_index is None:
                 messages.append(f"{bundle.camera_id}/{frame.light_id}: light not in configured light_order")
@@ -116,22 +120,9 @@ class ImageQualityGate:
                     f"{bundle.camera_id}/{frame.light_id}: light_seq_index {frame.light_seq_index} "
                     f"does not match configured order {expected_seq_index}"
                 )
-
-        exposures = [frame.exposure_us for frame in frames]
-        if any(exposure <= 0 for exposure in exposures):
-            messages.append(f"{bundle.camera_id}: invalid exposure_us")
-        exposure_delta_us = max(exposures) - min(exposures)
-        if exposure_delta_us > recipe.quality.max_exposure_delta_us:
-            messages.append(
-                f"{bundle.camera_id}: exposure delta {exposure_delta_us}us exceeds {recipe.quality.max_exposure_delta_us}us"
-            )
-
-        gains = [frame.gain for frame in frames]
-        if any(gain <= 0 for gain in gains):
-            messages.append(f"{bundle.camera_id}: invalid gain")
-        gain_delta = max(gains) - min(gains)
-        if gain_delta > recipe.quality.max_gain_delta:
-            messages.append(f"{bundle.camera_id}: gain delta {gain_delta:.3f} exceeds {recipe.quality.max_gain_delta:.3f}")
+            if frame.light_seq_index in seen_indices:
+                messages.append(f"{bundle.camera_id}: duplicate light_seq_index in captured lights")
+            seen_indices.add(frame.light_seq_index)
 
     def _check_robot_pose_consistency(
         self,
@@ -169,6 +160,29 @@ class ImageQualityGate:
                 if not self._float_tuple_close(reference_rpy, frame.robot_rpy_deg):
                     messages.append(f"{label}: inconsistent robot_rpy_deg in required lights")
                     break
+
+    def _check_required_light_capture_params(
+        self,
+        bundle: CameraBundle,
+        frames: list[LightFrame],
+        recipe: Recipe,
+        messages: list[str],
+    ) -> None:
+        exposures = [frame.exposure_us for frame in frames]
+        if any(exposure <= 0 for exposure in exposures):
+            messages.append(f"{bundle.camera_id}: invalid exposure_us")
+        exposure_delta_us = max(exposures) - min(exposures)
+        if exposure_delta_us > recipe.quality.max_exposure_delta_us:
+            messages.append(
+                f"{bundle.camera_id}: exposure delta {exposure_delta_us}us exceeds {recipe.quality.max_exposure_delta_us}us"
+            )
+
+        gains = [frame.gain for frame in frames]
+        if any(gain <= 0 for gain in gains):
+            messages.append(f"{bundle.camera_id}: invalid gain")
+        gain_delta = max(gains) - min(gains)
+        if gain_delta > recipe.quality.max_gain_delta:
+            messages.append(f"{bundle.camera_id}: gain delta {gain_delta:.3f} exceeds {recipe.quality.max_gain_delta:.3f}")
 
     def _float_tuple_close(self, left: tuple[float, ...], right: tuple[float, ...]) -> bool:
         return len(left) == len(right) and all(abs(a - b) <= 1e-4 for a, b in zip(left, right))

@@ -34,8 +34,8 @@
 - 已在 C++ 配置和 Python 配方中支持固定机位和机器人飞拍两类采集方案。
 - 固定机位配置通过 `capture_mode=fixed_camera` 生成相机视角；机器人飞拍配置通过 `capture_mode=robot_flyshot` 显式声明 `pose.<N>`。
 - C++ 主控通过 `capture_schedule` 区分采集调度：默认 `view_serial_tdm` 保持视角级串行；当前固定机位生产配置使用 `shared_light_parallel`，同一路共享光源频闪时 2 个固定机位相机同时曝光，机器人飞拍仍保持 pose 级串行。
-- 参考算法配方和模拟运行配置使用 `DIFFUSE`、`POLAR_DIFFUSE`、`HIGH_LEFT`、`HIGH_RIGHT` 四个 V4 语义光源；当前固定机位产线硬件已经按 2 相机 + 3 共享光源落地为 `light_order=1,2,3` 与 `capture_schedule=shared_light_parallel`，Python 生产配方同步为 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。
-- Python 配方通过 `v4_lights.semantic_to_light_id` 统一 V4 语义光源；当前固定机位生产映射为 `DOME -> DIFFUSE`、`DARKFIELD_L -> HIGH_LEFT`、`BRIGHTFIELD -> POLAR_DIFFUSE`，`DARKFIELD_R/HIGH_RIGHT` 保留为扩展光源。
+- 参考算法配方和模拟运行配置使用 `DIFFUSE`、`POLAR_DIFFUSE`、`HIGH_LEFT`、`HIGH_RIGHT` 四个 V4 语义光源；当前固定机位产线硬件已经按 2 相机 + 常亮 Dome ROI + 3 共享频闪光源落地为 `light_order=12,1,2,3` 与 `capture_schedule=shared_light_parallel`，Python 生产配方同步为 `DOME_ROI + DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。
+- Python 配方通过 `v4_lights.semantic_to_light_id` 统一 V4 语义光源；当前固定机位生产映射为 `DOME -> DOME_ROI`、`DARKFIELD_L -> HIGH_LEFT`、`BRIGHTFIELD -> POLAR_DIFFUSE`，`DARKFIELD_R/HIGH_RIGHT` 保留为扩展检测光源。
 - Python 检测层把 `cameras` 视为检测视角配置，固定机位通常 `pose_id == camera_id`；机器人飞拍允许多个 `pose_id` 共享同一个末端相机 `camera_id=EYE_IN_HAND`。
 - C++ 运行配置通过相机 `trigger_line`、`exposure_output_line` 和频闪 `trigger_input_line` 记录触发接线；当前 FL-ACDH 方案以控制器 F 口同步输出触发相机 Line0，Line1 ExposureStartActive 保留用于调试或后续 GPIO 同步方案。
 
@@ -79,7 +79,7 @@
 - 已支持 ROI 模板加载、轴对齐矩形裁剪和四点多边形透视展开。
 - 已增加 `RoiLocator`，支持 `template`、`fake_yolo`、`onnx_yolo` 和 `onnx_yolo_seg` 后端。
 - 已在根目录 `model/roi_yolo/seat_roi_seg.onnx` 预留真实 ROI YOLO segmentation 产物路径，并提供 `production_model.example.yaml` 配方模板和 `tools.validate_model_assets` 校验。
-- ROI 定位只读取 `DOME` 语义光源映射出的图像；YOLO segmentation 输出按 mask 自动生成运行时 `polygon_xy`，并通过 `roi_locator.class_names` 映射到 ROI 模板安全边界和 `output_size`。
+- ROI 定位只读取 `DOME` 语义光源映射出的 `DOME_ROI` 常亮图；YOLO segmentation 输出按 mask 自动生成运行时 `polygon_xy`，并通过 `roi_locator.class_names` 映射到 ROI 模板安全边界和 `output_size`。该图能更均匀照亮座椅表面，收益主要是提高 ROI 定位和 mask 边界稳定性，不作为缺陷特征或模型输入通道。
 - ROI 置信度不足、姿态误差超差、输出越界或缺 Dome 图会返回 `RECHECK`，不会输出 `OK`。
 
 差距：
@@ -91,14 +91,14 @@
 
 统一架构要求：
 
-- 输入所有光源图像。
-- 以 Dome ROI 为参考图。
-- DarkField-L/R、BrightField 等 ROI 与参考图对齐。
+- 输入所有检测光源图像。
+- 以检测配方中的 `base_light_id` 为参考图。
+- DarkField-L/R、BrightField 等检测光源 ROI 与参考图对齐；`DOME_ROI` 已在 ROI 定位阶段消费，不参与 ECC 配准或 ReflectanceCube 构建。
 - 使用 ECC 图像配准或等价高精度配准，输出配准后 ROI。
 
 当前状态：
 
-- 已支持所有光源 ROI 裁剪。
+- 已支持所有检测光源 ROI 裁剪。
 - 已支持透视展开和 ROI 到原图的双向矩阵。
 - 已使用标定文件中的 `light_alignment.matrix_3x3` 计算配准误差。
 - 已支持 `registration.method: ecc`，通过 ROI 平移搜索输出 ECC 风格配准矩阵、相关系数、迭代次数、收敛状态和误差报告。

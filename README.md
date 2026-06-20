@@ -90,10 +90,10 @@ flowchart LR
 | 双采集模式 | 支持固定机位 `fixed_camera` 与机器人飞拍 `robot_flyshot`，二者在 C++ Capture Plan 层统一为检测视角序列。 |
 | 参考模拟链路 | C++ 内置 fallback、`station_runtime.example.conf` 与 `station_runtime.robot_flyshot.example.conf` 均使用 4 路模拟光源，对齐默认 Python 配方的 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT/HIGH_RIGHT`。 |
 | 同机位多角度输入 | 固定机位默认配置可接收同一 `camera_id` 下动态 `pose_id` 的多张照片，按同一机位配方、标定、模型处理并在 trace/result 中保留原始 `pose_id`；显式机器人飞拍 pose 仍必须精确匹配配方。 |
-| 采集调度 | 固定机位支持 `capture_schedule=view_serial_tdm` 和 `shared_light_parallel`；当前 2 相机 + 3 共享光源生产配置启用 `shared_light_parallel`，即每路光源频闪前同时 arm 两个机位相机，仍输出 6 帧完整图像包。机器人飞拍保持 pose 级串行采集。 |
+| 采集调度 | 固定机位支持 `capture_schedule=view_serial_tdm` 和 `shared_light_parallel`；当前 2 相机 + 常亮 Dome ROI + 3 共享频闪光源生产配置启用 `shared_light_parallel`，先采集不触发频闪的 Dome ROI 图，再按 3 路频闪光源同步双机位采图，输出 8 帧完整图像包。机器人飞拍保持 pose 级串行采集。 |
 | 共享内存 IPC | C++/Python 双端固定布局结构体、frame/result ring buffer、slot 状态机、CRC、layout/对象大小 fail-fast 和协议校验工具。 |
 | V4 算法接口 | Dome ROI YOLO segmentation 自动生成 ROI polygon、ECC 配准、WideResNet50 embedding、PCA、PatchCore KNN 和 FAISS 可选加速接入点。 |
-| 生产光源对齐 | 当前固定机位产线是 2 相机 + 3 共享光源，C++ `light_order=1,2,3`、`capture_schedule=shared_light_parallel` 与 Python 生产配方 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 已对齐；第 4 路 `HIGH_RIGHT` 仅作为后续扩展。 |
+| 生产光源对齐 | 当前固定机位产线是 2 相机 + 常亮 Dome ROI + 3 共享频闪光源，C++ `light_order=12,1,2,3`、`capture_schedule=shared_light_parallel` 与 Python 生产配方已对齐：`12 -> DOME_ROI` 只用于 ROI 定位，`1/2/3 -> DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 仍是质量门禁、特征和模型输入光源；第 4 路 `HIGH_RIGHT` 仅作为后续扩展。 |
 | 保守判定 | 协议异常、CRC 错误、缺帧、超时、质量失败、shot/机器人位姿不一致、ROI 冲突、机器人 FAULT、候选融合溢出和模型异常返回 `RECHECK` 或 `ERROR`。 |
 | 无模型采样兜底 | 生产模型文件缺失、仍是占位文件或 ONNX/numpy 依赖未安装时，Python detector 返回 `RECHECK/CONFIGURATION_ERROR`，保存原始采集图和可用 ROI 图，不输出 `OK` 或 `NG`。 |
 | 前端展示页面 | `display_app/` 迁移 PySide6/QML 监控界面，轮询 `display_latest.json` 与 C++ 主控事件，展示相机/视角图像、OK/NG/复检/异常计数、采样模式、日志、复核队列和 NG 弹窗。 |
@@ -328,7 +328,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 | 产物 | 默认路径 | 用途 |
 | --- | --- | --- |
-| Dome ROI YOLO segmentation | `model/roi_yolo/seat_roi_seg.onnx` | 从 Dome 语义光源分割座椅 ROI，并自动生成运行时 `polygon_xy`。 |
+| Dome ROI YOLO segmentation | `model/roi_yolo/seat_roi_seg.onnx` | 从常亮 Dome 语义光源 `DOME_ROI` 分割座椅 ROI，并自动生成运行时 `polygon_xy`。 |
 | 监督缺陷检测 | `model/supervised_defect/seat_defect_detector.onnx` | 已知缺陷检测 ONNX。 |
 | WideResNet50 embedding | `model/wideresnet50/seat_wrn50_embedding.onnx` | 多光源 ROI embedding。 |
 | PCA | `model/patchcore/seat_pca.json` | unified embedding 降维。 |
@@ -339,14 +339,14 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 | 配方 | 采集模式 | 作用 |
 | --- | --- | --- |
-| `seat_a_black_leather_production_v1` | 固定机位 | `production_recipe.yaml`，启用 ONNX ROI、ECC、监督 ONNX、WideResNet50 embedding、PCA、PatchCore/FAISS safety net；同一固定机位的动态角度 `pose_id` 可复用该机位默认配置。 |
+| `seat_a_black_leather_production_v1` | 固定机位 | `production_recipe.yaml`，采集顺序包含 `DOME_ROI + DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`，启用 ONNX ROI、ECC、监督 ONNX、WideResNet50 embedding、PCA、PatchCore/FAISS safety net；`DOME_ROI` 只定位 ROI，不进入特征和模型输入。 |
 | `seat_a_robot_flyshot_production_v1` | 机器人飞拍 | `production_robot_flyshot_recipe.yaml`，同一末端相机按 `pose_id` 区分标定、ROI 和结果。 |
 
 C++ 生产模板已把 `recipe_id` 对齐到上述生产配方；上线前还必须用现场标定替换 `python_detector/config/calibration/*/*production*.yaml` 和 `python_detector/config/roi/production_full_roi.yaml` 的模板 ROI/矩阵。
 
 Python 配方已收敛为 `camera_defaults + cameras` 两层：`camera_defaults` 保存同一 SKU 共用的模型、ROI 模板和光源策略，`cameras` 只保留每个机位或机器人 pose 的差异字段，例如 `calibration_id`。像素尺寸、图像尺寸和多光源对齐矩阵继续归标定文件维护，避免配方与标定重复配置。
 
-当前固定机位硬件基线已记录到 `cpp_controller/config/station_runtime.production.example.conf` 和已生成的 `cpp_controller/config/station_runtime.production.conf`：海康 MV-CH120-20GC 工业相机 2 台，4096 x 3072，Hikrobot MVS backend；MVL-KF0814M-12MPE FA 镜头，8mm F1.4，1.1"，C 接口；FL-ACDH-20048-4 四通道频闪控制器（RS232 serial_ascii backend，支持多控制器扩展）；当前产线接入 3 组共享光源，按 `light_order=1,2,3` 与 `capture_schedule=shared_light_parallel` 采集：光源 1 频闪时两个机位同时拍摄，光源 2/3 同理，最终仍向 Python 发布 2 视角 x 3 光源的 6 帧图像包。Python 固定机位生产配方同步要求 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 三个必需光源，模型输入通道为 `ch0_diffuse/ch1_polar_diffuse/ch2_high_left`。
+当前固定机位硬件基线已记录到 `cpp_controller/config/station_runtime.production.example.conf` 和已生成的 `cpp_controller/config/station_runtime.production.conf`：海康 MV-CH120-20GC 工业相机 2 台，4096 x 3072，Hikrobot MVS backend；MVL-KF0814M-12MPE FA 镜头，8mm F1.4，1.1"，C 接口；FL-ACDH-20048-4 四通道频闪控制器（RS232 serial_ascii backend，支持多控制器扩展）；产线工位顶部 Dome 光常亮且不由本程序控制，C++ 按 `light_order=12,1,2,3` 与 `capture_schedule=shared_light_parallel` 采集：`12` 轮次只做常亮 Dome ROI 采图，光源 1/2/3 轮次再触发频闪并让两个机位同步拍摄，最终向 Python 发布 2 视角 x 4 采集轮次的 8 帧图像包。Python 固定机位生产配方同步要求 `DOME_ROI` 用于 ROI 定位，`DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 三个必需检测光源用于质量门禁、特征和模型输入，模型输入通道为 `ch0_diffuse/ch1_polar_diffuse/ch2_high_left`。
 
 **已实现的真实硬件后端：**
 - **相机**：Hikrobot MVS（Line0 硬件触发 + Software 软件触发），`-DSEAT_AOI_ENABLE_HIKROBOT_MVS=ON` 构建

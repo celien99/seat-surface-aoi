@@ -1,12 +1,13 @@
 recipe_id: seat_a_black_leather_production_v1
 sku: seat_a_black_leather
 light_order:
+  - DOME_ROI
   - DIFFUSE
   - POLAR_DIFFUSE
   - HIGH_LEFT
 v4_lights:
   semantic_to_light_id:
-    DOME: DIFFUSE
+    DOME: DOME_ROI
     DARKFIELD_L: HIGH_LEFT
     BRIGHTFIELD: POLAR_DIFFUSE
 camera_defaults:

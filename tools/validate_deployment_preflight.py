@@ -312,7 +312,7 @@ def _check_production_runtime_configs(strict_production: bool) -> list[Preflight
     config_issues = []
     if config.get("capture_mode") != "fixed_camera":
         config_issues.append(f"capture_mode={config.get('capture_mode')}")
-    if config.get("light_order") != "1,2,3":
+    if config.get("light_order") != "12,1,2,3":
         config_issues.append(f"light_order={config.get('light_order')}")
     camera_ids = _indexed_values(config, "camera", "camera_id")
     if len(camera_ids) != 2:
@@ -323,7 +323,7 @@ def _check_production_runtime_configs(strict_production: bool) -> list[Preflight
             PreflightItem(
                 status=status,
                 category="生产运行配置",
-                requirement="当前产线固定为 2 相机 x 3 光源，正式配置必须反映真实硬件。",
+                requirement="当前产线固定为 2 相机 x 常亮 Dome ROI + 3 检测光源，正式配置必须反映真实硬件。",
                 evidence="; ".join(config_issues),
                 owner="硬件/电气/现场集成",
                 next_step="修正 station_runtime.production.conf 中的 capture_mode、camera.<N> 和 light_order。",
@@ -455,6 +455,7 @@ def _light_ids_from_order(light_order: list[str]) -> list[str]:
         "9": "LOW_FRONT",
         "10": "LOW_REAR",
         "11": "NIR",
+        "12": "DOME_ROI",
     }
     return [light_id_by_index.get(index, f"LIGHT_{index}") for index in light_order]
 

@@ -122,6 +122,19 @@ bool set_bool_value(void* handle,
   return false;
 }
 
+bool set_command_value(void* handle,
+                       const char* key,
+                       std::string* error_message) {
+  const int ret = MV_CC_SetCommandValue(handle, key);
+  if (ret == kMvsOk) {
+    return true;
+  }
+  if (error_message != nullptr) {
+    *error_message = mvs_error(key, ret);
+  }
+  return false;
+}
+
 bool set_image_node_num(void* handle,
                         std::uint32_t value,
                         std::string* error_message) {
@@ -329,7 +342,12 @@ bool HikrobotMvsCamera::arm(std::uint64_t trigger_id,
   }
 #ifdef SEAT_AOI_ENABLE_HIKROBOT_MVS
   std::string error;
-  if (!set_float_value(handle_, "ExposureTime", static_cast<float>(light_param.exposure_us), &error) ||
+  const std::string trigger_source =
+      light_param.acquisition_mode == LightAcquisitionMode::Ambient || config_.trigger_line.empty()
+          ? "Software"
+          : config_.trigger_line;
+  if (!set_enum_by_string(handle_, "TriggerSource", trigger_source, &error) ||
+      !set_float_value(handle_, "ExposureTime", static_cast<float>(light_param.exposure_us), &error) ||
       !set_float_value(handle_, "Gain", light_param.gain, &error)) {
     set_error(error);
     return false;
@@ -359,6 +377,14 @@ bool HikrobotMvsCamera::wait_frame(std::uint64_t trigger_id,
   return false;
 #else
   MV_FRAME_OUT frame{};
+  if (light_param.acquisition_mode == LightAcquisitionMode::Ambient || config_.trigger_line.empty()) {
+    std::string trigger_error;
+    if (!set_command_value(handle_, "TriggerSoftware", &trigger_error)) {
+      ++dropped_frames_;
+      set_error(trigger_error);
+      return false;
+    }
+  }
   const int ret = MV_CC_GetImageBuffer(handle_, &frame, timeout_ms);
   if (ret != kMvsOk) {
     ++dropped_frames_;

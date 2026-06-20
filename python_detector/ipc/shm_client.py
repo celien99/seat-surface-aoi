@@ -55,6 +55,7 @@ LIGHT_ID_BY_INDEX = {
     9: "LOW_FRONT",
     10: "LOW_REAR",
     11: "NIR",
+    12: "DOME_ROI",
 }
 
 CAMERA_ID_BY_INDEX = {

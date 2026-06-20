@@ -24,6 +24,8 @@
 
 namespace {
 
+seat_aoi::StationRuntimeConfig make_filled_production_runtime_config();
+
 std::uint32_t result_header_crc(const seat_aoi::ResultSlotHeader* slot) {
   std::array<std::uint8_t, sizeof(seat_aoi::ResultSlotHeader)> bytes{};
   std::memcpy(bytes.data(), slot, bytes.size());
@@ -649,6 +651,29 @@ bool test_missing_light_controller_config_rejected() {
     std::cerr << "missing light controller config was not rejected: " << error << "\n";
   }
   return passed;
+}
+
+bool test_ambient_light_does_not_require_strobe_controller() {
+  auto config = make_filled_production_runtime_config();
+  config.light_order = {12, 1, 2, 3};
+  config.light_channels.push_back(seat_aoi::RuntimeLightChannelConfig{
+      99,
+      12,
+      0,
+      1200,
+      0,
+      0,
+      1.0F,
+      0.0F,
+      seat_aoi::LightAcquisitionMode::Ambient,
+  });
+  std::string error;
+  const bool ok = seat_aoi::validate_station_runtime_config(config, &error);
+  if (!ok) {
+    std::cerr << "ambient ROI light unexpectedly required strobe controller: "
+              << error << "\n";
+  }
+  return ok;
 }
 
 bool test_image_save_path_uses_date_directory() {
@@ -1441,6 +1466,9 @@ int main() {
     return 1;
   }
   if (!test_missing_light_controller_config_rejected()) {
+    return 1;
+  }
+  if (!test_ambient_light_does_not_require_strobe_controller()) {
     return 1;
   }
   if (!test_image_save_path_uses_date_directory()) {
