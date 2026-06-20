@@ -62,6 +62,32 @@ private:
                                   const LightSequence& sequence,
                                   const std::vector<RuntimeCaptureViewConfig>& views,
                                   AcquisitionError* error) const;
+  bool prepare_light_sequence_for_view(const LightSequence& sequence,
+                                       std::uint64_t trigger_id,
+                                       const RuntimeCaptureViewConfig& view,
+                                       AcquisitionError* error);
+  bool acquire_view_serial_tdm_frames(const LightSequence& sequence,
+                                      const ExternalTrigger& trigger,
+                                      const std::vector<RuntimeCaptureViewConfig>& capture_plan,
+                                      std::vector<CapturedFrame>* frames,
+                                      AcquisitionError* error);
+  bool acquire_shared_light_parallel_frames(const LightSequence& sequence,
+                                            const ExternalTrigger& trigger,
+                                            const std::vector<RuntimeCaptureViewConfig>& capture_plan,
+                                            std::vector<CapturedFrame>* frames,
+                                            AcquisitionError* error);
+  bool arm_view_camera(const ExternalTrigger& trigger,
+                       const RuntimeCaptureViewConfig& view,
+                       const LightChannelParam& light_param,
+                       std::uint32_t light_seq_index,
+                       AcquisitionError* error);
+  bool wait_view_light_frame(const ExternalTrigger& trigger,
+                             const RuntimeCaptureViewConfig& view,
+                             const LightChannelParam& light_param,
+                             std::uint32_t light_seq_index,
+                             const RobotPoseStatus& pose_status,
+                             CapturedFrame* out_frame,
+                             AcquisitionError* error);
   void reset_devices();
   ICamera* camera_for_index(std::uint32_t camera_index) const;
   bool wait_robot_pose_ready(const ExternalTrigger& trigger,

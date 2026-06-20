@@ -58,6 +58,7 @@ void apply_runtime_config(const seat_aoi::StationRuntimeConfig& runtime_config,
   config->trace_root = runtime_config.trace_root;
   config->light_order = runtime_config.light_order;
   config->capture_mode = runtime_config.capture_mode;
+  config->capture_schedule = runtime_config.capture_schedule;
   config->cameras = runtime_config.cameras;
   config->light = runtime_config.lights.empty() ? seat_aoi::RuntimeLightConfig{} : runtime_config.lights[0];
   config->lights = runtime_config.lights;

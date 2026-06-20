@@ -15,14 +15,14 @@
 PLC/工位触发
   -> C++ wait_trigger
   -> 根据 capture_mode 生成固定机位视角或机器人 pose 计划
-  -> 等待当前视角/pose ready，机器人飞拍读取 SHOT_ID 和 TCP 位姿
-  -> 按 light_order 逐光源串行采集
+  -> 等待视角/pose ready，机器人飞拍读取 SHOT_ID 和 TCP 位姿
+  -> 按 capture_schedule 执行视角串行或共享光源并行采集
   -> 写入共享内存 frame slot
   -> Python detector 检测并写 result slot
   -> C++ 读取结果、做保守校验并输出 PLC OK/NG/RECHECK
 ```
 
-C++ 主控固定采用视角级串行 TDM 采集：当前视角完成全部光源后再切换下一视角。固定机位模式下检测视角通常等于 `camera_id`；机器人飞拍模式下检测视角等于 `pose_id`。不要实现多视角并行频闪采集，否则容易造成光源互相污染。
+C++ 主控通过 `capture_schedule` 配置采集调度。`view_serial_tdm` 会让当前视角完成全部光源后再切换下一视角；`shared_light_parallel` 仅用于固定机位共享光源场景，同一路光源频闪前先 arm 所有固定机位相机并同步收图。固定机位模式下检测视角通常等于 `camera_id`；机器人飞拍模式下检测视角等于 `pose_id`，必须保持 pose 级串行，不能配置共享光源并行。
 
 当前固定机位接线以 FL-ACDH F 口同步输出触发相机 `Line0`，相机 `Line1` 的 `ExposureStartActive` 保留用于调试或后续 GPIO 同步方案。C++ 负责配置、arm、收图和故障判断；真实频闪时刻由频闪控制器、相机触发线或现场 IO/PLC/运动控制器完成，不能让 Python 参与触发时序。
 
@@ -144,7 +144,7 @@ cpp_controller/build/seat_aoi_controller `
 | --- | --- | --- |
 | 相机 | 海康 MV-CH120-20GC，4096 x 3072 | `camera.backend=hikrobot_mvs`，`camera.0.width=4096`，`camera.0.height=3072`。 |
 | 镜头 | MVL-KF0814M-12MPE FA 镜头，8mm F1.4，1.1"，C 接口 | 作为标定和视场参数记录，不作为当前运行配置字段解析。 |
-| 频闪控制器 | FL-ACDH-20048-4，4 通道，当前使用通道 1/2/3 | `light.device_id=FL-ACDH-20048-4`，当前 `light_order=1,2,3`，逻辑光源 1..3 映射物理通道 1..3；Python 固定机位生产配方已同步为 3 光源。 |
+| 频闪控制器 | FL-ACDH-20048-4，4 通道，当前使用通道 1/2/3 | `light.device_id=FL-ACDH-20048-4`，当前 `light_order=1,2,3` 且生产固定机位使用 `capture_schedule=shared_light_parallel`；Python 固定机位生产配方已同步为 3 光源。 |
 | PLC | 暂未定型 | 第一阶段可用手动/模拟触发测试相机、频闪、共享内存和 Python 收图；生产闭环前必须补齐 PLC 触发与输出点位。 |
 
 ## 必填现场参数
@@ -223,6 +223,8 @@ light.serial_port=/dev/ttyUSB0
 light.baud_rate=115200
 light.trigger_input_line=TriggerIn1
 
+capture_mode=fixed_camera
+capture_schedule=shared_light_parallel
 light_order=1,2,3
 light.1.physical_channel=1
 light.1.exposure_us=800

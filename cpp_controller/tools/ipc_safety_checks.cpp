@@ -545,6 +545,7 @@ bool test_station_multi_light_controller_acquisition_reaches_detector_timeout() 
   config.light_timeout_ms = 5;
   config.recipe_id = "seat_a_black_leather_v1";
   config.light_order = {1, 2};
+  config.capture_schedule = seat_aoi::CaptureSchedule::SharedLightParallel;
   config.lights = {seat_aoi::RuntimeLightConfig{}, seat_aoi::RuntimeLightConfig{}};
   config.light_channels = {
       seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F},
@@ -783,6 +784,7 @@ bool test_explicit_camera_config_replaces_defaults() {
         << "max_jobs=1\n"
         << "recipe_id=seat_a_black_leather_production_v1\n"
         << "capture_mode=fixed_camera\n"
+        << "capture_schedule=shared_light_parallel\n"
         << "light_order=1,2,3,4\n"
         << "trace_root=trace\n"
         << "signal.station_id=LAB_AOI_01\n"
@@ -830,6 +832,7 @@ bool test_explicit_camera_config_replaces_defaults() {
   std::remove(path.c_str());
   const bool passed = ok && config.cameras.size() == 1 &&
                       config.cameras[0].camera_index == 0 &&
+                      config.capture_schedule == seat_aoi::CaptureSchedule::SharedLightParallel &&
                       config.cameras[0].width == 4096 &&
                       config.cameras[0].height == 3072;
   if (!passed) {
@@ -870,6 +873,7 @@ seat_aoi::StationRuntimeConfig make_filled_production_runtime_config() {
   config.hardware_mode = seat_aoi::HardwareMode::Production;
   config.signal.backend = seat_aoi::HardwareBackend::ExternalSignal;
   config.camera_backend = seat_aoi::HardwareBackend::HikrobotMvs;
+  config.capture_schedule = seat_aoi::CaptureSchedule::SharedLightParallel;
   config.lights.emplace_back();
   config.lights[0].backend = seat_aoi::HardwareBackend::SerialAscii;
   config.frame_slot_size = 64 * 1024 * 1024;
@@ -1023,6 +1027,23 @@ bool test_robot_flyshot_production_template_rejects_todo_placeholders() {
                       error.find("占位") != std::string::npos;
   if (!passed) {
     std::cerr << "robot flyshot production template rejection did not mention placeholder: "
+              << error << "\n";
+  }
+  return passed;
+}
+
+bool test_robot_flyshot_rejects_shared_light_parallel_schedule() {
+  auto config = make_filled_production_runtime_config();
+  config.capture_mode = seat_aoi::CaptureMode::RobotFlyshot;
+  config.capture_schedule = seat_aoi::CaptureSchedule::SharedLightParallel;
+  config.capture_views = {
+      seat_aoi::RuntimeCaptureViewConfig{0, "T1_BACKREST", 0, "TOP_BACK", "calib/top_back_production_v1"},
+  };
+  std::string error;
+  const bool ok = seat_aoi::validate_station_runtime_config(config, &error);
+  const bool passed = !ok && error.find("shared_light_parallel") != std::string::npos;
+  if (!passed) {
+    std::cerr << "robot_flyshot shared_light_parallel schedule was not rejected: "
               << error << "\n";
   }
   return passed;
@@ -1456,6 +1477,9 @@ int main() {
     return 1;
   }
   if (!test_robot_flyshot_production_template_rejects_todo_placeholders()) {
+    return 1;
+  }
+  if (!test_robot_flyshot_rejects_shared_light_parallel_schedule()) {
     return 1;
   }
   if (!test_strobe_width_larger_than_exposure_rejected()) {

@@ -268,6 +268,13 @@ signal.trigger_queue_path=COM4,9600,1,500,500,50
 | 固定机位多光源 | `capture_mode=fixed_camera` | 每个 `camera.<N>` 自动生成一个检测视角，`pose_id` 默认等于 `camera_id` | `config/station_runtime.example.conf`、`config/station_runtime.lab_manual.example.conf`、`config/station_runtime.production.example.conf` |
 | 机器人飞拍多光源 | `capture_mode=robot_flyshot` | 每个 `pose.<N>` 是一个检测视角，可共享同一末端相机 `EYE_IN_HAND` | `config/station_runtime.robot_flyshot.example.conf`、`config/station_runtime.robot_flyshot.production.example.conf` |
 
+固定机位还可通过 `capture_schedule` 选择采集调度：
+
+| 调度 | 配置值 | 行为 |
+|------|--------|------|
+| 视角串行 TDM | `view_serial_tdm` | 当前视角完成全部 `light_order` 后再切换下一视角，兼容旧配置。 |
+| 共享光源并行 | `shared_light_parallel` | 每一路共享光源频闪前先 arm 所有固定机位相机，然后触发一次光源并分别收图；发布给 Python 的帧顺序仍保持“当前视角全光源→下一视角”。 |
+
 机器人飞拍模式会在采集每个 pose 前调用 `RobotClient::wait_pose_ready()`，校验 READY/FAULT/SHOT_ID，并把 `pose_id`、`shot_id`、机器人时间戳和 TCP 位姿写入 `LightFrameMeta`。任何机器人未到位、FAULT、触发错序或超时都返回 `RobotFault`，不会输出 `OK`。
 
 固定机位模式不会调用 `RobotClient`，采集器会为每个固定机位填充确定性的中性 pose 状态：`ready=true`、`fault=false`、`shot_id=trigger_id`、机器人时间戳和 TCP/RPY 为 0。这样固定机位链路不会因为未配置机器人 backend 被误阻断。
@@ -525,7 +532,7 @@ cp config/station_runtime.production.example.conf config/station_runtime.product
 
 该模板的 `recipe_id` 已对齐 Python 固定机位生产配方 `seat_a_black_leather_production_v1`。模型补齐后，Python detector 会按该配方启用 ONNX ROI、ECC、监督 ONNX、WideResNet50/PCA/PatchCore/FAISS safety net；相机 `calibration_id` 必须和 Python 标定文件保持一致。
 
-当前固定机位参考模拟配置使用 4 路光源并对齐默认 Python 配方；`tools/run_simulated_ipc.py` 默认会把 `config/station_runtime.example.conf` 同时传给 C++ 和 Python。固定机位生产模板按现场已确认硬件预置：海康 MV-CH120-20GC × 2，4096 x 3072，Hikrobot MVS backend；镜头 MVL-KF0814M-12MPE，8mm F1.4，1.1"，C 接口；频闪控制器 FL-ACDH-20048-4，4 通道（当前使用通道 1/2/3）。双相机、Mono8、3 光源图像包约 72 MB，模板保留 `frame_slot_size=134217728`（128 MB）；如果后续增加光源或分辨率变更，应重新计算并同步 Python 共享内存配置。
+当前固定机位参考模拟配置使用 4 路光源并对齐默认 Python 配方；`tools/run_simulated_ipc.py` 默认会把 `config/station_runtime.example.conf` 同时传给 C++ 和 Python。固定机位生产模板按现场已确认硬件预置：海康 MV-CH120-20GC × 2，4096 x 3072，Hikrobot MVS backend；镜头 MVL-KF0814M-12MPE，8mm F1.4，1.1"，C 接口；频闪控制器 FL-ACDH-20048-4，4 通道（当前使用通道 1/2/3）。生产模板启用 `capture_schedule=shared_light_parallel`，每路共享光源频闪时两个机位同步采图；双相机、Mono8、3 光源图像包约 72 MB，模板保留 `frame_slot_size=134217728`（128 MB）。如果后续增加光源或分辨率变更，应重新计算并同步 Python 共享内存配置。
 
 当前产线固定为 `light_order=1,2,3`，Python 固定机位生产配方 `seat_a_black_leather_production_v1` 已同步为 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 三个必需光源。若未来补第 4 路 `HIGH_RIGHT`，必须同时更新 C++ 配置、Python 生产配方、模型输入通道、训练资产和测试。
 
@@ -547,7 +554,7 @@ cp config/station_runtime.robot_flyshot.production.example.conf `
 
 新增生产校验要点：
 
-- C++ 主控固定采用视角级串行 TDM 采集路径，不再支持通过运行配置覆盖采集策略；配置文件中出现 `acquisition_strategy` 会被拒绝。
+- `capture_schedule=shared_light_parallel` 仅支持 `capture_mode=fixed_camera`，且同一相机不能在多个视角中被同一次共享光源触发复用；机器人飞拍必须保持 pose 级串行。
 - `capture_mode=fixed_camera` 时检测视角默认由 `camera.<N>` 自动生成；`capture_mode=robot_flyshot` 时必须显式配置 `pose.<N>.*` 采集计划。
 - 机器人飞拍模式必须配置非 simulated 的 `robot.backend`、Robot READY/FAULT/START 点位以及每个 pose 的 `shot_id_source`、`photo_trigger_input` 和标定位姿信息。
 - 生产模式必须使用相机触发线、频闪控制器同步输出或等价硬触发同步；当前 FL-ACDH 方案为控制器 F 口输出到相机 `Line0`，相机 `Line1` ExposureStartActive 保留调试。
@@ -625,15 +632,14 @@ cp config/station_runtime.robot_flyshot.production.example.conf `
 
 ## 频闪时序控制
 
-核心逻辑在 `src/control/frame_assembler.cpp` 的 `acquire_bundles()` 方法中，采用 **视角级时分频闪（TDM）方案："逐检测视角串行、逐光源串行"**。
+核心逻辑在 `src/control/frame_assembler.cpp` 的 `acquire_bundles()` 方法中。`capture_schedule=view_serial_tdm` 采用“逐检测视角串行、逐光源串行”；`capture_schedule=shared_light_parallel` 采用“逐共享光源串行、同光源下多固定机位同步采图”。
 
 ### 设计原则
 
 ```
-实际产线约束：每个检测视角独立完成全部光源频闪序列，视角之间串行执行。
 固定机位模式下，检测视角等同于相机机位；机器人飞拍模式下，检测视角等同于机器人 pose。
-即：视角A 依次完成 [光源1→光源2→光源3→光源4] 全部拍摄后，视角B 才开始。
-这是硬规则，不是性能优化选项；多视角并行频闪会造成光源互相污染，当前实现不开放外部采集策略配置，并通过采集包校验拒绝偏离串行 TDM 的路径。
+共享光源硬件接线允许同一路光源频闪同时照亮两个固定机位时，可使用 shared_light_parallel 降低节拍：光源1触发一次，TOP_BACK 和 TOP_CUSHION 同时曝光；光源2/3 同理。
+机器人飞拍和同一相机多 pose 场景不能使用共享光源并行，因为同一相机无法在同一光源触发中同时采多个 pose。
 ```
 
 ### 源码入口
@@ -671,22 +677,23 @@ build_capture_plan(&capture_plan, error);
 
 `capture_mode=fixed_camera` 且未显式配置 `pose.<N>` 时，会按 `camera.<N>` 自动生成视角；`capture_mode=robot_flyshot` 必须配置 `pose.<N>`，每个 pose 可以引用同一个末端相机或不同相机。
 
-**Step 3 — 外层循环：逐视角串行**
+**Step 3 — 选择采集调度**
 
 ```cpp
-for (const auto& view : capture_plan) {
-    auto& camera = *camera_for_index(view.camera_index);
-    wait_robot_pose_ready(trigger, view, &pose_status, error);
-    // 当前视角完成全部光源序列后，才进入下一个视角
+if (config_.capture_schedule == CaptureSchedule::SharedLightParallel) {
+    acquire_shared_light_parallel_frames(...);
+} else {
+    acquire_view_serial_tdm_frames(...);
+}
 ```
 
-**Step 4 — 每个视角重新 prepare_sequence**
+**Step 4 — prepare_sequence**
 
 ```cpp
     light_controller_.prepare_sequence(sequence, trigger.trigger_id, ...);
 ```
 
-**Step 5 — 内层循环：逐光源串行**
+**Step 5A — 视角串行 TDM**
 
 ```cpp
     for (std::uint32_t light_seq_index = 0;
@@ -694,6 +701,22 @@ for (const auto& view : capture_plan) {
          ++light_seq_index) {
         const auto light_param = sequence.channels[light_seq_index];
         // 当前光源频闪 → 当前视角相机拍摄 → 下一个光源
+    }
+}
+```
+
+**Step 5B — 共享光源并行**
+
+```cpp
+for (std::uint32_t light_seq_index = 0;
+     light_seq_index < sequence.channels.size();
+     ++light_seq_index) {
+    for (const auto& view : capture_plan) {
+        camera_for_index(view.camera_index)->arm(trigger_id, light_param, ...);
+    }
+    light_controller.trigger_channel(light_param, trigger_id, ...);
+    for (const auto& view : capture_plan) {
+        camera_for_index(view.camera_index)->wait_frame(...);
     }
 }
 ```
@@ -721,7 +744,7 @@ C++ 程序 (单视角单光源, FL-ACDH 硬触发)
   └──⑤──→ 下一个光源 或下一个视角
 ```
 
-### 完整时序图（时分频闪）
+### 完整时序图
 
 ```
 假设: 2个检测视角 (A, B), light_order = [1, 2, 3]
@@ -741,6 +764,21 @@ time ─────────────────────────
 最终产出: 2视角 × 3光源 = 6 张图像 → SeatImageBundle → FrameRingBuffer
 ```
 
+生产固定机位共享光源并行：
+
+```text
+假设: 2个检测视角 (A, B), light_order = [1, 2, 3]
+
+time ────────────────────────────────────────────────────────────→
+
+  Light 1: Cam A arm + Cam B arm → Light 1 trigger → Cam A/B 取图 → post_delay
+  Light 2: Cam A arm + Cam B arm → Light 2 trigger → Cam A/B 取图 → post_delay
+  Light 3: Cam A arm + Cam B arm → Light 3 trigger → Cam A/B 取图 → post_delay
+
+最终产出仍是: 2视角 × 3光源 = 6 张图像 → SeatImageBundle → FrameRingBuffer
+发布给 Python 的帧顺序仍为“视角A全光源→视角B全光源”。
+```
+
 ### 实际运行日志
 
 ```
@@ -754,9 +792,9 @@ time ─────────────────────────
 
 | 特性 | 说明 |
 |------|------|
-| **逐视角串行** | 外层循环按 capture plan 串行；固定机位模式下视角等同于 `camera_id`，机器人飞拍模式下视角等同于 `pose_id` |
-| **逐光源串行** | 内层循环按 light_seq_index 串行，一次只有一个光源频闪 |
-| **单视角采集** | 每次频闪仅当前视角对应相机拍摄，不再使用 `std::async` 并行 |
+| **可配置调度** | `view_serial_tdm` 保持旧的视角串行；`shared_light_parallel` 用于固定双机位共享光源同步采图 |
+| **逐光源串行** | 无论哪种调度，一次只触发一个 `light_seq_index`，避免不同光源互相污染 |
+| **同光源多机位采图** | `shared_light_parallel` 下同一路光源触发前 arm 所有固定机位相机，触发一次后分别收图 |
 | **采集包完整性校验** | 发布共享内存前校验 `frame_count == view_count x light_count`，并确认帧顺序为“当前视角全光源→下一视角” |
 | **每视角重新 prepare** | 切换视角时重新调用 `prepare_sequence()`，确保光源状态正确 |
 | **Arm → 触发 → 确认** | 三阶段握手机制，模拟真实硬件的 GPIO 时序 |

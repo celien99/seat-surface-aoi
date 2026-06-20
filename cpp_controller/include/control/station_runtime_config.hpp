@@ -15,6 +15,11 @@ enum class CaptureMode : std::uint32_t {
   RobotFlyshot = 2,
 };
 
+enum class CaptureSchedule : std::uint32_t {
+  ViewSerialTdm = 1,
+  SharedLightParallel = 2,
+};
+
 struct RuntimeCaptureViewConfig {
   std::uint32_t pose_index = 0;
   std::string pose_id = "TOP_BACK";
@@ -131,6 +136,7 @@ struct StationRuntimeConfig {
   std::string recipe_id = "seat_a_black_leather_v1";
   std::vector<std::uint32_t> light_order = {1, 2, 3, 4};
   CaptureMode capture_mode = CaptureMode::FixedCamera;
+  CaptureSchedule capture_schedule = CaptureSchedule::ViewSerialTdm;
   std::string trace_root = "trace";
   std::vector<RuntimeCameraConfig> cameras = {
       RuntimeCameraConfig{0, "TOP_BACK", "", "calib/simulated_v1", 64, 48, 1, "Mono8", "", "", 8, false},
@@ -156,6 +162,10 @@ const char* capture_mode_name(CaptureMode mode);
 bool parse_capture_mode(const std::string& value,
                         CaptureMode* out_mode,
                         std::string* error_message);
+const char* capture_schedule_name(CaptureSchedule schedule);
+bool parse_capture_schedule(const std::string& value,
+                            CaptureSchedule* out_schedule,
+                            std::string* error_message);
 bool load_station_runtime_config(const std::string& path,
                                  StationRuntimeConfig* out_config,
                                  std::string* error_message);
