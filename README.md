@@ -344,6 +344,8 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 C++ 生产模板已把 `recipe_id` 对齐到上述生产配方；上线前还必须用现场标定替换 `python_detector/config/calibration/*/*production*.yaml` 和 `python_detector/config/roi/production_full_roi.yaml` 的模板 ROI/矩阵。
 
+Python 配方已收敛为 `camera_defaults + cameras` 两层：`camera_defaults` 保存同一 SKU 共用的模型、ROI 模板和光源策略，`cameras` 只保留每个机位或机器人 pose 的差异字段，例如 `calibration_id`。像素尺寸、图像尺寸和多光源对齐矩阵继续归标定文件维护，避免配方与标定重复配置。
+
 当前固定机位硬件基线已记录到 `cpp_controller/config/station_runtime.production.example.conf` 和已生成的 `cpp_controller/config/station_runtime.production.conf`：海康 MV-CH120-20GC 工业相机 2 台，4096 x 3072，Hikrobot MVS backend；MVL-KF0814M-12MPE FA 镜头，8mm F1.4，1.1"，C 接口；FL-ACDH-20048-4 四通道频闪控制器（RS232 serial_ascii backend，支持多控制器扩展）；当前产线接入 3 组共享光源，按 `light_order=1,2,3` 与 `capture_schedule=shared_light_parallel` 采集：光源 1 频闪时两个机位同时拍摄，光源 2/3 同理，最终仍向 Python 发布 2 视角 x 3 光源的 6 帧图像包。Python 固定机位生产配方同步要求 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 三个必需光源，模型输入通道为 `ch0_diffuse/ch1_polar_diffuse/ch2_high_left`。
 
 **已实现的真实硬件后端：**

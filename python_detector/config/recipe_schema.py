@@ -89,6 +89,19 @@ class CameraRecipe:
 
 
 @dataclass(frozen=True)
+class CameraDefaults:
+    model_key: str = "default"
+    safety_net_model_key: str | None = None
+    roi_template: str = "python_detector/config/roi/default_roi.yaml"
+    calibration_id: str = "calib/simulated_v1"
+    base_light_id: str = "POLAR_DIFFUSE"
+    light_order: tuple[str, ...] = ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")
+    roi_models: dict[str, str] = field(default_factory=dict)
+    roi_safety_net_models: dict[str, str] = field(default_factory=dict)
+    pixel_size_mm: float | None = None
+
+
+@dataclass(frozen=True)
 class ThresholdConfig:
     ng_score: float = 0.35
     recheck_score: float = 0.20
@@ -150,6 +163,7 @@ class Recipe:
     sku: str
     light_order: tuple[str, ...] = ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")
     v4_lights: V4LightConfig = field(default_factory=V4LightConfig)
+    camera_defaults: CameraDefaults = field(default_factory=CameraDefaults)
     cameras: tuple[CameraRecipe, ...] = field(default_factory=tuple)
     quality: QualityConfig = field(default_factory=QualityConfig)
     roi_locator: RoiLocatorConfig = field(default_factory=RoiLocatorConfig)
@@ -276,7 +290,12 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
     roi_locator = _roi_locator_from_dict(_dict(data.get("roi_locator", {}), "roi_locator"))
     registration = _registration_from_dict(_dict(data.get("registration", {}), "registration"))
     fusion = _fusion_from_dict(_dict(data.get("fusion", {}), "fusion"))
-    cameras = _cameras_from_dict(data.get("cameras", {}), light_order, registration.base_light_id)
+    camera_defaults = _camera_defaults_from_dict(
+        _dict(data.get("camera_defaults", {}), "camera_defaults"),
+        light_order,
+        registration.base_light_id,
+    )
+    cameras = _cameras_from_dict(data.get("cameras", {}), camera_defaults)
     thresholds = _thresholds_from_dict(_dict(data.get("thresholds", {}), "thresholds"))
     models = _models_from_dict(_dict(data.get("models", {"default": {"backend": "fake"}}), "models"))
     trace = _trace_from_dict(_dict(data.get("trace", {}), "trace"))
@@ -295,6 +314,7 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
         sku=sku,
         light_order=light_order,
         v4_lights=v4_lights,
+        camera_defaults=camera_defaults,
         cameras=cameras,
         quality=quality,
         roi_locator=roi_locator,
@@ -416,7 +436,39 @@ def _fusion_from_dict(data: dict[str, Any]) -> FusionConfig:
     )
 
 
-def _cameras_from_dict(data: Any, default_light_order: tuple[str, ...], default_base_light_id: str) -> tuple[CameraRecipe, ...]:
+def _camera_defaults_from_dict(
+    data: dict[str, Any],
+    default_light_order: tuple[str, ...],
+    default_base_light_id: str,
+) -> CameraDefaults:
+    light_order = _str_tuple(data.get("light_order", default_light_order), "camera_defaults.light_order")
+    _validate_lights(light_order, ())
+    return CameraDefaults(
+        model_key=_str(data.get("model_key", "default"), "camera_defaults.model_key"),
+        safety_net_model_key=_optional_str(
+            data.get("safety_net_model_key"),
+            "camera_defaults.safety_net_model_key",
+        ),
+        roi_template=_str(
+            data.get("roi_template", "python_detector/config/roi/default_roi.yaml"),
+            "camera_defaults.roi_template",
+        ),
+        calibration_id=_str(data.get("calibration_id", "calib/simulated_v1"), "camera_defaults.calibration_id"),
+        base_light_id=_str(data.get("base_light_id", default_base_light_id), "camera_defaults.base_light_id"),
+        light_order=light_order,
+        roi_models={
+            str(k): _str(v, f"camera_defaults.roi_models.{k}")
+            for k, v in _dict(data.get("roi_models", {}), "camera_defaults.roi_models").items()
+        },
+        roi_safety_net_models={
+            str(k): _str(v, f"camera_defaults.roi_safety_net_models.{k}")
+            for k, v in _dict(data.get("roi_safety_net_models", {}), "camera_defaults.roi_safety_net_models").items()
+        },
+        pixel_size_mm=_optional_float(data.get("pixel_size_mm"), "camera_defaults.pixel_size_mm"),
+    )
+
+
+def _cameras_from_dict(data: Any, camera_defaults: CameraDefaults) -> tuple[CameraRecipe, ...]:
     if isinstance(data, list):
         items = []
         for index, item in enumerate(data):
@@ -435,25 +487,49 @@ def _cameras_from_dict(data: Any, default_light_order: tuple[str, ...], default_
         enabled = bool(raw.get("enabled", True))
         if not enabled:
             continue
-        light_order = _str_tuple(raw.get("light_order", default_light_order), f"cameras.{camera_id}.light_order")
+        light_order = _str_tuple(raw.get("light_order", camera_defaults.light_order), f"cameras.{camera_id}.light_order")
         _validate_lights(light_order, ())
         cameras.append(
             CameraRecipe(
                 camera_id=_str(raw.get("camera_id", camera_id), f"cameras.{camera_id}.camera_id"),
                 pose_id=_str(raw.get("pose_id", raw.get("camera_id", camera_id)), f"cameras.{camera_id}.pose_id"),
                 enabled=enabled,
-                model_key=_str(raw.get("model_key", "default"), f"cameras.{camera_id}.model_key"),
-                safety_net_model_key=_optional_str(raw.get("safety_net_model_key"), f"cameras.{camera_id}.safety_net_model_key"),
-                roi_template=_str(raw.get("roi_template", "python_detector/config/roi/default_roi.yaml"), f"cameras.{camera_id}.roi_template"),
-                calibration_id=_str(raw.get("calibration_id", "calib/simulated_v1"), f"cameras.{camera_id}.calibration_id"),
-                base_light_id=_str(raw.get("base_light_id", default_base_light_id), f"cameras.{camera_id}.base_light_id"),
+                model_key=_str(raw.get("model_key", camera_defaults.model_key), f"cameras.{camera_id}.model_key"),
+                safety_net_model_key=_optional_str(
+                    raw.get("safety_net_model_key", camera_defaults.safety_net_model_key),
+                    f"cameras.{camera_id}.safety_net_model_key",
+                ),
+                roi_template=_str(
+                    raw.get("roi_template", camera_defaults.roi_template),
+                    f"cameras.{camera_id}.roi_template",
+                ),
+                calibration_id=_str(
+                    raw.get("calibration_id", camera_defaults.calibration_id),
+                    f"cameras.{camera_id}.calibration_id",
+                ),
+                base_light_id=_str(
+                    raw.get("base_light_id", camera_defaults.base_light_id),
+                    f"cameras.{camera_id}.base_light_id",
+                ),
                 light_order=light_order,
-                roi_models={str(k): _str(v, f"cameras.{camera_id}.roi_models.{k}") for k, v in _dict(raw.get("roi_models", {}), f"cameras.{camera_id}.roi_models").items()},
+                roi_models={
+                    str(k): _str(v, f"cameras.{camera_id}.roi_models.{k}")
+                    for k, v in _dict(
+                        raw.get("roi_models", camera_defaults.roi_models),
+                        f"cameras.{camera_id}.roi_models",
+                    ).items()
+                },
                 roi_safety_net_models={
                     str(k): _str(v, f"cameras.{camera_id}.roi_safety_net_models.{k}")
-                    for k, v in _dict(raw.get("roi_safety_net_models", {}), f"cameras.{camera_id}.roi_safety_net_models").items()
+                    for k, v in _dict(
+                        raw.get("roi_safety_net_models", camera_defaults.roi_safety_net_models),
+                        f"cameras.{camera_id}.roi_safety_net_models",
+                    ).items()
                 },
-                pixel_size_mm=_optional_float(raw.get("pixel_size_mm"), f"cameras.{camera_id}.pixel_size_mm"),
+                pixel_size_mm=_optional_float(
+                    raw.get("pixel_size_mm", camera_defaults.pixel_size_mm),
+                    f"cameras.{camera_id}.pixel_size_mm",
+                ),
             )
         )
     return tuple(cameras)

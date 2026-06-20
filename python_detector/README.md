@@ -217,7 +217,9 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 `RecipeManager` 默认从包内 `python_detector/config` 加载 YAML，不依赖当前工作目录。`CalibrationManager` 通过 `paths.resolve_package_path()` 同时兼容包内路径和历史仓库相对路径，例如 `python_detector/config/roi/default_roi.yaml`。
 
-配方中的 `cameras` 实际表示检测视角配置。固定机位模式下 `pose_id` 默认等于 `camera_id`；如果某个固定机位只配置默认视角，Python 检测层允许同一 `camera_id` 下动态 `pose_id` 的多张照片复用该机位的标定、ROI 和模型配置，并在特征、结果和 trace 中继续保留原始 `pose_id`。机器人飞拍模式下允许多个视角共享同一 `camera_id`，并用显式 `pose_id` 区分轨迹点、ROI、标定和模型配置，例如 `EYE_IN_HAND/T1_BACKREST`、`EYE_IN_HAND/T2_CUSHION`；这类显式 pose 配方不会把未知 `pose_id` fallback 到第一条配置。`cameras` 支持字典和列表两种写法；列表写法会按条目保序解析，不会再把相同 `camera_id` 的不同 `pose_id` 折叠覆盖，重复 `(camera_id, pose_id)` 会报配方校验错误。
+配方中的 `camera_defaults` 用于声明同一 SKU 下各检测视角共享的模型、ROI 模板、光源顺序、基准光源和 ROI 级模型映射；`cameras` 实际表示检测视角配置，只需要写差异字段，例如 `camera_id`、`pose_id` 和 `calibration_id`。固定机位模式下 `pose_id` 默认等于 `camera_id`；如果某个固定机位只配置默认视角，Python 检测层允许同一 `camera_id` 下动态 `pose_id` 的多张照片复用该机位的标定、ROI 和模型配置，并在特征、结果和 trace 中继续保留原始 `pose_id`。机器人飞拍模式下允许多个视角共享同一 `camera_id`，并用显式 `pose_id` 区分轨迹点、ROI、标定和模型配置，例如 `EYE_IN_HAND/T1_BACKREST`、`EYE_IN_HAND/T2_CUSHION`；这类显式 pose 配方不会把未知 `pose_id` fallback 到第一条配置。`cameras` 支持字典和列表两种写法；列表写法会按条目保序解析，不会再把相同 `camera_id` 的不同 `pose_id` 折叠覆盖，重复 `(camera_id, pose_id)` 会报配方校验错误。
+
+相机条目仍可覆盖 `camera_defaults` 中的任一字段，兼容旧配方；但内置配方只在 `cameras` 中保留真正不同的标定或 pose。像素尺寸、图像尺寸和多光源几何对齐属于标定事实，优先放在 `calibration/*.yaml` 中维护，不在配方里重复写 `pixel_size_mm`。
 
 模型补齐后，固定机位生产任务应使用 `recipe_id=seat_a_black_leather_production_v1`，机器人飞拍生产任务应使用 `recipe_id=seat_a_robot_flyshot_production_v1`。这两个配方会启用 `onnx_yolo_seg` Dome ROI segmentation、`ecc` 多光源配准、监督 ONNX 主检测、WideResNet50 embedding、PCA、PatchCore KNN 和可选 FAISS safety net；仓库内生产标定和 `production_full_roi.yaml` 是可校验模板，其中 ROI `polygon_xy` 作为安全边界和 `output_size` 约束，真实 ROI polygon 由 segmentation mask 在线生成。
 
@@ -227,6 +229,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 - `light_order` 与 `quality.required_lights` 一致性。
 - V4 语义光源到真实光源的映射。
+- `camera_defaults` 与每个 `cameras` 视角合并后的模型、ROI 模板、标定和光源字段合法性。
 - ROI 定位、配准基准光源和 fallback 光源合法性。
 - 模型引用存在，且 primary / safety_net 角色不能混用。
 - 模型输入通道、类别列表、阈值、bbox 格式和输出 decode 规则。
