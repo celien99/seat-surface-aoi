@@ -420,6 +420,7 @@ cp "${ROOT_DIR}/tools/validate_model_assets.py" "${STAGE_DIR}/tools/"
 cp "${ROOT_DIR}/tools/validate_architecture_readiness.py" "${STAGE_DIR}/tools/"
 cp "${ROOT_DIR}/tools/validate_deployment_preflight.py" "${STAGE_DIR}/tools/"
 cp "${ROOT_DIR}/tools/package_release.sh" "${STAGE_DIR}/tools/"
+cp "${ROOT_DIR}/tools/package_python_offline_deps.py" "${STAGE_DIR}/tools/"
 chmod +x "${STAGE_DIR}/tools/"*.sh
 
 cp "${ROOT_DIR}/README.md" "${STAGE_DIR}/README.md"

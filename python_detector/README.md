@@ -58,7 +58,8 @@ uv run python -m python_detector.detector_main \
 - `display_app/`：PySide6/QML 展示前端，读取 detector display 通道；运行前需要安装 `display` extra。
 - `training_tools/`：离线回放、benchmark、embedding、PCA/PatchCore/FAISS 资产生成工具。
 - `model/`：默认集成根目录 `model/`；生产打包前必须先把真实模型产物替换到该目录。
-- `pyproject.toml` 和 `uv.lock`：用于在目标环境恢复 Python detector 依赖。
+- `pyproject.toml` 和 `uv.lock`：用于在有网目标环境恢复 Python detector 依赖。
+- `tools/package_python_offline_deps.py`：用于工控机无公网时生成 wheelhouse、项目 wheel 和离线安装脚本。
 
 参考联调包可以生成但不代表生产模型就绪：
 
@@ -72,6 +73,22 @@ bash tools/package_release.sh
 bash tools/package_release.sh
 ```
 
+工控机无公网时，需要在有网且与工控机平台一致的机器上额外生成 Python 离线依赖包：
+
+```powershell
+uv run python -m tools.package_python_offline_deps --extra display --extra onnx --extra faiss
+```
+
+把项目部署包和 `dist/*python-offline-deps*.zip` 一起拷到工控机。解包后在项目目录执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\offline_python_deps\install_offline.ps1 -ProjectRoot .
+.\.venv\Scripts\python.exe -m tools.validate_protocol
+.\.venv\Scripts\python.exe -m tools.validate_deployment_preflight
+```
+
+离线依赖包通过本地 `wheelhouse/` 在工控机重新创建 `.venv`，不要复制开发机现有 `.venv/`。如果现场只跑 detector，可去掉不需要的 `--extra`；如果需要训练工具，单独生成并验证包含 `--group training` 的离线包。
+
 解包后可运行：
 
 ```bash
@@ -79,7 +96,7 @@ bash validate_package.sh
 bash run_packaged_simulated_ipc.sh
 ```
 
-打包不会包含现场 `trace/`、训练数据集、日志、`.venv` 或本地缓存。Python detector 仍只负责检测链路，不控制 PLC、相机、机器人或频闪。
+打包不会包含现场 `trace/`、训练数据集、日志、`.venv`、Python wheel 缓存或本地缓存。Python detector 仍只负责检测链路，不控制 PLC、相机、机器人或频闪。
 
 ## 文件结构
 

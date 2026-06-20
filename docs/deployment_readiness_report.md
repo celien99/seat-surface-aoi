@@ -131,8 +131,9 @@
 | Visual Studio 2019+ Build Tools | C++17 MSVC 编译器 | VS Installer |
 | CMake ≥ 3.16 | 构建系统 | cmake.org |
 | 海康 MVS SDK | 相机驱动 + 开发库 | 海康官网下载 |
-| Python 3.10+ | 检测进程 | python.org |
-| uv | Python 包管理器 | `pip install uv` |
+| Python 3.10+ | 检测进程 | python.org；无网现场需提前准备离线安装包 |
+| uv | 有网开发机依赖锁定和打包工具 | 工控机无网时可不现场联网安装，随离线工具包或安装介质交付 |
+| Python 离线依赖包 | detector/display/ONNX/FAISS wheelhouse | 有网同平台机器执行 `uv run python -m tools.package_python_offline_deps --extra display --extra onnx --extra faiss` |
 
 ### C++ 构建（启用海康 MVS）
 
@@ -147,9 +148,20 @@ cmake --build build --config Release
 
 ### Python 环境初始化
 
+有网环境可以直接按锁文件恢复：
+
 ```powershell
 uv sync
 ```
+
+工控机无公网时，先解压项目部署包和 Python 离线依赖包，再在项目目录执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\offline_python_deps\install_offline.ps1 -ProjectRoot .
+.\.venv\Scripts\python.exe -m tools.validate_deployment_preflight
+```
+
+不要把开发机当前 `.venv/` 直接复制到工控机；依赖应通过离线 `wheelhouse/` 在目标机重建。
 
 ---
 

@@ -44,6 +44,7 @@ def validate_deployment_preflight(*, strict_production: bool = False) -> list[Pr
     items.extend(_check_windows_shared_memory_mapping())
     items.extend(_check_cross_platform_ipc_entry())
     items.extend(_check_package_handoff_entry())
+    items.extend(_check_python_offline_deps_entry())
     items.extend(_check_lab_manual_entry())
     items.extend(_check_production_runtime_configs(strict_production))
     items.extend(_check_production_light_alignment(strict_production))
@@ -194,6 +195,7 @@ def _check_package_handoff_entry() -> list[PreflightItem]:
         "run_packaged_simulated_ipc.sh",
         "validate_architecture_readiness.py",
         "validate_deployment_preflight.py",
+        "package_python_offline_deps.py",
         "run_simulated_ipc.py",
     ]
     missing = [token for token in required_tokens if token not in text]
@@ -217,6 +219,43 @@ def _check_package_handoff_entry() -> list[PreflightItem]:
             evidence="package_release.sh 会写入 validate_package.sh、run_packaged_simulated_ipc.sh 并复制预检工具。",
             owner="本仓库工程实现",
             next_step="打包后在目标机先运行 bash validate_package.sh 和预检命令。",
+        )
+    ]
+
+
+def _check_python_offline_deps_entry() -> list[PreflightItem]:
+    offline_script = REPO_ROOT / "tools/package_python_offline_deps.py"
+    text = _read_text(offline_script)
+    required_tokens = [
+        "wheelhouse",
+        "install_offline.ps1",
+        "install_offline.sh",
+        "pip",
+        "download",
+        "--no-index",
+        "OFFLINE_DEPS_MANIFEST.json",
+    ]
+    missing = [token for token in required_tokens if token not in text]
+    if missing:
+        return [
+            PreflightItem(
+                status="BLOCKED",
+                category="Python 离线依赖包",
+                requirement="工控机无公网时必须能在开发机生成 Python wheelhouse，并在目标机离线重建 .venv。",
+                evidence=f"package_python_offline_deps.py 未覆盖: {missing}",
+                owner="本仓库工程实现",
+                next_step="补齐 Python 离线依赖打包脚本后重新运行预检。",
+                local_actionable=True,
+            )
+        ]
+    return [
+        PreflightItem(
+            status="OK",
+            category="Python 离线依赖包",
+            requirement="工控机无公网时可使用本地 wheelhouse 离线安装 Python detector/display 依赖。",
+            evidence="tools/package_python_offline_deps.py 会生成 wheelhouse、requirements、项目 wheel 和 Windows/bash 离线安装脚本。",
+            owner="本仓库工程实现",
+            next_step="在有网且与工控机平台一致的开发机运行 uv run python -m tools.package_python_offline_deps。",
         )
     ]
 

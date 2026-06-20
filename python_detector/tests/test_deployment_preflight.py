@@ -19,6 +19,7 @@ def test_deployment_preflight_handoff_has_no_local_blockers() -> None:
     assert any(item.category == "Windows 共享内存映射" and item.status == "OK" for item in items)
     assert any(item.category == "跨平台模拟 IPC 入口" and item.status == "OK" for item in items)
     assert any(item.category == "部署包交接入口" and item.status == "OK" for item in items)
+    assert any(item.category == "Python 离线依赖包" and item.status == "OK" for item in items)
 
 
 def test_deployment_preflight_strict_blocks_field_assets_and_configs() -> None:
@@ -36,3 +37,14 @@ def test_package_script_includes_deployment_preflight_tool() -> None:
 
     assert "validate_deployment_preflight.py" in text
     assert "tools.validate_deployment_preflight" in text
+    assert "package_python_offline_deps.py" in text
+
+
+def test_python_offline_dependency_packager_has_target_installers() -> None:
+    text = Path("tools/package_python_offline_deps.py").read_text(encoding="utf-8")
+
+    assert "wheelhouse" in text
+    assert "install_offline.ps1" in text
+    assert "install_offline.sh" in text
+    assert "--no-index" in text
+    assert "OFFLINE_DEPS_MANIFEST.json" in text

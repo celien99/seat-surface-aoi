@@ -172,6 +172,9 @@ uv run python -m tools.validate_model_assets --recipe seat_a_robot_flyshot_produ
 # 生成离线部署包，默认集成根目录 model/
 bash tools/package_release.sh
 
+# 工控机无公网时，在有网且平台一致的机器上生成 Python 离线依赖包
+uv run python -m tools.package_python_offline_deps --extra display --extra onnx --extra faiss
+
 # 架构就绪度检查
 uv run python -m tools.validate_architecture_readiness --scope reference
 uv run python -m tools.validate_architecture_readiness --scope production
@@ -239,7 +242,23 @@ bash tools/package_release.sh
 bash tools/package_release.sh
 ```
 
-脚本会生成 `dist/<package>.tar.gz` 和对应 `.sha256`，并默认集成根目录 `model/`。解包后可先运行 `bash validate_package.sh` 做协议和 IPC 基础校验；如需使用包内已构建的 C++ 产物跑模拟 IPC，可运行 `bash run_packaged_simulated_ipc.sh`。生产包不默认包含现场训练数据、trace、日志、`.venv` 或本地构建缓存。
+脚本会生成 `dist/<package>.tar.gz` 和对应 `.sha256`，并默认集成根目录 `model/`。解包后可先运行 `bash validate_package.sh` 做协议和 IPC 基础校验；如需使用包内已构建的 C++ 产物跑模拟 IPC，可运行 `bash run_packaged_simulated_ipc.sh`。生产包不默认包含现场训练数据、trace、日志、`.venv`、Python wheel 缓存或本地构建缓存。
+
+工控机无公网时，不要把当前开发机 `.venv/` 直接复制到现场。应在有网且与工控机 Windows、CPU 架构和 Python 主次版本一致的机器上生成 Python 离线依赖包：
+
+```powershell
+uv run python -m tools.package_python_offline_deps --extra display --extra onnx --extra faiss
+```
+
+该命令生成 `dist/<package>-python-offline-deps-*.zip`，其中包含 `wheelhouse/`、`requirements.txt`、当前项目 wheel、`install_offline.ps1` 和 `install_offline.sh`。在工控机上解压项目部署包和该依赖包后，于项目目录执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\offline_python_deps\install_offline.ps1 -ProjectRoot .
+.\.venv\Scripts\python.exe -m tools.validate_protocol
+.\.venv\Scripts\python.exe -m tools.validate_deployment_preflight
+```
+
+如果目标机只跑 detector 且不启用展示端、ONNX Runtime 或 FAISS，可按实际减少 `--extra`；如果目标机需要训练工具，不建议在工控机现场临时补装，应单独生成包含 `--group training` 的大体积离线包并先在同平台测试机验证。
 
 部署包和源码树都提供上机前预检入口：
 
@@ -248,7 +267,7 @@ uv run python -m tools.validate_deployment_preflight
 uv run python -m tools.validate_deployment_preflight --strict-production
 ```
 
-默认预检用于交接，验证当前仓库可实现的参考链路、Windows 共享内存映射、跨平台 IPC 入口、部署包入口和 PLC 前手动联调路径；真实模型资产和 MES/报警/监控协议会列为现场 ACTION。`--strict-production` 用于 Windows 工控机放行前，把固定双机位正式 `production.conf` 缺失、生产光源/配方不一致和真实模型资产缺失升级为阻塞项。
+默认预检用于交接，验证当前仓库可实现的参考链路、Windows 共享内存映射、跨平台 IPC 入口、部署包入口、Python 离线依赖包入口和 PLC 前手动联调路径；真实模型资产和 MES/报警/监控协议会列为现场 ACTION。`--strict-production` 用于 Windows 工控机放行前，把固定双机位正式 `production.conf` 缺失、生产光源/配方不一致和真实模型资产缺失升级为阻塞项。
 
 ## 在线链路
 
