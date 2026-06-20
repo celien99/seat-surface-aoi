@@ -32,10 +32,10 @@
 
 ## 常用验证命令
 
-```bash
+```powershell
 uv run pytest
 uv run python -m tools.validate_protocol
-bash tools/run_simulated_ipc.sh
+uv run python tools/run_simulated_ipc.py
 ```
 
 ## Git 提交规范 (Git Commit Guidelines)
@@ -70,4 +70,4 @@ bash tools/run_simulated_ipc.sh
 - `docs: 📝 补充 AGENTS.md 中的 Git 提交规范说明`
 - `chore: 🔧 升级 tailwindcss 依赖到最新版本`
 
-如果本机没有 `cmake`，`run_simulated_ipc.sh` 会自动回退到 `clang++` 编译 C++ 主控。
+如果本机没有 `cmake`，`run_simulated_ipc.py` 会自动回退到 `clang++` 编译 C++ 主控。

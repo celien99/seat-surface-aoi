@@ -33,11 +33,13 @@ def test_deployment_preflight_strict_blocks_field_assets_and_configs() -> None:
 
 
 def test_package_script_includes_deployment_preflight_tool() -> None:
-    text = Path("tools/package_release.sh").read_text(encoding="utf-8")
+    text = Path("tools/package_release.py").read_text(encoding="utf-8")
 
     assert "validate_deployment_preflight.py" in text
     assert "tools.validate_deployment_preflight" in text
     assert "package_python_offline_deps.py" in text
+    assert "validate_package.py" in text
+    assert "run_packaged_simulated_ipc.py" in text
 
 
 def test_python_offline_dependency_packager_has_target_installers() -> None:
@@ -45,6 +47,6 @@ def test_python_offline_dependency_packager_has_target_installers() -> None:
 
     assert "wheelhouse" in text
     assert "install_offline.ps1" in text
-    assert "install_offline.sh" in text
+    assert "install_offline." + "sh" not in text
     assert "--no-index" in text
     assert "OFFLINE_DEPS_MANIFEST.json" in text

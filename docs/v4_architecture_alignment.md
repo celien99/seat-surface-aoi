@@ -249,20 +249,20 @@
 
 ## 当前验证命令
 
-```bash
+```powershell
 uv run pytest
 uv run python -m tools.validate_protocol
 uv run python -m tools.validate_model_assets --recipe production_model_example
 uv run python -m tools.validate_architecture_readiness --scope reference
 uv run python -m tools.validate_deployment_preflight
-bash tools/run_simulated_ipc.sh
+uv run python tools/run_simulated_ipc.py
 ```
 
 默认模拟链路要求测试、协议校验、架构就绪度检查和模拟 IPC 通过；`validate_model_assets --recipe production_model_example` 在占位文件未替换时应失败，并列出需要替换的真实模型产物。
 
 上 Windows 工控机放行前再执行：
 
-```bash
+```powershell
 uv run python -m tools.validate_deployment_preflight --strict-production
 ```
 

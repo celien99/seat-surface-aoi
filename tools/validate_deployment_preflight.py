@@ -158,8 +158,7 @@ def _check_windows_shared_memory_mapping() -> list[PreflightItem]:
 
 def _check_cross_platform_ipc_entry() -> list[PreflightItem]:
     py_entry = REPO_ROOT / "tools/run_simulated_ipc.py"
-    sh_entry = REPO_ROOT / "tools/run_simulated_ipc.sh"
-    missing = [str(path.relative_to(REPO_ROOT)) for path in (py_entry, sh_entry) if not path.exists()]
+    missing = [str(py_entry.relative_to(REPO_ROOT))] if not py_entry.exists() else []
     py_text = _read_text(py_entry)
     if "--config" not in py_text or "EXE_SUFFIX" not in py_text or "detector_main" not in py_text:
         missing.append(str(py_entry.relative_to(REPO_ROOT)))
@@ -168,7 +167,7 @@ def _check_cross_platform_ipc_entry() -> list[PreflightItem]:
             PreflightItem(
                 status="BLOCKED",
                 category="跨平台模拟 IPC 入口",
-                requirement="工控机上机前必须有不依赖 bash 的 Python 模拟 IPC 入口，并能同步 C++/Python 配置。",
+                requirement="工控机上机前必须有 Windows/Python 模拟 IPC 入口，并能同步 C++/Python 配置。",
                 evidence=f"入口缺失或参数不完整: {missing}",
                 owner="本仓库工程实现",
                 next_step="修复 tools/run_simulated_ipc.py 后重新运行模拟 IPC。",
@@ -188,11 +187,11 @@ def _check_cross_platform_ipc_entry() -> list[PreflightItem]:
 
 
 def _check_package_handoff_entry() -> list[PreflightItem]:
-    package_script = REPO_ROOT / "tools/package_release.sh"
+    package_script = REPO_ROOT / "tools/package_release.py"
     text = _read_text(package_script)
     required_tokens = [
-        "validate_package.sh",
-        "run_packaged_simulated_ipc.sh",
+        "validate_package.py",
+        "run_packaged_simulated_ipc.py",
         "validate_architecture_readiness.py",
         "validate_deployment_preflight.py",
         "package_python_offline_deps.py",
@@ -205,7 +204,7 @@ def _check_package_handoff_entry() -> list[PreflightItem]:
                 status="BLOCKED",
                 category="部署包交接入口",
                 requirement="离线部署包必须包含基础校验、模拟 IPC 和上机预检入口。",
-                evidence=f"package_release.sh 未覆盖: {missing}",
+                evidence=f"package_release.py 未覆盖: {missing}",
                 owner="本仓库工程实现",
                 next_step="更新打包脚本，确保工控机解包后可以直接做协议、IPC 和预检。",
                 local_actionable=True,
@@ -216,9 +215,9 @@ def _check_package_handoff_entry() -> list[PreflightItem]:
             status="OK",
             category="部署包交接入口",
             requirement="离线部署包带有协议校验、IPC 诊断、模拟 IPC 和上机预检。",
-            evidence="package_release.sh 会写入 validate_package.sh、run_packaged_simulated_ipc.sh 并复制预检工具。",
+            evidence="package_release.py 会写入 validate_package.py、run_packaged_simulated_ipc.py 并复制预检工具。",
             owner="本仓库工程实现",
-            next_step="打包后在目标机先运行 bash validate_package.sh 和预检命令。",
+            next_step="打包后在目标机先运行 uv run python validate_package.py 和预检命令。",
         )
     ]
 
@@ -229,7 +228,6 @@ def _check_python_offline_deps_entry() -> list[PreflightItem]:
     required_tokens = [
         "wheelhouse",
         "install_offline.ps1",
-        "install_offline.sh",
         "pip",
         "download",
         "--no-index",
@@ -253,7 +251,7 @@ def _check_python_offline_deps_entry() -> list[PreflightItem]:
             status="OK",
             category="Python 离线依赖包",
             requirement="工控机无公网时可使用本地 wheelhouse 离线安装 Python detector/display 依赖。",
-            evidence="tools/package_python_offline_deps.py 会生成 wheelhouse、requirements、项目 wheel 和 Windows/bash 离线安装脚本。",
+            evidence="tools/package_python_offline_deps.py 会生成 wheelhouse、requirements、项目 wheel 和 PowerShell 离线安装脚本。",
             owner="本仓库工程实现",
             next_step="在有网且与工控机平台一致的开发机运行 uv run python -m tools.package_python_offline_deps。",
         )

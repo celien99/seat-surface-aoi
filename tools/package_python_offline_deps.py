@@ -270,12 +270,6 @@ def _write_install_scripts(stage_dir: Path, python_version: str) -> None:
         encoding="utf-8-sig",
         newline="\n",
     )
-    bash_path = stage_dir / "install_offline.sh"
-    bash_path.write_text(_bash_installer(python_version), encoding="utf-8", newline="\n")
-    try:
-        bash_path.chmod(0o755)
-    except OSError:
-        pass
 
 
 def _powershell_installer(python_version: str) -> str:
@@ -350,55 +344,6 @@ Write-Host "Python offline environment created: $VenvPath"
     return template.replace("__PYTHON_VERSION__", python_version)
 
 
-def _bash_installer(python_version: str) -> str:
-    template = r'''#!/usr/bin/env bash
-set -euo pipefail
-
-DEPS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="${1:-$(pwd)}"
-VENV_NAME="${VENV_NAME:-.venv}"
-PYTHON_VERSION="${PYTHON_VERSION:-__PYTHON_VERSION__}"
-WHEELHOUSE="${DEPS_ROOT}/wheelhouse"
-REQUIREMENTS="${DEPS_ROOT}/requirements.txt"
-VENV_PATH="${PROJECT_ROOT}/${VENV_NAME}"
-
-[[ -d "${WHEELHOUSE}" ]] || { echo "缺少 wheelhouse: ${WHEELHOUSE}" >&2; exit 2; }
-[[ -f "${REQUIREMENTS}" ]] || { echo "缺少 requirements.txt: ${REQUIREMENTS}" >&2; exit 2; }
-PROJECT_WHEEL="$(find "${WHEELHOUSE}" -maxdepth 1 -name 'seat_surface_aoi_python_detector-*.whl' -type f | sort | head -n 1)"
-[[ -f "${PROJECT_WHEEL}" ]] || { echo "缺少项目 wheel: ${WHEELHOUSE}" >&2; exit 2; }
-
-if [[ -n "${PYTHON:-}" ]]; then
-  "${PYTHON}" -m venv "${VENV_PATH}"
-elif command -v "python${PYTHON_VERSION}" >/dev/null 2>&1; then
-  "python${PYTHON_VERSION}" -m venv "${VENV_PATH}"
-elif command -v uv >/dev/null 2>&1; then
-  uv venv "${VENV_PATH}" --python "${PYTHON_VERSION}" --offline
-else
-  python3 -m venv "${VENV_PATH}"
-fi
-VENV_PYTHON="${VENV_PATH}/bin/python"
-ACTUAL_VERSION="$("${VENV_PYTHON}" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
-if [[ "${ACTUAL_VERSION}" != "${PYTHON_VERSION}" ]]; then
-  echo "Python version mismatch: expected ${PYTHON_VERSION}, got ${ACTUAL_VERSION}. Rebuild the offline package for this Python version or install Python ${PYTHON_VERSION}." >&2
-  exit 2
-fi
-if "${VENV_PYTHON}" -m pip --version >/dev/null 2>&1; then
-  "${VENV_PYTHON}" -m pip install --no-index --find-links "${WHEELHOUSE}" --requirement "${REQUIREMENTS}"
-  "${VENV_PYTHON}" -m pip install --no-index --find-links "${WHEELHOUSE}" "${PROJECT_WHEEL}"
-  "${VENV_PYTHON}" -m pip check
-elif command -v uv >/dev/null 2>&1; then
-  uv pip install --offline --python "${VENV_PYTHON}" --find-links "${WHEELHOUSE}" --requirement "${REQUIREMENTS}"
-  uv pip install --offline --python "${VENV_PYTHON}" --find-links "${WHEELHOUSE}" "${PROJECT_WHEEL}"
-  uv pip check --python "${VENV_PYTHON}"
-else
-  echo "目标虚拟环境没有 pip，且未找到 uv；请随离线包交付 uv 或使用带 ensurepip 的 Python 安装包。" >&2
-  exit 2
-fi
-echo "Python 离线环境已创建: ${VENV_PATH}"
-'''
-    return template.replace("__PYTHON_VERSION__", python_version)
-
-
 def _write_readme(stage_dir: Path, args: argparse.Namespace) -> None:
     extras = ", ".join(args.extra) if args.extra else "无"
     groups = ", ".join(args.group) if args.group else "无"
@@ -417,18 +362,12 @@ def _write_readme(stage_dir: Path, args: argparse.Namespace) -> None:
 
 ## 工控机安装
 
-1. 解压 `tools/package_release.sh` 生成的项目发布包。
+1. 解压 `uv run python -m tools.package_release` 生成的项目发布包。
 2. 把本离线依赖包解压到发布目录旁边或发布目录下，例如 `offline_python_deps/`。
 3. 在发布目录执行：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\\offline_python_deps\\install_offline.ps1 -ProjectRoot .
-```
-
-也可以在 bash 环境执行：
-
-```bash
-bash offline_python_deps/install_offline.sh .
 ```
 
 安装完成后使用发布目录内的新 `.venv` 运行：

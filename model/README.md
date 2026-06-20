@@ -35,14 +35,14 @@ model/
 
 部署前执行：
 
-```bash
+```powershell
 uv run python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1
 uv run python -m tools.validate_model_assets --recipe seat_a_robot_flyshot_production_v1
 ```
 
 `production_model.example.yaml` 保留为真实模型接入参考模板，也可单独检查：
 
-```bash
+```powershell
 uv run python -m tools.validate_model_assets --recipe production_model_example
 ```
 
@@ -50,32 +50,32 @@ uv run python -m tools.validate_model_assets --recipe production_model_example
 
 当前仓库可生成 `python_detector` 生产配方直接消费的模型资产：
 
-```bash
+```powershell
 # Dome ROI YOLO segmentation
-uv run python -m training_tools.train_roi_yolo \
-  --data datasets/roi_seg/dataset.yaml \
-  --task segment \
-  --model yolov8n-seg.pt \
-  --imgsz 1024 \
+uv run python -m training_tools.train_roi_yolo `
+  --data datasets/roi_seg/dataset.yaml `
+  --task segment `
+  --model yolov8n-seg.pt `
+  --imgsz 1024 `
   --output model/roi_yolo/seat_roi_seg.onnx
 
 # 已知缺陷监督 YOLO
-uv run python -m training_tools.train_supervised_yolo \
-  --data datasets/supervised_defect_yolo/dataset.yaml \
+uv run python -m training_tools.train_supervised_yolo `
+  --data datasets/supervised_defect_yolo/dataset.yaml `
   --output model/supervised_defect/seat_defect_detector.onnx
 
 # WideResNet50 embedding
-uv run python -m training_tools.export_wideresnet_embedding \
-  --output model/wideresnet50/seat_wrn50_embedding.onnx \
+uv run python -m training_tools.export_wideresnet_embedding `
+  --output model/wideresnet50/seat_wrn50_embedding.onnx `
   --embedding-dim 1024
 
 # PatchCore PCA、memory bank、可选 FAISS
-uv run python -m training_tools.train_patchcore_assets \
-  --manifest datasets/seat_trace_v1/dataset_manifest.jsonl \
-  --output-dir model/patchcore \
-  --split train \
-  --pca-components 3 \
-  --coreset-ratio 0.1 \
+uv run python -m training_tools.train_patchcore_assets `
+  --manifest datasets/seat_trace_v1/dataset_manifest.jsonl `
+  --output-dir model/patchcore `
+  --split train `
+  --pca-components 3 `
+  --coreset-ratio 0.1 `
   --build-faiss
 ```
 

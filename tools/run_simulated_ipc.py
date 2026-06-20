@@ -20,6 +20,7 @@ EXE_SUFFIX = ".exe" if os.name == "nt" else ""
 @dataclass(frozen=True)
 class BuildArtifacts:
     controller: Path
+    protocol_layout: Path
     ipc_checks: Path
 
 
@@ -146,6 +147,7 @@ def build_cpp_with_cmake(plan: CMakeBuildPlan) -> BuildArtifacts:
     run(["cmake", "--build", str(build_dir), "--config", "Release"])
     return BuildArtifacts(
         controller=target_path(build_dir, f"seat_aoi_controller{EXE_SUFFIX}"),
+        protocol_layout=target_path(build_dir, f"protocol_layout{EXE_SUFFIX}"),
         ipc_checks=target_path(build_dir, f"ipc_safety_checks{EXE_SUFFIX}"),
     )
 
@@ -203,6 +205,19 @@ def direct_compile_command(compiler: str, entry: Path, output: Path) -> list[str
     return command
 
 
+def direct_protocol_layout_command(compiler: str, output: Path) -> list[str]:
+    return [
+        compiler,
+        "-std=c++17",
+        "-O2",
+        "-I",
+        str(CPP_DIR / "include"),
+        str(CPP_DIR / "tools" / "protocol_layout.cpp"),
+        "-o",
+        str(output),
+    ]
+
+
 def direct_compiler_candidates() -> list[str]:
     candidates = [
         os.environ.get("CXX", ""),
@@ -224,10 +239,12 @@ def build_cpp_direct(compiler: str) -> BuildArtifacts:
     build_dir = BUILD_ROOT / f"direct-{slug(Path(compiler).stem)}"
     build_dir.mkdir(parents=True, exist_ok=True)
     controller = build_dir / f"seat_aoi_controller{EXE_SUFFIX}"
+    protocol_layout = build_dir / f"protocol_layout{EXE_SUFFIX}"
     ipc_checks = build_dir / f"ipc_safety_checks{EXE_SUFFIX}"
     run(direct_compile_command(compiler, CPP_DIR / "src" / "main.cpp", controller))
+    run(direct_protocol_layout_command(compiler, protocol_layout))
     run(direct_compile_command(compiler, CPP_DIR / "tools" / "ipc_safety_checks.cpp", ipc_checks))
-    return BuildArtifacts(controller=controller, ipc_checks=ipc_checks)
+    return BuildArtifacts(controller=controller, protocol_layout=protocol_layout, ipc_checks=ipc_checks)
 
 
 def build_cpp() -> BuildArtifacts:
@@ -283,8 +300,9 @@ def main() -> int:
         return 2
 
     controller = artifacts.controller
+    protocol_layout = artifacts.protocol_layout
     ipc_checks = artifacts.ipc_checks
-    if not controller.exists() or not ipc_checks.exists():
+    if not controller.exists() or not protocol_layout.exists() or not ipc_checks.exists():
         print("缺少 C++ 构建产物", file=sys.stderr)
         return 2
 

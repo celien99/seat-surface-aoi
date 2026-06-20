@@ -19,14 +19,14 @@ C++ 主控 -> 共享内存 Frame Ring -> Python detector -> 共享内存 Result 
 
 ## 启动
 
-```bash
+```powershell
 uv sync --extra display
 uv run seat-aoi-display --trace-root trace --line-id AOI-1
 ```
 
 开发时也可以直接运行：
 
-```bash
+```powershell
 uv run python -m display_app.main --trace-root trace --poll-ms 300
 ```
 

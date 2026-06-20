@@ -342,7 +342,7 @@ Empty ─→ Writing ─→ Ready ─→ Reading ─→ Empty
 
 ### 构建
 
-```bash
+```powershell
 cd cpp_controller
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
@@ -381,7 +381,7 @@ cmake --build cpp_controller/build --config Release
 
 ### 部署打包
 
-根目录提供 `tools/package_release.sh` 生成离线部署包。脚本会先构建 C++ 主控，再把下列 C++ 相关内容放入包内：
+根目录提供 `tools/package_release.py` 生成 Windows 离线部署包。脚本会先构建 C++ 主控，再把下列 C++ 相关内容放入包内：
 
 - `bin/seat_aoi_controller`：已构建主控入口。
 - `bin/protocol_layout`：协议结构体大小诊断工具。
@@ -390,14 +390,14 @@ cmake --build cpp_controller/build --config Release
 
 参考联调包：
 
-```bash
-bash tools/package_release.sh
+```powershell
+uv run python -m tools.package_release
 ```
 
 生产包需要同时带真实 Python 模型资产：
 
-```bash
-bash tools/package_release.sh
+```powershell
+uv run python -m tools.package_release
 ```
 
 执行前先把真实模型产物替换到根目录 `model/`，脚本会默认集成该目录。
@@ -406,7 +406,7 @@ bash tools/package_release.sh
 
 ### 运行
 
-```bash
+```powershell
 # 单次检测（默认 --once 模式）
 ./build/seat_aoi_controller
 
@@ -518,14 +518,14 @@ simulate_trigger_timeout=false
 
 生产配置模板位于 `config/station_runtime.production.example.conf`。复制后替换所有 `TODO_*`：
 
-```bash
+```powershell
 cp config/station_runtime.production.example.conf config/station_runtime.production.conf
 ./build/seat_aoi_controller --config config/station_runtime.production.conf --validate-config
 ```
 
 该模板的 `recipe_id` 已对齐 Python 固定机位生产配方 `seat_a_black_leather_production_v1`。模型补齐后，Python detector 会按该配方启用 ONNX ROI、ECC、监督 ONNX、WideResNet50/PCA/PatchCore/FAISS safety net；相机 `calibration_id` 必须和 Python 标定文件保持一致。
 
-当前固定机位参考模拟配置使用 4 路光源并对齐默认 Python 配方；`tools/run_simulated_ipc.*` 默认会把 `config/station_runtime.example.conf` 同时传给 C++ 和 Python。固定机位生产模板按现场已确认硬件预置：海康 MV-CH120-20GC × 2，4096 x 3072，Hikrobot MVS backend；镜头 MVL-KF0814M-12MPE，8mm F1.4，1.1"，C 接口；频闪控制器 FL-ACDH-20048-4，4 通道（当前使用通道 1/2/3）。双相机、Mono8、3 光源图像包约 72 MB，模板保留 `frame_slot_size=134217728`（128 MB）；如果后续增加光源或分辨率变更，应重新计算并同步 Python 共享内存配置。
+当前固定机位参考模拟配置使用 4 路光源并对齐默认 Python 配方；`tools/run_simulated_ipc.py` 默认会把 `config/station_runtime.example.conf` 同时传给 C++ 和 Python。固定机位生产模板按现场已确认硬件预置：海康 MV-CH120-20GC × 2，4096 x 3072，Hikrobot MVS backend；镜头 MVL-KF0814M-12MPE，8mm F1.4，1.1"，C 接口；频闪控制器 FL-ACDH-20048-4，4 通道（当前使用通道 1/2/3）。双相机、Mono8、3 光源图像包约 72 MB，模板保留 `frame_slot_size=134217728`（128 MB）；如果后续增加光源或分辨率变更，应重新计算并同步 Python 共享内存配置。
 
 当前产线固定为 `light_order=1,2,3`，Python 固定机位生产配方 `seat_a_black_leather_production_v1` 已同步为 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 三个必需光源。若未来补第 4 路 `HIGH_RIGHT`，必须同时更新 C++ 配置、Python 生产配方、模型输入通道、训练资产和测试。
 
@@ -535,8 +535,8 @@ Hikrobot MVS backend 当前按 `Mono8` 单通道实现，并已按海康 MVS C++
 
 机器人飞拍生产模板位于 `config/station_runtime.robot_flyshot.production.example.conf`，复制后需要补齐 `robot.*`、`pose.<N>.*`、末端相机和光源控制器参数：
 
-```bash
-cp config/station_runtime.robot_flyshot.production.example.conf \
+```powershell
+cp config/station_runtime.robot_flyshot.production.example.conf `
    config/station_runtime.robot_flyshot.production.conf
 ./build/seat_aoi_controller --config config/station_runtime.robot_flyshot.production.conf --validate-config
 ```
@@ -780,11 +780,11 @@ time ─────────────────────────
 3. 按现场硬件型号链接真实外部信号网关、相机、频闪 SDK 或协议适配器。
 4. 做外部信号断线、相机缺帧、频闪故障、detector 超时等 fail-closed 验证。
 5. 确认 `trace/cpp_controller_events.jsonl` 能按 `sequence_id` 和 `trigger_id` 记录复检原因。
-6. 运行 `bash tools/run_cpp_soak.sh --jobs 20 --wait-ms 8000` 做短时长稳压测，上线前按现场节拍扩大到 8h/24h。
+6. 运行 `uv run python -m tools.run_cpp_soak --jobs 20 --wait-ms 8000` 做短时长稳压测，上线前按现场节拍扩大到 8h/24h。
 
 ### 部署步骤
 
-```bash
+```powershell
 # 1. 复制项目到测试机
 scp -r cpp_controller/ user@test-machine:/opt/seat-aoi/
 
@@ -802,7 +802,7 @@ cmake --build build
 
 当前主循环在 `wait_for_result()` 处需要 Python detector 写回结果。联调时优先使用根目录跨平台入口：
 
-```bash
+```powershell
 uv run python tools/run_simulated_ipc.py
 ```
 

@@ -48,7 +48,7 @@ config / ipc data types
 
 默认 fake/statistical/PatchCore exact KNN 参考链路不依赖 ONNX Runtime 或 FAISS。缺少可选后端依赖、模型文件或输出解码配置时，必须返回 `RECHECK` 或 `ERROR`，不能输出 `OK`。
 
-```bash
+```powershell
 uv sync --group dev
 uv sync --group dev --extra onnx
 uv sync --group dev --extra onnx --extra faiss
@@ -57,7 +57,7 @@ uv sync --locked --no-dev
 
 上 Windows 工控机前使用部署预检区分本地可实现项和现场项：
 
-```bash
+```powershell
 uv run python -m tools.validate_deployment_preflight
 uv run python -m tools.validate_deployment_preflight --strict-production
 ```
@@ -271,7 +271,7 @@ model/patchcore/seat_patchcore.faiss
 
 上线前校验：
 
-```bash
+```powershell
 uv run python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1
 uv run python -m tools.validate_model_assets --recipe seat_a_robot_flyshot_production_v1
 ```
@@ -303,15 +303,15 @@ uv run python -m tools.validate_model_assets --recipe seat_a_robot_flyshot_produ
 
 回放：
 
-```bash
+```powershell
 uv run python -m training_tools.replay_dataset --count 3 --write-trace
 ```
 
 Trace 转训练样本：
 
-```bash
-uv run python -m training_tools.collect_trace_dataset \
-  --trace-root trace \
+```powershell
+uv run python -m training_tools.collect_trace_dataset `
+  --trace-root trace `
   --output datasets/seat_trace_v1
 ```
 
@@ -319,10 +319,10 @@ uv run python -m training_tools.collect_trace_dataset \
 
 从 C++ 共享内存任务直接生成离线样本：
 
-```bash
-uv run python -m training_tools.collect_shm_dataset \
-  --output datasets/seat_shm_v1 \
-  --max-jobs 10 \
+```powershell
+uv run python -m training_tools.collect_shm_dataset `
+  --output datasets/seat_shm_v1 `
+  --max-jobs 10 `
   --trace-root trace/training_shm
 ```
 
@@ -330,51 +330,51 @@ uv run python -m training_tools.collect_shm_dataset \
 
 导出 PatchCore 所需 WideResNet50 embedding ONNX：
 
-```bash
-uv run python -m training_tools.export_wideresnet_embedding \
-  --output model/wideresnet50/seat_wrn50_embedding.onnx \
+```powershell
+uv run python -m training_tools.export_wideresnet_embedding `
+  --output model/wideresnet50/seat_wrn50_embedding.onnx `
   --embedding-dim 1024
 ```
 
 从真实 ROI 多光源样本提取 embedding：
 
-```bash
-uv run python -m training_tools.extract_embeddings \
-  --manifest datasets/seat_trace_v1/dataset_manifest.jsonl \
-  --output datasets/seat_trace_v1/embeddings.jsonl \
+```powershell
+uv run python -m training_tools.extract_embeddings `
+  --manifest datasets/seat_trace_v1/dataset_manifest.jsonl `
+  --output datasets/seat_trace_v1/embeddings.jsonl `
   --backend statistical
 ```
 
 训练 PatchCore PCA、memory bank 和可选 FAISS：
 
-```bash
-uv run python -m training_tools.train_patchcore_assets \
-  --manifest datasets/seat_trace_v1/dataset_manifest.jsonl \
-  --output-dir model/patchcore \
-  --split train \
-  --pca-components 3 \
-  --coreset-ratio 0.1 \
+```powershell
+uv run python -m training_tools.train_patchcore_assets `
+  --manifest datasets/seat_trace_v1/dataset_manifest.jsonl `
+  --output-dir model/patchcore `
+  --split train `
+  --pca-components 3 `
+  --coreset-ratio 0.1 `
   --build-faiss
 ```
 
 评估当前配方模型：
 
-```bash
-uv run python -m training_tools.evaluate_pipeline \
-  --manifest datasets/seat_trace_v1/dataset_manifest.jsonl \
-  --output reports/evaluation_report.json \
+```powershell
+uv run python -m training_tools.evaluate_pipeline `
+  --manifest datasets/seat_trace_v1/dataset_manifest.jsonl `
+  --output reports/evaluation_report.json `
   --split test
 ```
 
 Benchmark：
 
-```bash
+```powershell
 uv run python -m training_tools.benchmark_pipeline --count 10
-uv run python -m training_tools.benchmark_pipeline \
-  --count 20 \
-  --max-avg-ms 80 \
-  --max-ms 120 \
-  --max-step-ms quality_ms=10 \
+uv run python -m training_tools.benchmark_pipeline `
+  --count 20 `
+  --max-avg-ms 80 `
+  --max-ms 120 `
+  --max-step-ms quality_ms=10 `
   --max-step-ms inference_ms=30
 ```
 
@@ -396,13 +396,13 @@ uv run python -m training_tools.benchmark_pipeline \
 
 ## 验证命令
 
-```bash
+```powershell
 uv run pytest
 uv run python -m tools.validate_protocol
 uv run python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1
 uv run python -m tools.validate_model_assets --recipe seat_a_robot_flyshot_production_v1
 uv run python -m tools.validate_architecture_readiness --scope reference
-bash tools/run_simulated_ipc.sh
+uv run python tools/run_simulated_ipc.py
 ```
 
 生产阈值必须基于人工确认标注和按缺陷类别、ROI、材质、颜色、机位、光源条件分层的数据验证。弱标签 trace 只能用于闭环排查和预训练资产准备。
