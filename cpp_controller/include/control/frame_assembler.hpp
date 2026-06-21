@@ -82,12 +82,15 @@ private:
                              CapturedFrame* out_frame,
                              AcquisitionError* error);
   void reset_devices();
+  void handle_acquisition_failure();
   ICamera* camera_for_index(std::uint32_t camera_index) const;
 
   bool initialized_ = false;
   StationRuntimeConfig config_{};
   std::vector<std::unique_ptr<ILightController>> light_controllers_;
   std::vector<std::unique_ptr<ICamera>> cameras_;
+  int consecutive_failures_ = 0;
+  static constexpr int kMaxConsecutiveFailuresBeforeReset = 3;
 };
 
 }  // namespace seat_aoi

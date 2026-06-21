@@ -1,6 +1,8 @@
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <thread>
 
 #include "control/station_controller.hpp"
 #include "control/station_runtime_config.hpp"
@@ -154,13 +156,20 @@ int main(int argc, char** argv) {
     std::string error;
     if (!station.wait_for_trigger(&trigger, &error)) {
       std::cerr << "external signal trigger wait failed: " << error << std::endl;
-      return 1;
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      continue;
     }
     const auto result = station.inspect_one_seat(trigger);
     const auto decision = static_cast<seat_aoi::InspectionDecision>(result.meta.decision);
-    if (decision != seat_aoi::InspectionDecision::OK &&
-        decision != seat_aoi::InspectionDecision::NG &&
-        decision != seat_aoi::InspectionDecision::Recheck) {
+    // Python 内部异常返回 ERROR，映射为 RECHECK 避免进程退出，
+    // 与 station_controller 中 published_decision 的映射策略一致。
+    const auto effective_decision =
+        decision == seat_aoi::InspectionDecision::Error
+            ? seat_aoi::InspectionDecision::Recheck
+            : decision;
+    if (effective_decision != seat_aoi::InspectionDecision::OK &&
+        effective_decision != seat_aoi::InspectionDecision::NG &&
+        effective_decision != seat_aoi::InspectionDecision::Recheck) {
       return 1;
     }
     ++processed_jobs;

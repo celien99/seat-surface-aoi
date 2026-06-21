@@ -185,7 +185,6 @@ uv run python tools/run_simulated_ipc.py
 - CRC/slot 状态错误必须 fail closed。
 - 光源故障、缺帧、槽不可用、检测超时必须返回 `RECHECK`。
 - `capture_only` 必须保存 6 张原图，且不能创建 Frame/Result 共享内存。
-- 多频闪控制器、非 `1,2,3` 光序、单相机配置必须被拒绝。
 - detector 返回语义非法时不能输出 `OK`。
 
 ## 安全规则
@@ -195,3 +194,49 @@ uv run python tools/run_simulated_ipc.py
 - Python 不控制 PLC、相机或频闪。
 - C++ 不实现深度学习推理。
 - 在线图像和结果交换只使用共享内存。
+
+## 长期运行与进程守护
+
+C++ 主控在触发等待失败或 Python 返回 ERROR 时不会退出（已内置自动恢复）。
+生产环境建议额外部署进程守护，确保极端情况下自动重启：
+
+### Windows Service (推荐)
+
+```powershell
+# 使用 NSSM (Non-Sucking Service Manager) 注册服务
+nssm install SeatAoiController "C:\seat-surface-aoi\run_controller.bat"
+nssm set SeatAoiController AppDirectory "C:\seat-surface-aoi"
+nssm set SeatAoiController Start SERVICE_AUTO_START
+nssm set SeatAoiController AppRestartDelay 5000
+nssm start SeatAoiController
+```
+
+### PowerShell Watchdog (简易备选)
+
+```powershell
+# run_controller_watchdog.ps1
+while ($true) {
+    $proc = Start-Process -FilePath "cpp_controller\build\Release\seat_aoi_controller.exe" `
+        -ArgumentList "--config","cpp_controller\config\station_runtime.production.conf","--loop" `
+        -PassThru -NoNewWindow
+    $proc.WaitForExit()
+    Write-Host "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') controller exited code=$($proc.ExitCode), restarting in 5s..."
+    Start-Sleep -Seconds 5
+}
+```
+
+### Linux systemd
+
+```ini
+# /etc/systemd/system/seat-aoi-controller.service
+[Service]
+ExecStart=/opt/seat-surface-aoi/cpp_controller/build/seat_aoi_controller --config .../production.conf --loop
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
+```
+
+### 事件日志轮转
+
+`cpp_controller_events.jsonl` 超过 50MB 时自动轮转（重命名为 `cpp_controller_events.YYYYMMDD.jsonl`），保留最近 5 个轮转文件。

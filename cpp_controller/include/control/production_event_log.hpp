@@ -30,9 +30,15 @@ public:
   bool enabled() const { return enabled_; }
 
 private:
+  void rotate_if_needed();
+
   std::mutex mutex_;
   std::ofstream output_;
+  std::string trace_root_;
   bool enabled_ = false;
+
+  static constexpr std::uintmax_t kMaxEventLogBytes = 50ULL * 1024 * 1024;
+  static constexpr int kMaxRotatedLogs = 5;
 };
 
 const char* inspection_decision_name(InspectionDecision decision);

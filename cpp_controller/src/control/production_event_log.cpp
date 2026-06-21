@@ -1,7 +1,11 @@
 #include "control/production_event_log.hpp"
 
+#include <ctime>
 #include <filesystem>
+#include <iomanip>
+#include <iostream>
 #include <sstream>
+#include <vector>
 
 #include "common/time_utils.hpp"
 
@@ -116,6 +120,8 @@ bool ProductionEventLog::initialize(const std::string& trace_root,
   if (!ensure_directory(trace_root, error_message)) {
     return false;
   }
+  trace_root_ = trace_root;
+  rotate_if_needed();
   const std::string path = trace_root + "/cpp_controller_events.jsonl";
   output_.open(path, std::ios::out | std::ios::app);
   if (!output_.is_open()) {
@@ -126,6 +132,56 @@ bool ProductionEventLog::initialize(const std::string& trace_root,
   }
   enabled_ = true;
   return true;
+}
+
+void ProductionEventLog::rotate_if_needed() {
+  const std::string path = trace_root_ + "/cpp_controller_events.jsonl";
+  std::error_code ec;
+  if (!std::filesystem::is_regular_file(path, ec)) {
+    return;
+  }
+  const auto size = std::filesystem::file_size(path, ec);
+  if (ec || size < kMaxEventLogBytes) {
+    return;
+  }
+
+  // 关闭当前输出流
+  output_.close();
+
+  // 生成带日期的轮转文件名
+  const std::time_t now = std::time(nullptr);
+  std::tm local_time{};
+#ifdef _WIN32
+  localtime_s(&local_time, &now);
+#else
+  localtime_r(&now, &local_time);
+#endif
+  std::ostringstream date_suffix;
+  date_suffix << std::put_time(&local_time, "%Y%m%d");
+  const std::string rotated_path =
+      trace_root_ + "/cpp_controller_events." + date_suffix.str() + ".jsonl";
+
+  std::filesystem::rename(path, rotated_path, ec);
+  if (ec) {
+    std::cerr << "production_event_log rotate rename failed: " << ec.message() << std::endl;
+    return;
+  }
+
+  // 保留最近 kMaxRotatedLogs 个轮转文件，删除更旧的
+  std::vector<std::filesystem::path> rotated_files;
+  for (const auto& entry : std::filesystem::directory_iterator(trace_root_, ec)) {
+    if (ec) break;
+    const auto& name = entry.path().filename().string();
+    if (name.find("cpp_controller_events.") == 0 && name != "cpp_controller_events.jsonl") {
+      rotated_files.push_back(entry.path());
+    }
+  }
+  if (rotated_files.size() > static_cast<std::size_t>(kMaxRotatedLogs)) {
+    std::sort(rotated_files.begin(), rotated_files.end());
+    for (std::size_t i = 0; i < rotated_files.size() - kMaxRotatedLogs; ++i) {
+      std::filesystem::remove(rotated_files[i], ec);
+    }
+  }
 }
 
 void ProductionEventLog::record(const ProductionEvent& event) {

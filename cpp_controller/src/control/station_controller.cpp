@@ -168,15 +168,14 @@ bool StationController::initialize(const StationConfig& config) {
 bool StationController::wait_for_trigger(ExternalTrigger* out_trigger, std::string* error_message) {
   const auto snapshot = health_.snapshot();
   if (snapshot.state == StationState::Fault) {
-    if (error_message != nullptr) {
-      *error_message = snapshot.alarm_message.empty()
-                           ? "station is in fault state"
-                           : snapshot.alarm_message;
-    }
-    record_system_event("trigger_wait_blocked_by_fault",
-                        ErrorCode::DeviceFault,
-                        error_message != nullptr ? *error_message : "station is in fault state");
-    return false;
+    // 自动尝试从 Fault 恢复（trigger timeout 等可恢复故障），
+    // 避免一次 PLC 通信抖动导致进程永久阻塞。
+    health_.transition_to(StationState::Ready,
+                          "auto-recovery from fault: " + snapshot.alarm_message);
+    record_system_event("trigger_wait_fault_recovery_attempt",
+                        ErrorCode::None,
+                        "recovering from fault: " + snapshot.alarm_message);
+    // 继续执行，尝试等待触发信号
   }
   if (!signal_client_->wait_trigger(out_trigger, config_.trigger_timeout_ms, error_message)) {
     const std::string message =

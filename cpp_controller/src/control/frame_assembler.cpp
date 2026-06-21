@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <future>
+#include <iostream>
 #include <map>
 #include <sstream>
 #include <thread>
@@ -258,7 +259,7 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
                               light_param.light_index,
                               light_seq_index,
                               "one or more cameras failed to arm");
-        reset_devices();
+        handle_acquisition_failure();
         return false;
       }
     }
@@ -283,7 +284,7 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
                             light_param.light_index,
                             light_seq_index,
                             detail);
-      reset_devices();
+      handle_acquisition_failure();
       return false;
     }
 
@@ -323,7 +324,7 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
                               light_param.light_index,
                               light_seq_index,
                               "one or more cameras timed out waiting for frame");
-        reset_devices();
+        handle_acquisition_failure();
         return false;
       }
     }
@@ -342,12 +343,13 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
                               sequence.channels[light_seq_index].light_index,
                               light_seq_index,
                               "shared light capture missed an expected frame");
-        reset_devices();
+        handle_acquisition_failure();
         return false;
       }
       frames->push_back(std::move(frames_by_view[view_index][light_seq_index]));
     }
   }
+  consecutive_failures_ = 0;
   return true;
 }
 
@@ -436,6 +438,16 @@ bool FrameAssembler::wait_view_light_frame(const ExternalTrigger& trigger,
   copy_cstr(out_frame->meta.view_id, view.view_id);
   copy_cstr(out_frame->meta.calibration_id, view.calibration_id);
   return true;
+}
+
+void FrameAssembler::handle_acquisition_failure() {
+  ++consecutive_failures_;
+  if (consecutive_failures_ >= kMaxConsecutiveFailuresBeforeReset) {
+    std::cerr << "frame_assembler: " << consecutive_failures_
+              << " consecutive acquisition failures, resetting all devices" << std::endl;
+    reset_devices();
+    consecutive_failures_ = 0;
+  }
 }
 
 void FrameAssembler::reset_devices() {
