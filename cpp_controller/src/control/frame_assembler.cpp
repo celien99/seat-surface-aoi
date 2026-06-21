@@ -3,12 +3,9 @@
 #include <map>
 #include <sstream>
 
-#include "camera/camera_worker.hpp"
-#include "control/hardware_factory.hpp"
-#include "control/light_controller.hpp"
-
 #include "common/string_utils.hpp"
 #include "common/time_utils.hpp"
+#include "control/hardware_factory.hpp"
 
 namespace seat_aoi {
 
@@ -45,10 +42,6 @@ LightControllerConfig make_light_controller_config(const RuntimeLightConfig& con
   return controller_config;
 }
 
-bool uses_strobe_controller(const LightChannelParam& channel) {
-  return channel.acquisition_mode == LightAcquisitionMode::Strobe;
-}
-
 }  // namespace
 
 void FrameAssembler::configure(const StationRuntimeConfig& config) {
@@ -60,58 +53,42 @@ bool FrameAssembler::ensure_initialized() {
   if (initialized_) {
     return true;
   }
-  if (light_controllers_.empty()) {
-    if (config_.lights.empty()) {
-      return false;
-    }
-    for (std::size_t ctrl_idx = 0; ctrl_idx < config_.lights.size(); ++ctrl_idx) {
-      auto ctrl = create_light_controller(config_.lights[ctrl_idx].backend);
-      if (!ctrl->initialize(make_light_controller_config(config_.lights[ctrl_idx]))) {
-        reset_devices();
-        return false;
-      }
-      light_controllers_.push_back(std::move(ctrl));
-    }
+  if (config_.lights.size() != 1) {
+    return false;
   }
-  if (!robot_client_) {
-    robot_client_ = create_robot_client(config_.robot.backend);
-  }
-  RobotClientConfig robot_config;
-  robot_config.backend = config_.robot.backend;
-  robot_config.controller_id = config_.robot.controller_id;
-  robot_config.host = config_.robot.host;
-  robot_config.port = config_.robot.port;
-  robot_config.ready_input = config_.robot.ready_input;
-  robot_config.fault_input = config_.robot.fault_input;
-  robot_config.start_output = config_.robot.start_output;
-  robot_config.simulate_fault = config_.robot.simulate_fault;
-  if (!robot_client_->initialize(robot_config)) {
+
+  auto light_controller = create_light_controller(config_.lights.front().backend);
+  if (!light_controller->initialize(make_light_controller_config(config_.lights.front()))) {
     reset_devices();
     return false;
   }
+  light_controllers_.push_back(std::move(light_controller));
+
   cameras_.clear();
   for (const auto& runtime_camera : config_.cameras) {
-    CameraConfig config;
-    config.camera_index = runtime_camera.camera_index;
-    config.camera_id = runtime_camera.camera_id;
-    config.serial_number = runtime_camera.serial_number;
-    config.calibration_id = runtime_camera.calibration_id;
-    config.width = runtime_camera.width;
-    config.height = runtime_camera.height;
-    config.channels = runtime_camera.channels;
-    config.pixel_format = runtime_camera.pixel_format;
-    config.trigger_line = runtime_camera.trigger_line;
-    config.exposure_output_line = runtime_camera.exposure_output_line;
-    config.buffer_count = runtime_camera.buffer_count;
-    config.simulate_missing_frame = runtime_camera.simulate_missing_frame;
+    CameraConfig camera_config;
+    camera_config.camera_index = runtime_camera.camera_index;
+    camera_config.camera_id = runtime_camera.camera_id;
+    camera_config.serial_number = runtime_camera.serial_number;
+    camera_config.calibration_id = runtime_camera.calibration_id;
+    camera_config.width = runtime_camera.width;
+    camera_config.height = runtime_camera.height;
+    camera_config.channels = runtime_camera.channels;
+    camera_config.pixel_format = runtime_camera.pixel_format;
+    camera_config.trigger_line = runtime_camera.trigger_line;
+    camera_config.exposure_output_line = runtime_camera.exposure_output_line;
+    camera_config.buffer_count = runtime_camera.buffer_count;
+    camera_config.simulate_missing_frame = runtime_camera.simulate_missing_frame;
+
     auto camera = create_camera(config_.camera_backend);
-    if (!camera->initialize(config)) {
+    if (!camera->initialize(camera_config)) {
       reset_devices();
       return false;
     }
     camera->start();
     cameras_.push_back(std::move(camera));
   }
+
   initialized_ = true;
   return true;
 }
@@ -163,21 +140,14 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
 
   std::vector<CapturedFrame> frames;
   frames.reserve(capture_plan.size() * sequence.channels.size());
-
-  bool acquired = false;
-  if (config_.capture_schedule == CaptureSchedule::SharedLightParallel) {
-    acquired = acquire_shared_light_parallel_frames(sequence, trigger, capture_plan, &frames, error);
-  } else {
-    acquired = acquire_view_serial_tdm_frames(sequence, trigger, capture_plan, &frames, error);
-  }
-  if (!acquired) {
+  if (!acquire_shared_light_parallel_frames(sequence, trigger, capture_plan, &frames, error)) {
     return false;
   }
 
   job.frame_count = static_cast<std::uint32_t>(frames.size());
   out_bundle->job_meta = job;
   out_bundle->frames = std::move(frames);
-  if (!validate_serial_tdm_bundle(*out_bundle, sequence, capture_plan, error)) {
+  if (!validate_shared_light_bundle(*out_bundle, sequence, capture_plan, error)) {
     reset_devices();
     return false;
   }
@@ -188,101 +158,33 @@ bool FrameAssembler::prepare_light_sequence_for_view(const LightSequence& sequen
                                                      std::uint64_t trigger_id,
                                                      const RuntimeCaptureViewConfig& view,
                                                      AcquisitionError* error) {
-  for (std::size_t controller_index = 0; controller_index < light_controllers_.size();
-       ++controller_index) {
-    LightSequence controller_sequence;
-    for (const auto& channel : sequence.channels) {
-      if (uses_strobe_controller(channel) && channel.controller_index == controller_index) {
-        controller_sequence.channels.push_back(channel);
-      }
-    }
-    if (controller_sequence.channels.empty()) {
-      continue;
-    }
-    if (!light_controllers_[controller_index]->prepare_sequence(
-            controller_sequence,
-            trigger_id,
-            config_.light_timeout_ms,
-            error != nullptr ? &error->message : nullptr)) {
-      std::ostringstream oss;
-      oss << "light sequence prepare failed pose_id=" << view.pose_id
-          << " camera_index=" << view.camera_index
-          << " controller_index=" << controller_index;
-      const std::string detail =
-          error != nullptr && !error->message.empty() ? error->message : oss.str();
-      set_acquisition_error(error,
-                            ErrorCode::LightFault,
-                            AcquisitionStage::ConfigureLightSequence,
-                            view.camera_index,
-                            0,
-                            0,
-                            detail);
-      reset_devices();
-      return false;
-    }
-  }
-  return true;
-}
-
-bool FrameAssembler::acquire_view_serial_tdm_frames(
-    const LightSequence& sequence,
-    const ExternalTrigger& trigger,
-    const std::vector<RuntimeCaptureViewConfig>& capture_plan,
-    std::vector<CapturedFrame>* frames,
-    AcquisitionError* error) {
-  if (frames == nullptr) {
+  if (light_controllers_.size() != 1 || light_controllers_.front() == nullptr) {
     set_acquisition_error(error,
-                          ErrorCode::InternalError,
-                          AcquisitionStage::Configuration,
+                          ErrorCode::LightFault,
+                          AcquisitionStage::ConfigureLightSequence,
+                          view.camera_index,
                           0,
                           0,
-                          0,
-                          "frames output is null");
+                          "FL-ACDH controller is not initialized");
     return false;
   }
-
-  // 默认时分频闪方案：外层按检测视角串行，内层按光源串行。
-  for (const auto& view : capture_plan) {
-    RobotPoseStatus pose_status;
-    if (!wait_robot_pose_ready(trigger, view, &pose_status, error)) {
-      reset_devices();
-      return false;
-    }
-    if (!prepare_light_sequence_for_view(sequence, trigger.trigger_id, view, error)) {
-      return false;
-    }
-
-    for (std::uint32_t light_seq_index = 0;
-         light_seq_index < sequence.channels.size();
-         ++light_seq_index) {
-      const auto light_param = sequence.channels[light_seq_index];
-      if (!light_param.enabled) continue;
-
-      if (!arm_view_camera(trigger, view, light_param, light_seq_index, error)) {
-        reset_devices();
-        return false;
-      }
-      if (uses_strobe_controller(light_param)) {
-        if (!light_controllers_[light_param.controller_index]->trigger_channel(
-                light_param, trigger.trigger_id, light_seq_index,
-                config_.light_timeout_ms, error != nullptr ? &error->message : nullptr)) {
-          const std::string detail = error != nullptr && !error->message.empty()
-                                         ? error->message : "light channel trigger failed";
-          set_acquisition_error(error, ErrorCode::LightFault, AcquisitionStage::TriggerLight,
-                                view.camera_index, light_param.light_index, light_seq_index, detail);
-          reset_devices();
-          return false;
-        }
-      }
-
-      CapturedFrame frame;
-      if (!wait_view_light_frame(trigger, view, light_param, light_seq_index, pose_status,
-                                 &frame, error)) {
-        reset_devices();
-        return false;
-      }
-      frames->push_back(std::move(frame));
-    }
+  if (!light_controllers_.front()->prepare_sequence(
+          sequence,
+          trigger_id,
+          config_.light_timeout_ms,
+          error != nullptr ? &error->message : nullptr)) {
+    const std::string detail = error != nullptr && !error->message.empty()
+                                   ? error->message
+                                   : "FL-ACDH light sequence prepare failed";
+    set_acquisition_error(error,
+                          ErrorCode::LightFault,
+                          AcquisitionStage::ConfigureLightSequence,
+                          view.camera_index,
+                          0,
+                          0,
+                          detail);
+    reset_devices();
+    return false;
   }
   return true;
 }
@@ -303,27 +205,18 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
                           "frames output is null");
     return false;
   }
-  if (capture_plan.empty()) {
+  if (capture_plan.size() != 2) {
     set_acquisition_error(error,
                           ErrorCode::ConfigurationError,
                           AcquisitionStage::Configuration,
                           0,
                           0,
                           0,
-                          "shared light parallel capture requires at least one view");
+                          "shared light capture requires exactly two views");
     return false;
   }
   if (!prepare_light_sequence_for_view(sequence, trigger.trigger_id, capture_plan.front(), error)) {
     return false;
-  }
-
-  std::vector<RobotPoseStatus> pose_statuses(capture_plan.size());
-  for (std::size_t view_index = 0; view_index < capture_plan.size(); ++view_index) {
-    if (!wait_robot_pose_ready(trigger, capture_plan[view_index], &pose_statuses[view_index],
-                               error)) {
-      reset_devices();
-      return false;
-    }
   }
 
   std::vector<std::vector<CapturedFrame>> frames_by_view(
@@ -331,12 +224,13 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
   std::vector<std::vector<bool>> captured(
       capture_plan.size(), std::vector<bool>(sequence.channels.size(), false));
 
-  // 共享光源并行方案：外层按光源串行；每路光源触发前先 arm 所有固定机位相机。
   for (std::uint32_t light_seq_index = 0;
        light_seq_index < sequence.channels.size();
        ++light_seq_index) {
     const auto light_param = sequence.channels[light_seq_index];
-    if (!light_param.enabled) continue;
+    if (!light_param.enabled) {
+      continue;
+    }
 
     for (const auto& view : capture_plan) {
       if (!arm_view_camera(trigger, view, light_param, light_seq_index, error)) {
@@ -344,28 +238,33 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
         return false;
       }
     }
-    if (uses_strobe_controller(light_param)) {
-      if (!light_controllers_[light_param.controller_index]->trigger_channel(
-              light_param, trigger.trigger_id, light_seq_index,
-              config_.light_timeout_ms, error != nullptr ? &error->message : nullptr)) {
-        const std::string detail = error != nullptr && !error->message.empty()
-                                       ? error->message : "light channel trigger failed";
-        set_acquisition_error(error,
-                              ErrorCode::LightFault,
-                              AcquisitionStage::TriggerLight,
-                              capture_plan.front().camera_index,
-                              light_param.light_index,
-                              light_seq_index,
-                              detail);
-        reset_devices();
-        return false;
-      }
+    if (!light_controllers_.front()->trigger_channel(
+            light_param,
+            trigger.trigger_id,
+            light_seq_index,
+            config_.light_timeout_ms,
+            error != nullptr ? &error->message : nullptr)) {
+      const std::string detail = error != nullptr && !error->message.empty()
+                                     ? error->message
+                                     : "FL-ACDH channel trigger failed";
+      set_acquisition_error(error,
+                            ErrorCode::LightFault,
+                            AcquisitionStage::TriggerLight,
+                            capture_plan.front().camera_index,
+                            light_param.light_index,
+                            light_seq_index,
+                            detail);
+      reset_devices();
+      return false;
     }
 
     for (std::size_t view_index = 0; view_index < capture_plan.size(); ++view_index) {
-      if (!wait_view_light_frame(trigger, capture_plan[view_index], light_param,
-                                 light_seq_index, pose_statuses[view_index],
-                                 &frames_by_view[view_index][light_seq_index], error)) {
+      if (!wait_view_light_frame(trigger,
+                                 capture_plan[view_index],
+                                 light_param,
+                                 light_seq_index,
+                                 &frames_by_view[view_index][light_seq_index],
+                                 error)) {
         reset_devices();
         return false;
       }
@@ -373,7 +272,7 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
     }
   }
 
-  // 共享光源并行只是物理调度优化；发布给 Python 的帧包仍保持视角优先顺序。
+  // 物理上按光源同步采集，发布顺序仍保持视角优先，方便 Python 按 camera/pose 分组。
   for (std::size_t view_index = 0; view_index < capture_plan.size(); ++view_index) {
     for (std::uint32_t light_seq_index = 0;
          light_seq_index < sequence.channels.size();
@@ -385,7 +284,7 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
                               capture_plan[view_index].camera_index,
                               sequence.channels[light_seq_index].light_index,
                               light_seq_index,
-                              "shared light parallel capture missed an expected frame");
+                              "shared light capture missed an expected frame");
         reset_devices();
         return false;
       }
@@ -437,7 +336,6 @@ bool FrameAssembler::wait_view_light_frame(const ExternalTrigger& trigger,
                                            const RuntimeCaptureViewConfig& view,
                                            const LightChannelParam& light_param,
                                            std::uint32_t light_seq_index,
-                                           const RobotPoseStatus& pose_status,
                                            CapturedFrame* out_frame,
                                            AcquisitionError* error) {
   auto* camera_ptr = camera_for_index(view.camera_index);
@@ -472,11 +370,11 @@ bool FrameAssembler::wait_view_light_frame(const ExternalTrigger& trigger,
   }
   out_frame->meta.camera_index = view.camera_index;
   out_frame->meta.pose_index = view.pose_index;
-  out_frame->meta.shot_id = pose_status.shot_id;
-  out_frame->meta.robot_timestamp_us = pose_status.robot_timestamp_us;
+  out_frame->meta.shot_id = trigger.trigger_id;
+  out_frame->meta.robot_timestamp_us = 0;
   for (int index = 0; index < 3; ++index) {
-    out_frame->meta.robot_tcp_xyz_mm[index] = pose_status.tcp_xyz_mm[index];
-    out_frame->meta.robot_rpy_deg[index] = pose_status.rpy_deg[index];
+    out_frame->meta.robot_tcp_xyz_mm[index] = 0.0F;
+    out_frame->meta.robot_rpy_deg[index] = 0.0F;
   }
   copy_cstr(out_frame->meta.camera_id, view.camera_id);
   copy_cstr(out_frame->meta.pose_id, view.pose_id);
@@ -491,7 +389,6 @@ void FrameAssembler::reset_devices() {
     }
   }
   light_controllers_.clear();
-  robot_client_.reset();
   cameras_.clear();
   initialized_ = false;
 }
@@ -529,21 +426,15 @@ bool FrameAssembler::build_light_sequence(const Recipe& recipe,
       return false;
     }
     const auto& configured = iter->second;
-    if (configured.acquisition_mode == LightAcquisitionMode::Strobe &&
-        configured.controller_index >= config_.lights.size()) {
-      set_acquisition_error(error,
-                            ErrorCode::ConfigurationError,
-                            AcquisitionStage::Configuration,
-                            0,
-                            light_index,
-                            light_seq_index,
-                            "light channel references missing controller config");
-      return false;
-    }
-    if (configured.exposure_us == 0 || configured.gain <= 0.0F ||
-        (configured.acquisition_mode == LightAcquisitionMode::Strobe &&
-         (configured.physical_channel == 0 || configured.strobe_width_us == 0 ||
-          configured.current_percent <= 0.0F || configured.current_percent > 100.0F))) {
+    if (configured.controller_index != 0 ||
+        configured.acquisition_mode != LightAcquisitionMode::Strobe ||
+        configured.physical_channel == 0 ||
+        configured.exposure_us == 0 ||
+        configured.strobe_width_us == 0 ||
+        configured.strobe_width_us > configured.exposure_us ||
+        configured.gain <= 0.0F ||
+        configured.current_percent <= 0.0F ||
+        configured.current_percent > 100.0F) {
       set_acquisition_error(error,
                             ErrorCode::ConfigurationError,
                             AcquisitionStage::Configuration,
@@ -553,8 +444,9 @@ bool FrameAssembler::build_light_sequence(const Recipe& recipe,
                             "light channel config is invalid");
       return false;
     }
+
     LightChannelParam param;
-    param.controller_index = configured.controller_index;
+    param.controller_index = 0;
     param.light_index = configured.light_index;
     param.physical_channel = configured.physical_channel;
     param.exposure_us = configured.exposure_us;
@@ -562,16 +454,16 @@ bool FrameAssembler::build_light_sequence(const Recipe& recipe,
     param.trigger_delay_us = configured.trigger_delay_us;
     param.gain = configured.gain;
     param.current_percent = configured.current_percent;
-    param.acquisition_mode = configured.acquisition_mode;
+    param.acquisition_mode = LightAcquisitionMode::Strobe;
     out_sequence->channels.push_back(param);
   }
   return true;
 }
 
-bool FrameAssembler::validate_serial_tdm_bundle(const SeatImageBundle& bundle,
-                                                const LightSequence& sequence,
-                                                const std::vector<RuntimeCaptureViewConfig>& views,
-                                                AcquisitionError* error) const {
+bool FrameAssembler::validate_shared_light_bundle(const SeatImageBundle& bundle,
+                                                  const LightSequence& sequence,
+                                                  const std::vector<RuntimeCaptureViewConfig>& views,
+                                                  AcquisitionError* error) const {
   const std::uint32_t expected_frames =
       static_cast<std::uint32_t>(views.size() * sequence.channels.size());
   if (bundle.job_meta.view_count != views.size() ||
@@ -583,7 +475,7 @@ bool FrameAssembler::validate_serial_tdm_bundle(const SeatImageBundle& bundle,
                           0,
                           0,
                           0,
-                          "serial TDM bundle frame_count mismatch");
+                          "bundle frame_count mismatch");
     return false;
   }
 
@@ -616,15 +508,14 @@ bool FrameAssembler::validate_serial_tdm_bundle(const SeatImageBundle& bundle,
           meta.light_index != expected_light.light_index ||
           meta.light_seq_index != light_seq_index) {
         std::ostringstream oss;
-        oss << "serial TDM order mismatch expected pose_index=" << view.pose_index
-            << " pose_id=" << view.pose_id
+        oss << "bundle order mismatch expected pose_index=" << view.pose_index
             << " camera_index=" << view.camera_index
             << " light_index=" << expected_light.light_index
             << " light_seq_index=" << light_seq_index
             << " actual pose_index=" << meta.pose_index
             << " actual camera_index=" << meta.camera_index
-            << " light_index=" << meta.light_index
-            << " light_seq_index=" << meta.light_seq_index;
+            << " actual light_index=" << meta.light_index
+            << " actual light_seq_index=" << meta.light_seq_index;
         set_acquisition_error(error,
                               ErrorCode::InvalidPayload,
                               AcquisitionStage::Configuration,
@@ -640,8 +531,8 @@ bool FrameAssembler::validate_serial_tdm_bundle(const SeatImageBundle& bundle,
           meta.channels != camera.channels ||
           meta.stride_bytes < meta.width * meta.channels) {
         std::ostringstream oss;
-        oss << "serial TDM frame metadata invalid camera_index="
-            << camera.camera_index << " light_index=" << expected_light.light_index;
+        oss << "frame metadata invalid camera_index=" << camera.camera_index
+            << " light_index=" << expected_light.light_index;
         set_acquisition_error(error,
                               ErrorCode::InvalidPayload,
                               AcquisitionStage::Configuration,
@@ -655,8 +546,8 @@ bool FrameAssembler::validate_serial_tdm_bundle(const SeatImageBundle& bundle,
           static_cast<std::uint64_t>(meta.stride_bytes) * meta.height;
       if (frame.bytes.size() < minimum_size) {
         std::ostringstream oss;
-        oss << "serial TDM frame payload too small camera_index="
-            << camera.camera_index << " light_index=" << expected_light.light_index;
+        oss << "frame payload too small camera_index=" << camera.camera_index
+            << " light_index=" << expected_light.light_index;
         set_acquisition_error(error,
                               ErrorCode::InvalidPayload,
                               AcquisitionStage::Configuration,
@@ -673,7 +564,7 @@ bool FrameAssembler::validate_serial_tdm_bundle(const SeatImageBundle& bundle,
 }
 
 bool FrameAssembler::build_capture_plan(std::vector<RuntimeCaptureViewConfig>* out_views,
-                                         AcquisitionError* error) const {
+                                        AcquisitionError* error) const {
   if (out_views == nullptr) {
     set_acquisition_error(error,
                           ErrorCode::InternalError,
@@ -685,18 +576,14 @@ bool FrameAssembler::build_capture_plan(std::vector<RuntimeCaptureViewConfig>* o
     return false;
   }
   out_views->clear();
-  if (!config_.capture_views.empty()) {
-    *out_views = config_.capture_views;
-    return true;
-  }
-  if (config_.capture_mode == CaptureMode::RobotFlyshot) {
+  if (config_.cameras.size() != 2) {
     set_acquisition_error(error,
                           ErrorCode::ConfigurationError,
                           AcquisitionStage::Configuration,
                           0,
                           0,
                           0,
-                          "robot_flyshot capture mode requires explicit pose plan");
+                          "fixed station capture requires exactly two cameras");
     return false;
   }
   for (const auto& camera : config_.cameras) {
@@ -718,81 +605,6 @@ ICamera* FrameAssembler::camera_for_index(std::uint32_t camera_index) const {
     }
   }
   return nullptr;
-}
-
-bool FrameAssembler::wait_robot_pose_ready(const ExternalTrigger& trigger,
-                                           const RuntimeCaptureViewConfig& view,
-                                           RobotPoseStatus* out_status,
-                                           AcquisitionError* error) {
-  if (out_status == nullptr) {
-    set_acquisition_error(error,
-                          ErrorCode::InternalError,
-                          AcquisitionStage::Configuration,
-                          view.camera_index,
-                          0,
-                          0,
-                          "out_status is null");
-    return false;
-  }
-  RobotPoseRequest request;
-  if (config_.capture_mode != CaptureMode::RobotFlyshot) {
-    out_status->ready = true;
-    out_status->fault = false;
-    out_status->shot_id = trigger.trigger_id;
-    out_status->robot_timestamp_us = 0;
-    for (int index = 0; index < 3; ++index) {
-      out_status->tcp_xyz_mm[index] = 0.0F;
-      out_status->rpy_deg[index] = 0.0F;
-    }
-    out_status->message = "fixed camera mode";
-    return true;
-  }
-  request.pose_index = view.pose_index;
-  request.pose_id = view.pose_id;
-  request.shot_id_source = view.shot_id_source;
-  request.ready_input = view.robot_ready_input;
-  request.fault_input = view.robot_fault_input;
-  request.photo_trigger_input = view.photo_trigger_input;
-  request.simulated_shot_id = view.simulated_shot_id;
-  for (int index = 0; index < 3; ++index) {
-    request.planned_tcp_xyz_mm[index] = view.robot_tcp_xyz_mm[index];
-    request.planned_rpy_deg[index] = view.robot_rpy_deg[index];
-  }
-  std::string robot_error;
-  if (!robot_client_->wait_pose_ready(trigger,
-                                      request,
-                                      config_.trigger_timeout_ms,
-                                      out_status,
-                                      &robot_error)) {
-    std::ostringstream oss;
-    oss << "robot pose not ready pose_id=" << view.pose_id
-        << " camera_index=" << view.camera_index
-        << " error=" << robot_error;
-    set_acquisition_error(error,
-                          ErrorCode::RobotFault,
-                          AcquisitionStage::Configuration,
-                          view.camera_index,
-                          0,
-                          0,
-                          oss.str());
-    return false;
-  }
-  if (!out_status->ready || out_status->fault) {
-    std::ostringstream oss;
-    oss << "robot pose status invalid pose_id=" << view.pose_id
-        << " ready=" << out_status->ready
-        << " fault=" << out_status->fault
-        << " message=" << out_status->message;
-    set_acquisition_error(error,
-                          ErrorCode::RobotFault,
-                          AcquisitionStage::Configuration,
-                          view.camera_index,
-                          0,
-                          0,
-                          oss.str());
-    return false;
-  }
-  return true;
 }
 
 }  // namespace seat_aoi

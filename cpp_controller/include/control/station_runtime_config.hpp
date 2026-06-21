@@ -12,12 +12,15 @@ namespace seat_aoi {
 
 enum class CaptureMode : std::uint32_t {
   FixedCamera = 1,
-  RobotFlyshot = 2,
 };
 
 enum class CaptureSchedule : std::uint32_t {
-  ViewSerialTdm = 1,
-  SharedLightParallel = 2,
+  SharedLightParallel = 1,
+};
+
+enum class ControllerMode : std::uint32_t {
+  Online = 1,
+  CaptureOnly = 2,
 };
 
 struct RuntimeCaptureViewConfig {
@@ -26,13 +29,6 @@ struct RuntimeCaptureViewConfig {
   std::uint32_t camera_index = 0;
   std::string camera_id = "TOP_BACK";
   std::string calibration_id = "calib/simulated_v1";
-  std::string shot_id_source;
-  std::string robot_ready_input;
-  std::string robot_fault_input;
-  std::string photo_trigger_input;
-  std::uint64_t simulated_shot_id = 0;
-  float robot_tcp_xyz_mm[3] = {0.0F, 0.0F, 0.0F};
-  float robot_rpy_deg[3] = {0.0F, 0.0F, 0.0F};
 };
 
 struct RuntimeCameraConfig {
@@ -99,17 +95,6 @@ struct RuntimeSignalConfig {
   bool simulate_trigger_timeout = false;
 };
 
-struct RuntimeRobotConfig {
-  HardwareBackend backend = HardwareBackend::Simulated;
-  std::string controller_id;
-  std::string host;
-  std::uint32_t port = 0;
-  std::string ready_input;
-  std::string fault_input;
-  std::string start_output;
-  bool simulate_fault = false;
-};
-
 struct ImageSaveConfig {
   bool enabled = false;
   std::string root_dir = "images";
@@ -136,9 +121,10 @@ struct StationRuntimeConfig {
   std::uint32_t critical_recheck_threshold = 5;
   int max_jobs = 0;
   std::string recipe_id = "seat_a_black_leather_v1";
-  std::vector<std::uint32_t> light_order = {1, 2, 3, 4};
+  std::vector<std::uint32_t> light_order = {1, 2, 3};
+  ControllerMode controller_mode = ControllerMode::Online;
   CaptureMode capture_mode = CaptureMode::FixedCamera;
-  CaptureSchedule capture_schedule = CaptureSchedule::ViewSerialTdm;
+  CaptureSchedule capture_schedule = CaptureSchedule::SharedLightParallel;
   std::string trace_root = "trace";
   std::vector<RuntimeCameraConfig> cameras = {
       RuntimeCameraConfig{0, "TOP_BACK", "", "calib/simulated_v1", 64, 48, 1, "Mono8", "", "", 8, false},
@@ -149,17 +135,15 @@ struct StationRuntimeConfig {
       RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F, LightAcquisitionMode::Strobe},
       RuntimeLightChannelConfig{0, 2, 2, 800, 800, 0, 1.0F, 60.0F, LightAcquisitionMode::Strobe},
       RuntimeLightChannelConfig{0, 3, 3, 800, 800, 0, 1.0F, 55.0F, LightAcquisitionMode::Strobe},
-      RuntimeLightChannelConfig{0, 4, 4, 800, 800, 0, 1.0F, 55.0F, LightAcquisitionMode::Strobe},
   };
-  std::vector<RuntimeCaptureViewConfig> capture_views;
   RuntimeSignalConfig signal;
-  RuntimeRobotConfig robot;
   ImageSaveConfig image_save;
-  bool json_output_enabled = false;
-  std::string json_output_host;
-  std::uint32_t json_output_port = 9002;
 };
 
+const char* controller_mode_name(ControllerMode mode);
+bool parse_controller_mode(const std::string& value,
+                           ControllerMode* out_mode,
+                           std::string* error_message);
 const char* capture_mode_name(CaptureMode mode);
 bool parse_capture_mode(const std::string& value,
                         CaptureMode* out_mode,

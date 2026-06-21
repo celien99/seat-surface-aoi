@@ -3,38 +3,13 @@
 #include <iostream>
 #include <sstream>
 
-#ifdef _WIN32
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#else
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#endif
-
-#include "control/image_writer.hpp"
-
-#include "control/hardware_factory.hpp"
-
 #include "common/string_utils.hpp"
+#include "control/hardware_factory.hpp"
+#include "control/image_writer.hpp"
 
 namespace seat_aoi {
 
 namespace {
-
-#ifdef _WIN32
-using JsonSocket = SOCKET;
-constexpr JsonSocket kInvalidJsonSocket = INVALID_SOCKET;
-void close_json_socket(JsonSocket sock) {
-  ::closesocket(sock);
-}
-#else
-using JsonSocket = int;
-constexpr JsonSocket kInvalidJsonSocket = -1;
-void close_json_socket(JsonSocket sock) {
-  ::close(sock);
-}
-#endif
 
 SignalClientConfig make_signal_client_config(const RuntimeSignalConfig& config) {
   SignalClientConfig client_config;
@@ -58,6 +33,33 @@ SignalClientConfig make_signal_client_config(const RuntimeSignalConfig& config) 
   client_config.simulate_output_fault = config.simulate_output_fault;
   client_config.simulate_trigger_timeout = config.simulate_trigger_timeout;
   return client_config;
+}
+
+bool save_original_images(const ImageSaveConfig& config,
+                          const SeatImageBundle& bundle,
+                          bool force_fail_on_error,
+                          std::string* error_message) {
+  if (!config.enabled || !config.save_original) {
+    return true;
+  }
+
+  const std::string date_dir = image_save_date_dir();
+  const std::string seat_id = fixed_cstr_to_string(bundle.job_meta.seat_id, kStringIdSize);
+  for (const auto& frame : bundle.frames) {
+    const std::string path = build_original_image_path(config, date_dir, seat_id, frame);
+    std::string save_error;
+    if (!write_pgm(path, frame.bytes, frame.meta.width, frame.meta.height, &save_error)) {
+      const std::string message = "image save failed: " + save_error;
+      if (force_fail_on_error || config.fail_on_save_error) {
+        if (error_message != nullptr) {
+          *error_message = message;
+        }
+        return false;
+      }
+      std::cerr << message << std::endl;
+    }
+  }
+  return true;
 }
 
 }  // namespace
@@ -87,15 +89,15 @@ bool StationController::initialize(const StationConfig& config) {
   runtime_config.recipe_id = config.recipe_id;
   runtime_config.trace_root = config.trace_root;
   runtime_config.light_order = config.light_order;
+  runtime_config.controller_mode = config.controller_mode;
   runtime_config.capture_mode = config.capture_mode;
   runtime_config.capture_schedule = config.capture_schedule;
   runtime_config.cameras = config.cameras;
-  runtime_config.lights = config.lights.empty() ? std::vector<RuntimeLightConfig>{config.light}
-                                                : config.lights;
+  runtime_config.lights =
+      config.lights.empty() ? std::vector<RuntimeLightConfig>{config.light} : config.lights;
   runtime_config.light_channels = config.light_channels;
-  runtime_config.capture_views = config.capture_views;
   runtime_config.signal = config.signal;
-  runtime_config.robot = config.robot;
+  runtime_config.image_save = config.image_save;
   if (runtime_config.lights.empty()) {
     runtime_config.lights.emplace_back();
   }
@@ -104,25 +106,26 @@ bool StationController::initialize(const StationConfig& config) {
       light.simulate_fault = true;
     }
   }
-  runtime_config.robot.simulate_fault = config.robot.simulate_fault;
   runtime_config.signal.simulate_output_fault = config.simulate_signal_result_fault;
   runtime_config.signal.simulate_trigger_timeout = config.simulate_trigger_timeout;
   for (auto& camera : runtime_config.cameras) {
     camera.simulate_missing_frame = config.simulate_missing_frame;
   }
+
   std::string trace_error;
   if (!event_log_.initialize(config.trace_root, &trace_error)) {
-    std::cerr << "C++ 生产事件日志初始化失败: " << trace_error << std::endl;
+    std::cerr << "C++ production event log initialize failed: " << trace_error << std::endl;
     return false;
   }
   health_.configure(config.warning_recheck_threshold, config.critical_recheck_threshold);
   health_.transition_to(StationState::Initialized, "station controller initialized");
   record_system_event("station_initialized", ErrorCode::None, "station controller initialized");
+
   frame_assembler_.configure(runtime_config);
   signal_client_ = create_signal_client(config.signal.backend);
   if (!signal_client_->initialize(make_signal_client_config(runtime_config.signal))) {
-    std::cerr << "外部信号客户端初始化失败: " << signal_client_->get_health().message
-              << std::endl;
+    std::cerr << "external signal client initialize failed: "
+              << signal_client_->get_health().message << std::endl;
     health_.record_fault(ErrorCode::DeviceFault, signal_client_->get_health().message);
     health_.transition_to(StationState::Fault, signal_client_->get_health().message);
     record_system_event("station_initialize_failed",
@@ -130,24 +133,34 @@ bool StationController::initialize(const StationConfig& config) {
                         signal_client_->get_health().message);
     return false;
   }
-  const bool frames_ok = frame_ring_.initialize(kFrameShmName,
-                                                config.slot_count,
-                                                config.frame_slot_size,
-                                                config.reset_shared_memory);
-  const bool results_ok = result_ring_.initialize(kResultShmName,
+
+  shared_memory_initialized_ = false;
+  if (config.controller_mode == ControllerMode::Online) {
+    const bool frames_ok = frame_ring_.initialize(kFrameShmName,
                                                   config.slot_count,
-                                                  config.result_slot_size,
+                                                  config.frame_slot_size,
                                                   config.reset_shared_memory);
-  if (!frames_ok || !results_ok) {
-    health_.record_fault(ErrorCode::ProtocolMismatch, "shared memory initialize failed");
-    health_.transition_to(StationState::Fault, "shared memory initialize failed");
-    record_system_event("station_initialize_failed",
-                        ErrorCode::ProtocolMismatch,
-                        "shared memory initialize failed");
-    return false;
+    const bool results_ok = result_ring_.initialize(kResultShmName,
+                                                    config.slot_count,
+                                                    config.result_slot_size,
+                                                    config.reset_shared_memory);
+    if (!frames_ok || !results_ok) {
+      health_.record_fault(ErrorCode::ProtocolMismatch, "shared memory initialize failed");
+      health_.transition_to(StationState::Fault, "shared memory initialize failed");
+      record_system_event("station_initialize_failed",
+                          ErrorCode::ProtocolMismatch,
+                          "shared memory initialize failed");
+      return false;
+    }
+    shared_memory_initialized_ = true;
   }
-  health_.transition_to(StationState::Ready, "station ready");
-  record_system_event("station_ready", ErrorCode::None, "station ready");
+
+  const std::string ready_message =
+      config.controller_mode == ControllerMode::CaptureOnly
+          ? "station ready in capture_only mode"
+          : "station ready";
+  health_.transition_to(StationState::Ready, ready_message);
+  record_system_event("station_ready", ErrorCode::None, ready_message);
   return true;
 }
 
@@ -184,7 +197,8 @@ InspectionResultPayload StationController::inspect_one_seat(const ExternalTrigge
                sequence_id,
                InspectionDecision::Recheck,
                ErrorCode::None,
-               "start serial_tdm inspection");
+               "start shared_light_parallel capture");
+
   std::string storage_message;
   if (!cleanup_runtime_storage_if_needed(config_.image_save, config_.trace_root, &storage_message)) {
     return make_and_send_recheck_result(
@@ -217,29 +231,47 @@ InspectionResultPayload StationController::inspect_one_seat(const ExternalTrigge
         << " camera_index=" << acquisition_error.camera_index
         << " light_index=" << acquisition_error.light_index
         << " light_seq_index=" << acquisition_error.light_seq_index;
-    const ErrorCode error_code = acquisition_error.code == ErrorCode::None
-                                     ? ErrorCode::InternalError
-                                     : acquisition_error.code;
+    const ErrorCode error_code =
+        acquisition_error.code == ErrorCode::None ? ErrorCode::InternalError
+                                                  : acquisition_error.code;
     return make_and_send_recheck_result(trigger, sequence_id, error_code, oss.str());
   }
 
-  // 图像落盘（发布到共享内存之前保存原始图像）
-  if (config_.image_save.enabled && config_.image_save.save_original) {
-    const std::string date_dir = image_save_date_dir();
-    const std::string seat_id = fixed_cstr_to_string(bundle.job_meta.seat_id, kStringIdSize);
-    for (const auto& frame : bundle.frames) {
-      const std::string path =
-          build_original_image_path(config_.image_save, date_dir, seat_id, frame);
-      std::string save_error;
-      if (!write_pgm(path, frame.bytes, frame.meta.width, frame.meta.height, &save_error)) {
-        const std::string message = "图像保存失败: " + save_error;
-        if (config_.image_save.fail_on_save_error) {
-          return make_and_send_recheck_result(
-              trigger, sequence_id, ErrorCode::DeviceFault, message);
-        }
-        std::cerr << message << std::endl;
-      }
+  if (!save_original_images(config_.image_save,
+                            bundle,
+                            config_.controller_mode == ControllerMode::CaptureOnly,
+                            &error)) {
+    return make_and_send_recheck_result(trigger, sequence_id, ErrorCode::DeviceFault, error);
+  }
+
+  if (config_.controller_mode == ControllerMode::CaptureOnly) {
+    const std::string message =
+        "capture_only saved images; shared memory and detector bypassed";
+    auto result = make_recheck_result(trigger, sequence_id, ErrorCode::None, message);
+    if (!signal_client_->publish_result(trigger,
+                                        sequence_id,
+                                        InspectionDecision::Recheck,
+                                        200,
+                                        &error)) {
+      result.meta.error_code = static_cast<std::uint32_t>(ErrorCode::DeviceFault);
+      record_result_health(result, message + "; publish_error=" + error);
+      record_event("capture_only_result_publish_failed",
+                   trigger,
+                   sequence_id,
+                   InspectionDecision::Recheck,
+                   ErrorCode::DeviceFault,
+                   message + "; publish_error=" + error);
+      return result;
     }
+    health_.transition_to(StationState::Ready, "station ready in capture_only mode");
+    record_event("capture_only_complete",
+                 trigger,
+                 sequence_id,
+                 InspectionDecision::Recheck,
+                 ErrorCode::None,
+                 message);
+    log_result(result);
+    return result;
   }
 
   std::uint64_t published_sequence_id = 0;
@@ -265,6 +297,7 @@ InspectionResultPayload StationController::inspect_one_seat(const ExternalTrigge
   if (!validate_detector_result(trigger, published_sequence_id, result, &error)) {
     return make_and_send_recheck_result(trigger, sequence_id, ErrorCode::InvalidPayload, error);
   }
+
   const auto decision = static_cast<InspectionDecision>(result.meta.decision);
   const InspectionDecision published_decision =
       decision == InspectionDecision::Error ? InspectionDecision::Recheck : decision;
@@ -289,44 +322,6 @@ InspectionResultPayload StationController::inspect_one_seat(const ExternalTrigge
                    ? "detector result accepted and external signal result published"
                    : "detector ERROR mapped to external RECHECK result");
 
-  // JSON 详细结果输出 (detail_result_output)
-  if (config_.json_output_enabled && !config_.json_output_host.empty() &&
-      config_.json_output_port > 0) {
-    std::ostringstream json;
-    json << "{\"type\":\"inspection_result\","
-         << "\"sn\":\"" << trigger.seat_id << "\","
-         << "\"overall\":\"" << (decision == InspectionDecision::OK ? "OK"
-                               : decision == InspectionDecision::NG ? "NG"
-                               : "RECHECK") << "\","
-         << "\"overall_code\":" << static_cast<std::uint32_t>(decision) << ","
-         << "\"sequence\":" << sequence_id << ","
-         << "\"error_code\":" << result.meta.error_code << ","
-         << "\"elapsed_ms\":" << result.meta.elapsed_ms << ","
-         << "\"defect_count\":" << result.meta.defect_count << "}\n";
-    // 通过 TCP 发送（best-effort, 不阻塞主流程）
-    try {
-      // POSIX socket send
-      JsonSocket sock =
-#ifdef _WIN32
-          ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-#else
-          ::socket(AF_INET, SOCK_STREAM, 0);
-#endif
-      if (sock != kInvalidJsonSocket) {
-        struct sockaddr_in addr{};
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons(static_cast<uint16_t>(config_.json_output_port));
-        if (inet_pton(AF_INET, config_.json_output_host.c_str(), &addr.sin_addr) == 1) {
-          if (::connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0) {
-            const auto& data = json.str();
-            ::send(sock, data.data(), data.size(), 0);
-          }
-        }
-        close_json_socket(sock);
-      }
-    } catch (...) {}
-  }
-
   log_result(result);
   return result;
 }
@@ -334,8 +329,11 @@ InspectionResultPayload StationController::inspect_one_seat(const ExternalTrigge
 void StationController::cleanup_shared_memory() {
   health_.transition_to(StationState::Stopped, "shared memory cleanup requested");
   record_system_event("station_stopped", ErrorCode::None, "shared memory cleanup requested");
-  frame_ring_.unlink_name();
-  result_ring_.unlink_name();
+  if (shared_memory_initialized_) {
+    frame_ring_.unlink_name();
+    result_ring_.unlink_name();
+    shared_memory_initialized_ = false;
+  }
   frame_ring_.close();
   result_ring_.close();
 }
@@ -376,7 +374,8 @@ InspectionResultPayload StationController::make_and_send_recheck_result(
     const std::string& message) {
   auto result = make_recheck_result(trigger, sequence_id, error_code, message);
   std::string publish_error;
-  if (!signal_client_->publish_result(trigger, sequence_id, InspectionDecision::Recheck, 200, &publish_error)) {
+  if (!signal_client_->publish_result(
+          trigger, sequence_id, InspectionDecision::Recheck, 200, &publish_error)) {
     result.meta.error_code = static_cast<std::uint32_t>(ErrorCode::DeviceFault);
     record_result_health(result, message + "; publish_error=" + publish_error);
     std::cerr << "[sequence_id=" << sequence_id << " trigger_id=" << trigger.trigger_id

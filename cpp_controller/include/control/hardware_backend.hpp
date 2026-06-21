@@ -14,19 +14,9 @@ enum class HardwareBackend {
   Simulated,
   ManualTrigger,
   ExternalSignal,
-  ModbusTcp,
-  SiemensS7,
-  EthercatIo,
-  DigitalIo,
   SerialAscii,
-  BaslerPylon,
   HikrobotMvs,
-  DahengGalaxy,
-  FlirSpinnaker,
-  VendorSdk,
-  CustomSdk,
   TcpSignal,
-  DistanceTrigger,
 };
 
 const char* hardware_mode_name(HardwareMode mode);

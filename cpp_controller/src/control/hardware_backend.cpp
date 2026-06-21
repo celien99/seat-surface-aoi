@@ -22,32 +22,12 @@ const char* hardware_backend_name(HardwareBackend backend) {
       return "manual_trigger";
     case HardwareBackend::ExternalSignal:
       return "external_signal";
-    case HardwareBackend::ModbusTcp:
-      return "modbus_tcp";
-    case HardwareBackend::SiemensS7:
-      return "siemens_s7";
-    case HardwareBackend::EthercatIo:
-      return "ethercat_io";
-    case HardwareBackend::DigitalIo:
-      return "digital_io";
     case HardwareBackend::SerialAscii:
       return "serial_ascii";
-    case HardwareBackend::BaslerPylon:
-      return "basler_pylon";
     case HardwareBackend::HikrobotMvs:
       return "hikrobot_mvs";
-    case HardwareBackend::DahengGalaxy:
-      return "daheng_galaxy";
-    case HardwareBackend::FlirSpinnaker:
-      return "flir_spinnaker";
-    case HardwareBackend::VendorSdk:
-      return "vendor_sdk";
-    case HardwareBackend::CustomSdk:
-      return "custom_sdk";
     case HardwareBackend::TcpSignal:
       return "tcp_signal";
-    case HardwareBackend::DistanceTrigger:
-      return "distance_trigger";
   }
   return "unknown";
 }
@@ -102,65 +82,24 @@ bool parse_hardware_backend(const std::string& value,
     *out_backend = HardwareBackend::ExternalSignal;
     return true;
   }
-  if (value == "modbus_tcp" || value == "modbus") {
-    *out_backend = HardwareBackend::ModbusTcp;
-    return true;
-  }
-  if (value == "siemens_s7" || value == "s7") {
-    *out_backend = HardwareBackend::SiemensS7;
-    return true;
-  }
-  if (value == "ethercat_io" || value == "ethercat") {
-    *out_backend = HardwareBackend::EthercatIo;
-    return true;
-  }
-  if (value == "digital_io" || value == "io_card" || value == "dio") {
-    *out_backend = HardwareBackend::DigitalIo;
-    return true;
-  }
   if (value == "serial_ascii" || value == "rs232" || value == "rs485" ||
       value == "serial") {
     *out_backend = HardwareBackend::SerialAscii;
-    return true;
-  }
-  if (value == "basler_pylon" || value == "basler") {
-    *out_backend = HardwareBackend::BaslerPylon;
     return true;
   }
   if (value == "hikrobot_mvs" || value == "hikrobot" || value == "mvs") {
     *out_backend = HardwareBackend::HikrobotMvs;
     return true;
   }
-  if (value == "daheng_galaxy" || value == "daheng" || value == "galaxy") {
-    *out_backend = HardwareBackend::DahengGalaxy;
-    return true;
-  }
-  if (value == "flir_spinnaker" || value == "flir" || value == "spinnaker") {
-    *out_backend = HardwareBackend::FlirSpinnaker;
-    return true;
-  }
-  if (value == "vendor_sdk" || value == "sdk") {
-    *out_backend = HardwareBackend::VendorSdk;
-    return true;
-  }
-  if (value == "custom_sdk" || value == "custom") {
-    *out_backend = HardwareBackend::CustomSdk;
-    return true;
-  }
   if (value == "tcp_signal" || value == "tcp" || value == "tcp_plc") {
     *out_backend = HardwareBackend::TcpSignal;
-    return true;
-  }
-  if (value == "distance_trigger" || value == "distance" || value == "laser") {
-    *out_backend = HardwareBackend::DistanceTrigger;
     return true;
   }
   if (error_message != nullptr) {
     *error_message =
         "硬件 backend 不支持: " + value +
-        "，可选 simulated/manual_trigger/external_signal/tcp_signal/modbus_tcp/siemens_s7/ethercat_io/digital_io/"
-        "serial_ascii/basler_pylon/hikrobot_mvs/daheng_galaxy/"
-        "flir_spinnaker/vendor_sdk/custom_sdk";
+        "，当前只保留 simulated/manual_trigger/external_signal/tcp_signal/"
+        "serial_ascii/hikrobot_mvs";
   }
   return false;
 }

@@ -57,26 +57,21 @@ void apply_runtime_config(const seat_aoi::StationRuntimeConfig& runtime_config,
   config->recipe_id = runtime_config.recipe_id;
   config->trace_root = runtime_config.trace_root;
   config->light_order = runtime_config.light_order;
+  config->controller_mode = runtime_config.controller_mode;
   config->capture_mode = runtime_config.capture_mode;
   config->capture_schedule = runtime_config.capture_schedule;
   config->cameras = runtime_config.cameras;
   config->light = runtime_config.lights.empty() ? seat_aoi::RuntimeLightConfig{} : runtime_config.lights[0];
   config->lights = runtime_config.lights;
   config->light_channels = runtime_config.light_channels;
-  config->capture_views = runtime_config.capture_views;
   config->signal = runtime_config.signal;
-  config->robot = runtime_config.robot;
   config->simulate_light_fault = !runtime_config.lights.empty() && runtime_config.lights[0].simulate_fault;
-  config->robot.simulate_fault = runtime_config.robot.simulate_fault;
   config->simulate_trigger_timeout = runtime_config.signal.simulate_trigger_timeout;
   config->simulate_signal_result_fault = runtime_config.signal.simulate_output_fault;
   for (const auto& camera : runtime_config.cameras) {
     config->simulate_missing_frame = config->simulate_missing_frame || camera.simulate_missing_frame;
   }
   config->image_save = runtime_config.image_save;
-  config->json_output_enabled = runtime_config.json_output_enabled;
-  config->json_output_host = runtime_config.json_output_host;
-  config->json_output_port = runtime_config.json_output_port;
 }
 
 }  // namespace

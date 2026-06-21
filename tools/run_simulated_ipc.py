@@ -228,7 +228,6 @@ def common_cpp_sources() -> list[Path]:
         CPP_DIR / "src" / "control" / "light_controller.cpp",
         CPP_DIR / "src" / "control" / "signal_client.cpp",
         CPP_DIR / "src" / "control" / "tcp_signal_client.cpp",
-        CPP_DIR / "src" / "control" / "robot_client.cpp",
         CPP_DIR / "src" / "control" / "production_event_log.cpp",
         CPP_DIR / "src" / "control" / "station_health.cpp",
         CPP_DIR / "src" / "control" / "station_runtime_config.cpp",
@@ -238,8 +237,6 @@ def common_cpp_sources() -> list[Path]:
         CPP_DIR / "src" / "control" / "frame_assembler.cpp",
         CPP_DIR / "src" / "control" / "station_controller.cpp",
         CPP_DIR / "src" / "control" / "image_writer.cpp",
-        CPP_DIR / "src" / "control" / "distance_sensor.cpp",
-        CPP_DIR / "src" / "control" / "distance_trigger_signal_client.cpp",
     ]
 
 

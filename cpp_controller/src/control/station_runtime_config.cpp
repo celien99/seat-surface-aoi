@@ -4,12 +4,20 @@
 #include <fstream>
 #include <map>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 
 namespace seat_aoi {
 
 namespace {
+
+std::string trim(const std::string& value) {
+  const auto begin = value.find_first_not_of(" \t\r\n");
+  if (begin == std::string::npos) {
+    return "";
+  }
+  const auto end = value.find_last_not_of(" \t\r\n");
+  return value.substr(begin, end - begin + 1);
+}
 
 bool parse_bool_field(const std::string& field_name,
                       const std::string& value,
@@ -24,126 +32,7 @@ bool parse_bool_field(const std::string& field_name,
     return true;
   }
   if (error_message != nullptr) {
-    *error_message = field_name + " 必须是布尔值 true/false/1/0/yes/no/on/off: " + value;
-  }
-  return false;
-}
-
-std::string trim(const std::string& value) {
-  const auto begin = value.find_first_not_of(" \t\r\n");
-  if (begin == std::string::npos) {
-    return "";
-  }
-  const auto end = value.find_last_not_of(" \t\r\n");
-  return value.substr(begin, end - begin + 1);
-}
-
-bool parse_light_order(const std::string& value,
-                       std::vector<std::uint32_t>* out_light_order,
-                       std::string* error_message) {
-  std::vector<std::uint32_t> light_order;
-  std::stringstream stream(value);
-  std::string item;
-  while (std::getline(stream, item, ',')) {
-    item = trim(item);
-    if (item.empty()) {
-      continue;
-    }
-    try {
-      const int parsed = std::stoi(item);
-      if (parsed <= 0) {
-        if (error_message != nullptr) {
-          *error_message = "light_order 只能包含正整数: " + value;
-        }
-        return false;
-      }
-      light_order.push_back(static_cast<std::uint32_t>(parsed));
-    } catch (const std::exception&) {
-      if (error_message != nullptr) {
-        *error_message = "light_order 解析失败: " + value;
-      }
-      return false;
-    }
-  }
-  if (light_order.empty()) {
-    if (error_message != nullptr) {
-      *error_message = "light_order 不能为空";
-    }
-    return false;
-  }
-  *out_light_order = light_order;
-  return true;
-}
-
-bool parse_capture_mode_value(const std::string& value,
-                              CaptureMode* out_mode,
-                              std::string* error_message) {
-  if (value == "fixed_camera" || value == "fixed" || value == "stationary") {
-    *out_mode = CaptureMode::FixedCamera;
-    return true;
-  }
-  if (value == "robot_flyshot" || value == "robot" || value == "flyshot") {
-    *out_mode = CaptureMode::RobotFlyshot;
-    return true;
-  }
-  if (error_message != nullptr) {
-    *error_message = "capture_mode 只能是 fixed_camera 或 robot_flyshot: " + value;
-  }
-  return false;
-}
-
-bool parse_capture_schedule_value(const std::string& value,
-                                  CaptureSchedule* out_schedule,
-                                  std::string* error_message) {
-  if (value == "view_serial_tdm" || value == "view_serial" || value == "serial_tdm") {
-    *out_schedule = CaptureSchedule::ViewSerialTdm;
-    return true;
-  }
-  if (value == "shared_light_parallel" || value == "light_parallel" ||
-      value == "parallel_light") {
-    *out_schedule = CaptureSchedule::SharedLightParallel;
-    return true;
-  }
-  if (error_message != nullptr) {
-    *error_message =
-        "capture_schedule 只能是 view_serial_tdm 或 shared_light_parallel: " + value;
-  }
-  return false;
-}
-
-bool parse_light_acquisition_mode_value(const std::string& value,
-                                        LightAcquisitionMode* out_mode,
-                                        std::string* error_message) {
-  if (value == "strobe" || value == "flash") {
-    *out_mode = LightAcquisitionMode::Strobe;
-    return true;
-  }
-  if (value == "ambient" || value == "constant" || value == "constant_light" ||
-      value == "no_strobe") {
-    *out_mode = LightAcquisitionMode::Ambient;
-    return true;
-  }
-  if (error_message != nullptr) {
-    *error_message =
-        "light acquisition_mode 只能是 strobe 或 ambient: " + value;
-  }
-  return false;
-}
-
-bool parse_light_serial_response_mode_value(const std::string& value,
-                                            LightSerialResponseMode* out_mode,
-                                            std::string* error_message) {
-  if (value == "ack" || value == "strict_ack" || value == "strict") {
-    *out_mode = LightSerialResponseMode::Ack;
-    return true;
-  }
-  if (value == "none" || value == "no_ack" || value == "write_only") {
-    *out_mode = LightSerialResponseMode::None;
-    return true;
-  }
-  if (error_message != nullptr) {
-    *error_message =
-        "light response_mode 只能是 ack 或 none: " + value;
+    *error_message = field_name + " 必须是布尔值: " + value;
   }
   return false;
 }
@@ -162,32 +51,8 @@ bool parse_uint32_field(const std::string& field_name,
     return true;
   } catch (const std::exception&) {
     if (error_message != nullptr) {
-      *error_message = field_name + " 必须是" + (allow_zero ? "非负整数" : "正整数") +
-                       ": " + value;
-    }
-    return false;
-  }
-}
-
-bool parse_uint64_field(const std::string& field_name,
-                        const std::string& value,
-                        bool allow_zero,
-                        std::uint64_t* out_value,
-                        std::string* error_message) {
-  try {
-    if (!value.empty() && value.front() == '-') {
-      throw std::invalid_argument(field_name);
-    }
-    const unsigned long long parsed = std::stoull(value);
-    if (!allow_zero && parsed == 0ULL) {
-      throw std::invalid_argument(field_name);
-    }
-    *out_value = static_cast<std::uint64_t>(parsed);
-    return true;
-  } catch (const std::exception&) {
-    if (error_message != nullptr) {
-      *error_message = field_name + " 必须是" + (allow_zero ? "非负整数" : "正整数") +
-                       ": " + value;
+      *error_message = field_name + " 必须是" +
+                       std::string(allow_zero ? "非负整数" : "正整数") + ": " + value;
     }
     return false;
   }
@@ -207,8 +72,8 @@ bool parse_int_field(const std::string& field_name,
     return true;
   } catch (const std::exception&) {
     if (error_message != nullptr) {
-      *error_message = field_name + " 必须是" + (allow_zero ? "非负整数" : "正整数") +
-                       ": " + value;
+      *error_message = field_name + " 必须是" +
+                       std::string(allow_zero ? "非负整数" : "正整数") + ": " + value;
     }
     return false;
   }
@@ -236,35 +101,58 @@ bool parse_float_field(const std::string& field_name,
   }
 }
 
-RuntimeLightChannelConfig default_light_channel_config(std::uint32_t light_index) {
-  RuntimeLightChannelConfig config;
-  config.light_index = light_index;
-  config.physical_channel = light_index;
-  return config;
-}
-
-/// 确保 lights 向量至少有 n 个元素（单控制器模式填充默认值）
-void ensure_lights_size(std::vector<RuntimeLightConfig>* lights, std::size_t n) {
-  if (lights->size() < n) {
-    lights->resize(n);
+bool parse_light_order(const std::string& value,
+                       std::vector<std::uint32_t>* out_light_order,
+                       std::string* error_message) {
+  std::vector<std::uint32_t> light_order;
+  std::stringstream stream(value);
+  std::string item;
+  while (std::getline(stream, item, ',')) {
+    item = trim(item);
+    if (item.empty()) {
+      continue;
+    }
+    try {
+      const int parsed = std::stoi(item);
+      if (parsed <= 0) {
+        throw std::invalid_argument("light_order");
+      }
+      light_order.push_back(static_cast<std::uint32_t>(parsed));
+    } catch (const std::exception&) {
+      if (error_message != nullptr) {
+        *error_message = "light_order 只能包含正整数: " + value;
+      }
+      return false;
+    }
   }
-}
-
-RuntimeLightChannelConfig* ensure_light_channel(
-    std::map<std::uint32_t, RuntimeLightChannelConfig>* channels,
-    std::uint32_t light_index) {
-  auto iter = channels->find(light_index);
-  if (iter == channels->end()) {
-    iter = channels->emplace(light_index, default_light_channel_config(light_index)).first;
+  if (light_order.empty()) {
+    if (error_message != nullptr) {
+      *error_message = "light_order 不能为空";
+    }
+    return false;
   }
-  return &iter->second;
+  *out_light_order = light_order;
+  return true;
 }
 
-/// 解析光源通道键。
-/// 旧格式: light.<N>.<field>    → controller_index=0, light_index=N（向后兼容）
-/// 新格式: light.<M>.<N>.<field> → controller_index=M, light_index=N
+bool parse_light_serial_response_mode_value(const std::string& value,
+                                            LightSerialResponseMode* out_mode,
+                                            std::string* error_message) {
+  if (value == "ack" || value == "strict_ack" || value == "strict") {
+    *out_mode = LightSerialResponseMode::Ack;
+    return true;
+  }
+  if (value == "none" || value == "no_ack" || value == "write_only") {
+    *out_mode = LightSerialResponseMode::None;
+    return true;
+  }
+  if (error_message != nullptr) {
+    *error_message = "light.response_mode 只能是 ack 或 none: " + value;
+  }
+  return false;
+}
+
 bool parse_light_channel_key(const std::string& key,
-                             std::uint32_t* out_controller_index,
                              std::uint32_t* out_light_index,
                              std::string* out_field) {
   constexpr const char* kPrefix = "light.";
@@ -272,37 +160,18 @@ bool parse_light_channel_key(const std::string& key,
     return false;
   }
   const auto after_prefix = std::string(kPrefix).size();
-  const auto first_dot = key.find('.', after_prefix);
-  if (first_dot == std::string::npos) {
+  const auto field_separator = key.find('.', after_prefix);
+  if (field_separator == std::string::npos) {
     return false;
   }
-  const std::string first_index_text = key.substr(after_prefix, first_dot - after_prefix);
+  const auto index_text = key.substr(after_prefix, field_separator - after_prefix);
   try {
-    const int first_parsed = std::stoi(first_index_text);
-    if (first_parsed < 0) {
+    const int parsed = std::stoi(index_text);
+    if (parsed <= 0) {
       return false;
     }
-    const auto second_dot = key.find('.', first_dot + 1);
-    if (second_dot != std::string::npos) {
-      // 新格式: light.<M>.<N>.<field> 有三个点
-      const std::string second_index_text =
-          key.substr(first_dot + 1, second_dot - first_dot - 1);
-      const int second_parsed = std::stoi(second_index_text);
-      if (second_parsed <= 0) {
-        return false;
-      }
-      *out_controller_index = static_cast<std::uint32_t>(first_parsed);
-      *out_light_index = static_cast<std::uint32_t>(second_parsed);
-      *out_field = key.substr(second_dot + 1);
-    } else {
-      // 旧格式: light.<N>.<field> 只有两个点
-      if (first_parsed <= 0) {
-        return false;
-      }
-      *out_controller_index = 0;
-      *out_light_index = static_cast<std::uint32_t>(first_parsed);
-      *out_field = key.substr(first_dot + 1);
-    }
+    *out_light_index = static_cast<std::uint32_t>(parsed);
+    *out_field = key.substr(field_separator + 1);
     return !out_field->empty();
   } catch (const std::exception&) {
     return false;
@@ -321,7 +190,7 @@ bool parse_camera_key(const std::string& key,
   if (field_separator == std::string::npos) {
     return false;
   }
-  const std::string index_text = key.substr(after_prefix, field_separator - after_prefix);
+  const auto index_text = key.substr(after_prefix, field_separator - after_prefix);
   try {
     const int parsed = std::stoi(index_text);
     if (parsed < 0) {
@@ -335,30 +204,11 @@ bool parse_camera_key(const std::string& key,
   }
 }
 
-bool parse_pose_key(const std::string& key,
-                    std::uint32_t* out_pose_index,
-                    std::string* out_field) {
-  constexpr const char* kPrefix = "pose.";
-  if (key.rfind(kPrefix, 0) != 0) {
-    return false;
-  }
-  const auto after_prefix = std::string(kPrefix).size();
-  const auto field_separator = key.find('.', after_prefix);
-  if (field_separator == std::string::npos) {
-    return false;
-  }
-  const std::string index_text = key.substr(after_prefix, field_separator - after_prefix);
-  try {
-    const int parsed = std::stoi(index_text);
-    if (parsed < 0) {
-      return false;
-    }
-    *out_pose_index = static_cast<std::uint32_t>(parsed);
-    *out_field = key.substr(field_separator + 1);
-    return !out_field->empty();
-  } catch (const std::exception&) {
-    return false;
-  }
+RuntimeLightChannelConfig default_light_channel_config(std::uint32_t light_index) {
+  RuntimeLightChannelConfig config;
+  config.light_index = light_index;
+  config.physical_channel = light_index;
+  return config;
 }
 
 RuntimeCameraConfig default_camera_config(std::uint32_t camera_index) {
@@ -366,6 +216,16 @@ RuntimeCameraConfig default_camera_config(std::uint32_t camera_index) {
   config.camera_index = camera_index;
   config.camera_id = "CAMERA_" + std::to_string(camera_index);
   return config;
+}
+
+RuntimeLightChannelConfig* ensure_light_channel(
+    std::map<std::uint32_t, RuntimeLightChannelConfig>* channels,
+    std::uint32_t light_index) {
+  auto iter = channels->find(light_index);
+  if (iter == channels->end()) {
+    iter = channels->emplace(light_index, default_light_channel_config(light_index)).first;
+  }
+  return &iter->second;
 }
 
 RuntimeCameraConfig* ensure_camera(std::map<std::uint32_t, RuntimeCameraConfig>* cameras,
@@ -377,189 +237,74 @@ RuntimeCameraConfig* ensure_camera(std::map<std::uint32_t, RuntimeCameraConfig>*
   return &iter->second;
 }
 
-RuntimeCaptureViewConfig default_capture_view_config(std::uint32_t pose_index) {
-  RuntimeCaptureViewConfig config;
-  config.pose_index = pose_index;
-  config.pose_id = "POSE_" + std::to_string(pose_index);
-  config.camera_index = 0;
-  config.camera_id = "TOP_BACK";
-  return config;
-}
-
-RuntimeCaptureViewConfig* ensure_capture_view(
-    std::map<std::uint32_t, RuntimeCaptureViewConfig>* views,
-    std::uint32_t pose_index) {
-  auto iter = views->find(pose_index);
-  if (iter == views->end()) {
-    iter = views->emplace(pose_index, default_capture_view_config(pose_index)).first;
-  }
-  return &iter->second;
-}
-
-bool parse_float3(const std::string& field_name,
-                  const std::string& value,
-                  float* out_values,
-                  std::string* error_message) {
-  std::stringstream stream(value);
-  std::string item;
-  int index = 0;
-  while (std::getline(stream, item, ',')) {
-    item = trim(item);
-    if (item.empty()) {
-      continue;
-    }
-    if (index >= 3) {
-      if (error_message != nullptr) {
-        *error_message = field_name + " 必须包含 3 个数字: " + value;
-      }
-      return false;
-    }
-    try {
-      out_values[index] = std::stof(item);
-    } catch (const std::exception&) {
-      if (error_message != nullptr) {
-        *error_message = field_name + " 解析失败: " + value;
-      }
-      return false;
-    }
-    ++index;
-  }
-  if (index != 3) {
-    if (error_message != nullptr) {
-      *error_message = field_name + " 必须包含 3 个数字: " + value;
-    }
-    return false;
-  }
-  return true;
-}
-
 bool apply_light_channel_value(RuntimeLightChannelConfig* channel,
                                const std::string& field,
                                const std::string& value,
                                std::string* error_message) {
-  try {
-    if (field == "physical_channel") {
-      const int parsed = std::stoi(value);
-      if (parsed < 0) {
-        throw std::invalid_argument("physical_channel");
-      }
-      channel->physical_channel = static_cast<std::uint32_t>(parsed);
-    } else if (field == "exposure_us") {
-      const int parsed = std::stoi(value);
-      if (parsed <= 0) {
-        throw std::invalid_argument("exposure_us");
-      }
-      channel->exposure_us = static_cast<std::uint32_t>(parsed);
-    } else if (field == "strobe_width_us") {
-      const int parsed = std::stoi(value);
-      if (parsed < 0) {
-        throw std::invalid_argument("strobe_width_us");
-      }
-      channel->strobe_width_us = static_cast<std::uint32_t>(parsed);
-    } else if (field == "trigger_delay_us") {
-      const int parsed = std::stoi(value);
-      if (parsed < 0) {
-        throw std::invalid_argument("trigger_delay_us");
-      }
-      channel->trigger_delay_us = static_cast<std::uint32_t>(parsed);
-    } else if (field == "gain") {
-      const float parsed = std::stof(value);
-      if (parsed <= 0.0F) {
-        throw std::invalid_argument("gain");
-      }
-      channel->gain = parsed;
-    } else if (field == "current_percent") {
-      const float parsed = std::stof(value);
-      if (parsed < 0.0F || parsed > 100.0F) {
-        throw std::invalid_argument("current_percent");
-      }
-      channel->current_percent = parsed;
-    } else if (field == "acquisition_mode") {
-      return parse_light_acquisition_mode_value(
-          value, &channel->acquisition_mode, error_message);
-    } else {
-      if (error_message != nullptr) {
-        *error_message = "未知光源配置字段: light." + std::to_string(channel->light_index) +
-                         "." + field;
-      }
-      return false;
-    }
-  } catch (const std::exception&) {
-    if (error_message != nullptr) {
-      *error_message = "光源配置字段非法: light." + std::to_string(channel->light_index) +
-                       "." + field + "=" + value;
-    }
-    return false;
+  if (field == "physical_channel") {
+    return parse_uint32_field("light." + std::to_string(channel->light_index) +
+                                  ".physical_channel",
+                              value,
+                              false,
+                              &channel->physical_channel,
+                              error_message);
   }
-  return true;
-}
-
-bool parse_light_controller_key(const std::string& key,
-                                std::uint32_t* out_controller_index,
-                                std::string* out_field) {
-  constexpr const char* kPrefix = "light.";
-  if (key.rfind(kPrefix, 0) != 0) {
-    return false;
+  if (field == "exposure_us") {
+    return parse_uint32_field("light." + std::to_string(channel->light_index) +
+                                  ".exposure_us",
+                              value,
+                              false,
+                              &channel->exposure_us,
+                              error_message);
   }
-  const auto after_prefix = std::string(kPrefix).size();
-  const auto dot = key.find('.', after_prefix);
-  if (dot == std::string::npos) {
-    return false;
+  if (field == "strobe_width_us") {
+    return parse_uint32_field("light." + std::to_string(channel->light_index) +
+                                  ".strobe_width_us",
+                              value,
+                              false,
+                              &channel->strobe_width_us,
+                              error_message);
   }
-  const std::string controller_text = key.substr(after_prefix, dot - after_prefix);
-  try {
-    const int parsed = std::stoi(controller_text);
-    if (parsed < 0) {
-      return false;
-    }
-    const std::string field = key.substr(dot + 1);
-    if (field == "backend" || field == "device_id" || field == "host" ||
-        field == "port" || field == "serial_port" || field == "baud_rate" ||
-        field == "trigger_input_line" || field == "response_mode" ||
-        field == "simulate_fault") {
-      *out_controller_index = static_cast<std::uint32_t>(parsed);
-      *out_field = field;
+  if (field == "trigger_delay_us") {
+    return parse_uint32_field("light." + std::to_string(channel->light_index) +
+                                  ".trigger_delay_us",
+                              value,
+                              true,
+                              &channel->trigger_delay_us,
+                              error_message);
+  }
+  if (field == "gain") {
+    return parse_float_field("light." + std::to_string(channel->light_index) + ".gain",
+                             value,
+                             0.01F,
+                             100.0F,
+                             &channel->gain,
+                             error_message);
+  }
+  if (field == "current_percent") {
+    return parse_float_field("light." + std::to_string(channel->light_index) +
+                                 ".current_percent",
+                             value,
+                             0.01F,
+                             100.0F,
+                             &channel->current_percent,
+                             error_message);
+  }
+  if (field == "acquisition_mode") {
+    if (value == "strobe" || value == "flash") {
+      channel->acquisition_mode = LightAcquisitionMode::Strobe;
       return true;
     }
-  } catch (const std::exception&) {
-    return false;
-  }
-  return false;
-}
-
-bool apply_light_controller_value(RuntimeLightConfig* light,
-                                  std::uint32_t controller_index,
-                                  const std::string& field,
-                                  const std::string& value,
-                                  std::string* error_message) {
-  const std::string prefix = "light." + std::to_string(controller_index) + ".";
-  if (field == "backend") {
-    return parse_hardware_backend(value, &light->backend, error_message);
-  }
-  if (field == "device_id") {
-    light->device_id = value;
-  } else if (field == "host") {
-    light->host = value;
-  } else if (field == "port") {
-    return parse_uint32_field(prefix + "port", value, false, &light->port, error_message);
-  } else if (field == "serial_port") {
-    light->serial_port = value;
-  } else if (field == "baud_rate") {
-    return parse_uint32_field(prefix + "baud_rate", value, false, &light->baud_rate, error_message);
-  } else if (field == "trigger_input_line") {
-    light->trigger_input_line = value;
-  } else if (field == "response_mode") {
-    return parse_light_serial_response_mode_value(
-        value, &light->response_mode, error_message);
-  } else if (field == "simulate_fault") {
-    return parse_bool_field(prefix + "simulate_fault", value, &light->simulate_fault, error_message);
-  } else {
     if (error_message != nullptr) {
-      *error_message = "未知频闪控制器配置字段: " + prefix + field;
+      *error_message = "当前频闪链路只允许 light.<N>.acquisition_mode=strobe";
     }
     return false;
   }
-  return true;
+  if (error_message != nullptr) {
+    *error_message = "未知光源字段: light." + std::to_string(channel->light_index) +
+                     "." + field;
+  }
+  return false;
 }
 
 bool apply_camera_value(RuntimeCameraConfig* camera,
@@ -611,208 +356,12 @@ bool apply_camera_value(RuntimeCameraConfig* camera,
                             error_message);
   } else {
     if (error_message != nullptr) {
-      *error_message = "未知相机配置字段: camera." +
-                       std::to_string(camera->camera_index) + "." + field;
+      *error_message = "未知相机字段: camera." + std::to_string(camera->camera_index) +
+                       "." + field;
     }
     return false;
   }
   return true;
-}
-
-bool apply_capture_view_value(RuntimeCaptureViewConfig* view,
-                              const std::string& field,
-                              const std::string& value,
-                              std::string* error_message) {
-  if (field == "pose_id") {
-    view->pose_id = value;
-  } else if (field == "camera_index") {
-    return parse_uint32_field("pose." + std::to_string(view->pose_index) + ".camera_index",
-                              value,
-                              true,
-                              &view->camera_index,
-                              error_message);
-  } else if (field == "camera_id") {
-    view->camera_id = value;
-  } else if (field == "calibration_id") {
-    view->calibration_id = value;
-  } else if (field == "shot_id_source") {
-    view->shot_id_source = value;
-  } else if (field == "robot_ready_input") {
-    view->robot_ready_input = value;
-  } else if (field == "robot_fault_input") {
-    view->robot_fault_input = value;
-  } else if (field == "photo_trigger_input") {
-    view->photo_trigger_input = value;
-  } else if (field == "simulated_shot_id") {
-    return parse_uint64_field("pose." + std::to_string(view->pose_index) + ".simulated_shot_id",
-                              value,
-                              true,
-                              &view->simulated_shot_id,
-                              error_message);
-  } else if (field == "robot_tcp_xyz_mm") {
-    return parse_float3("pose." + std::to_string(view->pose_index) + ".robot_tcp_xyz_mm",
-                        value,
-                        view->robot_tcp_xyz_mm,
-                        error_message);
-  } else if (field == "robot_rpy_deg") {
-    return parse_float3("pose." + std::to_string(view->pose_index) + ".robot_rpy_deg",
-                        value,
-                        view->robot_rpy_deg,
-                        error_message);
-  } else {
-    if (error_message != nullptr) {
-      *error_message = "未知 pose 配置字段: pose." +
-                       std::to_string(view->pose_index) + "." + field;
-    }
-    return false;
-  }
-  return true;
-}
-
-bool validate_light_channels(const std::vector<std::uint32_t>& light_order,
-                             const std::map<std::uint32_t, RuntimeLightChannelConfig>& channels,
-                             const std::vector<RuntimeLightConfig>& lights,
-                             std::string* error_message) {
-  for (std::uint32_t light_index : light_order) {
-    const auto iter = channels.find(light_index);
-    if (iter == channels.end()) {
-      if (error_message != nullptr) {
-        *error_message = "light_order 中的光源缺少配置: light." +
-                         std::to_string(light_index);
-      }
-      return false;
-    }
-    const auto& channel = iter->second;
-    if (channel.acquisition_mode == LightAcquisitionMode::Ambient) {
-      if (channel.exposure_us == 0 || channel.gain <= 0.0F) {
-        if (error_message != nullptr) {
-          *error_message = "常亮采图配置非法: light." + std::to_string(light_index);
-        }
-        return false;
-      }
-      continue;
-    }
-    if (channel.controller_index >= lights.size()) {
-      if (error_message != nullptr) {
-        *error_message = "光源引用的频闪控制器不存在: light." +
-                         std::to_string(channel.controller_index) + "." +
-                         std::to_string(light_index);
-      }
-      return false;
-    }
-    if (channel.physical_channel == 0 || channel.exposure_us == 0 ||
-        channel.strobe_width_us == 0 || channel.gain <= 0.0F ||
-        channel.current_percent <= 0.0F || channel.current_percent > 100.0F) {
-      if (error_message != nullptr) {
-        *error_message = "光源配置非法: light." + std::to_string(light_index);
-      }
-      return false;
-    }
-    if (channel.strobe_width_us > channel.exposure_us) {
-      if (error_message != nullptr) {
-        *error_message = "光源频闪脉宽不能大于曝光时间: light." +
-                         std::to_string(light_index);
-      }
-      return false;
-    }
-  }
-  return true;
-}
-
-bool validate_capture_views(const StationRuntimeConfig& config,
-                            std::string* error_message) {
-  std::map<std::uint32_t, RuntimeCameraConfig> cameras;
-  for (const auto& camera : config.cameras) {
-    cameras[camera.camera_index] = camera;
-  }
-
-  if (config.capture_mode == CaptureMode::RobotFlyshot && config.capture_views.empty()) {
-    if (error_message != nullptr) {
-      *error_message = "capture_mode=robot_flyshot 时必须配置 pose.<N> 采集计划";
-    }
-    return false;
-  }
-
-  std::map<std::uint32_t, bool> pose_indices;
-  std::map<std::string, bool> pose_ids;
-  for (const auto& view : config.capture_views) {
-    if (pose_indices[view.pose_index]) {
-      if (error_message != nullptr) {
-        *error_message = "pose_index 重复: " + std::to_string(view.pose_index);
-      }
-      return false;
-    }
-    pose_indices[view.pose_index] = true;
-    if (view.pose_id.empty()) {
-      if (error_message != nullptr) {
-        *error_message = "pose." + std::to_string(view.pose_index) + ".pose_id 不能为空";
-      }
-      return false;
-    }
-    if (pose_ids[view.pose_id]) {
-      if (error_message != nullptr) {
-        *error_message = "pose_id 重复: " + view.pose_id;
-      }
-      return false;
-    }
-    pose_ids[view.pose_id] = true;
-    const auto camera_iter = cameras.find(view.camera_index);
-    if (camera_iter == cameras.end()) {
-      if (error_message != nullptr) {
-        *error_message = "pose." + std::to_string(view.pose_index) +
-                         ".camera_index 未配置相机: " +
-                         std::to_string(view.camera_index);
-      }
-      return false;
-    }
-    if (!view.camera_id.empty() && view.camera_id != camera_iter->second.camera_id) {
-      if (error_message != nullptr) {
-        *error_message = "pose." + std::to_string(view.pose_index) +
-                         ".camera_id 与 camera_index 对应相机不一致: " +
-                         view.camera_id + " != " + camera_iter->second.camera_id;
-      }
-      return false;
-    }
-    if (view.calibration_id.empty() || view.calibration_id.find("TODO") != std::string::npos) {
-      if (error_message != nullptr) {
-        *error_message = "pose." + std::to_string(view.pose_index) +
-                         ".calibration_id 不能为空，也不能保留 TODO 占位值";
-      }
-      return false;
-    }
-  }
-  return true;
-}
-
-std::uint64_t effective_view_count(const StationRuntimeConfig& config) {
-  if (!config.capture_views.empty()) {
-    return config.capture_views.size();
-  }
-  return config.cameras.size();
-}
-
-bool require_non_empty(const std::string& field_name,
-                       const std::string& value,
-                       std::string* error_message) {
-  if (!value.empty() && value.find("TODO") == std::string::npos) {
-    return true;
-  }
-  if (error_message != nullptr) {
-    *error_message = field_name + " 不能为空，也不能保留 TODO 占位值";
-  }
-  return false;
-}
-
-bool reject_todo_if_set(const std::string& field_name,
-                        const std::string& value,
-                        std::string* error_message) {
-  if (value.find("TODO") == std::string::npos) {
-    return true;
-  }
-  if (error_message != nullptr) {
-    *error_message = field_name + " 不能保留 TODO 占位值";
-  }
-  return false;
 }
 
 std::uint32_t bytes_per_channel_for_pixel_format(const std::string& pixel_format) {
@@ -827,22 +376,136 @@ std::uint32_t bytes_per_channel_for_pixel_format(const std::string& pixel_format
   return 0;
 }
 
+bool reject_todo_if_set(const std::string& field_name,
+                        const std::string& value,
+                        std::string* error_message) {
+  if (value.find("TODO") == std::string::npos) {
+    return true;
+  }
+  if (error_message != nullptr) {
+    *error_message = field_name + " 不能保留 TODO 占位值";
+  }
+  return false;
+}
+
+bool require_non_empty(const std::string& field_name,
+                       const std::string& value,
+                       std::string* error_message) {
+  if (!value.empty() && value.find("TODO") == std::string::npos) {
+    return true;
+  }
+  if (error_message != nullptr) {
+    *error_message = field_name + " 不能为空，也不能保留 TODO 占位值";
+  }
+  return false;
+}
+
+bool validate_light_channels(const StationRuntimeConfig& config,
+                             std::string* error_message) {
+  if (config.lights.size() != 1) {
+    if (error_message != nullptr) {
+      *error_message = "当前真实链路只支持 1 台 FL-ACDH 频闪控制器";
+    }
+    return false;
+  }
+  if (config.light_order.size() != 3 || config.light_order[0] != 1 ||
+      config.light_order[1] != 2 || config.light_order[2] != 3) {
+    if (error_message != nullptr) {
+      *error_message = "当前真实链路固定 light_order=1,2,3";
+    }
+    return false;
+  }
+  std::map<std::uint32_t, RuntimeLightChannelConfig> channels;
+  for (const auto& channel : config.light_channels) {
+    if (channel.light_index == 0 || channels[channel.light_index].light_index != 0) {
+      if (error_message != nullptr) {
+        *error_message = "光源 light_index 为空或重复";
+      }
+      return false;
+    }
+    channels[channel.light_index] = channel;
+  }
+  for (std::uint32_t light_index : config.light_order) {
+    const auto iter = channels.find(light_index);
+    if (iter == channels.end()) {
+      if (error_message != nullptr) {
+        *error_message = "light_order 中的光源缺少配置: light." +
+                         std::to_string(light_index);
+      }
+      return false;
+    }
+    const auto& channel = iter->second;
+    if (channel.controller_index != 0 ||
+        channel.acquisition_mode != LightAcquisitionMode::Strobe ||
+        channel.physical_channel == 0 ||
+        channel.exposure_us == 0 ||
+        channel.strobe_width_us == 0 ||
+        channel.strobe_width_us > channel.exposure_us ||
+        channel.gain <= 0.0F ||
+        channel.current_percent <= 0.0F ||
+        channel.current_percent > 100.0F) {
+      if (error_message != nullptr) {
+        *error_message = "光源配置非法: light." + std::to_string(light_index);
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
+std::uint64_t estimated_payload_size(const StationRuntimeConfig& config) {
+  const std::uint64_t expected_frame_count = config.cameras.size() * config.light_order.size();
+  std::uint64_t payload_size =
+      frame_slot_image_offset(static_cast<std::uint32_t>(expected_frame_count));
+  for (const auto& camera : config.cameras) {
+    const std::uint32_t bytes_per_channel =
+        bytes_per_channel_for_pixel_format(camera.pixel_format);
+    payload_size += static_cast<std::uint64_t>(camera.width) *
+                    camera.height * camera.channels * bytes_per_channel *
+                    config.light_order.size();
+  }
+  return payload_size;
+}
+
 }  // namespace
+
+const char* controller_mode_name(ControllerMode mode) {
+  switch (mode) {
+    case ControllerMode::Online:
+      return "online";
+    case ControllerMode::CaptureOnly:
+      return "capture_only";
+  }
+  return "unknown";
+}
+
+bool parse_controller_mode(const std::string& value,
+                           ControllerMode* out_mode,
+                           std::string* error_message) {
+  if (value == "online" || value == "inspection" || value == "detect") {
+    *out_mode = ControllerMode::Online;
+    return true;
+  }
+  if (value == "capture_only" || value == "capture" || value == "acquire_only") {
+    *out_mode = ControllerMode::CaptureOnly;
+    return true;
+  }
+  if (error_message != nullptr) {
+    *error_message = "controller_mode 只能是 online 或 capture_only: " + value;
+  }
+  return false;
+}
 
 const char* capture_mode_name(CaptureMode mode) {
   switch (mode) {
     case CaptureMode::FixedCamera:
       return "fixed_camera";
-    case CaptureMode::RobotFlyshot:
-      return "robot_flyshot";
   }
   return "unknown";
 }
 
 const char* capture_schedule_name(CaptureSchedule schedule) {
   switch (schedule) {
-    case CaptureSchedule::ViewSerialTdm:
-      return "view_serial_tdm";
     case CaptureSchedule::SharedLightParallel:
       return "shared_light_parallel";
   }
@@ -852,13 +515,28 @@ const char* capture_schedule_name(CaptureSchedule schedule) {
 bool parse_capture_mode(const std::string& value,
                         CaptureMode* out_mode,
                         std::string* error_message) {
-  return parse_capture_mode_value(value, out_mode, error_message);
+  if (value == "fixed_camera" || value == "fixed" || value == "stationary") {
+    *out_mode = CaptureMode::FixedCamera;
+    return true;
+  }
+  if (error_message != nullptr) {
+    *error_message = "当前真实链路只支持 capture_mode=fixed_camera: " + value;
+  }
+  return false;
 }
 
 bool parse_capture_schedule(const std::string& value,
                             CaptureSchedule* out_schedule,
                             std::string* error_message) {
-  return parse_capture_schedule_value(value, out_schedule, error_message);
+  if (value == "shared_light_parallel" || value == "light_parallel" ||
+      value == "parallel_light") {
+    *out_schedule = CaptureSchedule::SharedLightParallel;
+    return true;
+  }
+  if (error_message != nullptr) {
+    *error_message = "当前真实链路只支持 capture_schedule=shared_light_parallel: " + value;
+  }
+  return false;
 }
 
 bool load_station_runtime_config(const std::string& path,
@@ -880,18 +558,12 @@ bool load_station_runtime_config(const std::string& path,
   for (const auto& channel : config.light_channels) {
     light_channels[channel.light_index] = channel;
   }
-  // 确保 lights 向量至少有一个元素，兼容单控制器旧格式
-  ensure_lights_size(&config.lights, 1);
-
   std::map<std::uint32_t, RuntimeCameraConfig> cameras;
   for (const auto& camera : config.cameras) {
     cameras[camera.camera_index] = camera;
   }
   bool has_explicit_camera_config = false;
-  std::map<std::uint32_t, RuntimeCaptureViewConfig> capture_views;
-  for (const auto& view : config.capture_views) {
-    capture_views[view.pose_index] = view;
-  }
+
   std::string line;
   while (std::getline(input, line)) {
     const auto comment = line.find('#');
@@ -905,46 +577,23 @@ bool load_station_runtime_config(const std::string& path,
     const auto eq = line.find('=');
     if (eq == std::string::npos) {
       if (error_message != nullptr) {
-        *error_message = "运行配置行缺少 =: " + line;
+        *error_message = "运行配置行缺少 '=': " + line;
       }
       return false;
     }
     const std::string key = trim(line.substr(0, eq));
     const std::string value = trim(line.substr(eq + 1));
+
     if (key == "hardware_mode") {
-      if (!parse_hardware_mode(value, &config.hardware_mode, error_message)) {
-        return false;
-      }
+      if (!parse_hardware_mode(value, &config.hardware_mode, error_message)) return false;
+    } else if (key == "controller_mode") {
+      if (!parse_controller_mode(value, &config.controller_mode, error_message)) return false;
     } else if (key == "signal.backend" || key == "plc.backend") {
-      if (!parse_hardware_backend(value, &config.signal.backend, error_message)) {
-        return false;
-      }
+      if (!parse_hardware_backend(value, &config.signal.backend, error_message)) return false;
     } else if (key == "camera_backend" || key == "camera.backend") {
-      if (!parse_hardware_backend(value, &config.camera_backend, error_message)) {
-        return false;
-      }
+      if (!parse_hardware_backend(value, &config.camera_backend, error_message)) return false;
     } else if (key == "light.backend") {
-      if (!parse_hardware_backend(value, &config.lights[0].backend, error_message)) {
-        return false;
-      }
-    } else if (key == "robot.backend") {
-      if (!parse_hardware_backend(value, &config.robot.backend, error_message)) {
-        return false;
-      }
-    } else if (key == "robot.controller_id") {
-      config.robot.controller_id = value;
-    } else if (key == "robot.host") {
-      config.robot.host = value;
-    } else if (key == "robot.port") {
-      if (!parse_uint32_field("robot.port", value, false, &config.robot.port, error_message)) {
-        return false;
-      }
-    } else if (key == "robot.ready_input") {
-      config.robot.ready_input = value;
-    } else if (key == "robot.fault_input") {
-      config.robot.fault_input = value;
-    } else if (key == "robot.start_output") {
-      config.robot.start_output = value;
+      if (!parse_hardware_backend(value, &config.lights[0].backend, error_message)) return false;
     } else if (key == "signal.station_id" || key == "plc.station_id") {
       config.signal.station_id = value;
     } else if (key == "signal.default_seat_id") {
@@ -956,18 +605,12 @@ bool load_station_runtime_config(const std::string& path,
     } else if (key == "signal.result_queue_path" || key == "signal.result_queue") {
       config.signal.result_queue_path = value;
     } else if (key == "signal.port" || key == "plc.port") {
-      try {
-        const int parsed = std::stoi(value);
-        if (parsed <= 0 || parsed > 65535) {
-          if (error_message != nullptr) {
-            *error_message = "signal.port 端口号必须在 1-65535: " + value;
-          }
-          return false;
-        }
-        config.signal.port = static_cast<std::uint32_t>(parsed);
-      } catch (const std::exception&) {
+      if (!parse_uint32_field("signal.port", value, false, &config.signal.port, error_message)) {
+        return false;
+      }
+      if (config.signal.port > 65535) {
         if (error_message != nullptr) {
-          *error_message = "signal.port 解析失败: " + value;
+          *error_message = "signal.port 端口号必须在 1-65535: " + value;
         }
         return false;
       }
@@ -980,7 +623,13 @@ bool load_station_runtime_config(const std::string& path,
     } else if (key == "signal.result_host") {
       config.signal.result_host = value;
     } else if (key == "signal.result_port") {
-      if (!parse_uint32_field("signal.result_port", value, false, &config.signal.result_port, error_message)) { return false; }
+      if (!parse_uint32_field("signal.result_port",
+                              value,
+                              false,
+                              &config.signal.result_port,
+                              error_message)) {
+        return false;
+      }
     } else if (key == "signal.result_prefix") {
       config.signal.result_prefix = value;
     } else if (key == "signal.result_delimiter") {
@@ -993,13 +642,13 @@ bool load_station_runtime_config(const std::string& path,
       config.signal.recheck_text = value;
     } else if (key == "signal.error_text") {
       config.signal.error_text = value;
-    } else if (key == "plc.host" || key == "plc.port" ||
-               key == "plc.trigger_source" || key == "plc.trigger_id_source" ||
-               key == "plc.seat_id_source" || key == "plc.ok_output" ||
-               key == "plc.ng_output" || key == "plc.recheck_output" ||
-               key == "plc.ack_input" || key == "plc.output_hold_ms") {
+    } else if (key == "plc.host" || key == "plc.trigger_source" ||
+               key == "plc.trigger_id_source" || key == "plc.seat_id_source" ||
+               key == "plc.ok_output" || key == "plc.ng_output" ||
+               key == "plc.recheck_output" || key == "plc.ack_input" ||
+               key == "plc.output_hold_ms") {
       if (error_message != nullptr) {
-        *error_message = key + " 已移除；C++ 只接收外部归一化信号，请改用 signal.* 配置";
+        *error_message = key + " 已移除；C++ 只接收归一化外部信号，请使用 signal.*";
       }
       return false;
     } else if (key == "light.device_id") {
@@ -1047,6 +696,14 @@ bool load_station_runtime_config(const std::string& path,
                               error_message)) {
         return false;
       }
+    } else if (key == "publish_timeout_ms") {
+      if (!parse_int_field("publish_timeout_ms",
+                           value,
+                           false,
+                           &config.publish_timeout_ms,
+                           error_message)) {
+        return false;
+      }
     } else if (key == "detector_timeout_ms") {
       if (!parse_int_field("detector_timeout_ms",
                            value,
@@ -1060,14 +717,6 @@ bool load_station_runtime_config(const std::string& path,
                            value,
                            false,
                            &config.trigger_timeout_ms,
-                           error_message)) {
-        return false;
-      }
-    } else if (key == "publish_timeout_ms") {
-      if (!parse_int_field("publish_timeout_ms",
-                           value,
-                           false,
-                           &config.publish_timeout_ms,
                            error_message)) {
         return false;
       }
@@ -1110,61 +759,33 @@ bool load_station_runtime_config(const std::string& path,
         return false;
       }
     } else if (key == "light_order") {
-      if (!parse_light_order(value, &config.light_order, error_message)) {
-        return false;
-      }
+      if (!parse_light_order(value, &config.light_order, error_message)) return false;
     } else if (key == "capture_mode") {
-      if (!parse_capture_mode_value(value, &config.capture_mode, error_message)) {
-        return false;
-      }
+      if (!parse_capture_mode(value, &config.capture_mode, error_message)) return false;
     } else if (key == "capture_schedule") {
-      if (!parse_capture_schedule_value(value, &config.capture_schedule, error_message)) {
-        return false;
-      }
+      if (!parse_capture_schedule(value, &config.capture_schedule, error_message)) return false;
     } else if (key == "reset_shared_memory") {
-      if (!parse_bool_field(key, value, &config.reset_shared_memory, error_message)) {
-        return false;
-      }
-    } else if (key == "simulate_light_fault") {
-      if (!parse_bool_field(key, value, &config.lights[0].simulate_fault, error_message)) {
-        return false;
-      }
-    } else if (key == "light.simulate_fault") {
+      if (!parse_bool_field(key, value, &config.reset_shared_memory, error_message)) return false;
+    } else if (key == "simulate_light_fault" || key == "light.simulate_fault") {
       if (!parse_bool_field(key, value, &config.lights[0].simulate_fault, error_message)) {
         return false;
       }
     } else if (key == "simulate_signal_result_fault" ||
-               key == "simulate_plc_output_fault") {
-      if (!parse_bool_field(key, value, &config.signal.simulate_output_fault, error_message)) {
-        return false;
-      }
-    } else if (key == "signal.simulate_output_fault" ||
+               key == "simulate_plc_output_fault" ||
+               key == "signal.simulate_output_fault" ||
                key == "plc.simulate_output_fault") {
       if (!parse_bool_field(key, value, &config.signal.simulate_output_fault, error_message)) {
         return false;
       }
-    } else if (key == "simulate_trigger_timeout") {
-      if (!parse_bool_field(key, value, &config.signal.simulate_trigger_timeout, error_message)) {
-        return false;
-      }
-    } else if (key == "signal.simulate_trigger_timeout" ||
+    } else if (key == "simulate_trigger_timeout" ||
+               key == "signal.simulate_trigger_timeout" ||
                key == "plc.simulate_trigger_timeout") {
       if (!parse_bool_field(key, value, &config.signal.simulate_trigger_timeout, error_message)) {
         return false;
       }
-    } else if (key == "simulate_robot_fault") {
-      if (!parse_bool_field(key, value, &config.robot.simulate_fault, error_message)) {
-        return false;
-      }
-    } else if (key == "robot.simulate_fault") {
-      if (!parse_bool_field(key, value, &config.robot.simulate_fault, error_message)) {
-        return false;
-      }
     } else if (key == "simulate_missing_frame") {
       bool simulate_missing_frame = false;
-      if (!parse_bool_field(key, value, &simulate_missing_frame, error_message)) {
-        return false;
-      }
+      if (!parse_bool_field(key, value, &simulate_missing_frame, error_message)) return false;
       for (auto& camera : config.cameras) {
         camera.simulate_missing_frame = simulate_missing_frame;
       }
@@ -1172,12 +793,6 @@ bool load_station_runtime_config(const std::string& path,
         (void)camera_index;
         camera.simulate_missing_frame = simulate_missing_frame;
       }
-    } else if (key == "json_output.enabled") {
-      if (!parse_bool_field(key, value, &config.json_output_enabled, error_message)) return false;
-    } else if (key == "json_output.host") {
-      config.json_output_host = value;
-    } else if (key == "json_output.port") {
-      if (!parse_uint32_field("json_output.port", value, false, &config.json_output_port, error_message)) return false;
     } else if (key == "image_save.enabled") {
       if (!parse_bool_field(key, value, &config.image_save.enabled, error_message)) return false;
     } else if (key == "image_save.root_dir") {
@@ -1196,29 +811,20 @@ bool load_station_runtime_config(const std::string& path,
         return false;
       }
     } else if (key == "image_save.cleanup_trace_root") {
-      if (!parse_bool_field(key, value, &config.image_save.cleanup_trace_root, error_message)) return false;
+      if (!parse_bool_field(key, value, &config.image_save.cleanup_trace_root, error_message)) {
+        return false;
+      }
     } else if (key == "image_save.fail_on_save_error") {
-      if (!parse_bool_field(key, value, &config.image_save.fail_on_save_error, error_message)) return false;
+      if (!parse_bool_field(key, value, &config.image_save.fail_on_save_error, error_message)) {
+        return false;
+      }
     } else if (key == "trace_root") {
       config.trace_root = value;
     } else {
-      std::uint32_t controller_index = 0;
       std::uint32_t light_index = 0;
       std::string light_field;
-      std::string light_controller_field;
-      if (parse_light_controller_key(key, &controller_index, &light_controller_field)) {
-        ensure_lights_size(&config.lights, static_cast<std::size_t>(controller_index) + 1U);
-        if (!apply_light_controller_value(&config.lights[controller_index],
-                                          controller_index,
-                                          light_controller_field,
-                                          value,
-                                          error_message)) {
-          return false;
-        }
-      } else if (parse_light_channel_key(key, &controller_index, &light_index, &light_field)) {
-        ensure_lights_size(&config.lights, static_cast<std::size_t>(controller_index) + 1U);
+      if (parse_light_channel_key(key, &light_index, &light_field)) {
         auto* channel = ensure_light_channel(&light_channels, light_index);
-        channel->controller_index = controller_index;
         if (!apply_light_channel_value(channel, light_field, value, error_message)) {
           return false;
         }
@@ -1235,26 +841,15 @@ bool load_station_runtime_config(const std::string& path,
             return false;
           }
         } else {
-          std::uint32_t pose_index = 0;
-          std::string pose_field;
-          if (parse_pose_key(key, &pose_index, &pose_field)) {
-            auto* view = ensure_capture_view(&capture_views, pose_index);
-            if (!apply_capture_view_value(view, pose_field, value, error_message)) {
-              return false;
-            }
-          } else {
-            if (error_message != nullptr) {
-              *error_message = "未知运行配置字段: " + key;
-            }
-            return false;
+          if (error_message != nullptr) {
+            *error_message = "未知运行配置字段: " + key;
           }
+          return false;
         }
       }
     }
   }
-  if (!validate_light_channels(config.light_order, light_channels, config.lights, error_message)) {
-    return false;
-  }
+
   config.light_channels.clear();
   for (const auto& [light_index, channel] : light_channels) {
     (void)light_index;
@@ -1264,11 +859,6 @@ bool load_station_runtime_config(const std::string& path,
   for (const auto& [camera_index, camera] : cameras) {
     (void)camera_index;
     config.cameras.push_back(camera);
-  }
-  config.capture_views.clear();
-  for (const auto& [pose_index, view] : capture_views) {
-    (void)pose_index;
-    config.capture_views.push_back(view);
   }
   if (!validate_station_runtime_config(config, error_message)) {
     return false;
@@ -1280,9 +870,7 @@ bool load_station_runtime_config(const std::string& path,
 bool validate_station_runtime_config(const StationRuntimeConfig& config,
                                      std::string* error_message) {
   if (config.slot_count == 0) {
-    if (error_message != nullptr) {
-      *error_message = "slot_count 必须大于 0";
-    }
+    if (error_message != nullptr) *error_message = "slot_count 必须大于 0";
     return false;
   }
   if (config.frame_slot_size <= sizeof(FrameSlotHeader) ||
@@ -1295,9 +883,7 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
   if (config.detector_timeout_ms <= 0 || config.trigger_timeout_ms <= 0 ||
       config.publish_timeout_ms <= 0 || config.camera_timeout_ms <= 0 ||
       config.light_timeout_ms <= 0) {
-    if (error_message != nullptr) {
-      *error_message = "所有 timeout_ms 配置都必须大于 0";
-    }
+    if (error_message != nullptr) *error_message = "所有 timeout_ms 配置都必须大于 0";
     return false;
   }
   if (config.warning_recheck_threshold == 0 ||
@@ -1307,28 +893,17 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
     }
     return false;
   }
-  if (config.cameras.empty()) {
+  if (config.capture_mode != CaptureMode::FixedCamera ||
+      config.capture_schedule != CaptureSchedule::SharedLightParallel) {
     if (error_message != nullptr) {
-      *error_message = "至少需要配置 1 台相机";
+      *error_message = "当前真实链路固定 capture_mode=fixed_camera 且 "
+                       "capture_schedule=shared_light_parallel";
     }
     return false;
   }
-  if (config.lights.empty()) {
+  if (config.cameras.size() != 2) {
     if (error_message != nullptr) {
-      *error_message = "至少需要配置 1 台频闪控制器";
-    }
-    return false;
-  }
-  if (config.image_save.enabled && config.image_save.root_dir.empty()) {
-    if (error_message != nullptr) {
-      *error_message = "image_save.root_dir 不能为空";
-    }
-    return false;
-  }
-  if (config.image_save.cleanup_min_free_ratio < 0.0F ||
-      config.image_save.cleanup_min_free_ratio > 1.0F) {
-    if (error_message != nullptr) {
-      *error_message = "image_save.cleanup_min_free_ratio 必须在 0 到 1 之间";
+      *error_message = "当前真实链路固定 2 个机位";
     }
     return false;
   }
@@ -1357,90 +932,25 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
       return false;
     }
   }
-  if (!validate_capture_views(config, error_message)) {
-    return false;
-  }
-  if (config.capture_schedule == CaptureSchedule::SharedLightParallel &&
-      config.capture_mode != CaptureMode::FixedCamera) {
+  if (!camera_indices[0] || !camera_indices[1]) {
     if (error_message != nullptr) {
-      *error_message = "capture_schedule=shared_light_parallel 仅支持 capture_mode=fixed_camera";
+      *error_message = "当前真实链路要求 camera.0 和 camera.1";
     }
     return false;
   }
-  if (config.capture_schedule == CaptureSchedule::SharedLightParallel) {
-    std::map<std::uint32_t, bool> camera_in_parallel_shot;
-    if (config.capture_views.empty()) {
-      for (const auto& camera : config.cameras) {
-        camera_in_parallel_shot[camera.camera_index] = true;
-      }
-    } else {
-      for (const auto& view : config.capture_views) {
-        if (camera_in_parallel_shot[view.camera_index]) {
-          if (error_message != nullptr) {
-            *error_message =
-                "capture_schedule=shared_light_parallel 不允许同一相机在多个视角中同时采图: camera_index=" +
-                std::to_string(view.camera_index);
-          }
-          return false;
-        }
-        camera_in_parallel_shot[view.camera_index] = true;
-      }
-    }
+  if (!validate_light_channels(config, error_message)) {
+    return false;
   }
-  const std::uint64_t expected_frame_count =
-      effective_view_count(config) * config.light_order.size();
+  const std::uint64_t expected_frame_count = config.cameras.size() * config.light_order.size();
   if (expected_frame_count == 0 || expected_frame_count > kMaxFramesPerJob) {
     if (error_message != nullptr) {
       *error_message = "相机数量 x 光源数量超过单任务最大帧数或为空";
     }
     return false;
   }
-  std::map<std::uint32_t, RuntimeLightChannelConfig> configured_light_channels;
-  for (const auto& channel : config.light_channels) {
-    if (channel.light_index == 0 ||
-        configured_light_channels[channel.light_index].light_index != 0) {
-      if (error_message != nullptr) {
-        *error_message = "光源 light_index 为空或重复";
-      }
-      return false;
-    }
-    configured_light_channels[channel.light_index] = channel;
-  }
-  if (!validate_light_channels(
-          config.light_order, configured_light_channels, config.lights, error_message)) {
-    return false;
-  }
-  std::map<std::uint32_t, RuntimeCameraConfig> camera_by_index;
-  for (const auto& camera : config.cameras) {
-    camera_by_index[camera.camera_index] = camera;
-  }
-  std::uint64_t estimated_payload_size =
-      frame_slot_image_offset(static_cast<std::uint32_t>(expected_frame_count));
-  if (config.capture_views.empty()) {
-    for (const auto& camera : config.cameras) {
-      const std::uint32_t bytes_per_channel =
-          bytes_per_channel_for_pixel_format(camera.pixel_format);
-      estimated_payload_size += static_cast<std::uint64_t>(camera.width) *
-                                camera.height * camera.channels * bytes_per_channel *
-                                config.light_order.size();
-    }
-  } else {
-    for (const auto& view : config.capture_views) {
-      const auto camera_iter = camera_by_index.find(view.camera_index);
-      if (camera_iter == camera_by_index.end()) {
-        continue;
-      }
-      const auto& camera = camera_iter->second;
-      const std::uint32_t bytes_per_channel =
-          bytes_per_channel_for_pixel_format(camera.pixel_format);
-      estimated_payload_size += static_cast<std::uint64_t>(camera.width) *
-                                camera.height * camera.channels * bytes_per_channel *
-                                config.light_order.size();
-    }
-  }
-  if (estimated_payload_size > config.frame_slot_size) {
+  if (estimated_payload_size(config) > config.frame_slot_size) {
     if (error_message != nullptr) {
-      *error_message = "frame_slot_size 太小，无法容纳多机位多光源采集图像包";
+      *error_message = "frame_slot_size 太小，无法容纳双机位三光源图像包";
     }
     return false;
   }
@@ -1449,41 +959,13 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
   const bool signal_is_manual = is_manual_trigger_backend(config.signal.backend);
   const bool signal_is_external = is_external_signal_backend(config.signal.backend);
   const bool signal_is_tcp = config.signal.backend == HardwareBackend::TcpSignal;
-  const bool signal_is_distance = config.signal.backend == HardwareBackend::DistanceTrigger;
-  const bool signal_is_real = signal_is_external || signal_is_tcp || signal_is_distance;
   const bool camera_is_simulated = is_simulated_backend(config.camera_backend);
-  const bool robot_is_simulated = is_simulated_backend(config.robot.backend);
-  std::map<std::uint32_t, bool> used_light_controllers;
-  bool used_light_is_simulated = false;
-  for (std::uint32_t light_index : config.light_order) {
-    const auto iter = configured_light_channels.find(light_index);
-    if (iter == configured_light_channels.end()) {
-      continue;
-    }
-    if (iter->second.acquisition_mode == LightAcquisitionMode::Ambient) {
-      continue;
-    }
-    used_light_controllers[iter->second.controller_index] = true;
-    if (iter->second.controller_index < config.lights.size() &&
-        is_simulated_backend(config.lights[iter->second.controller_index].backend)) {
-      used_light_is_simulated = true;
-    }
-  }
+  const bool light_is_simulated = is_simulated_backend(config.lights[0].backend);
 
   if (config.hardware_mode == HardwareMode::Simulated) {
-    bool all_used_lights_simulated = true;
-    for (const auto& [controller_index, _used] : used_light_controllers) {
-      if (controller_index >= config.lights.size() ||
-          !is_simulated_backend(config.lights[controller_index].backend)) {
-        all_used_lights_simulated = false;
-      }
-    }
-    if (!is_simulated_backend(config.signal.backend) ||
-        !is_simulated_backend(config.camera_backend) ||
-        !all_used_lights_simulated || !is_simulated_backend(config.robot.backend)) {
+    if (!signal_is_simulated || !camera_is_simulated || !light_is_simulated) {
       if (error_message != nullptr) {
-        *error_message = "hardware_mode=simulated 时 signal.backend/camera_backend/"
-                         "已使用的 light backend/robot.backend 必须都是 simulated";
+        *error_message = "hardware_mode=simulated 时 signal/camera/light backend 必须都是 simulated";
       }
       return false;
     }
@@ -1491,30 +973,25 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
   }
 
   if (config.hardware_mode == HardwareMode::Lab) {
-    if (!signal_is_manual && !signal_is_simulated && !signal_is_external && !signal_is_tcp &&
-        !signal_is_distance) {
+    if (!signal_is_manual && !signal_is_external && !signal_is_tcp) {
       if (error_message != nullptr) {
-        *error_message =
-            "hardware_mode=lab 时 signal.backend 只能是 manual_trigger、external_signal、tcp_signal、distance_trigger 或 simulated";
+        *error_message = "hardware_mode=lab 只允许 manual_trigger/external_signal/tcp_signal";
       }
       return false;
     }
-    if (config.capture_mode == CaptureMode::RobotFlyshot && robot_is_simulated) {
+  } else {
+    if (!signal_is_tcp && !signal_is_external) {
       if (error_message != nullptr) {
-        *error_message = "hardware_mode=lab 的机器人飞拍模式必须配置真实 robot.backend";
+        *error_message = "hardware_mode=production 只允许 tcp_signal 或 external_signal";
       }
       return false;
     }
-  } else if (signal_is_simulated || signal_is_manual || !signal_is_real ||
-             camera_is_simulated ||
-             used_light_is_simulated ||
-             (config.capture_mode == CaptureMode::RobotFlyshot && robot_is_simulated)) {
-    if (error_message != nullptr) {
-      *error_message = "hardware_mode=production 时 signal.backend 必须是 external_signal、tcp_signal 或 distance_trigger，"
-                       "且不能使用 simulated/manual_trigger/camera/light backend；"
-                       "请填写 signal.backend、camera_backend、light.backend 和 robot.backend";
+    if (signal_is_manual || signal_is_simulated || camera_is_simulated || light_is_simulated) {
+      if (error_message != nullptr) {
+        *error_message = "hardware_mode=production 禁止 simulated/manual backend";
+      }
+      return false;
     }
-    return false;
   }
 
   if (!reject_todo_if_set("signal.station_id", config.signal.station_id, error_message) ||
@@ -1524,22 +1001,21 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
       !reject_todo_if_set("signal.default_sku", config.signal.default_sku, error_message)) {
     return false;
   }
-
   if (!signal_is_manual &&
       (!require_non_empty("signal.station_id", config.signal.station_id, error_message) ||
        !require_non_empty("signal.default_sku", config.signal.default_sku, error_message))) {
     return false;
   }
-  if (signal_is_tcp || signal_is_distance) {
+  if (signal_is_tcp) {
     if (config.signal.port == 0 || config.signal.port > 65535) {
       if (error_message != nullptr) {
-        *error_message = "signal.backend=tcp_signal/distance_trigger 时 signal.port 必须配置 (1-65535)";
+        *error_message = "signal.backend=tcp_signal 时 signal.port 必须配置 (1-65535)";
       }
       return false;
     }
     if (config.signal.station_id.empty()) {
       if (error_message != nullptr) {
-        *error_message = "signal.backend=tcp_signal/distance_trigger 时 signal.station_id 不能为空";
+        *error_message = "signal.backend=tcp_signal 时 signal.station_id 不能为空";
       }
       return false;
     }
@@ -1550,82 +1026,52 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
         !reject_todo_if_set(prefix + ".pixel_format", camera.pixel_format, error_message)) {
       return false;
     }
-    if (!require_non_empty(prefix + ".camera_id", camera.camera_id, error_message) ||
-        !require_non_empty(prefix + ".serial_number", camera.serial_number, error_message) ||
-        !require_non_empty(prefix + ".pixel_format", camera.pixel_format, error_message) ||
-        !require_non_empty(prefix + ".trigger_line", camera.trigger_line, error_message) ||
-        !require_non_empty(prefix + ".exposure_output_line",
-                           camera.exposure_output_line,
-                           error_message)) {
+    if (!camera_is_simulated &&
+        (!require_non_empty(prefix + ".camera_id", camera.camera_id, error_message) ||
+         !require_non_empty(prefix + ".serial_number", camera.serial_number, error_message) ||
+         !require_non_empty(prefix + ".pixel_format", camera.pixel_format, error_message) ||
+         !require_non_empty(prefix + ".trigger_line", camera.trigger_line, error_message) ||
+         !require_non_empty(prefix + ".exposure_output_line",
+                            camera.exposure_output_line,
+                            error_message))) {
       return false;
     }
   }
-  if (config.capture_mode == CaptureMode::RobotFlyshot) {
-    if (!reject_todo_if_set("robot.controller_id", config.robot.controller_id, error_message) ||
-        !reject_todo_if_set("robot.host", config.robot.host, error_message) ||
-        !reject_todo_if_set("robot.ready_input", config.robot.ready_input, error_message) ||
-        !reject_todo_if_set("robot.fault_input", config.robot.fault_input, error_message) ||
-        !reject_todo_if_set("robot.start_output", config.robot.start_output, error_message)) {
-      return false;
-    }
-    if (!require_non_empty("robot.controller_id", config.robot.controller_id, error_message) ||
-        !require_non_empty("robot.ready_input", config.robot.ready_input, error_message) ||
-        !require_non_empty("robot.fault_input", config.robot.fault_input, error_message) ||
-        !require_non_empty("robot.start_output", config.robot.start_output, error_message)) {
-      return false;
-    }
-    if ((config.robot.backend == HardwareBackend::ModbusTcp ||
-         config.robot.backend == HardwareBackend::SiemensS7 ||
-         config.robot.backend == HardwareBackend::VendorSdk ||
-         config.robot.backend == HardwareBackend::CustomSdk) &&
-        config.robot.host.empty()) {
+  if (!light_is_simulated) {
+    const auto& light = config.lights[0];
+    if (light.backend != HardwareBackend::SerialAscii) {
       if (error_message != nullptr) {
-        *error_message = "robot.host 不能为空";
+        *error_message = "当前真实链路只支持 light.backend=serial_ascii";
       }
       return false;
     }
-  }
-  for (const auto& [controller_index, _used] : used_light_controllers) {
-    if (controller_index >= config.lights.size()) {
-      if (error_message != nullptr) {
-        *error_message = "频闪控制器不存在: light." + std::to_string(controller_index);
-      }
-      return false;
-    }
-    const auto& light = config.lights[controller_index];
-    const std::string prefix = controller_index == 0
-                                   ? "light"
-                                   : "light." + std::to_string(controller_index);
-    if (!reject_todo_if_set(prefix + ".device_id", light.device_id, error_message) ||
-        !reject_todo_if_set(prefix + ".host", light.host, error_message) ||
-        !reject_todo_if_set(prefix + ".serial_port", light.serial_port, error_message)) {
-      return false;
-    }
-    if (light.backend == HardwareBackend::SerialAscii) {
-      if (!require_non_empty(prefix + ".serial_port", light.serial_port, error_message)) {
-        return false;
-      }
-      if (light.baud_rate == 0) {
-        if (error_message != nullptr) {
-          *error_message = prefix + ".baud_rate 必须大于 0";
-        }
-        return false;
-      }
-    }
-    if ((light.backend == HardwareBackend::ModbusTcp ||
-         light.backend == HardwareBackend::VendorSdk ||
-         light.backend == HardwareBackend::CustomSdk) &&
-        light.host.empty() && light.serial_port.empty() && light.device_id.empty()) {
-      if (error_message != nullptr) {
-        *error_message = prefix + " 频闪控制器至少需要填写 host、serial_port 或 device_id";
-      }
-      return false;
-    }
-    if (!require_non_empty(prefix + ".trigger_input_line",
+    if (!reject_todo_if_set("light.device_id", light.device_id, error_message) ||
+        !reject_todo_if_set("light.serial_port", light.serial_port, error_message) ||
+        !require_non_empty("light.serial_port", light.serial_port, error_message) ||
+        !require_non_empty("light.trigger_input_line",
                            light.trigger_input_line,
                            error_message)) {
       return false;
     }
+    if (light.baud_rate == 0) {
+      if (error_message != nullptr) {
+        *error_message = "light.baud_rate 必须大于 0";
+      }
+      return false;
+    }
+  }
+  if (config.image_save.enabled && config.image_save.root_dir.empty()) {
+    if (error_message != nullptr) {
+      *error_message = "image_save.root_dir 不能为空";
+    }
+    return false;
+  }
+  if (config.controller_mode == ControllerMode::CaptureOnly &&
+      (!config.image_save.enabled || !config.image_save.save_original)) {
+    if (error_message != nullptr) {
+      *error_message = "controller_mode=capture_only 必须启用 image_save.enabled/save_original";
+    }
+    return false;
   }
   return true;
 }

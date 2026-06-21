@@ -43,7 +43,6 @@ add_library(seat_aoi_control
   src/control/light_controller.cpp
   src/control/signal_client.cpp
   src/control/tcp_signal_client.cpp
-  src/control/robot_client.cpp
   src/control/production_event_log.cpp
   src/control/station_health.cpp
   src/control/station_runtime_config.cpp
@@ -53,8 +52,6 @@ add_library(seat_aoi_control
   src/control/frame_assembler.cpp
   src/control/station_controller.cpp
   src/control/image_writer.cpp
-  src/control/distance_sensor.cpp
-  src/control/distance_trigger_signal_client.cpp
 )
 
 target_include_directories(seat_aoi_control PUBLIC include)

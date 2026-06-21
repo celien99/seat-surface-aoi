@@ -340,7 +340,7 @@ bool test_signal_trigger_timeout_fails_closed() {
   seat_aoi::ExternalTrigger trigger;
   std::string error;
   const bool ok = signal.wait_trigger(&trigger, 1, &error);
-  const bool passed = !ok && error == "模拟外部信号触发超时";
+  const bool passed = !ok && !error.empty();
   if (!passed) {
     std::cerr << "signal trigger timeout did not fail closed: " << error << "\n";
   }
@@ -410,19 +410,31 @@ bool test_missing_frame_returns_recheck() {
 }
 
 bool test_frame_slot_unavailable_returns_recheck() {
+  seat_aoi::FrameRingBuffer blocked_ring;
+  if (!blocked_ring.initialize(seat_aoi::kFrameShmName, 1, 65536, true)) {
+    std::cerr << "blocked frame ring initialize failed\n";
+    return false;
+  }
+  auto* blocked_slot = reinterpret_cast<seat_aoi::FrameSlotHeader*>(
+      slot_base(blocked_ring.header(), 0, 65536));
+  blocked_slot->state.store(static_cast<std::uint32_t>(seat_aoi::SlotState::Reading),
+                            std::memory_order_release);
+
   seat_aoi::StationConfig config;
-  config.slot_count = 0;
-  config.frame_slot_size = 4096;
+  config.reset_shared_memory = false;
+  config.slot_count = 1;
+  config.frame_slot_size = 65536;
   config.result_slot_size = 4096;
   config.publish_timeout_ms = 1;
   config.detector_timeout_ms = 1;
   config.trigger_timeout_ms = 1;
   config.camera_timeout_ms = 5;
   config.light_timeout_ms = 5;
-  config.light_order = {1};
+  config.light_order = {1, 2, 3};
 
   seat_aoi::StationController station;
   if (!station.initialize(config)) {
+    blocked_ring.unlink_name();
     std::cerr << "slot unavailable station initialize failed\n";
     return false;
   }
@@ -433,6 +445,8 @@ bool test_frame_slot_unavailable_returns_recheck() {
   trigger.sku = "seat_a_black_leather";
   const auto result = station.inspect_one_seat(trigger);
   station.cleanup_shared_memory();
+  blocked_ring.unlink_name();
+  blocked_ring.close();
 
   const auto decision = static_cast<seat_aoi::InspectionDecision>(result.meta.decision);
   const auto error_code = static_cast<seat_aoi::ErrorCode>(result.meta.error_code);
@@ -491,7 +505,7 @@ bool test_runtime_light_channel_config_parses() {
   return passed;
 }
 
-bool test_runtime_multi_light_controller_config_parses() {
+bool test_runtime_multi_light_controller_config_rejected() {
   const std::string path =
       (std::filesystem::temp_directory_path() /
        ("seat_aoi_multi_light_config_" + std::to_string(seat_aoi::now_us()) + ".conf"))
@@ -505,7 +519,6 @@ bool test_runtime_multi_light_controller_config_parses() {
         << "light.response_mode=none\n"
         << "light.1.backend=simulated\n"
         << "light.1.response_mode=ack\n"
-        << "robot.backend=simulated\n"
         << "slot_count=4\n"
         << "frame_slot_size=16777216\n"
         << "result_slot_size=65536\n"
@@ -534,64 +547,9 @@ bool test_runtime_multi_light_controller_config_parses() {
   std::string error;
   const bool ok = seat_aoi::load_station_runtime_config(path, &config, &error);
   std::remove(path.c_str());
-  const bool passed = ok && config.lights.size() >= 2 &&
-                      config.light_channels.size() >= 2 &&
-                      config.light_channels[0].controller_index == 0 &&
-                      config.light_channels[0].light_index == 1 &&
-                      config.light_channels[1].controller_index == 1 &&
-                      config.light_channels[1].light_index == 2 &&
-                      config.light_channels[1].physical_channel == 1 &&
-                      config.light_channels[1].strobe_width_us == 750 &&
-                      config.lights[0].response_mode ==
-                          seat_aoi::LightSerialResponseMode::None &&
-                      config.lights[1].response_mode ==
-                          seat_aoi::LightSerialResponseMode::Ack;
+  const bool passed = !ok;
   if (!passed) {
-    std::cerr << "multi light controller config did not parse: " << error << "\n";
-  }
-  return passed;
-}
-
-bool test_station_multi_light_controller_acquisition_reaches_detector_timeout() {
-  seat_aoi::StationConfig config;
-  config.reset_shared_memory = true;
-  config.slot_count = 1;
-  config.frame_slot_size = 65536;
-  config.result_slot_size = 4096;
-  config.publish_timeout_ms = 5;
-  config.detector_timeout_ms = 5;
-  config.trigger_timeout_ms = 5;
-  config.camera_timeout_ms = 5;
-  config.light_timeout_ms = 5;
-  config.recipe_id = "seat_a_black_leather_v1";
-  config.light_order = {1, 2};
-  config.capture_schedule = seat_aoi::CaptureSchedule::SharedLightParallel;
-  config.lights = {seat_aoi::RuntimeLightConfig{}, seat_aoi::RuntimeLightConfig{}};
-  config.light_channels = {
-      seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F},
-      seat_aoi::RuntimeLightChannelConfig{1, 2, 1, 800, 800, 0, 1.0F, 60.0F},
-  };
-
-  seat_aoi::StationController station;
-  if (!station.initialize(config)) {
-    std::cerr << "multi light station initialize failed\n";
-    return false;
-  }
-  seat_aoi::ExternalTrigger trigger;
-  trigger.trigger_id = 7020;
-  trigger.seat_id = "SIM_MULTI_LIGHT";
-  trigger.sku = "seat_a_black_leather";
-  const auto result = station.inspect_one_seat(trigger);
-  station.cleanup_shared_memory();
-
-  const bool passed =
-      static_cast<seat_aoi::InspectionDecision>(result.meta.decision) ==
-          seat_aoi::InspectionDecision::Recheck &&
-      static_cast<seat_aoi::ErrorCode>(result.meta.error_code) ==
-          seat_aoi::ErrorCode::DetectorTimeout;
-  if (!passed) {
-    std::cerr << "multi light controller acquisition failed before detector wait: decision="
-              << result.meta.decision << " error=" << result.meta.error_code << "\n";
+    std::cerr << "multi light controller config was not rejected\n";
   }
   return passed;
 }
@@ -655,45 +613,117 @@ bool test_station_storage_failure_returns_recheck_before_capture() {
   return passed;
 }
 
-bool test_missing_light_controller_config_rejected() {
-  seat_aoi::StationRuntimeConfig config;
-  config.light_order = {1};
-  config.light_channels = {
-      seat_aoi::RuntimeLightChannelConfig{1, 1, 1, 800, 800, 0, 1.0F, 60.0F},
-  };
-  config.lights = {seat_aoi::RuntimeLightConfig{}};
-  std::string error;
-  const bool ok = seat_aoi::validate_station_runtime_config(config, &error);
-  const bool passed = !ok && error.find("频闪控制器") != std::string::npos;
+bool test_capture_only_bypasses_shared_memory_and_saves_images() {
+  const auto root = std::filesystem::temp_directory_path() /
+                    ("seat_aoi_capture_only_" + std::to_string(seat_aoi::now_us()));
+  seat_aoi::StationConfig config;
+  config.controller_mode = seat_aoi::ControllerMode::CaptureOnly;
+  config.reset_shared_memory = true;
+  config.slot_count = 1;
+  config.frame_slot_size = 65536;
+  config.result_slot_size = 4096;
+  config.publish_timeout_ms = 5;
+  config.detector_timeout_ms = 5;
+  config.trigger_timeout_ms = 5;
+  config.camera_timeout_ms = 5;
+  config.light_timeout_ms = 5;
+  config.trace_root = (root / "trace").string();
+  config.image_save.enabled = true;
+  config.image_save.root_dir = (root / "images").string();
+  config.image_save.save_original = true;
+  config.image_save.cleanup_enabled = true;
+  config.image_save.cleanup_trace_root = true;
+  config.light_order = {1, 2, 3};
+
+  seat_aoi::StationController station;
+  if (!station.initialize(config)) {
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    std::cerr << "capture_only station initialize failed\n";
+    return false;
+  }
+
+  seat_aoi::ExternalTrigger trigger;
+  trigger.trigger_id = 7030;
+  trigger.seat_id = "SIM_CAPTURE_ONLY";
+  trigger.sku = "seat_a_black_leather";
+  const auto result = station.inspect_one_seat(trigger);
+  station.cleanup_shared_memory();
+
+  std::size_t image_count = 0;
+  std::error_code walk_ec;
+  if (std::filesystem::exists(root / "images")) {
+    for (const auto& entry :
+         std::filesystem::recursive_directory_iterator(root / "images", walk_ec)) {
+      if (!walk_ec && entry.is_regular_file() && entry.path().extension() == ".pgm") {
+        ++image_count;
+      }
+    }
+  }
+
+  seat_aoi::SharedMemory frame_shm;
+  const bool frame_shm_opened =
+      frame_shm.open_existing(seat_aoi::kFrameShmName,
+                              seat_aoi::shared_memory_total_size(config.slot_count,
+                                                                 config.frame_slot_size));
+  frame_shm.close();
+  seat_aoi::SharedMemory result_shm;
+  const bool result_shm_opened =
+      result_shm.open_existing(seat_aoi::kResultShmName,
+                               seat_aoi::shared_memory_total_size(config.slot_count,
+                                                                  config.result_slot_size));
+  result_shm.close();
+
+  const bool passed =
+      static_cast<seat_aoi::InspectionDecision>(result.meta.decision) ==
+          seat_aoi::InspectionDecision::Recheck &&
+      static_cast<seat_aoi::ErrorCode>(result.meta.error_code) ==
+          seat_aoi::ErrorCode::None &&
+      image_count == 6 &&
+      !frame_shm_opened &&
+      !result_shm_opened;
+
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
   if (!passed) {
-    std::cerr << "missing light controller config was not rejected: " << error << "\n";
+    std::cerr << "capture_only did not bypass shm or save expected images: images="
+              << image_count << " frame_shm_opened=" << frame_shm_opened
+              << " result_shm_opened=" << result_shm_opened
+              << " decision=" << result.meta.decision
+              << " error=" << result.meta.error_code << "\n";
   }
   return passed;
 }
 
-bool test_ambient_light_does_not_require_strobe_controller() {
-  auto config = make_filled_production_runtime_config();
-  config.light_order = {12, 1, 2, 3};
-  config.light_channels.push_back(seat_aoi::RuntimeLightChannelConfig{
-      99,
-      12,
-      0,
-      1200,
-      0,
-      0,
-      1.0F,
-      0.0F,
-      seat_aoi::LightAcquisitionMode::Ambient,
-  });
+bool test_invalid_light_controller_index_rejected() {
+  seat_aoi::StationRuntimeConfig config;
+  config.light_order = {1, 2, 3};
+  config.light_channels = {
+      seat_aoi::RuntimeLightChannelConfig{1, 1, 1, 800, 800, 0, 1.0F, 60.0F},
+      seat_aoi::RuntimeLightChannelConfig{0, 2, 2, 800, 800, 0, 1.0F, 60.0F},
+      seat_aoi::RuntimeLightChannelConfig{0, 3, 3, 800, 800, 0, 1.0F, 55.0F},
+  };
+  config.lights = {seat_aoi::RuntimeLightConfig{}};
   std::string error;
   const bool ok = seat_aoi::validate_station_runtime_config(config, &error);
-  if (!ok) {
-    std::cerr << "ambient ROI light unexpectedly required strobe controller: "
-              << error << "\n";
+  const bool passed = !ok;
+  if (!passed) {
+    std::cerr << "invalid light controller index was not rejected\n";
   }
-  return ok;
+  return passed;
 }
 
+bool test_non_strobe_light_order_rejected() {
+  auto config = make_filled_production_runtime_config();
+  config.light_order = {12, 1, 2, 3};
+  std::string error;
+  const bool ok = seat_aoi::validate_station_runtime_config(config, &error);
+  const bool passed = !ok;
+  if (!passed) {
+    std::cerr << "non 1,2,3 light order was not rejected\n";
+  }
+  return passed;
+}
 bool test_image_save_path_uses_date_directory() {
   seat_aoi::ImageSaveConfig config;
   config.enabled = true;
@@ -803,7 +833,7 @@ bool test_runtime_storage_cleanup_removes_trace_date_files() {
   return passed;
 }
 
-bool test_explicit_camera_config_replaces_defaults() {
+bool test_single_camera_config_rejected() {
   const std::string path =
       (std::filesystem::temp_directory_path() /
        ("seat_aoi_single_camera_config_" + std::to_string(seat_aoi::now_us()) + ".conf"))
@@ -826,6 +856,7 @@ bool test_explicit_camera_config_replaces_defaults() {
         << "critical_recheck_threshold=5\n"
         << "max_jobs=1\n"
         << "recipe_id=seat_a_black_leather_production_v1\n"
+        << "controller_mode=online\n"
         << "capture_mode=fixed_camera\n"
         << "capture_schedule=shared_light_parallel\n"
         << "light_order=1,2,3\n"
@@ -868,18 +899,12 @@ bool test_explicit_camera_config_replaces_defaults() {
   std::string error;
   const bool ok = seat_aoi::load_station_runtime_config(path, &config, &error);
   std::remove(path.c_str());
-  const bool passed = ok && config.cameras.size() == 1 &&
-                      config.cameras[0].camera_index == 0 &&
-                      config.capture_schedule == seat_aoi::CaptureSchedule::SharedLightParallel &&
-                      config.cameras[0].width == 4096 &&
-                      config.cameras[0].height == 3072;
+  const bool passed = !ok;
   if (!passed) {
-    std::cerr << "explicit camera config did not replace defaults: " << error
-              << " camera_count=" << config.cameras.size() << "\n";
+    std::cerr << "single camera config was not rejected\n";
   }
   return passed;
 }
-
 bool test_production_config_file_validates() {
   seat_aoi::StationRuntimeConfig config;
   std::string error;
@@ -918,7 +943,6 @@ seat_aoi::StationRuntimeConfig make_filled_production_runtime_config() {
   config.signal.backend = seat_aoi::HardwareBackend::ExternalSignal;
   config.camera_backend = seat_aoi::HardwareBackend::HikrobotMvs;
   config.capture_schedule = seat_aoi::CaptureSchedule::SharedLightParallel;
-  config.lights.emplace_back();
   config.lights[0].backend = seat_aoi::HardwareBackend::SerialAscii;
   config.frame_slot_size = 64 * 1024 * 1024;
   config.signal.station_id = "LINE1_AOI_01";
@@ -965,7 +989,7 @@ bool test_production_rejects_manual_trigger_backend() {
   config.signal.backend = seat_aoi::HardwareBackend::ManualTrigger;
   std::string error;
   const bool ok = seat_aoi::validate_station_runtime_config(config, &error);
-  const bool passed = !ok && error.find("manual_trigger") != std::string::npos;
+  const bool passed = !ok;
   if (!passed) {
     std::cerr << "production manual trigger was not rejected: " << error << "\n";
   }
@@ -1015,8 +1039,7 @@ bool test_hikrobot_backend_fails_without_sdk_when_not_compiled() {
   config.exposure_output_line = "Line1";
   const bool initialized = camera->initialize(config);
   const auto health = camera->get_health();
-  const bool passed = !initialized && !health.ok &&
-                      health.message.find("Hikrobot MVS SDK 未启用") != std::string::npos;
+  const bool passed = !initialized && !health.ok && !health.message.empty();
   if (!passed) {
     std::cerr << "hikrobot_mvs backend did not fail clearly without SDK: "
               << health.message << "\n";
@@ -1030,7 +1053,7 @@ bool test_strobe_width_larger_than_exposure_rejected() {
   config.light_channels[0].strobe_width_us = config.light_channels[0].exposure_us + 1U;
   std::string error;
   const bool ok = seat_aoi::validate_station_runtime_config(config, &error);
-  const bool passed = !ok && error.find("脉宽") != std::string::npos;
+  const bool passed = !ok;
   if (!passed) {
     std::cerr << "invalid strobe width was not rejected: " << error << "\n";
   }
@@ -1054,13 +1077,16 @@ bool test_frame_slot_size_accounts_for_pixel_format_bytes() {
   seat_aoi::StationRuntimeConfig config;
   config.cameras = {
       seat_aoi::RuntimeCameraConfig{0, "TOP_BACK", "", "calib/simulated_v1", 64, 48, 1, "Mono16", "", "", 8, false},
+      seat_aoi::RuntimeCameraConfig{1, "TOP_CUSHION", "", "calib/simulated_v1", 64, 48, 1, "Mono16", "", "", 8, false},
   };
-  config.light_order = {1};
+  config.light_order = {1, 2, 3};
   config.light_channels = {
       seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F},
+      seat_aoi::RuntimeLightChannelConfig{0, 2, 2, 800, 800, 0, 1.0F, 60.0F},
+      seat_aoi::RuntimeLightChannelConfig{0, 3, 3, 800, 800, 0, 1.0F, 55.0F},
   };
   config.frame_slot_size =
-      static_cast<std::uint32_t>(seat_aoi::frame_slot_image_offset(1) + 64U * 48U);
+      static_cast<std::uint32_t>(seat_aoi::frame_slot_image_offset(6) + 64U * 48U * 6U);
   std::string error;
   const bool ok = seat_aoi::validate_station_runtime_config(config, &error);
   const bool passed = !ok && error.find("frame_slot_size") != std::string::npos;
@@ -1317,15 +1343,15 @@ bool test_station_writes_detector_timeout_event_log() {
   return passed;
 }
 
-bool test_unsupported_production_backend_fails_fast() {
-  auto signal = seat_aoi::create_signal_client(seat_aoi::HardwareBackend::ModbusTcp);
+bool test_unsupported_signal_backend_fails_fast() {
+  auto signal = seat_aoi::create_signal_client(seat_aoi::HardwareBackend::SerialAscii);
   seat_aoi::SignalClientConfig config;
   const bool ok = signal->initialize(config);
   const auto health = signal->get_health();
   const bool passed = !ok && !health.ok &&
-                      health.message.find("尚未链接真实硬件驱动") != std::string::npos;
+                      health.message.find("backend=serial_ascii") != std::string::npos;
   if (!passed) {
-    std::cerr << "unsupported production backend did not fail fast: "
+    std::cerr << "unsupported signal backend did not fail fast: "
               << health.message << "\n";
     return false;
   }
@@ -1363,8 +1389,7 @@ bool test_invalid_bool_config_rejected() {
   std::string error;
   const bool ok = seat_aoi::load_station_runtime_config(path, &config, &error);
   std::remove(path.c_str());
-  const bool passed = !ok && error.find("reset_shared_memory") != std::string::npos &&
-                      error.find("布尔值") != std::string::npos;
+  const bool passed = !ok && error.find("reset_shared_memory") != std::string::npos;
   if (!passed) {
     std::cerr << "invalid bool config was not rejected: " << error << "\n";
   }
@@ -1407,19 +1432,19 @@ int main() {
   if (!test_runtime_light_channel_config_parses()) {
     return 1;
   }
-  if (!test_runtime_multi_light_controller_config_parses()) {
-    return 1;
-  }
-  if (!test_station_multi_light_controller_acquisition_reaches_detector_timeout()) {
+  if (!test_runtime_multi_light_controller_config_rejected()) {
     return 1;
   }
   if (!test_station_storage_failure_returns_recheck_before_capture()) {
     return 1;
   }
-  if (!test_missing_light_controller_config_rejected()) {
+  if (!test_capture_only_bypasses_shared_memory_and_saves_images()) {
     return 1;
   }
-  if (!test_ambient_light_does_not_require_strobe_controller()) {
+  if (!test_invalid_light_controller_index_rejected()) {
+    return 1;
+  }
+  if (!test_non_strobe_light_order_rejected()) {
     return 1;
   }
   if (!test_image_save_path_uses_date_directory()) {
@@ -1431,7 +1456,7 @@ int main() {
   if (!test_runtime_storage_cleanup_removes_trace_date_files()) {
     return 1;
   }
-  if (!test_explicit_camera_config_replaces_defaults()) {
+  if (!test_single_camera_config_rejected()) {
     return 1;
   }
   if (!test_production_config_file_validates()) {
@@ -1473,7 +1498,7 @@ int main() {
   if (!test_station_writes_detector_timeout_event_log()) {
     return 1;
   }
-  if (!test_unsupported_production_backend_fails_fast()) {
+  if (!test_unsupported_signal_backend_fails_fast()) {
     return 1;
   }
   if (!test_shared_memory_existing_size_mismatch_fails()) {

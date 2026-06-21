@@ -8,7 +8,6 @@ namespace seat_aoi {
 
 enum class LightAcquisitionMode : std::uint32_t {
   Strobe = 1,
-  Ambient = 2,
 };
 
 enum class LightSerialResponseMode : std::uint32_t {

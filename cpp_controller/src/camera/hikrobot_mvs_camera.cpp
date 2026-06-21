@@ -267,10 +267,12 @@ bool HikrobotMvsCamera::initialize(const CameraConfig& config) {
     return false;
   }
 
-  // 根据配置决定触发源：trigger_line 非空时使用硬件触发（Line0 等），否则使用 Software 触发
-  const std::string trigger_source =
-      config_.trigger_line.empty() ? "Software" : config_.trigger_line;
-  if (!set_enum_by_string(handle_, "TriggerSource", trigger_source, &error)) {
+  if (config_.trigger_line.empty()) {
+    set_error("Hikrobot MVS trigger_line is required for FL-ACDH strobe capture");
+    close();
+    return false;
+  }
+  if (!set_enum_by_string(handle_, "TriggerSource", config_.trigger_line, &error)) {
     set_error(error);
     close();
     return false;
@@ -342,11 +344,11 @@ bool HikrobotMvsCamera::arm(std::uint64_t trigger_id,
   }
 #ifdef SEAT_AOI_ENABLE_HIKROBOT_MVS
   std::string error;
-  const std::string trigger_source =
-      light_param.acquisition_mode == LightAcquisitionMode::Ambient || config_.trigger_line.empty()
-          ? "Software"
-          : config_.trigger_line;
-  if (!set_enum_by_string(handle_, "TriggerSource", trigger_source, &error) ||
+  if (config_.trigger_line.empty()) {
+    set_error("Hikrobot MVS trigger_line is required for FL-ACDH strobe capture");
+    return false;
+  }
+  if (!set_enum_by_string(handle_, "TriggerSource", config_.trigger_line, &error) ||
       !set_float_value(handle_, "ExposureTime", static_cast<float>(light_param.exposure_us), &error) ||
       !set_float_value(handle_, "Gain", light_param.gain, &error)) {
     set_error(error);
@@ -377,14 +379,6 @@ bool HikrobotMvsCamera::wait_frame(std::uint64_t trigger_id,
   return false;
 #else
   MV_FRAME_OUT frame{};
-  if (light_param.acquisition_mode == LightAcquisitionMode::Ambient || config_.trigger_line.empty()) {
-    std::string trigger_error;
-    if (!set_command_value(handle_, "TriggerSoftware", &trigger_error)) {
-      ++dropped_frames_;
-      set_error(trigger_error);
-      return false;
-    }
-  }
   const int ret = MV_CC_GetImageBuffer(handle_, &frame, timeout_ms);
   if (ret != kMvsOk) {
     ++dropped_frames_;
