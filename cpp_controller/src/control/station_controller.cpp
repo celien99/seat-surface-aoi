@@ -83,6 +83,7 @@ bool StationController::initialize(const StationConfig& config) {
   runtime_config.trigger_timeout_ms = config.trigger_timeout_ms;
   runtime_config.camera_timeout_ms = config.camera_timeout_ms;
   runtime_config.light_timeout_ms = config.light_timeout_ms;
+  runtime_config.arm_settle_ms = config.arm_settle_ms;
   runtime_config.warning_recheck_threshold = config.warning_recheck_threshold;
   runtime_config.critical_recheck_threshold = config.critical_recheck_threshold;
   runtime_config.max_jobs = config.max_jobs;

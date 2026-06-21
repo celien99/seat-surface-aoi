@@ -736,6 +736,14 @@ bool load_station_runtime_config(const std::string& path,
                            error_message)) {
         return false;
       }
+    } else if (key == "arm_settle_ms") {
+      if (!parse_int_field("arm_settle_ms",
+                           value,
+                           true,
+                           &config.arm_settle_ms,
+                           error_message)) {
+        return false;
+      }
     } else if (key == "warning_recheck_threshold") {
       if (!parse_uint32_field("warning_recheck_threshold",
                               value,

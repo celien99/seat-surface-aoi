@@ -111,6 +111,12 @@ light.baud_rate=115200
 light.response_mode=none
 light.trigger_input_line=Line0
 
+# 超时配置（毫秒）
+camera_timeout_ms=800
+light_timeout_ms=800
+# arm 完成后到触发频闪前的相机稳定等待 (ms)，默认 5，0 则跳过
+# arm_settle_ms=5
+
 image_save.enabled=true
 image_save.save_original=true
 ```

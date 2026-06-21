@@ -1,7 +1,9 @@
 #include "control/frame_assembler.hpp"
 
+#include <chrono>
 #include <map>
 #include <sstream>
+#include <thread>
 
 #include "common/string_utils.hpp"
 #include "common/time_utils.hpp"
@@ -237,6 +239,11 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
         reset_devices();
         return false;
       }
+    }
+    // arm 完成后等待相机内部稳定（Exposure/Gain 应用完成），
+    // 再向 FL-ACDH 发送触发命令，避免硬件触发沿被相机错过。
+    if (config_.arm_settle_ms > 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(config_.arm_settle_ms));
     }
     if (!light_controllers_.front()->trigger_channel(
             light_param,

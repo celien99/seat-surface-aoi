@@ -315,6 +315,13 @@ void HikrobotMvsCamera::start() {
     set_error(mvs_error("MV_CC_StartGrabbing", ret));
     return;
   }
+  // 排空 Continuous 模式启动时的残留帧，避免第一个 wait_frame() 取到过期帧
+  {
+    MV_FRAME_OUT drain{};
+    while (MV_CC_GetImageBuffer(handle_, &drain, 100) == MV_OK) {
+      MV_CC_FreeImageBuffer(handle_, &drain);
+    }
+  }
   grabbing_ = true;
   healthy_ = true;
   health_message_ = "hikrobot_mvs grabbing";
@@ -348,8 +355,11 @@ bool HikrobotMvsCamera::arm(std::uint64_t trigger_id,
     set_error("Hikrobot MVS trigger_line is required for FL-ACDH strobe capture");
     return false;
   }
-  if (!set_enum_by_string(handle_, "TriggerSource", config_.trigger_line, &error) ||
-      !set_float_value(handle_, "ExposureTime", static_cast<float>(light_param.exposure_us), &error) ||
+  // TriggerSource 已在 initialize() 中设为 config_.trigger_line，
+  // arm() 只更新随光源变化的 ExposureTime 和 Gain，避免冗余
+  // TriggerSource 写入导致相机在 Continuous+Trigger 模式下短暂
+  // 无法检测硬件触发沿，引发 Camera Timeout。
+  if (!set_float_value(handle_, "ExposureTime", static_cast<float>(light_param.exposure_us), &error) ||
       !set_float_value(handle_, "Gain", light_param.gain, &error)) {
     set_error(error);
     return false;
