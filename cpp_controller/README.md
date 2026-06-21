@@ -75,7 +75,7 @@ cpp_controller/
 
 采图模式 `controller_mode=capture_only`：
 
-1. 仍然等待外部信号并完成相同的双机位三光源采集。
+1. 仍然等待外部信号并完成相同的多机位多光源采集。
 2. 不初始化共享内存，不发布 frame，不等待 Python detector。
 3. 必须启用 `image_save.enabled=true` 和 `image_save.save_original=true`。
 4. 原图保存为 `image_save.root_dir/YYYYMMDD/<seat_id>/<camera>_<timestamp>_L<light>_original.pgm`。
