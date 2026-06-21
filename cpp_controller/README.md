@@ -1,6 +1,6 @@
 ﻿# Seat Surface AOI - C++ Controller
 
-`cpp_controller` 是当前产线主控程序。现阶段只保留一条真实需要的链路：接收外部信号，驱动 1 台 FL-ACDH 频闪控制器，2 个固定机位共享 3 路光源采图，并在在线模式下通过共享内存与 Python detector 交换图像和检测结果。
+`cpp_controller` 是当前产线主控程序。现阶段只保留一条真实需要的链路：接收外部信号，驱动 1 台 FL-ACDH 频闪控制器，N 个固定机位共享 M 路光源采图，并在在线模式下通过共享内存与 Python detector 交换图像和检测结果。
 
 ## 当前架构
 
@@ -29,8 +29,8 @@ flowchart LR
 
 - `capture_mode=fixed_camera`
 - `capture_schedule=shared_light_parallel`
-- `light_order=1,2,3`
-- 只允许 2 个相机：`camera.0` 和 `camera.1`
+- `light_order` 至少 1 路光源（生产环境 3 路）
+- 相机数量 ≥ 1：`camera.0`, `camera.1`, ... 索引从 0 连续编号
 - 只允许 1 台光源控制器：`light.backend=serial_ascii`
 - 非模拟现场相机只保留 `camera.backend=hikrobot_mvs`
 - 在线模式才启用共享内存；采图模式不创建 Frame/Result ring

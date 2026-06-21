@@ -1,6 +1,7 @@
 #include "control/frame_assembler.hpp"
 
 #include <chrono>
+#include <future>
 #include <map>
 #include <sstream>
 #include <thread>
@@ -55,7 +56,7 @@ bool FrameAssembler::ensure_initialized() {
   if (initialized_) {
     return true;
   }
-  if (config_.lights.size() != 1) {
+  if (config_.lights.empty()) {
     return false;
   }
 
@@ -207,14 +208,14 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
                           "frames output is null");
     return false;
   }
-  if (capture_plan.size() != 2) {
+  if (capture_plan.empty()) {
     set_acquisition_error(error,
                           ErrorCode::ConfigurationError,
                           AcquisitionStage::Configuration,
                           0,
                           0,
                           0,
-                          "shared light capture requires exactly two views");
+                          "shared light capture requires at least one view");
     return false;
   }
   if (!prepare_light_sequence_for_view(sequence, trigger.trigger_id, capture_plan.front(), error)) {
@@ -234,8 +235,29 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
       continue;
     }
 
-    for (const auto& view : capture_plan) {
-      if (!arm_view_camera(trigger, view, light_param, light_seq_index, error)) {
+    // 所有相机并行 arm（各自通过独立 SDK handle 操作，无共享状态）。
+    {
+      std::vector<std::future<bool>> arm_futures;
+      arm_futures.reserve(capture_plan.size());
+      for (const auto& view : capture_plan) {
+        arm_futures.push_back(std::async(std::launch::async, [&, &view = view]() {
+          return arm_view_camera(trigger, view, light_param, light_seq_index, nullptr);
+        }));
+      }
+      bool any_arm_failed = false;
+      for (auto& f : arm_futures) {
+        if (!f.get()) {
+          any_arm_failed = true;
+        }
+      }
+      if (any_arm_failed) {
+        set_acquisition_error(error,
+                              ErrorCode::CameraFault,
+                              AcquisitionStage::ArmCamera,
+                              capture_plan.front().camera_index,
+                              light_param.light_index,
+                              light_seq_index,
+                              "one or more cameras failed to arm");
         reset_devices();
         return false;
       }
@@ -265,17 +287,45 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
       return false;
     }
 
-    for (std::size_t view_index = 0; view_index < capture_plan.size(); ++view_index) {
-      if (!wait_view_light_frame(trigger,
-                                 capture_plan[view_index],
-                                 light_param,
-                                 light_seq_index,
-                                 &frames_by_view[view_index][light_seq_index],
-                                 error)) {
+    // 所有相机并行取帧（已同时触发，各自通过独立 SDK handle 取图）。
+    {
+      struct FrameResult {
+        bool ok = false;
+        CapturedFrame frame;
+        std::size_t view_index = 0;
+      };
+      std::vector<std::future<FrameResult>> frame_futures;
+      frame_futures.reserve(capture_plan.size());
+      for (std::size_t vi = 0; vi < capture_plan.size(); ++vi) {
+        frame_futures.push_back(std::async(std::launch::async, [&, vi]() -> FrameResult {
+          FrameResult result;
+          result.view_index = vi;
+          result.ok = wait_view_light_frame(trigger, capture_plan[vi], light_param,
+                                            light_seq_index, &result.frame, nullptr);
+          return result;
+        }));
+      }
+      bool any_wait_failed = false;
+      for (auto& f : frame_futures) {
+        auto result = f.get();
+        if (!result.ok) {
+          any_wait_failed = true;
+          continue;
+        }
+        frames_by_view[result.view_index][light_seq_index] = std::move(result.frame);
+        captured[result.view_index][light_seq_index] = true;
+      }
+      if (any_wait_failed) {
+        set_acquisition_error(error,
+                              ErrorCode::MissingFrame,
+                              AcquisitionStage::WaitFrame,
+                              capture_plan.front().camera_index,
+                              light_param.light_index,
+                              light_seq_index,
+                              "one or more cameras timed out waiting for frame");
         reset_devices();
         return false;
       }
-      captured[view_index][light_seq_index] = true;
     }
   }
 
@@ -582,14 +632,14 @@ bool FrameAssembler::build_capture_plan(std::vector<RuntimeCaptureSlotConfig>* o
     return false;
   }
   out_views->clear();
-  if (config_.cameras.size() != 2) {
+  if (config_.cameras.empty()) {
     set_acquisition_error(error,
                           ErrorCode::ConfigurationError,
                           AcquisitionStage::Configuration,
                           0,
                           0,
                           0,
-                          "fixed station capture requires exactly two cameras");
+                          "fixed station capture requires at least one camera");
     return false;
   }
   for (const auto& camera : config_.cameras) {

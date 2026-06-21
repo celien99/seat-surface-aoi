@@ -408,10 +408,9 @@ bool validate_light_channels(const StationRuntimeConfig& config,
     }
     return false;
   }
-  if (config.light_order.size() != 3 || config.light_order[0] != 1 ||
-      config.light_order[1] != 2 || config.light_order[2] != 3) {
+  if (config.light_order.empty()) {
     if (error_message != nullptr) {
-      *error_message = "当前真实链路固定 light_order=1,2,3";
+      *error_message = "light_order 不能为空";
     }
     return false;
   }
@@ -909,9 +908,9 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
     }
     return false;
   }
-  if (config.cameras.size() != 2) {
+  if (config.cameras.empty()) {
     if (error_message != nullptr) {
-      *error_message = "当前真实链路固定 2 个机位";
+      *error_message = "至少需要配置 1 台相机";
     }
     return false;
   }
@@ -940,11 +939,14 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
       return false;
     }
   }
-  if (!camera_indices[0] || !camera_indices[1]) {
-    if (error_message != nullptr) {
-      *error_message = "当前真实链路要求 camera.0 和 camera.1";
+  // 验证 camera_index 从 0 开始连续编号
+  for (std::uint32_t i = 0; i < config.cameras.size(); ++i) {
+    if (!camera_indices[i]) {
+      if (error_message != nullptr) {
+        *error_message = "camera_index 必须从 0 开始连续编号，缺少 camera." + std::to_string(i);
+      }
+      return false;
     }
-    return false;
   }
   if (!validate_light_channels(config, error_message)) {
     return false;
@@ -958,7 +960,7 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
   }
   if (estimated_payload_size(config) > config.frame_slot_size) {
     if (error_message != nullptr) {
-      *error_message = "frame_slot_size 太小，无法容纳双机位三光源图像包";
+      *error_message = "frame_slot_size 太小，无法容纳全部相机和光源的图像包";
     }
     return false;
   }
