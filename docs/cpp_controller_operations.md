@@ -221,6 +221,7 @@ light.backend=serial_ascii
 light.device_id=FL-ACDH-20048-4
 light.serial_port=/dev/ttyUSB0
 light.baud_rate=115200
+light.response_mode=ack
 light.trigger_input_line=TriggerIn1
 
 capture_mode=fixed_camera
@@ -243,6 +244,8 @@ light.1.current_percent=60
 
 `light.<N>.acquisition_mode` 默认为 `strobe`，会校验 `physical_channel/strobe_width_us/current_percent` 并触发频闪控制器；`ambient` 用于常亮 Dome ROI 采图，只校验曝光和增益，C++ 不会准备或触发频闪控制器，Hikrobot MVS 后端会改用 `TriggerSource=Software` 取图。
 
+`light.response_mode` 默认为 `ack`，要求 FL-ACDH 每条串口命令返回 `$`。若现场控制器或接线确认无回包，可在联调配置中改为 `none`，程序只校验串口写入成功；后续仍必须通过相机取帧、控制器指示灯或示波器确认 `7` 命令触发成功。写入失败、取帧超时、协议错误或未确认状态仍必须输出 `RECHECK/ERROR`，不能放行 `OK`。
+
 要求 `strobe_width_us <= exposure_us`，电流、脉宽和触发延时不得超过控制器与光源规格。
 
 多控制器频闪使用控制器级 `light.<M>.<field>` 与通道级 `light.<M>.<N>.<field>`：
@@ -251,12 +254,14 @@ light.1.current_percent=60
 light.0.backend=serial_ascii
 light.0.serial_port=COM3
 light.0.baud_rate=115200
+light.0.response_mode=ack
 light.0.trigger_input_line=Line1
 light.0.1.physical_channel=1
 
 light.1.backend=serial_ascii
 light.1.serial_port=COM4
 light.1.baud_rate=115200
+light.1.response_mode=ack
 light.1.trigger_input_line=Line1
 light.1.3.physical_channel=1
 ```

@@ -29,7 +29,7 @@ Seat Surface AOI 是一套可验证、可扩展的汽车座椅表面缺陷检测
 
 | 层级 | 职责 | 当前实现 |
 | --- | --- | --- |
-| 实时主控 | PLC、相机、频闪、机器人 pose/shot、触发同步、节拍控制 | `cpp_controller/` C++17 主控、按 `light_index/light_seq_index` 生成元数据的模拟相机、Hikrobot MVS 相机 (Line0 硬触发)、FL-ACDH RS232 多控制器频闪、TCP 信号 (SN+结果回传)、距离传感器触发、按日期分目录的图像落盘 PGM、`images/` 与 `trace/` 低磁盘容量旧数据清理、落盘失败保守复检、JSON 结果输出、生产配置校验和故障注入 |
+| 实时主控 | PLC、相机、频闪、机器人 pose/shot、触发同步、节拍控制 | `cpp_controller/` C++17 主控、按 `light_index/light_seq_index` 生成元数据的模拟相机、Hikrobot MVS 相机 (Line0 硬触发)、FL-ACDH RS232 多控制器频闪（支持 `ack/none` 串口应答模式）、TCP 信号 (SN+结果回传)、距离传感器触发、按日期分目录的图像落盘 PGM、`images/` 与 `trace/` 低磁盘容量旧数据清理、落盘失败保守复检、JSON 结果输出、生产配置校验和故障注入 |
 | 检测进程 | 质量门禁、预处理、ROI、配准、多光源特征、模型推理、融合判定 | `python_detector/` 独立进程，默认 fake 后端，可接 ONNX/PatchCore/FAISS |
 | 在线通信 | 图像包与检测结果交换 | 跨平台共享内存 frame/result ring buffer，固定布局、CRC 和协议校验 |
 | 离线闭环 | trace 转样本、embedding、PCA、PatchCore/FAISS、回放、benchmark | `training_tools/` 只消费在线检测公开入口，不反向耦合 detector |
@@ -350,7 +350,7 @@ Python 配方已收敛为 `camera_defaults + cameras` 两层：`camera_defaults`
 
 **已实现的真实硬件后端：**
 - **相机**：Hikrobot MVS（Line0 硬件触发 + Software 软件触发），`-DSEAT_AOI_ENABLE_HIKROBOT_MVS=ON` 构建
-- **频闪**：FL-ACDH RS232 串口 ASCII 协议（XOR 校验和，多控制器 `light.<M>.<field>` + `light.<M>.<N>.<field>` 格式）
+- **频闪**：FL-ACDH RS232 串口 ASCII 协议（XOR 校验和，多控制器 `light.<M>.<field>` + `light.<M>.<N>.<field>` 格式，`light.response_mode=ack|none` 控制是否等待 `$` ACK）
 - **信号**：TCP 信号客户端（SN 接收 + `result|seat_id|OK\n` 结果回传）、距离传感器触发（JK-LRD Modbus RTU，消抖触发状态机）
 - **辅助**：图像落盘 PGM（纯 C++ 零依赖，路径 `images/YYYYMMDD/<seat_id>/`，可用容量低于 20% 时清理 `images/` 与 `trace/` 日期目录历史文件，落盘失败默认复检）、JSON 详细结果 TCP 输出、生产配置 fail-fast 校验
 

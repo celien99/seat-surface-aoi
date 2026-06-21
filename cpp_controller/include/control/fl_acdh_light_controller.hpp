@@ -53,6 +53,7 @@ private:
   bool simulate_fault_ = false;
   std::string serial_port_;
   std::uint32_t baud_rate_ = 9600;
+  LightSerialResponseMode response_mode_ = LightSerialResponseMode::Ack;
 
 #ifdef _WIN32
   void* handle_ = nullptr;

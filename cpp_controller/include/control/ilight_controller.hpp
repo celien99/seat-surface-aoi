@@ -11,6 +11,11 @@ enum class LightAcquisitionMode : std::uint32_t {
   Ambient = 2,
 };
 
+enum class LightSerialResponseMode : std::uint32_t {
+  Ack = 1,
+  None = 2,
+};
+
 struct LightChannelParam {
   std::uint32_t controller_index = 0;  // 所属控制器索引（0-based）
   std::uint32_t light_index = 0;
@@ -36,6 +41,7 @@ struct LightControllerConfig {
   std::string serial_port;
   std::uint32_t baud_rate = 0;
   std::string trigger_input_line;
+  LightSerialResponseMode response_mode = LightSerialResponseMode::Ack;
   bool simulate_fault = false;
 };
 

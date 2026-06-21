@@ -40,6 +40,7 @@ LightControllerConfig make_light_controller_config(const RuntimeLightConfig& con
   controller_config.serial_port = config.serial_port;
   controller_config.baud_rate = config.baud_rate;
   controller_config.trigger_input_line = config.trigger_input_line;
+  controller_config.response_mode = config.response_mode;
   controller_config.simulate_fault = config.simulate_fault;
   return controller_config;
 }
@@ -127,7 +128,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
                           0,
                           0,
                           0,
-                          "failed to initialize simulated acquisition");
+                          "failed to initialize acquisition hardware");
     return false;
   }
   if (out_bundle == nullptr) {

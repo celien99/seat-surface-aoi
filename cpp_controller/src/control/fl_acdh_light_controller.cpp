@@ -348,6 +348,12 @@ bool FlAcdhLightController::send_frame(const std::string& frame,
     return false;
   }
 
+  if (response_mode_ == LightSerialResponseMode::None) {
+    std::cout << "FL-ACDH " << serial_port_
+              << " response skipped (response_mode=none)" << std::endl;
+    return true;
+  }
+
   // 读取 1 字节响应
   unsigned char response = 0;
   const int n = read_serial(&response, 1, timeout_ms);
@@ -414,6 +420,7 @@ bool FlAcdhLightController::initialize(const LightControllerConfig& config) {
 
   serial_port_ = config.serial_port;
   baud_rate_ = config.baud_rate > 0 ? config.baud_rate : kDefaultBaudRate;
+  response_mode_ = config.response_mode;
   simulate_fault_ = config.simulate_fault;
 
   if (serial_port_.empty()) {
@@ -428,7 +435,9 @@ bool FlAcdhLightController::initialize(const LightControllerConfig& config) {
   }
 
   std::cout << "FL-ACDH 串口已打开 " << serial_port_ << " @ " << baud_rate_
-            << " baud" << std::endl;
+            << " baud response_mode="
+            << (response_mode_ == LightSerialResponseMode::None ? "none" : "ack")
+            << std::endl;
 
   initialized_ = true;
   trigger_count_ = 0;
@@ -528,7 +537,9 @@ LightHealth FlAcdhLightController::get_health() const {
   else if (simulate_fault_)
     health.message = "FL-ACDH 模拟故障";
   else
-    health.message = "FL-ACDH serial " + serial_port_ + " @ " + std::to_string(baud_rate_);
+    health.message = "FL-ACDH serial " + serial_port_ + " @ " +
+                     std::to_string(baud_rate_) + " response_mode=" +
+                     (response_mode_ == LightSerialResponseMode::None ? "none" : "ack");
   return health;
 }
 

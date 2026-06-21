@@ -471,6 +471,8 @@ bool test_runtime_light_channel_config_parses() {
                       config.light_channels[2].physical_channel == 3 &&
                       config.light_channels[2].strobe_width_us == 650 &&
                       config.light_channels[2].current_percent == 55.0F &&
+                      config.lights[0].response_mode ==
+                          seat_aoi::LightSerialResponseMode::Ack &&
                       config.image_save.cleanup_enabled &&
                       config.image_save.cleanup_min_free_ratio == 0.20F;
   if (!passed) {
@@ -490,7 +492,9 @@ bool test_runtime_multi_light_controller_config_parses() {
         << "signal.backend=simulated\n"
         << "camera.backend=simulated\n"
         << "light.backend=simulated\n"
+        << "light.response_mode=none\n"
         << "light.1.backend=simulated\n"
+        << "light.1.response_mode=ack\n"
         << "robot.backend=simulated\n"
         << "slot_count=4\n"
         << "frame_slot_size=16777216\n"
@@ -527,7 +531,11 @@ bool test_runtime_multi_light_controller_config_parses() {
                       config.light_channels[1].controller_index == 1 &&
                       config.light_channels[1].light_index == 2 &&
                       config.light_channels[1].physical_channel == 1 &&
-                      config.light_channels[1].strobe_width_us == 750;
+                      config.light_channels[1].strobe_width_us == 750 &&
+                      config.lights[0].response_mode ==
+                          seat_aoi::LightSerialResponseMode::None &&
+                      config.lights[1].response_mode ==
+                          seat_aoi::LightSerialResponseMode::Ack;
   if (!passed) {
     std::cerr << "multi light controller config did not parse: " << error << "\n";
   }

@@ -165,6 +165,7 @@ ipc_safety_checks   (依赖 seat_aoi_control)
 ### FL-ACDH 频闪控制器 (`serial_ascii`)
 
 当 `light.backend=serial_ascii` 时，通过 RS232 串口（`light.serial_port`、`light.baud_rate`，默认 9600 8N1）与 FL-ACDH-20048-4 通信，使用 XOR 校验和的专有 ASCII 帧协议。
+默认 `light.response_mode=ack` 会要求每条命令收到控制器返回的 `$` ACK；如果现场控制器确认不回包，或联调阶段只有 PC TX/GND 单向接线，可显式设置 `light.response_mode=none`，程序只校验串口写入成功，后续仍依赖相机取帧/示波器确认触发。未知应答、写入失败或取帧超时仍会保守输出 `RECHECK`。
 
 ### 多控制器频闪
 
@@ -174,6 +175,7 @@ ipc_safety_checks   (依赖 seat_aoi_control)
 ```ini
 light.backend=serial_ascii
 light.serial_port=/dev/ttyUSB0
+light.response_mode=ack
 light.1.physical_channel=1    # light.<N>.<field> → controller 0
 ```
 
@@ -182,11 +184,13 @@ light.1.physical_channel=1    # light.<N>.<field> → controller 0
 light.0.backend=serial_ascii
 light.0.serial_port=/dev/ttyUSB0
 light.0.baud_rate=115200
+light.0.response_mode=ack
 light.0.trigger_input_line=Line1
 light.0.1.physical_channel=1  # light.<M>.<N>.<field>：控制器 M, 光源索引 N
 light.1.backend=serial_ascii
 light.1.serial_port=/dev/ttyUSB1
 light.1.baud_rate=115200
+light.1.response_mode=ack
 light.1.trigger_input_line=Line1
 light.1.3.physical_channel=1  # 第二台控制器通道 1, 光源索引 3
 ```
@@ -536,7 +540,7 @@ cp config/station_runtime.production.example.conf config/station_runtime.product
 
 当前产线固定为 `light_order=12,1,2,3`，Python 固定机位生产配方 `seat_a_black_leather_production_v1` 已同步为 `DOME_ROI + DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。其中 `12 -> DOME_ROI` 只用于 ROI 定位，不进入特征构建或模型输入；`1/2/3` 是三个必需检测光源。若未来补第 4 路 `HIGH_RIGHT`，必须同时更新 C++ 配置、Python 生产配方、模型输入通道、训练资产和测试。
 
-Hikrobot MVS backend 当前按 `Mono8` 单通道实现，并已按海康 MVS C++ 示例工程对齐：进程内引用计数调用 `MV_CC_Initialize/Finalize`，枚举 GigE/USB/GenTL 设备，按 `camera.<N>.serial_number` 匹配相机，配置 `4096 x 3072`、`TriggerMode=On`、`Line1=ExposureStartActive`、`StrobeEnable=true`。C++ 每个采集轮次先设置曝光/增益并 arm 相机；频闪轮次使用 `TriggerSource=Line0`，再通过 RS232 发送 FL-ACDH 频闪序列（C→B→8→9→A→7），FL-ACDH 的 `7` 命令同时点亮频闪并通过 F 口同步输出触发相机 Line0 曝光；常亮 Dome ROI 轮次使用 `TriggerSource=Software` 和 `TriggerSoftware` 直接取图，不对 Dome 光源发送任何控制命令。取帧使用 MVS 示例里的 `nExtendWidth/nExtendHeight/nFrameLenEx` 字段，其他像素格式不会隐式转换，配置不匹配会保守失败。
+Hikrobot MVS backend 当前按 `Mono8` 单通道实现，并已按海康 MVS C++ 示例工程对齐：进程内引用计数调用 `MV_CC_Initialize/Finalize`，枚举 GigE/USB/GenTL 设备，按 `camera.<N>.serial_number` 匹配相机，配置 `4096 x 3072`、`TriggerMode=On`、`Line1=ExposureStartActive`、`StrobeEnable=true`。C++ 每个采集轮次先设置曝光/增益并 arm 相机；频闪轮次使用 `TriggerSource=Line0`，再通过 RS232 发送 FL-ACDH 频闪序列（C→B→8→9→A→7），`light.response_mode=ack` 时等待每条命令返回 `$`，`none` 时只校验串口写入；FL-ACDH 的 `7` 命令同时点亮频闪并通过 F 口同步输出触发相机 Line0 曝光；常亮 Dome ROI 轮次使用 `TriggerSource=Software` 和 `TriggerSoftware` 直接取图，不对 Dome 光源发送任何控制命令。取帧使用 MVS 示例里的 `nExtendWidth/nExtendHeight/nFrameLenEx` 字段，其他像素格式不会隐式转换，配置不匹配会保守失败。
 
 外部信号网关未确定前，使用 `config/station_runtime.lab_manual.example.conf` 做手动触发联调，只验证相机、频闪、共享内存和 Python detector 收图。该模板的 `frame_slot_size=67108864` 会被联调脚本同步传给 Python detector，避免 4096 x 3072 图像在 Python 侧仍按默认 16 MB 打开共享内存。进入生产闭环前仍必须补齐 `signal.backend=external_signal`、`trigger_queue_path`/`result_queue_path` 和外部信号网关。
 

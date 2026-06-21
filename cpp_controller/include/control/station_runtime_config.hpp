@@ -58,6 +58,7 @@ struct RuntimeLightConfig {
   std::string serial_port;
   std::uint32_t baud_rate = 0;
   std::string trigger_input_line;
+  LightSerialResponseMode response_mode = LightSerialResponseMode::Ack;
   bool simulate_fault = false;
   std::string message = "simulated";
 };

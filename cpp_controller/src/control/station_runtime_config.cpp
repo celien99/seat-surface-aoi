@@ -130,6 +130,24 @@ bool parse_light_acquisition_mode_value(const std::string& value,
   return false;
 }
 
+bool parse_light_serial_response_mode_value(const std::string& value,
+                                            LightSerialResponseMode* out_mode,
+                                            std::string* error_message) {
+  if (value == "ack" || value == "strict_ack" || value == "strict") {
+    *out_mode = LightSerialResponseMode::Ack;
+    return true;
+  }
+  if (value == "none" || value == "no_ack" || value == "write_only") {
+    *out_mode = LightSerialResponseMode::None;
+    return true;
+  }
+  if (error_message != nullptr) {
+    *error_message =
+        "light response_mode 只能是 ack 或 none: " + value;
+  }
+  return false;
+}
+
 bool parse_uint32_field(const std::string& field_name,
                         const std::string& value,
                         bool allow_zero,
@@ -497,7 +515,8 @@ bool parse_light_controller_key(const std::string& key,
     const std::string field = key.substr(dot + 1);
     if (field == "backend" || field == "device_id" || field == "host" ||
         field == "port" || field == "serial_port" || field == "baud_rate" ||
-        field == "trigger_input_line" || field == "simulate_fault") {
+        field == "trigger_input_line" || field == "response_mode" ||
+        field == "simulate_fault") {
       *out_controller_index = static_cast<std::uint32_t>(parsed);
       *out_field = field;
       return true;
@@ -529,6 +548,9 @@ bool apply_light_controller_value(RuntimeLightConfig* light,
     return parse_uint32_field(prefix + "baud_rate", value, false, &light->baud_rate, error_message);
   } else if (field == "trigger_input_line") {
     light->trigger_input_line = value;
+  } else if (field == "response_mode") {
+    return parse_light_serial_response_mode_value(
+        value, &light->response_mode, error_message);
   } else if (field == "simulate_fault") {
     return parse_bool_field(prefix + "simulate_fault", value, &light->simulate_fault, error_message);
   } else {
@@ -1000,6 +1022,11 @@ bool load_station_runtime_config(const std::string& path,
       }
     } else if (key == "light.trigger_input_line") {
       config.lights[0].trigger_input_line = value;
+    } else if (key == "light.response_mode") {
+      if (!parse_light_serial_response_mode_value(
+              value, &config.lights[0].response_mode, error_message)) {
+        return false;
+      }
     } else if (key == "slot_count") {
       if (!parse_uint32_field("slot_count", value, false, &config.slot_count, error_message)) {
         return false;
