@@ -55,28 +55,28 @@ private:
   bool build_light_sequence(const Recipe& recipe,
                             LightSequence* out_sequence,
                             AcquisitionError* error) const;
-  bool build_capture_plan(std::vector<RuntimeCaptureViewConfig>* out_views,
+  bool build_capture_plan(std::vector<RuntimeCaptureSlotConfig>* out_views,
                           AcquisitionError* error) const;
   bool validate_shared_light_bundle(const SeatImageBundle& bundle,
                                     const LightSequence& sequence,
-                                    const std::vector<RuntimeCaptureViewConfig>& views,
+                                    const std::vector<RuntimeCaptureSlotConfig>& views,
                                     AcquisitionError* error) const;
   bool prepare_light_sequence_for_view(const LightSequence& sequence,
                                        std::uint64_t trigger_id,
-                                       const RuntimeCaptureViewConfig& view,
+                                       const RuntimeCaptureSlotConfig& view,
                                        AcquisitionError* error);
   bool acquire_shared_light_parallel_frames(const LightSequence& sequence,
                                             const ExternalTrigger& trigger,
-                                            const std::vector<RuntimeCaptureViewConfig>& capture_plan,
+                                            const std::vector<RuntimeCaptureSlotConfig>& capture_plan,
                                             std::vector<CapturedFrame>* frames,
                                             AcquisitionError* error);
   bool arm_view_camera(const ExternalTrigger& trigger,
-                       const RuntimeCaptureViewConfig& view,
+                       const RuntimeCaptureSlotConfig& view,
                        const LightChannelParam& light_param,
                        std::uint32_t light_seq_index,
                        AcquisitionError* error);
   bool wait_view_light_frame(const ExternalTrigger& trigger,
-                             const RuntimeCaptureViewConfig& view,
+                             const RuntimeCaptureSlotConfig& view,
                              const LightChannelParam& light_param,
                              std::uint32_t light_seq_index,
                              CapturedFrame* out_frame,

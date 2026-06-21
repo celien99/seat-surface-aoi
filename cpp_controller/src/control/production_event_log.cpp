@@ -102,8 +102,8 @@ const char* error_code_name(ErrorCode error_code) {
       return "TriggerSyncFault";
     case ErrorCode::ConfigurationError:
       return "ConfigurationError";
-    case ErrorCode::RobotFault:
-      return "RobotFault";
+    case ErrorCode::Reserved14:
+      return "Reserved14";
   }
   return "UnknownError";
 }

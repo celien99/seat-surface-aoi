@@ -54,7 +54,7 @@ seat_aoi::SeatImageBundle make_bundle(std::uint64_t sequence_id) {
   seat_aoi::CapturedFrame frame;
   frame.bytes = {80, 81, 82, 83};
   frame.meta.camera_index = 0;
-  frame.meta.pose_index = 0;
+  frame.meta.view_index = 0;
   frame.meta.light_index = 1;
   frame.meta.frame_index = 1;
   frame.meta.light_seq_index = 0;
@@ -68,11 +68,11 @@ seat_aoi::SeatImageBundle make_bundle(std::uint64_t sequence_id) {
   frame.meta.dtype_code = static_cast<std::uint32_t>(seat_aoi::DTypeCode::UInt8);
   frame.meta.timestamp_us = seat_aoi::now_us();
   frame.meta.shot_id = 1000 + sequence_id;
-  frame.meta.robot_timestamp_us = frame.meta.timestamp_us;
+  frame.meta.reserved_u64 = 0;
   frame.meta.exposure_us = 800;
   frame.meta.gain = 1.0F;
   seat_aoi::copy_cstr(frame.meta.camera_id, "TOP_BACK");
-  seat_aoi::copy_cstr(frame.meta.pose_id, "TOP_BACK");
+  seat_aoi::copy_cstr(frame.meta.view_id, "TOP_BACK");
   seat_aoi::copy_cstr(frame.meta.calibration_id, "calib/simulated_v1");
   bundle.frames.push_back(frame);
   return bundle;

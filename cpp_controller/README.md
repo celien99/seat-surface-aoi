@@ -35,7 +35,7 @@ flowchart LR
 - 非模拟现场相机只保留 `camera.backend=hikrobot_mvs`
 - 在线模式才启用共享内存；采图模式不创建 Frame/Result ring
 
-已移除：机器人飞拍、距离传感器触发、多频闪控制器、视角串行 TDM、JSON 详细结果 TCP 输出、未使用 PLC/SDK backend 枚举和对应源码。
+C++ 主控只保留上述当前链路。非当前链路的兼容路径、未使用 backend 枚举和对应源码已移除；共享内存协议布局保持与 Python detector 二进制兼容，C++ 结构命名统一为固定机位视图语义。
 
 ## 文件结构
 

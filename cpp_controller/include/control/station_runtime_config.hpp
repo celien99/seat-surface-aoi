@@ -23,9 +23,9 @@ enum class ControllerMode : std::uint32_t {
   CaptureOnly = 2,
 };
 
-struct RuntimeCaptureViewConfig {
-  std::uint32_t pose_index = 0;
-  std::string pose_id = "TOP_BACK";
+struct RuntimeCaptureSlotConfig {
+  std::uint32_t view_index = 0;
+  std::string view_id = "TOP_BACK";
   std::uint32_t camera_index = 0;
   std::string camera_id = "TOP_BACK";
   std::string calibration_id = "calib/simulated_v1";

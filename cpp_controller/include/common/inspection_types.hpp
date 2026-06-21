@@ -48,7 +48,7 @@ enum class InspectionDecision : std::uint32_t {
 
 struct LightFrameMeta {
   std::uint32_t camera_index;
-  std::uint32_t pose_index;
+  std::uint32_t view_index;
   std::uint32_t light_index;
   std::uint32_t frame_index;
   std::uint32_t light_seq_index;
@@ -62,13 +62,12 @@ struct LightFrameMeta {
   std::uint32_t dtype_code;
   std::uint64_t timestamp_us;
   std::uint64_t shot_id;
-  std::uint64_t robot_timestamp_us;
+  std::uint64_t reserved_u64;
   std::uint32_t exposure_us;
   float gain;
-  float robot_tcp_xyz_mm[3];
-  float robot_rpy_deg[3];
+  float reserved_f32[6];
   char camera_id[kStringIdSize];
-  char pose_id[kStringIdSize];
+  char view_id[kStringIdSize];
   char calibration_id[kStringIdSize];
   std::uint64_t image_offset;
   std::uint64_t image_size;
@@ -95,7 +94,7 @@ struct DefectResultMeta {
   char severity[kStringIdSize];
   std::uint32_t camera_index;
   char camera_id[kStringIdSize];
-  char pose_id[kStringIdSize];
+  char view_id[kStringIdSize];
   char roi_name[kStringIdSize];
   std::int32_t bbox_xyxy[4];
   float score;

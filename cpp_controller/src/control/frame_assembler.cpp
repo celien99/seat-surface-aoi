@@ -123,7 +123,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
   if (!build_light_sequence(recipe, &sequence, error)) {
     return false;
   }
-  std::vector<RuntimeCaptureViewConfig> capture_plan;
+  std::vector<RuntimeCaptureSlotConfig> capture_plan;
   if (!build_capture_plan(&capture_plan, error)) {
     return false;
   }
@@ -156,7 +156,7 @@ bool FrameAssembler::acquire_bundles(const Recipe& recipe,
 
 bool FrameAssembler::prepare_light_sequence_for_view(const LightSequence& sequence,
                                                      std::uint64_t trigger_id,
-                                                     const RuntimeCaptureViewConfig& view,
+                                                     const RuntimeCaptureSlotConfig& view,
                                                      AcquisitionError* error) {
   if (light_controllers_.size() != 1 || light_controllers_.front() == nullptr) {
     set_acquisition_error(error,
@@ -192,7 +192,7 @@ bool FrameAssembler::prepare_light_sequence_for_view(const LightSequence& sequen
 bool FrameAssembler::acquire_shared_light_parallel_frames(
     const LightSequence& sequence,
     const ExternalTrigger& trigger,
-    const std::vector<RuntimeCaptureViewConfig>& capture_plan,
+    const std::vector<RuntimeCaptureSlotConfig>& capture_plan,
     std::vector<CapturedFrame>* frames,
     AcquisitionError* error) {
   if (frames == nullptr) {
@@ -295,7 +295,7 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
 }
 
 bool FrameAssembler::arm_view_camera(const ExternalTrigger& trigger,
-                                     const RuntimeCaptureViewConfig& view,
+                                     const RuntimeCaptureSlotConfig& view,
                                      const LightChannelParam& light_param,
                                      std::uint32_t light_seq_index,
                                      AcquisitionError* error) {
@@ -303,7 +303,7 @@ bool FrameAssembler::arm_view_camera(const ExternalTrigger& trigger,
   if (camera_ptr == nullptr) {
     std::ostringstream oss;
     oss << "capture view references missing camera_index=" << view.camera_index
-        << " pose_id=" << view.pose_id;
+        << " view_id=" << view.view_id;
     set_acquisition_error(error,
                           ErrorCode::ConfigurationError,
                           AcquisitionStage::Configuration,
@@ -333,7 +333,7 @@ bool FrameAssembler::arm_view_camera(const ExternalTrigger& trigger,
 }
 
 bool FrameAssembler::wait_view_light_frame(const ExternalTrigger& trigger,
-                                           const RuntimeCaptureViewConfig& view,
+                                           const RuntimeCaptureSlotConfig& view,
                                            const LightChannelParam& light_param,
                                            std::uint32_t light_seq_index,
                                            CapturedFrame* out_frame,
@@ -355,7 +355,7 @@ bool FrameAssembler::wait_view_light_frame(const ExternalTrigger& trigger,
                               out_frame,
                               config_.camera_timeout_ms)) {
     std::ostringstream oss;
-    oss << "camera frame timeout pose_id=" << view.pose_id
+    oss << "camera frame timeout view_id=" << view.view_id
         << " camera_index=" << view.camera_index
         << " light_index=" << light_param.light_index
         << " light_seq_index=" << light_seq_index;
@@ -369,15 +369,14 @@ bool FrameAssembler::wait_view_light_frame(const ExternalTrigger& trigger,
     return false;
   }
   out_frame->meta.camera_index = view.camera_index;
-  out_frame->meta.pose_index = view.pose_index;
+  out_frame->meta.view_index = view.view_index;
   out_frame->meta.shot_id = trigger.trigger_id;
-  out_frame->meta.robot_timestamp_us = 0;
-  for (int index = 0; index < 3; ++index) {
-    out_frame->meta.robot_tcp_xyz_mm[index] = 0.0F;
-    out_frame->meta.robot_rpy_deg[index] = 0.0F;
+  out_frame->meta.reserved_u64 = 0;
+  for (float& value : out_frame->meta.reserved_f32) {
+    value = 0.0F;
   }
   copy_cstr(out_frame->meta.camera_id, view.camera_id);
-  copy_cstr(out_frame->meta.pose_id, view.pose_id);
+  copy_cstr(out_frame->meta.view_id, view.view_id);
   copy_cstr(out_frame->meta.calibration_id, view.calibration_id);
   return true;
 }
@@ -462,7 +461,7 @@ bool FrameAssembler::build_light_sequence(const Recipe& recipe,
 
 bool FrameAssembler::validate_shared_light_bundle(const SeatImageBundle& bundle,
                                                   const LightSequence& sequence,
-                                                  const std::vector<RuntimeCaptureViewConfig>& views,
+                                                  const std::vector<RuntimeCaptureSlotConfig>& views,
                                                   AcquisitionError* error) const {
   const std::uint32_t expected_frames =
       static_cast<std::uint32_t>(views.size() * sequence.channels.size());
@@ -504,15 +503,15 @@ bool FrameAssembler::validate_shared_light_bundle(const SeatImageBundle& bundle,
       const auto& frame = bundle.frames[frame_index];
       const auto& meta = frame.meta;
       if (meta.camera_index != view.camera_index ||
-          meta.pose_index != view.pose_index ||
+          meta.view_index != view.view_index ||
           meta.light_index != expected_light.light_index ||
           meta.light_seq_index != light_seq_index) {
         std::ostringstream oss;
-        oss << "bundle order mismatch expected pose_index=" << view.pose_index
+        oss << "bundle order mismatch expected view_index=" << view.view_index
             << " camera_index=" << view.camera_index
             << " light_index=" << expected_light.light_index
             << " light_seq_index=" << light_seq_index
-            << " actual pose_index=" << meta.pose_index
+            << " actual view_index=" << meta.view_index
             << " actual camera_index=" << meta.camera_index
             << " actual light_index=" << meta.light_index
             << " actual light_seq_index=" << meta.light_seq_index;
@@ -563,7 +562,7 @@ bool FrameAssembler::validate_shared_light_bundle(const SeatImageBundle& bundle,
   return true;
 }
 
-bool FrameAssembler::build_capture_plan(std::vector<RuntimeCaptureViewConfig>* out_views,
+bool FrameAssembler::build_capture_plan(std::vector<RuntimeCaptureSlotConfig>* out_views,
                                         AcquisitionError* error) const {
   if (out_views == nullptr) {
     set_acquisition_error(error,
@@ -587,9 +586,9 @@ bool FrameAssembler::build_capture_plan(std::vector<RuntimeCaptureViewConfig>* o
     return false;
   }
   for (const auto& camera : config_.cameras) {
-    RuntimeCaptureViewConfig view;
-    view.pose_index = camera.camera_index;
-    view.pose_id = camera.camera_id;
+    RuntimeCaptureSlotConfig view;
+    view.view_index = camera.camera_index;
+    view.view_id = camera.camera_id;
     view.camera_index = camera.camera_index;
     view.camera_id = camera.camera_id;
     view.calibration_id = camera.calibration_id;

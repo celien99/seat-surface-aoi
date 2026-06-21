@@ -28,7 +28,7 @@ flowchart LR
 - 固定采集方式：2 个机位共享 3 路光源，`capture_mode=fixed_camera`、`capture_schedule=shared_light_parallel`、`light_order=1,2,3`。
 - 在线模式使用共享内存和 Python detector；采图模式不启用共享内存，只采图保存原图并向外部信号回传 `RECHECK`。
 
-已移除的 C++ 主控兼容路径：机器人飞拍、距离传感器触发、多频闪控制器、视角串行 TDM、JSON 详细结果 TCP 输出，以及未使用的 PLC/SDK backend 枚举。共享内存协议中的历史字段和错误码编号暂未重排，以避免破坏 C++/Python 二进制协议兼容。
+C++ 主控只保留上述当前链路。非当前链路的兼容路径、未使用 backend 枚举和对应源码已移除；共享内存协议布局保持与 Python detector 二进制兼容，C++ 结构命名统一为固定机位视图语义。
 
 ## 快速开始
 
