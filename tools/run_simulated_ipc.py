@@ -140,9 +140,68 @@ def cmake_configure_command(plan: CMakeBuildPlan, build_dir: Path) -> list[str]:
     return command
 
 
+def normalized_path_key(path: str | Path) -> str:
+    return os.path.normcase(os.path.abspath(os.path.normpath(str(path))))
+
+
+def read_cmake_cache_entries(cache_path: Path) -> dict[str, str]:
+    if not cache_path.exists():
+        return {}
+
+    entries: dict[str, str] = {}
+    for raw_line in cache_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(("#", "//")) or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        entries[key.split(":", 1)[0]] = value.strip()
+    return entries
+
+
+def stale_cmake_cache_reasons(build_dir: Path) -> list[str]:
+    cache = read_cmake_cache_entries(build_dir / "CMakeCache.txt")
+    if not cache:
+        return []
+
+    reasons: list[str] = []
+    cached_source = cache.get("CMAKE_HOME_DIRECTORY")
+    if cached_source and normalized_path_key(cached_source) != normalized_path_key(CPP_DIR):
+        reasons.append(f"source={cached_source}")
+
+    cached_build = cache.get("CMAKE_CACHEFILE_DIR")
+    if cached_build and normalized_path_key(cached_build) != normalized_path_key(build_dir):
+        reasons.append(f"build={cached_build}")
+
+    return reasons
+
+
+def assert_simulated_ipc_build_dir(build_dir: Path) -> None:
+    root = BUILD_ROOT.resolve(strict=False)
+    target = build_dir.resolve(strict=False)
+    try:
+        target.relative_to(root)
+    except ValueError as exc:
+        raise RuntimeError(f"拒绝清理非模拟 IPC 构建目录: {target}") from exc
+    if target == root:
+        raise RuntimeError(f"拒绝清理模拟 IPC 构建根目录: {target}")
+
+
+def prepare_cmake_build_dir(build_dir: Path) -> None:
+    reasons = stale_cmake_cache_reasons(build_dir)
+    if reasons:
+        assert_simulated_ipc_build_dir(build_dir)
+        print(
+            "检测到 CMake 缓存来自其他源码或构建目录，清理后重新生成: "
+            f"{build_dir} ({'; '.join(reasons)})",
+            flush=True,
+        )
+        shutil.rmtree(build_dir)
+    build_dir.mkdir(parents=True, exist_ok=True)
+
+
 def build_cpp_with_cmake(plan: CMakeBuildPlan) -> BuildArtifacts:
     build_dir = BUILD_ROOT / plan.name
-    build_dir.mkdir(parents=True, exist_ok=True)
+    prepare_cmake_build_dir(build_dir)
     run(cmake_configure_command(plan, build_dir))
     run(["cmake", "--build", str(build_dir), "--config", "Release"])
     return BuildArtifacts(

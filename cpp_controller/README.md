@@ -361,7 +361,7 @@ Windows 上可优先使用根目录跨平台入口，它会自动选择可用构
 uv run python tools/run_simulated_ipc.py
 ```
 
-该入口会依次尝试 Ninja、已安装的 Visual Studio/MSBuild 生成器、`nmake`、MinGW Makefiles，以及 `clang++`/`g++` 直接编译回退路径；如果某个旧 build 缓存曾记录不可用生成器，会在独立的 `cpp_controller/build/simulated-ipc/` 子目录重新生成，不复用根 build 缓存。当前 CMake 工程会在 MSVC 下自动添加 `/utf-8`，避免中文日志字符串在本地代码页下触发编译错误。
+该入口会依次尝试 Ninja、已安装的 Visual Studio/MSBuild 生成器、`nmake`、MinGW Makefiles，以及 `clang++`/`g++` 直接编译回退路径；如果某个旧 build 缓存曾记录不可用生成器，或仓库从开发机复制到工控机后 `CMakeCache.txt` 里的源码/构建绝对路径仍指向旧目录，会在独立的 `cpp_controller/build/simulated-ipc/<generator>/` 子目录清理并重新生成，不复用根 build 缓存，也不会删除其它生成器或手工构建目录。当前 CMake 工程会在 MSVC 下自动添加 `/utf-8`，避免中文日志字符串在本地代码页下触发编译错误。
 
 需要手动构建 MSVC 产物时，可进入 x64 VS 开发命令环境后显式指定生成器：
 

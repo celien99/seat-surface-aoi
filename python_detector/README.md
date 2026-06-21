@@ -48,7 +48,7 @@ uv run python -m python_detector.detector_main `
   --once --timeout-ms 8000
 ```
 
-端到端模拟使用 `uv run python tools/run_simulated_ipc.py`。该入口会先启动 C++ 主控，再启动 detector 读取共享内存任务并写回结果。带 `--config` 运行时，脚本会把同一份 C++ 运行配置传给 detector，detector 会读取 `slot_count`、`frame_slot_size` 和 `result_slot_size`，确保 4096 x 3072 固定机位高分辨率图像不会因为 Python 仍使用默认 16 MB slot 而布局不匹配。`python_detector/tests/test_run_simulated_ipc_tool.py` 固化了 Windows 入口的生成器选择和直接编译回退参数，避免 CMake 默认选中缺失的 `nmake.exe` 后提前失败。
+端到端模拟使用 `uv run python tools/run_simulated_ipc.py`。该入口会先启动 C++ 主控，再启动 detector 读取共享内存任务并写回结果。带 `--config` 运行时，脚本会把同一份 C++ 运行配置传给 detector，detector 会读取 `slot_count`、`frame_slot_size` 和 `result_slot_size`，确保 4096 x 3072 固定机位高分辨率图像不会因为 Python 仍使用默认 16 MB slot 而布局不匹配。`python_detector/tests/test_run_simulated_ipc_tool.py` 固化了 Windows 入口的生成器选择、直接编译回退参数，以及仓库搬迁后旧 CMake 缓存的定向清理行为，避免 CMake 默认选中缺失的 `nmake.exe` 或复用旧绝对路径后提前失败。
 
 ## 部署打包
 

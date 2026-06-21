@@ -128,7 +128,7 @@ uv run python -m tools.validate_deployment_preflight
 uv run python tools/run_simulated_ipc.py
 ```
 
-Windows 入口会显式探测 CMake 生成器：优先使用 Ninja，其次使用已安装的 Visual Studio/MSBuild 生成器，再在可用时回退到 `clang++`/`g++` 直接编译；不会因为 CMake 默认选中缺失的 `nmake.exe` 而提前失败。若需手动指定构建环境，仍可进入 x64 VS 开发命令环境后运行同一命令。C++ 工程已为 MSVC 固化 `/utf-8` 编译选项，避免中文日志字符串在本地代码页下被误解析。
+Windows 入口会显式探测 CMake 生成器：优先使用 Ninja，其次使用已安装的 Visual Studio/MSBuild 生成器，再在可用时回退到 `clang++`/`g++` 直接编译；不会因为 CMake 默认选中缺失的 `nmake.exe` 而提前失败。仓库复制或解压到工控机新路径后，如果 `cpp_controller/build/simulated-ipc/<generator>/CMakeCache.txt` 仍记录旧源码目录或旧构建目录，脚本会只清理对应生成器子目录并重新生成，避免 CMake 因路径漂移拒绝配置。若需手动指定构建环境，仍可进入 x64 VS 开发命令环境后运行同一命令。C++ 工程已为 MSVC 固化 `/utf-8` 编译选项，避免中文日志字符串在本地代码页下被误解析。
 
 模拟 IPC 会构建 C++ 主控，默认使用 `cpp_controller/config/station_runtime.example.conf` 发布一次多视角四光源图像包，Python detector 从共享内存读取任务并写回结果。正常模拟链路应返回 `OK`；故障注入、协议错误或 detector 超时必须返回 `RECHECK` 或 `ERROR`。
 
