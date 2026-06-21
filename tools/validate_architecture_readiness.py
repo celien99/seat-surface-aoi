@@ -94,7 +94,7 @@ def _check_protocol() -> list[ReadinessItem]:
     return [
         _ok(
             "共享内存协议",
-            "协议需支持固定机位与机器人飞拍两类视角元数据，并可校验 CRC/布局。",
+            "协议需支持固定机位视角元数据，并可校验 CRC/布局。",
             "protocol v2; "
             f"LightFrameMeta={sizes['LightFrameMeta']} bytes, "
             f"SeatJobMeta={sizes['SeatJobMeta']} bytes, "
@@ -105,11 +105,9 @@ def _check_protocol() -> list[ReadinessItem]:
 
 def _check_runtime_configs(scope: ReadinessScope) -> list[ReadinessItem]:
     items: list[ReadinessItem] = []
-    fixed_config = _read_key_value_config(REPO_ROOT / "cpp_controller/config/station_runtime.example.conf")
-    robot_config = _read_key_value_config(REPO_ROOT / "cpp_controller/config/station_runtime.robot_flyshot.example.conf")
+    fixed_config = _read_key_value_config(REPO_ROOT / "cpp_controller/config/station_runtime.test.conf")
 
     items.extend(_check_fixed_camera_config(fixed_config))
-    items.extend(_check_robot_flyshot_config(robot_config))
     items.extend(_check_production_runtime_config(scope))
     return items
 
@@ -120,104 +118,36 @@ def _check_fixed_camera_config(config: dict[str, str]) -> list[ReadinessItem]:
             _blocked(
                 "固定机位多光源",
                 "固定机位方案必须可通过 capture_mode=fixed_camera 独立配置。",
-                f"station_runtime.example.conf capture_mode={config.get('capture_mode')}",
-                "修正固定机位运行配置模板。",
+                f"station_runtime.test.conf capture_mode={config.get('capture_mode')}",
+                "修正固定机位测试运行配置。",
             )
         ]
 
     camera_ids = _indexed_values(config, "camera", "camera_id")
     light_order = _split_csv(config.get("light_order", ""))
-    missing = _missing_required(["1", "2", "3", "4"], light_order)
+    missing = _missing_required(["1", "2", "3"], light_order)
     if not camera_ids or missing:
         return [
             _blocked(
                 "固定机位多光源",
-                "固定机位参考方案必须至少包含相机视角和 4 路标准语义光源。",
+                "固定机位参考方案必须包含 2 个相机视角和 3 路共享频闪光源。",
                 f"camera_ids={camera_ids}, light_order={light_order}",
-                "补齐 camera.<N> 与 light_order=1,2,3,4。",
+                "补齐 camera.<N> 与 light_order=1,2,3。",
             )
         ]
 
     return [
         _ok(
             "固定机位多光源",
-            "固定机位方案需按相机视角串行完成多光源采集。",
+            "固定机位方案需按共享光源并行调度完成双相机三光源采集。",
             f"{len(camera_ids)} 个固定视角; light_order={','.join(light_order)}; "
             "触发同步由 trigger_line/exposure_output_line 与频闪接线共同定义",
         )
     ]
 
 
-def _check_robot_flyshot_config(config: dict[str, str]) -> list[ReadinessItem]:
-    if config.get("capture_mode") != "robot_flyshot":
-        return [
-            _blocked(
-                "机器人飞拍多光源",
-                "机器人飞拍方案必须可通过 capture_mode=robot_flyshot 独立配置。",
-                f"station_runtime.robot_flyshot.example.conf capture_mode={config.get('capture_mode')}",
-                "修正机器人飞拍运行配置模板。",
-            )
-        ]
-
-    poses = _indexed_records(config, "pose")
-    required_pose_fields = {
-        "pose_id",
-        "camera_index",
-        "camera_id",
-        "calibration_id",
-        "shot_id_source",
-        "robot_ready_input",
-        "robot_fault_input",
-        "photo_trigger_input",
-    }
-    pose_issues = []
-    for index, values in poses.items():
-        missing = sorted(field for field in required_pose_fields if not values.get(field))
-        if missing:
-            pose_issues.append(f"pose.{index} 缺少 {missing}")
-    if not poses or pose_issues:
-        return [
-            _blocked(
-                "机器人飞拍多光源",
-                "机器人飞拍必须显式配置 pose、SHOT_ID、READY/FAULT 和 PHOTO_TRIGGER。",
-                "; ".join(pose_issues) if pose_issues else "未配置 pose.<N>",
-                "补齐机器人飞拍 pose 采集计划。",
-            )
-        ]
-
-    camera_ids = [values["camera_id"] for values in poses.values()]
-    pose_ids = [values["pose_id"] for values in poses.values()]
-    shared_camera = len(set(camera_ids)) < len(camera_ids)
-    return [
-        _ok(
-            "机器人飞拍多光源",
-            "机器人飞拍方案需按 pose_id 归属图像，并记录 SHOT_ID 与机器人位姿。",
-            f"{len(poses)} 个 pose: {','.join(pose_ids)}; "
-            f"camera_ids={','.join(sorted(set(camera_ids)))}; "
-            f"shared_eye_in_hand={str(shared_camera).lower()}",
-        )
-    ]
-
-
 def _check_production_runtime_config(scope: ReadinessScope) -> list[ReadinessItem]:
-    fixed_path = REPO_ROOT / "cpp_controller/config/station_runtime.production.example.conf"
-    robot_path = REPO_ROOT / "cpp_controller/config/station_runtime.robot_flyshot.production.example.conf"
     fixed_deployed_path = REPO_ROOT / "cpp_controller/config/station_runtime.production.conf"
-    missing = [str(path.relative_to(REPO_ROOT)) for path in (fixed_path, robot_path) if not path.exists()]
-    if missing:
-        return [
-            _blocked(
-                "生产运行配置",
-                "固定机位生产配置模板和机器人飞拍扩展模板都应保留。",
-                f"缺少: {missing}",
-                "补齐缺失模板；当前产线放行以固定双机位 production.conf 为准。",
-            )
-        ]
-
-    todo_files = []
-    for path in (fixed_path, robot_path):
-        if "TODO" in path.read_text(encoding="utf-8"):
-            todo_files.append(str(path.relative_to(REPO_ROOT)))
     items: list[ReadinessItem] = []
     deployed_issues = _deployed_fixed_config_issues(fixed_deployed_path)
     if deployed_issues and scope == "production":
@@ -238,20 +168,11 @@ def _check_production_runtime_config(scope: ReadinessScope) -> list[ReadinessIte
                 "进入现场联调后生成正式 station_runtime.production.conf。",
             )
         )
-    elif todo_files:
-        items.append(
-            _warn(
-                "生产运行配置",
-                "固定双机位 production.conf 已存在；模板中的 TODO 保留为复制提示或机器人扩展占位。",
-                f"模板仍含 TODO: {todo_files}",
-                "当前产线放行以 cpp_controller/config/station_runtime.production.conf 为准。",
-            )
-        )
     else:
         items.append(
             _ok(
                 "生产运行配置",
-                "当前固定双机位生产配置已生成，机器人飞拍模板保留为扩展方案。",
+                "当前固定双机位生产配置已生成。",
                 "固定机位 production.conf 存在且未发现占位值。",
             )
         )
@@ -294,8 +215,8 @@ def _deployed_fixed_config_issues(path: Path) -> list[str]:
     issues = []
     if config.get("capture_mode") != "fixed_camera":
         issues.append(f"capture_mode={config.get('capture_mode')}")
-    if config.get("light_order") != "12,1,2,3":
-        issues.append(f"当前产线应为常亮 Dome ROI + 3 检测光源 light_order=12,1,2,3，实际={config.get('light_order')}")
+    if config.get("light_order") != "1,2,3":
+        issues.append(f"当前产线应为 3 路共享频闪光源 light_order=1,2,3，实际={config.get('light_order')}")
     camera_ids = _indexed_values(config, "camera", "camera_id")
     if len(camera_ids) != 2:
         issues.append(f"当前产线应为 2 相机，实际 camera_ids={camera_ids}")
@@ -478,7 +399,7 @@ def _check_v4_algorithm_contract(scope: ReadinessScope) -> list[ReadinessItem]:
         items.append(
             _ok(
                 "固定机位生产光源证据",
-                "当前固定双机位产线采用常亮 Dome ROI + 3 路检测光源，Python 生产配方不得把 ROI 图当作第 4 路检测特征。",
+                "当前固定双机位产线采用 3 路共享频闪检测光源，Python 生产配方不得要求额外采集轮次。",
                 f"required_lights={list(recipe.quality.required_lights)}; "
                 f"model_channels={list(recipe.models['supervised_defect_onnx'].input_channels)}",
             )
@@ -487,7 +408,7 @@ def _check_v4_algorithm_contract(scope: ReadinessScope) -> list[ReadinessItem]:
         items.append(
             _blocked(
                 "固定机位生产光源证据",
-                "当前产线事实为 2 相机 x 常亮 Dome ROI + 3 检测光源，生产配方必须与真实检测光源一致。",
+                "当前产线事实为 2 相机 x 3 路共享频闪光源，生产配方必须与真实检测光源一致。",
                 f"required_lights={list(recipe.quality.required_lights)}",
                 "把 production_recipe.yaml 对齐为 DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT 三光源，或同步现场硬件变更。",
             )

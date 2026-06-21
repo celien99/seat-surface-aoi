@@ -44,7 +44,7 @@ uv run python -m tools.validate_architecture_readiness --scope reference
 uv run python -m tools.validate_deployment_preflight
 uv run python -m python_detector.detector_main --once --timeout-ms 8000
 uv run python -m python_detector.detector_main `
-  --config cpp_controller/config/station_runtime.lab_manual.example.conf `
+  --config cpp_controller/config/station_runtime.test.conf `
   --once --timeout-ms 8000
 ```
 
@@ -192,7 +192,7 @@ training_tools/
 
 ```powershell
 uv run python -m python_detector.detector_main `
-  --config cpp_controller/config/station_runtime.example.conf `
+  --config cpp_controller/config/station_runtime.test.conf `
   --display-root trace `
   --once --timeout-ms 8000
 ```
@@ -223,11 +223,11 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 模型补齐后，固定机位生产任务应使用 `recipe_id=seat_a_black_leather_production_v1`，机器人飞拍生产任务应使用 `recipe_id=seat_a_robot_flyshot_production_v1`。这两个配方会启用 `onnx_yolo_seg` Dome ROI segmentation、`ecc` 多光源配准、监督 ONNX 主检测、WideResNet50 embedding、PCA、PatchCore KNN 和可选 FAISS safety net；仓库内生产标定和 `production_full_roi.yaml` 是可校验模板，其中 ROI `polygon_xy` 作为安全边界和 `output_size` 约束，真实 ROI polygon 由 segmentation mask 在线生成。
 
-当前固定机位 C++ 生产配置是双相机 + 常亮 Dome ROI + 3 个检测光源，采集顺序为 `light_order=12,1,2,3`，映射到 `DOME_ROI/DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。`production_recipe.yaml` 顶层 `light_order` 用于校验采集序号和 ROI 定位图存在性；`camera_defaults.light_order`、`quality.required_lights` 和模型输入仍只包含 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`，因此 `DOME_ROI` 只供 ROI 定位，不进入 `ReflectanceCubeBuilder`、`FeatureBuilder` 或监督/安全网模型。若未来补第 4 路 `HIGH_RIGHT`，必须同步生产配方、模型输入通道、训练资产和测试。
+当前固定机位 C++ 生产配置是双相机 + FL-ACDH 三路共享频闪光源，采集顺序为 `light_order=1,2,3`，映射到 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。`production_recipe.yaml` 顶层 `light_order`、`camera_defaults.light_order`、`quality.required_lights` 和模型输入通道均保持这三路检测光源一致；DOME 语义暂时映射到 `DIFFUSE`，仅为 ROI 定位后端提供输入图，不额外要求 C++ 发布 `DOME_ROI` 采集轮次。若未来补常亮 Dome ROI 或第 4 路 `HIGH_RIGHT`，必须同步 C++ 配置、生产配方、模型输入通道、训练资产和测试。
 
 配方 schema 会校验：
 
-- 顶层 `light_order` 与 `quality.required_lights` 一致性；允许存在 `DOME_ROI` 这类采集图，只要它不作为必需检测光源或模型输入通道。
+- 顶层 `light_order` 与 `quality.required_lights` 一致性；当前生产配方与 C++ 三路频闪顺序完全一致。
 - V4 语义光源到真实光源的映射。
 - `camera_defaults` 与每个 `cameras` 视角合并后的模型、ROI 模板、标定和光源字段合法性。
 - ROI 定位、配准基准光源和 fallback 光源合法性。
@@ -248,13 +248,13 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 ### 质量门禁与预处理
 
-`ImageQualityGate` 在进入模型前拦截不可靠输入，包括缺少必需机位/检测光源、未启用的显式机器人 pose、非单调时间戳、重复帧号、曝光/增益漂移、过曝欠曝、锐度不足、光源亮度漂移，以及同一视角必需检测光源间的 `shot_id`、机器人时间戳、TCP 坐标和 RPY 姿态不一致。固定机位默认配置可接收同一机位的动态 `pose_id`，但仍要求每个动态视角自己的必需检测光源完整、时序一致、质量通过；`DOME_ROI` 的 `light_seq_index` 会按顶层采集顺序校验，并交给 ROI 定位后端使用，但不参与三路检测光的亮度稳定性和特征通道校验。固定机位可以保留空的机器人字段，一旦任一必需检测光源携带机器人字段，其余必需检测光源必须保持一致。失败结果进入 `RuleEngine.make_quality_fail_result()`，不会输出 `OK`。
+`ImageQualityGate` 在进入模型前拦截不可靠输入，包括缺少必需机位/检测光源、未启用的显式机器人 pose、非单调时间戳、重复帧号、曝光/增益漂移、过曝欠曝、锐度不足、光源亮度漂移，以及同一视角必需检测光源间的 `shot_id`、机器人时间戳、TCP 坐标和 RPY 姿态不一致。固定机位默认配置可接收同一机位的动态 `pose_id`，但仍要求每个动态视角自己的三路必需检测光源完整、时序一致、质量通过；`DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 的 `light_seq_index` 必须分别匹配顶层采集顺序 `0/1/2`。固定机位可以保留空的机器人字段，一旦任一必需检测光源携带机器人字段，其余必需检测光源必须保持一致。失败结果进入 `RuleEngine.make_quality_fail_result()`，不会输出 `OK`。
 
 `Preprocessor` 只接受当前实现支持的 `MONO8` / `UINT8` / 单通道图像，并显式检查 stride、图像长度、标定版本和图像尺寸。ROI 可以是轴对齐矩形裁剪，也可以是四点透视展开。Dome ROI 定位会按 `roi_name` 聚合同名候选，优先选择置信度最高、姿态误差最低的候选；bbox 后端输出矩形 ROI，seg 后端从 mask 自动生成运行时 `polygon_xy`，并用模板边界、mask 面积和重复候选冲突保护不确定状态。同名 ROI 出现互相冲突的框或 mask 时返回 `RECHECK`，避免重复检测静默覆盖 ROI。
 
 ### 多光源特征
 
-`ReflectanceCubeBuilder` 将同一 ROI 下多个检测光源图组织成 cube。固定机位生产配方只使用 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 进入 cube，`DOME_ROI` 已在 ROI 定位阶段消费完毕，不作为配准基准或特征通道。`fixed_calibration` 模式检查标定矩阵角点误差；`ecc` 模式以 `base_light_id` ROI 为基准，对其余光源做整数像素平移搜索，记录相关系数、位移和误差，并在配准通过时把非基准光源 ROI 重采样到基准坐标后再进入特征构建。配准失败、相关性不足或位移超过阈值时仍走质量失败结果，不输出 `OK`。
+`ReflectanceCubeBuilder` 将同一 ROI 下多个检测光源图组织成 cube。固定机位生产配方只使用 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 进入 cube；DOME 语义映射到 `DIFFUSE` 只影响 ROI 定位输入选择，不新增特征通道。`fixed_calibration` 模式检查标定矩阵角点误差；`ecc` 模式以 `base_light_id` ROI 为基准，对其余光源做整数像素平移搜索，记录相关系数、位移和误差，并在配准通过时把非基准光源 ROI 重采样到基准坐标后再进入特征构建。配准失败、相关性不足或位移超过阈值时仍走质量失败结果，不输出 `OK`。
 
 `FeatureBuilder` 构建当前标准通道：
 
@@ -333,7 +333,7 @@ uv run python -m tools.validate_deployment_preflight
 uv run pytest python_detector/tests/test_run_simulated_ipc_tool.py
 uv run python -m training_tools.replay_dataset --count 3 --write-trace
 uv run python tools/run_simulated_ipc.py
-uv run python tools/run_simulated_ipc.py --config cpp_controller/config/station_runtime.robot_flyshot.example.conf
+uv run python tools/run_simulated_ipc.py --config cpp_controller/config/station_runtime.test.conf
 ```
 
 有 trace 数据后再执行离线样本生成：

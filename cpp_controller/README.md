@@ -91,11 +91,8 @@ cpp_controller/
 │   └── ipc_safety_checks.cpp               # IPC 故障注入与安全测试套件
 │
 └── config/
-    ├── station_runtime.example.conf        # 固定机位模拟配置模板
-    ├── station_runtime.lab_manual.example.conf # 固定机位手动触发联调模板
-    ├── station_runtime.production.example.conf # 固定机位生产配置模板
-    ├── station_runtime.robot_flyshot.example.conf # 机器人飞拍模拟配置模板
-    └── station_runtime.robot_flyshot.production.example.conf # 机器人飞拍生产配置模板
+    ├── station_runtime.test.conf           # 工控机手动触发联调：真实相机 + 真实 FL-ACDH
+    └── station_runtime.production.conf     # 生产运行：TCP 信号 + 真实相机 + 真实 FL-ACDH
 ```
 
 ---
@@ -269,8 +266,9 @@ signal.trigger_queue_path=COM4,9600,1,500,500,50
 
 | 模式 | 配置值 | 视角定义 | 典型配置 |
 |------|--------|----------|----------|
-| 固定机位多光源 | `capture_mode=fixed_camera` | 每个 `camera.<N>` 自动生成一个检测视角，`pose_id` 默认等于 `camera_id` | `config/station_runtime.example.conf`、`config/station_runtime.lab_manual.example.conf`、`config/station_runtime.production.example.conf` |
-| 机器人飞拍多光源 | `capture_mode=robot_flyshot` | 每个 `pose.<N>` 是一个检测视角，可共享同一末端相机 `EYE_IN_HAND` | `config/station_runtime.robot_flyshot.example.conf`、`config/station_runtime.robot_flyshot.production.example.conf` |
+| 固定机位多光源 | `capture_mode=fixed_camera` | 每个 `camera.<N>` 自动生成一个检测视角，`pose_id` 默认等于 `camera_id` | `config/station_runtime.test.conf`、`config/station_runtime.production.conf` |
+
+当前 `cpp_controller/config` 不再维护机器人飞拍配置文件，本轮现场接线只按固定双机位三频闪链路验证。
 
 固定机位还可通过 `capture_schedule` 选择采集调度：
 
@@ -413,7 +411,7 @@ uv run python -m tools.package_release
 
 执行前先把真实模型产物替换到根目录 `model/`，脚本会默认集成该目录。
 
-解包后可执行 `./bin/seat_aoi_controller --config cpp_controller/config/station_runtime.example.conf --once --wait-ms 8000` 启动 C++ 主控。C++ 仍只负责外部信号、相机、频闪、机器人、共享内存写入和结果读取，不包含深度学习推理。
+解包后可执行 `./bin/seat_aoi_controller --config cpp_controller/config/station_runtime.test.conf --once --wait-ms 8000` 在工控机上做手动触发联调。C++ 仍只负责外部信号、相机、频闪、共享内存写入和结果读取，不包含深度学习推理。
 
 ### 运行
 
@@ -424,11 +422,8 @@ uv run python -m tools.package_release
 # 循环模式（持续等待触发）
 ./build/seat_aoi_controller --loop
 
-# 使用配置文件
-./build/seat_aoi_controller --config config/station_runtime.example.conf
-
-# 使用机器人飞拍模拟配置
-./build/seat_aoi_controller --config config/station_runtime.robot_flyshot.example.conf
+# 使用工控机手动触发联调配置
+./build/seat_aoi_controller --config config/station_runtime.test.conf
 
 # 只校验生产配置，不启动外部信号/相机/频闪
 ./build/seat_aoi_controller --config config/station_runtime.production.conf --validate-config
@@ -527,40 +522,29 @@ simulate_signal_result_fault=false
 simulate_trigger_timeout=false
 ```
 
-生产配置模板位于 `config/station_runtime.production.example.conf`。复制后替换所有 `TODO_*`：
+当前目录只保留两份运行配置：
 
 ```powershell
-cp config/station_runtime.production.example.conf config/station_runtime.production.conf
+./build/seat_aoi_controller --config config/station_runtime.test.conf --validate-config
 ./build/seat_aoi_controller --config config/station_runtime.production.conf --validate-config
 ```
 
 该模板的 `recipe_id` 已对齐 Python 固定机位生产配方 `seat_a_black_leather_production_v1`。模型补齐后，Python detector 会按该配方启用 ONNX ROI、ECC、监督 ONNX、WideResNet50/PCA/PatchCore/FAISS safety net；相机 `calibration_id` 必须和 Python 标定文件保持一致。
 
-当前固定机位参考模拟配置使用 4 路光源并对齐默认 Python 配方；`tools/run_simulated_ipc.py` 默认会把 `config/station_runtime.example.conf` 同时传给 C++ 和 Python。固定机位生产模板按现场已确认硬件预置：海康 MV-CH120-20GC × 2，4096 x 3072，Hikrobot MVS backend；镜头 MVL-KF0814M-12MPE，8mm F1.4，1.1"，C 接口；工位顶部 Dome 主光常亮且不受本程序控制；频闪控制器 FL-ACDH-20048-4，4 通道（当前使用通道 1/2/3）。生产模板启用 `capture_schedule=shared_light_parallel`，先以 `light.12.acquisition_mode=ambient` 拍摄常亮 Dome ROI 图，不准备或触发频闪控制器；随后每路共享频闪光源点亮时两个机位同步采图。双相机、Mono8、4 个采集轮次图像包约 96 MB，模板保留 `frame_slot_size=134217728`（128 MB）。如果后续增加光源或分辨率变更，应重新计算并同步 Python 共享内存配置。
+当前固定机位生产配置按现场已确认硬件预置：Hikrobot MVS 相机 2 台，4096 x 3072，`Line0` 硬触发；FL-ACDH 光源控制器 1 台，通道 1/2/3 接三路共享频闪光源；相机触发线已经接在 FL-ACDH 同步触发输出上。生产配置启用 `capture_schedule=shared_light_parallel` 和 `light_order=1,2,3`，每路共享频闪光源点亮时两个机位同步采图。双相机、Mono8、3 个采集轮次图像包约 72 MB，配置保留 `frame_slot_size=134217728`（128 MB）。如果后续增加光源或分辨率变更，应重新计算并同步 Python 共享内存配置。
 
-当前产线固定为 `light_order=12,1,2,3`，Python 固定机位生产配方 `seat_a_black_leather_production_v1` 已同步为 `DOME_ROI + DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。其中 `12 -> DOME_ROI` 只用于 ROI 定位，不进入特征构建或模型输入；`1/2/3` 是三个必需检测光源。若未来补第 4 路 `HIGH_RIGHT`，必须同时更新 C++ 配置、Python 生产配方、模型输入通道、训练资产和测试。
+当前产线固定为 `light_order=1,2,3`，Python 固定机位生产配方 `seat_a_black_leather_production_v1` 已同步为 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。若未来补常亮 Dome ROI 或第 4 路 `HIGH_RIGHT`，必须同时更新 C++ 配置、Python 生产配方、模型输入通道、训练资产和测试。
 
-Hikrobot MVS backend 当前按 `Mono8` 单通道实现，并已按海康 MVS C++ 示例工程对齐：进程内引用计数调用 `MV_CC_Initialize/Finalize`，枚举 GigE/USB/GenTL 设备，按 `camera.<N>.serial_number` 匹配相机，配置 `4096 x 3072`、`TriggerMode=On`、`Line1=ExposureStartActive`、`StrobeEnable=true`。C++ 每个采集轮次先设置曝光/增益并 arm 相机；频闪轮次使用 `TriggerSource=Line0`，再通过 RS232 发送 FL-ACDH 频闪序列（C→B→8→9→A→7），`light.response_mode=ack` 时等待每条命令返回 `$`，`none` 时只校验串口写入；FL-ACDH 的 `7` 命令同时点亮频闪并通过 F 口同步输出触发相机 Line0 曝光；常亮 Dome ROI 轮次使用 `TriggerSource=Software` 和 `TriggerSoftware` 直接取图，不对 Dome 光源发送任何控制命令。取帧使用 MVS 示例里的 `nExtendWidth/nExtendHeight/nFrameLenEx` 字段，其他像素格式不会隐式转换，配置不匹配会保守失败。
+Hikrobot MVS backend 当前按 `Mono8` 单通道实现，并已按海康 MVS C++ 示例工程对齐：进程内引用计数调用 `MV_CC_Initialize/Finalize`，枚举 GigE/USB/GenTL 设备，按 `camera.<N>.serial_number` 匹配相机，配置 `4096 x 3072`、`TriggerMode=On`、`Line1=ExposureStartActive`、`StrobeEnable=true`。C++ 每个采集轮次先设置曝光/增益并 arm 两台相机；频闪轮次使用 `TriggerSource=Line0`，再通过 RS232 发送 FL-ACDH 频闪序列（C→B→8→9→A→7），`light.response_mode=none` 时只校验串口写入；FL-ACDH 的 `7` 命令同时点亮频闪并通过同步输出触发相机 Line0 曝光。取帧使用 MVS 示例里的 `nExtendWidth/nExtendHeight/nFrameLenEx` 字段，其他像素格式不会隐式转换，配置不匹配会保守失败。
 
-外部信号网关未确定前，使用 `config/station_runtime.lab_manual.example.conf` 做手动触发联调，只验证相机、频闪、共享内存和 Python detector 收图。该模板的 `frame_slot_size=67108864` 会被联调脚本同步传给 Python detector，避免 4096 x 3072 图像在 Python 侧仍按默认 16 MB 打开共享内存。进入生产闭环前仍必须补齐 `signal.backend=external_signal`、`trigger_queue_path`/`result_queue_path` 和外部信号网关。
-
-机器人飞拍生产模板位于 `config/station_runtime.robot_flyshot.production.example.conf`，复制后需要补齐 `robot.*`、`pose.<N>.*`、末端相机和光源控制器参数：
-
-```powershell
-cp config/station_runtime.robot_flyshot.production.example.conf `
-   config/station_runtime.robot_flyshot.production.conf
-./build/seat_aoi_controller --config config/station_runtime.robot_flyshot.production.conf --validate-config
-```
-
-机器人飞拍模板的 `recipe_id` 已对齐 Python 生产配方 `seat_a_robot_flyshot_production_v1`，每个 `pose.<N>.calibration_id` 必须匹配 Python 中 `EYE_IN_HAND` 下对应 pose 的标定文件。
+PLC 接入前，使用 `config/station_runtime.test.conf` 做手动触发联调，只验证相机、频闪、共享内存和 Python detector 收图。该配置的 `frame_slot_size=134217728` 会被联调脚本同步传给 Python detector，避免 4096 x 3072 图像在 Python 侧仍按默认 16 MB 打开共享内存。进入生产闭环前必须确认 `signal.backend=tcp_signal`、`signal.port`、结果回传地址和现场 PLC/TCP 信号协议。
 
 配置字段逐项说明见 [C++ 主控部署与硬件运维](../docs/cpp_controller_operations.md)。
 
 新增生产校验要点：
 
 - `capture_schedule=shared_light_parallel` 仅支持 `capture_mode=fixed_camera`，且同一相机不能在多个视角中被同一次共享光源触发复用；机器人飞拍必须保持 pose 级串行。
-- `capture_mode=fixed_camera` 时检测视角默认由 `camera.<N>` 自动生成；`capture_mode=robot_flyshot` 时必须显式配置 `pose.<N>.*` 采集计划。
-- 机器人飞拍模式必须配置非 simulated 的 `robot.backend`、Robot READY/FAULT/START 点位以及每个 pose 的 `shot_id_source`、`photo_trigger_input` 和标定位姿信息。
+- `capture_mode=fixed_camera` 时检测视角默认由 `camera.<N>` 自动生成；当前现场配置不使用 `pose.<N>.*`。
 - 生产模式必须使用相机触发线、频闪控制器同步输出或等价硬触发同步；当前 FL-ACDH 方案为控制器 F 口输出到相机 `Line0`，相机 `Line1` ExposureStartActive 保留调试。
 - `strobe_width_us` 不能大于 `exposure_us`，`frame_slot_size` 必须能容纳 `view_count x light_count` 的完整图像包。
 - 相机 `pixel_format` 只接受当前已知格式，`Mono10/Mono12/Mono16/BayerRG12` 按 2 bytes/channel 估算 frame slot 容量，避免高位深图像因容量低估写爆 slot。
@@ -817,9 +801,9 @@ time ─────────────────────────
 
 生产模式部署前必须完成：
 
-1. 按 `config/station_runtime.production.example.conf` 填写现场外部信号、相机、频闪参数。
-2. 运行 `--validate-config`，确保没有 `TODO` 占位和缺失点位。
-3. 按现场硬件型号链接真实外部信号网关、相机、频闪 SDK 或协议适配器。
+1. 按 `config/station_runtime.production.conf` 核对现场外部信号、相机、频闪参数。
+2. 运行 `--validate-config`，确保没有缺失点位或容量不足。
+3. 按现场硬件型号链接 Hikrobot MVS SDK，并确认 FL-ACDH 串口号和 TCP 信号协议。
 4. 做外部信号断线、相机缺帧、频闪故障、detector 超时等 fail-closed 验证。
 5. 确认 `trace/cpp_controller_events.jsonl` 能按 `sequence_id` 和 `trigger_id` 记录复检原因。
 6. 运行 `uv run python -m tools.run_cpp_soak --jobs 20 --wait-ms 8000` 做短时长稳压测，上线前按现场节拍扩大到 8h/24h。

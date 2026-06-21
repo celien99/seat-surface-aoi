@@ -47,8 +47,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--config",
-        default=str(ROOT_DIR / "cpp_controller" / "config" / "station_runtime.example.conf"),
-        help="C++ station runtime config 路径",
+        default="",
+        help="C++ station runtime config 路径；默认使用 C++ 内置 simulated fallback",
     )
     args = parser.parse_args(argv)
 
@@ -87,32 +87,31 @@ def main(argv: list[str] | None = None) -> int:
     env["PYTHONPATH"] = str(ROOT_DIR)
     try:
         for index in range(1, args.jobs + 1):
-            cpp_process = subprocess.Popen(
-                [
-                    str(controller),
-                    "--config",
-                    args.config,
-                    "--once",
-                    "--wait-ms",
-                    str(args.wait_ms),
-                    "--trace-root",
-                    str(trace_root),
-                ]
-            )
+            controller_args = [
+                str(controller),
+                "--once",
+                "--wait-ms",
+                str(args.wait_ms),
+                "--trace-root",
+                str(trace_root),
+            ]
+            if args.config:
+                controller_args[1:1] = ["--config", args.config]
+            cpp_process = subprocess.Popen(controller_args)
             time.sleep(0.2)
             detector_status = 0
             try:
+                detector_args = [
+                    "-m",
+                    "python_detector.detector_main",
+                    "--once",
+                    "--timeout-ms",
+                    str(args.wait_ms),
+                ]
+                if args.config:
+                    detector_args[2:2] = ["--config", args.config]
                 run(
-                    python_runner()
-                    + [
-                        "-m",
-                        "python_detector.detector_main",
-                        "--config",
-                        args.config,
-                        "--once",
-                        "--timeout-ms",
-                        str(args.wait_ms),
-                    ],
+                    python_runner() + detector_args,
                     cwd=ROOT_DIR,
                     env=env,
                 )

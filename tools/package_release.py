@@ -139,7 +139,7 @@ uv run python -m tools.validate_deployment_preflight --strict-production
 
 ```powershell
 # C++ 主控，解包后可直接使用 bin/ 内已构建产物
-.\bin\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.example.conf --once --wait-ms 8000
+.\bin\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.test.conf --once --wait-ms 8000
 
 # Python detector
 $env:PYTHONPATH="."
@@ -220,8 +220,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="运行部署包内 C++ 产物的端到端模拟 IPC")
     parser.add_argument(
         "--config",
-        default=str(ROOT_DIR / "cpp_controller" / "config" / "station_runtime.example.conf"),
-        help="C++ station runtime config 路径",
+        default="",
+        help="C++ station runtime config 路径；默认使用 C++ 内置 simulated fallback",
     )
     args = parser.parse_args()
 
@@ -236,24 +236,24 @@ def main() -> int:
 
     run([str(ipc_checks)])
     subprocess.run([str(controller), "--cleanup"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    cpp_process = subprocess.Popen([str(controller), "--config", args.config, "--once", "--wait-ms", "8000"])
+    controller_args = [str(controller), "--once", "--wait-ms", "8000"]
+    if args.config:
+        controller_args[1:1] = ["--config", args.config]
+    cpp_process = subprocess.Popen(controller_args)
     time.sleep(0.2)
     env = os.environ.copy()
     env["PYTHONPATH"] = str(ROOT_DIR)
     try:
-        run(
-            python_runner()
-            + [
-                "-m",
-                "python_detector.detector_main",
-                "--config",
-                args.config,
-                "--once",
-                "--timeout-ms",
-                "8000",
-            ],
-            env=env,
-        )
+        detector_args = [
+            "-m",
+            "python_detector.detector_main",
+            "--once",
+            "--timeout-ms",
+            "8000",
+        ]
+        if args.config:
+            detector_args[2:2] = ["--config", args.config]
+        run(python_runner() + detector_args, env=env)
         cpp_status = cpp_process.wait()
     finally:
         if cpp_process.poll() is None:

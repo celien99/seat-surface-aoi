@@ -215,7 +215,7 @@ def test_dome_roi_locator_missing_light_returns_error_not_ok() -> None:
     assert result.quality_pass is False
 
 
-def test_roi_only_dome_frame_is_not_used_for_feature_building() -> None:
+def test_production_roi_source_reuses_diffuse_without_extra_feature_channel() -> None:
     recipe = RecipeManager().load("seat_a_black_leather_production_v1")
     recipe = replace(
         recipe,
@@ -247,43 +247,23 @@ def test_roi_only_dome_frame_is_not_used_for_feature_building() -> None:
     job = make_simulated_job()
     for bundle in job.camera_bundles:
         bundle.light_frames.pop("HIGH_RIGHT", None)
-        dome_frame = bundle.light_frames["DIFFUSE"]
-        bundle.light_frames["DOME_ROI"] = LightFrame(
-            camera_id=dome_frame.camera_id,
-            pose_id=dome_frame.pose_id,
-            light_id="DOME_ROI",
-            frame_index=999,
-            light_seq_index=0,
-            width=dome_frame.width,
-            height=dome_frame.height,
-            channels=dome_frame.channels,
-            stride_bytes=dome_frame.stride_bytes,
-            pixel_format=dome_frame.pixel_format,
-            bit_depth=dome_frame.bit_depth,
-            color_order=dome_frame.color_order,
-            dtype=dome_frame.dtype,
-            timestamp_us=900,
-            exposure_us=1200,
-            gain=1.0,
-            calibration_id=dome_frame.calibration_id,
-            image_crc32=dome_frame.image_crc32,
-            image=dome_frame.image,
-        )
         for light_id, frame in bundle.light_frames.items():
-            if light_id == "DOME_ROI":
-                continue
-            frame.light_seq_index = {"DIFFUSE": 1, "POLAR_DIFFUSE": 2, "HIGH_LEFT": 3}[light_id]
+            frame.light_seq_index = {"DIFFUSE": 0, "POLAR_DIFFUSE": 1, "HIGH_LEFT": 2}[light_id]
 
     pipeline = InspectionPipeline()
     result = pipeline.process(job, recipe)
 
     assert result.decision == "OK"
     report = pipeline.last_context["roi_location_reports"][0]
-    assert report.dome_light_id == "DOME_ROI"
+    assert report.dome_light_id == "DIFFUSE"
     assert all("DOME_ROI" not in summary["tensor_channel_names"] for summary in pipeline.last_context["feature_summary"])
+    assert all(
+        summary["tensor_channel_names"] == ["ch0_diffuse", "ch1_polar_diffuse", "ch2_high_left"]
+        for summary in pipeline.last_context["feature_summary"]
+    )
 
 
-def test_roi_only_dome_frame_seq_index_is_validated() -> None:
+def test_production_three_strobe_light_seq_index_is_validated() -> None:
     recipe = RecipeManager().load("seat_a_black_leather_production_v1")
     recipe = replace(
         recipe,
@@ -315,39 +295,16 @@ def test_roi_only_dome_frame_seq_index_is_validated() -> None:
     job = make_simulated_job()
     for bundle in job.camera_bundles:
         bundle.light_frames.pop("HIGH_RIGHT", None)
-        dome_frame = bundle.light_frames["DIFFUSE"]
-        bundle.light_frames["DOME_ROI"] = LightFrame(
-            camera_id=dome_frame.camera_id,
-            pose_id=dome_frame.pose_id,
-            light_id="DOME_ROI",
-            frame_index=999,
-            light_seq_index=9,
-            width=dome_frame.width,
-            height=dome_frame.height,
-            channels=dome_frame.channels,
-            stride_bytes=dome_frame.stride_bytes,
-            pixel_format=dome_frame.pixel_format,
-            bit_depth=dome_frame.bit_depth,
-            color_order=dome_frame.color_order,
-            dtype=dome_frame.dtype,
-            timestamp_us=900,
-            exposure_us=1200,
-            gain=1.0,
-            calibration_id=dome_frame.calibration_id,
-            image_crc32=dome_frame.image_crc32,
-            image=dome_frame.image,
-        )
         for light_id, frame in bundle.light_frames.items():
-            if light_id == "DOME_ROI":
-                continue
-            frame.light_seq_index = {"DIFFUSE": 1, "POLAR_DIFFUSE": 2, "HIGH_LEFT": 3}[light_id]
+            frame.light_seq_index = {"DIFFUSE": 0, "POLAR_DIFFUSE": 1, "HIGH_LEFT": 2}[light_id]
+        bundle.light_frames["DIFFUSE"].light_seq_index = 9
 
     pipeline = InspectionPipeline()
     result = pipeline.process(job, recipe)
 
     assert result.decision == "RECHECK"
     assert (
-        "TOP_BACK/DOME_ROI: light_seq_index 9 does not match configured order 0"
+        "TOP_BACK/DIFFUSE: light_seq_index 9 does not match configured order 0"
         in pipeline.last_context["quality_report"].messages
     )
 

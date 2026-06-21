@@ -1,6 +1,6 @@
 # Seat Surface AOI
 
-> 汽车座椅表面缺陷检测系统参考实现，面向生产线 AOI 场景，采用 **C++ 实时主控 + Python 独立检测进程 + 跨平台共享内存 IPC**。当前主链路覆盖固定机位多光源和机器人飞拍多光源两类采集模式，支持 Linux/macOS POSIX 共享内存与 Windows Named Shared Memory。
+> 汽车座椅表面缺陷检测系统参考实现，面向生产线 AOI 场景，采用 **C++ 实时主控 + Python 独立检测进程 + 跨平台共享内存 IPC**。当前产线主链路收敛为固定双机位 + FL-ACDH 三路共享频闪光源，支持 Linux/macOS POSIX 共享内存与 Windows Named Shared Memory。
 
 ![Seat Surface AOI hero](docs/assets/readme-hero.png)
 
@@ -37,7 +37,7 @@ Seat Surface AOI 是一套可验证、可扩展的汽车座椅表面缺陷检测
 **适合用来做：**
 
 - 工业 AOI 在线链路参考实现。
-- 固定机位和机器人飞拍多光源采集方案验证。
+- 固定双机位三频闪采集方案验证。
 - C++ 控制侧与 Python 算法侧边界设计。
 - 共享内存协议、质量门禁、保守判定和离线训练闭环验证。
 
@@ -87,13 +87,13 @@ flowchart LR
 
 | 能力 | 状态 |
 | --- | --- |
-| 双采集模式 | 支持固定机位 `fixed_camera` 与机器人飞拍 `robot_flyshot`，二者在 C++ Capture Plan 层统一为检测视角序列。 |
-| 参考模拟链路 | C++ 内置 fallback、`station_runtime.example.conf` 与 `station_runtime.robot_flyshot.example.conf` 均使用 4 路模拟光源，对齐默认 Python 配方的 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT/HIGH_RIGHT`。 |
-| 同机位多角度输入 | 固定机位默认配置可接收同一 `camera_id` 下动态 `pose_id` 的多张照片，按同一机位配方、标定、模型处理并在 trace/result 中保留原始 `pose_id`；显式机器人飞拍 pose 仍必须精确匹配配方。 |
-| 采集调度 | 固定机位支持 `capture_schedule=view_serial_tdm` 和 `shared_light_parallel`；当前 2 相机 + 常亮 Dome ROI + 3 共享频闪光源生产配置启用 `shared_light_parallel`，先采集不触发频闪的 Dome ROI 图，再按 3 路频闪光源同步双机位采图，输出 8 帧完整图像包。机器人飞拍保持 pose 级串行采集。 |
+| 固定机位主链路 | 当前 `cpp_controller/config` 只保留 `station_runtime.test.conf` 与 `station_runtime.production.conf` 两份现场配置，均为 2 台 Hikrobot MVS 相机 + FL-ACDH 三路共享频闪光源。 |
+| 参考模拟链路 | 不传 `--config` 时使用 C++ 内置 simulated fallback，用于本地共享内存和故障注入回归；现场真实硬件联调用 `station_runtime.test.conf`。 |
+| 同机位多角度输入 | 固定机位默认配置可接收同一 `camera_id` 下动态 `pose_id` 的多张照片，按同一机位配方、标定、模型处理并在 trace/result 中保留原始 `pose_id`。 |
+| 采集调度 | 当前生产配置固定启用 `capture_schedule=shared_light_parallel`：每一路共享频闪前先 arm 两台相机，再触发 FL-ACDH，同一路光源下两个机位同步曝光；3 路光源输出 2 x 3 = 6 帧完整图像包。 |
 | 共享内存 IPC | C++/Python 双端固定布局结构体、frame/result ring buffer、slot 状态机、CRC、layout/对象大小 fail-fast 和协议校验工具。 |
 | V4 算法接口 | Dome ROI YOLO segmentation 自动生成 ROI polygon、ECC 配准、WideResNet50 embedding、PCA、PatchCore KNN 和 FAISS 可选加速接入点。 |
-| 生产光源对齐 | 当前固定机位产线是 2 相机 + 常亮 Dome ROI + 3 共享频闪光源，C++ `light_order=12,1,2,3`、`capture_schedule=shared_light_parallel` 与 Python 生产配方已对齐：`12 -> DOME_ROI` 只用于 ROI 定位，`1/2/3 -> DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 仍是质量门禁、特征和模型输入光源；第 4 路 `HIGH_RIGHT` 仅作为后续扩展。 |
+| 生产光源对齐 | 当前固定机位产线是 2 相机 + 3 共享频闪光源，C++ `light_order=1,2,3`、`capture_schedule=shared_light_parallel` 与 Python 生产配方对齐为 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`；第 4 路 `HIGH_RIGHT` 和独立 `DOME_ROI` 仅作为后续扩展。 |
 | 保守判定 | 协议异常、CRC 错误、缺帧、超时、质量失败、shot/机器人位姿不一致、ROI 冲突、机器人 FAULT、候选融合溢出和模型异常返回 `RECHECK` 或 `ERROR`。 |
 | 无模型采样兜底 | 生产模型文件缺失、仍是占位文件或 ONNX/numpy 依赖未安装时，Python detector 返回 `RECHECK/CONFIGURATION_ERROR`，保存原始采集图和可用 ROI 图，不输出 `OK` 或 `NG`。 |
 | 前端展示页面 | `display_app/` 迁移 PySide6/QML 监控界面，轮询 `display_latest.json` 与 C++ 主控事件，展示相机/视角图像、OK/NG/复检/异常计数、采样模式、日志、复核队列和 NG 弹窗。 |
@@ -130,17 +130,17 @@ uv run python tools/run_simulated_ipc.py
 
 Windows 入口会显式探测 CMake 生成器：优先使用 Ninja，其次使用已安装的 Visual Studio/MSBuild 生成器，再在可用时回退到 `clang++`/`g++` 直接编译；不会因为 CMake 默认选中缺失的 `nmake.exe` 而提前失败。仓库复制或解压到工控机新路径后，如果 `cpp_controller/build/simulated-ipc/<generator>/CMakeCache.txt` 仍记录旧源码目录或旧构建目录，脚本会只清理对应生成器子目录并重新生成，避免 CMake 因路径漂移拒绝配置。若需手动指定构建环境，仍可进入 x64 VS 开发命令环境后运行同一命令。C++ 工程已为 MSVC 固化 `/utf-8` 编译选项，避免中文日志字符串在本地代码页下被误解析。
 
-模拟 IPC 会构建 C++ 主控，默认使用 `cpp_controller/config/station_runtime.example.conf` 发布一次多视角四光源图像包，Python detector 从共享内存读取任务并写回结果。正常模拟链路应返回 `OK`；故障注入、协议错误或 detector 超时必须返回 `RECHECK` 或 `ERROR`。
+模拟 IPC 会构建 C++ 主控；默认不传运行配置，使用 C++ 内置 simulated fallback 发布一次模拟图像包，Python detector 从共享内存读取任务并写回结果。正常模拟链路应返回 `OK`；故障注入、协议错误或 detector 超时必须返回 `RECHECK` 或 `ERROR`。如需在工控机上验证真实 Hikrobot 相机和 FL-ACDH 频闪，使用 `cpp_controller/config/station_runtime.test.conf`。
 
 ## 常用入口
 
 ```powershell
-# 固定机位模拟链路
+# 固定机位模拟链路（内置 simulated fallback）
 uv run python tools/run_simulated_ipc.py
 
-# 机器人飞拍模拟链路
+# 工控机真实相机/频闪手动触发联调
 uv run python tools/run_simulated_ipc.py `
-  --config cpp_controller/config/station_runtime.robot_flyshot.example.conf
+  --config cpp_controller/config/station_runtime.test.conf
 
 # Python detector 在线入口
 uv run python -m python_detector.detector_main --once --timeout-ms 8000
@@ -148,7 +148,7 @@ uv run seat-aoi-detector --once --timeout-ms 8000
 
 # Python detector 写前端展示通道，默认输出到 trace_root
 uv run python -m python_detector.detector_main `
-  --config cpp_controller/config/station_runtime.example.conf `
+  --config cpp_controller/config/station_runtime.test.conf `
   --display-root trace `
   --once --timeout-ms 8000
 
@@ -328,7 +328,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 | 产物 | 默认路径 | 用途 |
 | --- | --- | --- |
-| Dome ROI YOLO segmentation | `model/roi_yolo/seat_roi_seg.onnx` | 从常亮 Dome 语义光源 `DOME_ROI` 分割座椅 ROI，并自动生成运行时 `polygon_xy`。 |
+| ROI YOLO segmentation | `model/roi_yolo/seat_roi_seg.onnx` | 从当前生产配方的 DOME 语义映射光源分割座椅 ROI，并自动生成运行时 `polygon_xy`；现阶段该语义映射到 `DIFFUSE`。 |
 | 监督缺陷检测 | `model/supervised_defect/seat_defect_detector.onnx` | 已知缺陷检测 ONNX。 |
 | WideResNet50 embedding | `model/wideresnet50/seat_wrn50_embedding.onnx` | 多光源 ROI embedding。 |
 | PCA | `model/patchcore/seat_pca.json` | unified embedding 降维。 |
@@ -339,14 +339,14 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 | 配方 | 采集模式 | 作用 |
 | --- | --- | --- |
-| `seat_a_black_leather_production_v1` | 固定机位 | `production_recipe.yaml`，采集顺序包含 `DOME_ROI + DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`，启用 ONNX ROI、ECC、监督 ONNX、WideResNet50 embedding、PCA、PatchCore/FAISS safety net；`DOME_ROI` 只定位 ROI，不进入特征和模型输入。 |
+| `seat_a_black_leather_production_v1` | 固定机位 | `production_recipe.yaml`，采集顺序为 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`，启用 ONNX ROI、ECC、监督 ONNX、WideResNet50 embedding、PCA、PatchCore/FAISS safety net；DOME 语义暂时映射到 `DIFFUSE` 用于 ROI 定位。 |
 | `seat_a_robot_flyshot_production_v1` | 机器人飞拍 | `production_robot_flyshot_recipe.yaml`，同一末端相机按 `pose_id` 区分标定、ROI 和结果。 |
 
 C++ 生产模板已把 `recipe_id` 对齐到上述生产配方；上线前还必须用现场标定替换 `python_detector/config/calibration/*/*production*.yaml` 和 `python_detector/config/roi/production_full_roi.yaml` 的模板 ROI/矩阵。
 
 Python 配方已收敛为 `camera_defaults + cameras` 两层：`camera_defaults` 保存同一 SKU 共用的模型、ROI 模板和光源策略，`cameras` 只保留每个机位或机器人 pose 的差异字段，例如 `calibration_id`。像素尺寸、图像尺寸和多光源对齐矩阵继续归标定文件维护，避免配方与标定重复配置。
 
-当前固定机位硬件基线已记录到 `cpp_controller/config/station_runtime.production.example.conf` 和已生成的 `cpp_controller/config/station_runtime.production.conf`：海康 MV-CH120-20GC 工业相机 2 台，4096 x 3072，Hikrobot MVS backend；MVL-KF0814M-12MPE FA 镜头，8mm F1.4，1.1"，C 接口；FL-ACDH-20048-4 四通道频闪控制器（RS232 serial_ascii backend，支持多控制器扩展）；产线工位顶部 Dome 光常亮且不由本程序控制，C++ 按 `light_order=12,1,2,3` 与 `capture_schedule=shared_light_parallel` 采集：`12` 轮次只做常亮 Dome ROI 采图，光源 1/2/3 轮次再触发频闪并让两个机位同步拍摄，最终向 Python 发布 2 视角 x 4 采集轮次的 8 帧图像包。Python 固定机位生产配方同步要求 `DOME_ROI` 用于 ROI 定位，`DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 三个必需检测光源用于质量门禁、特征和模型输入，模型输入通道为 `ch0_diffuse/ch1_polar_diffuse/ch2_high_left`。
+当前固定机位硬件基线已记录到 `cpp_controller/config/station_runtime.production.conf`：Hikrobot MVS 工业相机 2 台，4096 x 3072，`Line0` 硬触发；FL-ACDH 光源控制器（RS232 `serial_ascii` backend）；FL-ACDH 通道 1/2/3 接三路共享频闪光源；相机触发线已经接在 FL-ACDH 同步触发输出上。C++ 按 `light_order=1,2,3` 与 `capture_schedule=shared_light_parallel` 采集：每个光源轮次先 arm 两台相机，再发送 FL-ACDH `C/B/8/9/A/7` 完整序列，由控制器同步输出触发两台相机曝光，最终向 Python 发布 2 视角 x 3 光源轮次的 6 帧图像包。Python 固定机位生产配方同步要求 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 三个必需检测光源用于质量门禁、特征和模型输入，模型输入通道为 `ch0_diffuse/ch1_polar_diffuse/ch2_high_left`。
 
 **已实现的真实硬件后端：**
 - **相机**：Hikrobot MVS（Line0 硬件触发 + Software 软件触发），`-DSEAT_AOI_ENABLE_HIKROBOT_MVS=ON` 构建
@@ -356,7 +356,7 @@ Python 配方已收敛为 `camera_defaults + cameras` 两层：`camera_defaults`
 
 测试阶段可先用手动/模拟触发验证相机、频闪、共享内存和 Python 收图链路。
 
-PLC 接入前的工控机联调使用 `cpp_controller/config/station_runtime.lab_manual.example.conf`：`hardware_mode=lab` 配合 `signal.backend=manual_trigger`，只生成手动触发任务并记录结果，不输出真实 PLC IO；`production` 模式仍禁止 `manual_trigger` 和 `simulated` backend。`tools/run_simulated_ipc.py` 与打包后的 `run_packaged_simulated_ipc.py` 会把 `--config` 同步传给 Python detector，detector 会读取同一份 `slot_count/frame_slot_size/result_slot_size`，4096 x 3072 图像不需要现场再改 Python 共享内存参数。
+PLC 接入前的工控机联调使用 `cpp_controller/config/station_runtime.test.conf`：`hardware_mode=lab` 配合 `signal.backend=manual_trigger`，只生成手动触发任务并记录结果，不输出真实 PLC IO；`production` 模式仍禁止 `manual_trigger` 和相机/频闪 simulated backend。`tools/run_simulated_ipc.py` 与打包后的 `run_packaged_simulated_ipc.py` 会把 `--config` 同步传给 Python detector，detector 会读取同一份 `slot_count/frame_slot_size/result_slot_size`，4096 x 3072 图像不需要现场再改 Python 共享内存参数。
 
 典型离线闭环：
 

@@ -16,7 +16,6 @@ PreflightStatus = Literal["OK", "ACTION", "BLOCKED"]
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PRODUCTION_RECIPES = (
     "seat_a_black_leather_production_v1",
-    "seat_a_robot_flyshot_production_v1",
 )
 
 
@@ -114,7 +113,7 @@ def _check_reference_architecture() -> list[PreflightItem]:
         PreflightItem(
             status="OK",
             category="本地参考链路",
-            requirement="固定机位、机器人飞拍、共享内存、检测链路和训练闭环在本地参考范围内无阻塞。",
+            requirement="固定机位、共享内存、检测链路和训练闭环在本地参考范围内无阻塞。",
             evidence=f"reference readiness OK={summary['OK']} WARN={summary['WARN']} BLOCKED={summary['BLOCKED']}",
             owner="本仓库工程实现",
             next_step="继续保持 uv run pytest、tools.validate_protocol 和模拟 IPC 作为默认回归。",
@@ -259,7 +258,7 @@ def _check_python_offline_deps_entry() -> list[PreflightItem]:
 
 
 def _check_lab_manual_entry() -> list[PreflightItem]:
-    path = REPO_ROOT / "cpp_controller/config/station_runtime.lab_manual.example.conf"
+    path = REPO_ROOT / "cpp_controller/config/station_runtime.test.conf"
     config = _read_key_value_config(path)
     if config.get("hardware_mode") != "lab" or config.get("signal.backend") != "manual_trigger":
         return [
@@ -269,7 +268,7 @@ def _check_lab_manual_entry() -> list[PreflightItem]:
                 requirement="PLC 接入前需要 lab/manual_trigger 配置验证真实相机、频闪和共享内存收图。",
                 evidence=f"hardware_mode={config.get('hardware_mode')}, signal.backend={config.get('signal.backend')}",
                 owner="本仓库工程实现",
-                next_step="修复 station_runtime.lab_manual.example.conf。",
+                next_step="修复 station_runtime.test.conf。",
                 local_actionable=True,
             )
         ]
@@ -278,9 +277,9 @@ def _check_lab_manual_entry() -> list[PreflightItem]:
             status="OK",
             category="PLC 前手动联调路径",
             requirement="PLC 未接入时可以先用手动触发联调真实相机、频闪和 Python 收图。",
-            evidence="station_runtime.lab_manual.example.conf 使用 hardware_mode=lab 与 signal.backend=manual_trigger。",
+            evidence="station_runtime.test.conf 使用 hardware_mode=lab 与 signal.backend=manual_trigger。",
             owner="本仓库工程实现",
-            next_step="上机后复制为 station_runtime.lab_manual.conf，替换相机序列号和频闪接线参数。",
+            next_step="上机后用 station_runtime.test.conf 低速验证相机、频闪、共享内存和 Python 收图。",
         )
     ]
 
@@ -305,14 +304,14 @@ def _check_production_runtime_configs(strict_production: bool) -> list[Preflight
                 requirement="当前固定双机位产线必须生成不含 TODO/占位值的 production.conf，并通过 C++ --validate-config。",
                 evidence=f"missing={missing}; placeholder_counts={todo_counts}",
                 owner="硬件/电气/现场集成",
-                next_step="从 station_runtime.production.example.conf 复制正式配置，填写 PLC、相机、频闪参数并运行 --validate-config。",
+                next_step="修正 station_runtime.production.conf 中的 PLC、相机、频闪参数并运行 --validate-config。",
             )
         ]
     config = _read_key_value_config(expected[0])
     config_issues = []
     if config.get("capture_mode") != "fixed_camera":
         config_issues.append(f"capture_mode={config.get('capture_mode')}")
-    if config.get("light_order") != "12,1,2,3":
+    if config.get("light_order") != "1,2,3":
         config_issues.append(f"light_order={config.get('light_order')}")
     camera_ids = _indexed_values(config, "camera", "camera_id")
     if len(camera_ids) != 2:
@@ -323,7 +322,7 @@ def _check_production_runtime_configs(strict_production: bool) -> list[Preflight
             PreflightItem(
                 status=status,
                 category="生产运行配置",
-                requirement="当前产线固定为 2 相机 x 常亮 Dome ROI + 3 检测光源，正式配置必须反映真实硬件。",
+                requirement="当前产线固定为 2 相机 x 3 路共享频闪光源，正式配置必须反映真实硬件。",
                 evidence="; ".join(config_issues),
                 owner="硬件/电气/现场集成",
                 next_step="修正 station_runtime.production.conf 中的 capture_mode、camera.<N> 和 light_order。",

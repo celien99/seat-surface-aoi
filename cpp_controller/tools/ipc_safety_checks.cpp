@@ -451,15 +451,24 @@ bool test_runtime_light_channel_config_parses() {
   seat_aoi::StationRuntimeConfig config;
   std::string error;
   if (!seat_aoi::load_station_runtime_config(
-          "cpp_controller/config/station_runtime.example.conf", &config, &error)) {
+          "cpp_controller/config/station_runtime.test.conf", &config, &error)) {
     error.clear();
     if (!seat_aoi::load_station_runtime_config(
-            "config/station_runtime.example.conf", &config, &error)) {
+            "config/station_runtime.test.conf", &config, &error)) {
       std::cerr << "runtime config parse failed: " << error << "\n";
       return false;
     }
   }
-  const bool passed = config.light_channels.size() >= 4 &&
+  const bool passed = config.hardware_mode == seat_aoi::HardwareMode::Lab &&
+                      config.capture_mode == seat_aoi::CaptureMode::FixedCamera &&
+                      config.capture_schedule == seat_aoi::CaptureSchedule::SharedLightParallel &&
+                      config.camera_backend == seat_aoi::HardwareBackend::HikrobotMvs &&
+                      config.lights[0].backend == seat_aoi::HardwareBackend::SerialAscii &&
+                      config.light_order.size() == 3 &&
+                      config.light_order[0] == 1 &&
+                      config.light_order[1] == 2 &&
+                      config.light_order[2] == 3 &&
+                      config.light_channels.size() >= 3 &&
                       config.light_channels[0].light_index == 1 &&
                       config.light_channels[0].physical_channel == 1 &&
                       config.light_channels[0].exposure_us == 800 &&
@@ -472,7 +481,8 @@ bool test_runtime_light_channel_config_parses() {
                       config.light_channels[2].strobe_width_us == 650 &&
                       config.light_channels[2].current_percent == 55.0F &&
                       config.lights[0].response_mode ==
-                          seat_aoi::LightSerialResponseMode::Ack &&
+                          seat_aoi::LightSerialResponseMode::None &&
+                      config.image_save.enabled &&
                       config.image_save.cleanup_enabled &&
                       config.image_save.cleanup_min_free_ratio == 0.20F;
   if (!passed) {
@@ -818,7 +828,7 @@ bool test_explicit_camera_config_replaces_defaults() {
         << "recipe_id=seat_a_black_leather_production_v1\n"
         << "capture_mode=fixed_camera\n"
         << "capture_schedule=shared_light_parallel\n"
-        << "light_order=1,2,3,4\n"
+        << "light_order=1,2,3\n"
         << "trace_root=trace\n"
         << "signal.station_id=LAB_AOI_01\n"
         << "signal.default_sku=seat_a_black_leather\n"
@@ -852,12 +862,7 @@ bool test_explicit_camera_config_replaces_defaults() {
         << "light.3.trigger_delay_us=10\n"
         << "light.3.gain=1.0\n"
         << "light.3.current_percent=55\n"
-        << "light.4.physical_channel=4\n"
-        << "light.4.exposure_us=800\n"
-        << "light.4.strobe_width_us=650\n"
-        << "light.4.trigger_delay_us=10\n"
-        << "light.4.gain=1.0\n"
-        << "light.4.current_percent=55\n";
+        << "light.response_mode=none\n";
   }
   seat_aoi::StationRuntimeConfig config;
   std::string error;
@@ -875,28 +880,34 @@ bool test_explicit_camera_config_replaces_defaults() {
   return passed;
 }
 
-bool test_production_template_rejects_todo_placeholders() {
+bool test_production_config_file_validates() {
   seat_aoi::StationRuntimeConfig config;
   std::string error;
   bool ok = seat_aoi::load_station_runtime_config(
-      "cpp_controller/config/station_runtime.production.example.conf", &config, &error);
-  if (ok) {
-    std::cerr << "production template with TODO placeholders unexpectedly passed\n";
-    return false;
-  }
-  if (error.empty()) {
+      "cpp_controller/config/station_runtime.production.conf", &config, &error);
+  if (!ok) {
     error.clear();
     ok = seat_aoi::load_station_runtime_config(
-        "config/station_runtime.production.example.conf", &config, &error);
-    if (ok) {
-      std::cerr << "production template with TODO placeholders unexpectedly passed\n";
-      return false;
-    }
+        "config/station_runtime.production.conf", &config, &error);
   }
-  const bool passed = error.find("TODO") != std::string::npos ||
-                      error.find("占位") != std::string::npos;
+  const bool passed = ok &&
+                      config.hardware_mode == seat_aoi::HardwareMode::Production &&
+                      config.signal.backend == seat_aoi::HardwareBackend::TcpSignal &&
+                      config.camera_backend == seat_aoi::HardwareBackend::HikrobotMvs &&
+                      config.lights[0].backend == seat_aoi::HardwareBackend::SerialAscii &&
+                      config.capture_mode == seat_aoi::CaptureMode::FixedCamera &&
+                      config.capture_schedule == seat_aoi::CaptureSchedule::SharedLightParallel &&
+                      config.light_order.size() == 3 &&
+                      config.light_order[0] == 1 &&
+                      config.light_order[1] == 2 &&
+                      config.light_order[2] == 3 &&
+                      config.cameras.size() == 2 &&
+                      config.light_channels.size() >= 3 &&
+                      config.lights[0].response_mode ==
+                          seat_aoi::LightSerialResponseMode::None;
   if (!passed) {
-    std::cerr << "production template rejection did not mention placeholder: " << error << "\n";
+    std::cerr << "production config did not validate expected fixed-camera strobe setup: "
+              << error << "\n";
   }
   return passed;
 }
@@ -1012,74 +1023,6 @@ bool test_hikrobot_backend_fails_without_sdk_when_not_compiled() {
   }
   return passed;
 #endif
-}
-
-bool test_robot_flyshot_runtime_config_parses() {
-  seat_aoi::StationRuntimeConfig config;
-  std::string error;
-  bool ok = seat_aoi::load_station_runtime_config(
-      "cpp_controller/config/station_runtime.robot_flyshot.example.conf", &config, &error);
-  if (!ok) {
-    error.clear();
-    ok = seat_aoi::load_station_runtime_config(
-        "config/station_runtime.robot_flyshot.example.conf", &config, &error);
-  }
-  const bool passed = ok &&
-                      config.capture_mode == seat_aoi::CaptureMode::RobotFlyshot &&
-                      config.cameras.size() >= 1 &&
-                      config.capture_views.size() == 2 &&
-                      config.capture_views[0].pose_id == "T1_BACKREST" &&
-                      config.capture_views[1].pose_id == "T2_CUSHION" &&
-                      config.capture_views[0].camera_index == 0 &&
-                      config.capture_views[1].camera_id == "EYE_IN_HAND";
-  if (!passed) {
-    std::cerr << "robot_flyshot runtime config did not parse expected values: " << error << "\n";
-  }
-  return passed;
-}
-
-bool test_robot_flyshot_production_template_rejects_todo_placeholders() {
-  seat_aoi::StationRuntimeConfig config;
-  std::string error;
-  bool ok = seat_aoi::load_station_runtime_config(
-      "cpp_controller/config/station_runtime.robot_flyshot.production.example.conf", &config, &error);
-  if (ok) {
-    std::cerr << "robot flyshot production template with TODO placeholders unexpectedly passed\n";
-    return false;
-  }
-  if (error.empty()) {
-    error.clear();
-    ok = seat_aoi::load_station_runtime_config(
-        "config/station_runtime.robot_flyshot.production.example.conf", &config, &error);
-    if (ok) {
-      std::cerr << "robot flyshot production template with TODO placeholders unexpectedly passed\n";
-      return false;
-    }
-  }
-  const bool passed = error.find("TODO") != std::string::npos ||
-                      error.find("占位") != std::string::npos;
-  if (!passed) {
-    std::cerr << "robot flyshot production template rejection did not mention placeholder: "
-              << error << "\n";
-  }
-  return passed;
-}
-
-bool test_robot_flyshot_rejects_shared_light_parallel_schedule() {
-  auto config = make_filled_production_runtime_config();
-  config.capture_mode = seat_aoi::CaptureMode::RobotFlyshot;
-  config.capture_schedule = seat_aoi::CaptureSchedule::SharedLightParallel;
-  config.capture_views = {
-      seat_aoi::RuntimeCaptureViewConfig{0, "T1_BACKREST", 0, "TOP_BACK", "calib/top_back_production_v1"},
-  };
-  std::string error;
-  const bool ok = seat_aoi::validate_station_runtime_config(config, &error);
-  const bool passed = !ok && error.find("shared_light_parallel") != std::string::npos;
-  if (!passed) {
-    std::cerr << "robot_flyshot shared_light_parallel schedule was not rejected: "
-              << error << "\n";
-  }
-  return passed;
 }
 
 bool test_strobe_width_larger_than_exposure_rejected() {
@@ -1491,7 +1434,7 @@ int main() {
   if (!test_explicit_camera_config_replaces_defaults()) {
     return 1;
   }
-  if (!test_production_template_rejects_todo_placeholders()) {
+  if (!test_production_config_file_validates()) {
     return 1;
   }
   if (!test_filled_production_config_validates()) {
@@ -1507,15 +1450,6 @@ int main() {
     return 1;
   }
   if (!test_hikrobot_backend_fails_without_sdk_when_not_compiled()) {
-    return 1;
-  }
-  if (!test_robot_flyshot_runtime_config_parses()) {
-    return 1;
-  }
-  if (!test_robot_flyshot_production_template_rejects_todo_placeholders()) {
-    return 1;
-  }
-  if (!test_robot_flyshot_rejects_shared_light_parallel_schedule()) {
     return 1;
   }
   if (!test_strobe_width_larger_than_exposure_rejected()) {
