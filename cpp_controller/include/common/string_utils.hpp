@@ -6,6 +6,15 @@
 
 namespace seat_aoi {
 
+inline std::string trim(const std::string& value) {
+  const auto begin = value.find_first_not_of(" \t\r\n");
+  if (begin == std::string::npos) {
+    return "";
+  }
+  const auto end = value.find_last_not_of(" \t\r\n");
+  return value.substr(begin, end - begin + 1);
+}
+
 template <std::size_t N>
 inline void copy_cstr(char (&dst)[N], const std::string& value) {
   std::memset(dst, 0, N);

@@ -6,18 +6,11 @@
 #include <sstream>
 #include <string>
 
+#include "common/string_utils.hpp"
+
 namespace seat_aoi {
 
 namespace {
-
-std::string trim(const std::string& value) {
-  const auto begin = value.find_first_not_of(" \t\r\n");
-  if (begin == std::string::npos) {
-    return "";
-  }
-  const auto end = value.find_last_not_of(" \t\r\n");
-  return value.substr(begin, end - begin + 1);
-}
 
 bool parse_bool_field(const std::string& field_name,
                       const std::string& value,

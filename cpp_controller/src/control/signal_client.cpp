@@ -9,26 +9,18 @@
 #include <vector>
 
 #include "common/inspection_types.hpp"
+#include "common/string_utils.hpp"
 
 namespace seat_aoi {
 
 namespace {
-
-std::string trim_field(const std::string& value) {
-  const auto begin = value.find_first_not_of(" \t\r\n");
-  if (begin == std::string::npos) {
-    return "";
-  }
-  const auto end = value.find_last_not_of(" \t\r\n");
-  return value.substr(begin, end - begin + 1);
-}
 
 std::vector<std::string> split_csv_line(const std::string& line) {
   std::vector<std::string> fields;
   std::string current;
   std::istringstream stream(line);
   while (std::getline(stream, current, ',')) {
-    fields.push_back(trim_field(current));
+    fields.push_back(trim(current));
   }
   return fields;
 }
@@ -39,7 +31,7 @@ bool parse_trigger_line(const std::string& line,
                         const std::string& default_sku,
                         ExternalTrigger* out_trigger,
                         std::string* error_message) {
-  const std::string trimmed = trim_field(line);
+  const std::string trimmed = trim(line);
   if (trimmed.empty() || trimmed[0] == '#') {
     if (error_message != nullptr) {
       *error_message = "empty trigger line";

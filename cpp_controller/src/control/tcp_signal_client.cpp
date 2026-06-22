@@ -7,6 +7,8 @@
 #include <string>
 #include <thread>
 
+#include "common/string_utils.hpp"
+
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -24,15 +26,6 @@
 namespace seat_aoi {
 
 namespace {
-
-std::string trim(const std::string& value) {
-  const auto begin = value.find_first_not_of(" \t\r\n");
-  if (begin == std::string::npos) {
-    return "";
-  }
-  const auto end = value.find_last_not_of(" \t\r\n");
-  return value.substr(begin, end - begin + 1);
-}
 
 #ifdef _WIN32
 int close_socket_impl(TcpSignalClient::socket_t sock) {
