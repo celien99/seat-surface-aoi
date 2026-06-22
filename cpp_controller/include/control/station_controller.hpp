@@ -68,7 +68,7 @@ public:
   void cleanup_shared_memory();
 
 private:
-  Recipe load_recipe(const std::string& sku) const;
+  Recipe load_recipe() const;
   InspectionResultPayload make_recheck_result(const ExternalTrigger& trigger,
                                                std::uint64_t sequence_id,
                                                ErrorCode error_code,

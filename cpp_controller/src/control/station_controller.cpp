@@ -191,7 +191,7 @@ bool StationController::wait_for_trigger(ExternalTrigger* out_trigger, std::stri
 
 InspectionResultPayload StationController::inspect_one_seat(const ExternalTrigger& trigger) {
   const std::uint64_t sequence_id = next_sequence_id_++;
-  const Recipe recipe = load_recipe(trigger.sku);
+  const Recipe recipe = load_recipe();
   record_event("inspection_start",
                trigger,
                sequence_id,
@@ -342,7 +342,7 @@ StationHealthSnapshot StationController::health_snapshot() const {
   return health_.snapshot();
 }
 
-Recipe StationController::load_recipe(const std::string& /*sku*/) const {
+Recipe StationController::load_recipe() const {
   Recipe recipe;
   recipe.recipe_id = config_.recipe_id;
   recipe.light_order = config_.light_order;
