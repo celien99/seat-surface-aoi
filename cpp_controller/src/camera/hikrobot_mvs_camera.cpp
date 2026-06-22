@@ -148,6 +148,17 @@ bool set_image_node_num(void* handle,
   return false;
 }
 
+bool set_grab_strategy(void* handle, MV_GRAB_STRATEGY strategy, std::string* error_message) {
+  const int ret = MV_CC_SetGrabStrategy(handle, strategy);
+  if (ret == kMvsOk) {
+    return true;
+  }
+  if (error_message != nullptr) {
+    *error_message = mvs_error("MV_CC_SetGrabStrategy", ret);
+  }
+  return false;
+}
+
 bool serial_matches(const MV_CC_DEVICE_INFO* info, const std::string& serial_number) {
   if (serial_number.empty() || info == nullptr) {
     return false;
@@ -293,7 +304,8 @@ bool HikrobotMvsCamera::initialize(const CameraConfig& config) {
       !set_int_value(handle_, "StrobeLineDuration", 0, &error) ||
       !set_int_value(handle_, "StrobeLineDelay", 0, &error) ||
       !set_int_value(handle_, "StrobeLinePreDelay", 0, &error) ||
-      !set_image_node_num(handle_, std::max<std::uint32_t>(config_.buffer_count, 1U), &error)) {
+      !set_image_node_num(handle_, std::max<std::uint32_t>(config_.buffer_count, 1U), &error) ||
+      !set_grab_strategy(handle_, MV_GrabStrategy_LatestImagesOnly, &error)) {
     set_error(error);
     close();
     return false;
@@ -412,12 +424,19 @@ bool HikrobotMvsCamera::wait_frame(std::uint64_t trigger_id,
     return false;
   }
 
-  const std::uint32_t width = frame.stFrameInfo.nExtendWidth;
-  const std::uint32_t height = frame.stFrameInfo.nExtendHeight;
+  const std::uint32_t width =
+      frame.stFrameInfo.nExtendWidth != 0 ? frame.stFrameInfo.nExtendWidth
+                                          : frame.stFrameInfo.nWidth;
+  const std::uint32_t height =
+      frame.stFrameInfo.nExtendHeight != 0 ? frame.stFrameInfo.nExtendHeight
+                                           : frame.stFrameInfo.nHeight;
   const std::uint32_t stride = width * config_.channels;
   const std::uint64_t expected_size = static_cast<std::uint64_t>(stride) * height;
+  const std::uint64_t frame_size =
+      frame.stFrameInfo.nFrameLenEx != 0 ? frame.stFrameInfo.nFrameLenEx
+                                         : frame.stFrameInfo.nFrameLen;
   if (width != config_.width || height != config_.height ||
-      frame.stFrameInfo.nFrameLenEx < expected_size) {
+      frame_size < expected_size) {
     release_frame();
     ++dropped_frames_;
     set_error("Hikrobot MVS frame size mismatch");

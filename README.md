@@ -24,7 +24,7 @@ flowchart LR
 
 - 接收外部信号：`manual_trigger`、`external_signal`、`tcp_signal`，以及本地回归用 `simulated`。
 - 连接当前型号频闪控制器：`light.backend=serial_ascii`，适配 FL-ACDH。
-- 相机链路：本地回归 `simulated`，现场 `hikrobot_mvs`。
+- 相机链路：本地回归 `simulated`，现场 `hikrobot_mvs`；真实采集会先让相机取帧线程进入硬触发等待，再由 FL-ACDH 触发曝光。
 - 固定采集方式：2 个机位共享 3 路光源，`capture_mode=fixed_camera`、`capture_schedule=shared_light_parallel`、`light_order=1,2,3`。
 - 在线模式使用共享内存和 Python detector；采图模式不启用共享内存，只采图保存原图并向外部信号回传 `RECHECK`。
 
@@ -60,8 +60,8 @@ cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --config cpp_co
 | 配置 | 用途 |
 | --- | --- |
 | `cpp_controller/config/station_runtime.production.conf` | 生产在线模式：TCP 外部信号、Hikrobot MVS、FL-ACDH、共享内存、Python 检测。 |
-| `cpp_controller/config/station_runtime.test.conf` | 工控机联调模式：手动触发、Hikrobot MVS、FL-ACDH、共享内存、Python 检测。 |
-| `cpp_controller/config/station_runtime.capture_only.conf` | 采图模式：手动触发、Hikrobot MVS、FL-ACDH，只保存原图，不创建共享内存。 |
+| `cpp_controller/config/station_runtime.test.conf` | 工控机联调模式：手动触发、Hikrobot MVS、FL-ACDH、共享内存、Python 检测，默认相机取帧超时 5s。 |
+| `cpp_controller/config/station_runtime.capture_only.conf` | 采图模式：手动触发、Hikrobot MVS、FL-ACDH，只保存原图，不创建共享内存，默认相机取帧超时 5s。 |
 
 `controller_mode` 只有两个值：
 

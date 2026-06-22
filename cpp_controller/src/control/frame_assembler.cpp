@@ -1,9 +1,11 @@
 #include "control/frame_assembler.hpp"
 
 #include <chrono>
+#include <condition_variable>
 #include <future>
 #include <iostream>
 #include <map>
+#include <mutex>
 #include <sstream>
 #include <thread>
 
@@ -268,43 +270,58 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
     if (config_.arm_settle_ms > 0) {
       std::this_thread::sleep_for(std::chrono::milliseconds(config_.arm_settle_ms));
     }
-    if (!light_controllers_.front()->trigger_channel(
-            light_param,
-            trigger.trigger_id,
-            light_seq_index,
-            config_.light_timeout_ms,
-            error != nullptr ? &error->message : nullptr)) {
-      const std::string detail = error != nullptr && !error->message.empty()
-                                     ? error->message
-                                     : "FL-ACDH channel trigger failed";
-      set_acquisition_error(error,
-                            ErrorCode::LightFault,
-                            AcquisitionStage::TriggerLight,
-                            capture_plan.front().camera_index,
-                            light_param.light_index,
-                            light_seq_index,
-                            detail);
-      handle_acquisition_failure();
-      return false;
-    }
-
-    // 所有相机并行取帧（已同时触发，各自通过独立 SDK handle 取图）。
+    // 所有相机先进入 GetImageBuffer 等待，再触发 FL-ACDH。
+    // 这与现场验证程序一致，可避免触发沿早于 SDK 取帧等待而丢帧。
     {
       struct FrameResult {
         bool ok = false;
         CapturedFrame frame;
         std::size_t view_index = 0;
       };
+      std::mutex wait_mutex;
+      std::condition_variable wait_cv;
+      std::uint32_t waiters_ready = 0;
       std::vector<std::future<FrameResult>> frame_futures;
       frame_futures.reserve(capture_plan.size());
       for (std::size_t vi = 0; vi < capture_plan.size(); ++vi) {
         frame_futures.push_back(std::async(std::launch::async, [&, vi]() -> FrameResult {
           FrameResult result;
           result.view_index = vi;
+          {
+            std::lock_guard<std::mutex> lock(wait_mutex);
+            ++waiters_ready;
+          }
+          wait_cv.notify_one();
           result.ok = wait_view_light_frame(trigger, capture_plan[vi], light_param,
                                             light_seq_index, &result.frame, nullptr);
           return result;
         }));
+      }
+      {
+        std::unique_lock<std::mutex> lock(wait_mutex);
+        wait_cv.wait(lock, [&]() {
+          return waiters_ready == static_cast<std::uint32_t>(capture_plan.size());
+        });
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+      if (!light_controllers_.front()->trigger_channel(
+              light_param,
+              trigger.trigger_id,
+              light_seq_index,
+              config_.light_timeout_ms,
+              error != nullptr ? &error->message : nullptr)) {
+        const std::string detail = error != nullptr && !error->message.empty()
+                                       ? error->message
+                                       : "FL-ACDH channel trigger failed";
+        set_acquisition_error(error,
+                              ErrorCode::LightFault,
+                              AcquisitionStage::TriggerLight,
+                              capture_plan.front().camera_index,
+                              light_param.light_index,
+                              light_seq_index,
+                              detail);
+        handle_acquisition_failure();
+        return false;
       }
       bool any_wait_failed = false;
       for (auto& f : frame_futures) {

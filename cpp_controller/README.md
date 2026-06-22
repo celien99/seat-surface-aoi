@@ -67,7 +67,7 @@ cpp_controller/
 
 1. 等待外部信号，生成 `ExternalTrigger`。
 2. `FrameAssembler` 初始化 1 台 FL-ACDH 和 2 台相机。
-3. 按光源顺序 1、2、3 逐路执行：先 arm 两台相机，再触发 FL-ACDH，再分别等待两台相机的帧。
+3. 按光源顺序 1、2、3 逐路执行：先 arm 两台相机，并让取帧线程进入 `GetImageBuffer` 等待，再触发 FL-ACDH，最后收集两台相机的帧。
 4. 组包为 6 帧，发布到 `/seat_aoi_cpp_to_py_frames_v1`。
 5. 等待 Python detector 写回 `/seat_aoi_py_to_cpp_results_v1`。
 6. 校验 `sequence_id`、`trigger_id`、`seat_id`、CRC 和结果语义。
@@ -112,10 +112,10 @@ light.response_mode=none
 light.trigger_input_line=Line0
 
 # 超时配置（毫秒）
-camera_timeout_ms=800
+camera_timeout_ms=5000
 light_timeout_ms=800
-# arm 完成后到触发频闪前的相机稳定等待 (ms)，默认 5，0 则跳过
-# arm_settle_ms=5
+# arm 完成后到触发频闪前的相机稳定等待 (ms)
+arm_settle_ms=50
 
 image_save.enabled=true
 image_save.save_original=true

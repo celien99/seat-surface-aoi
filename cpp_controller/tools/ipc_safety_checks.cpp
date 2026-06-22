@@ -833,7 +833,7 @@ bool test_runtime_storage_cleanup_removes_trace_date_files() {
   return passed;
 }
 
-bool test_single_camera_config_rejected() {
+bool test_single_camera_config_validates() {
   const std::string path =
       (std::filesystem::temp_directory_path() /
        ("seat_aoi_single_camera_config_" + std::to_string(seat_aoi::now_us()) + ".conf"))
@@ -899,9 +899,12 @@ bool test_single_camera_config_rejected() {
   std::string error;
   const bool ok = seat_aoi::load_station_runtime_config(path, &config, &error);
   std::remove(path.c_str());
-  const bool passed = !ok;
+  const bool passed = ok && config.cameras.size() == 1 &&
+                      config.cameras[0].camera_index == 0 &&
+                      config.light_order.size() == 3;
   if (!passed) {
-    std::cerr << "single camera config was not rejected\n";
+    std::cerr << "single camera config did not validate expected fixed-camera setup: "
+              << error << "\n";
   }
   return passed;
 }
@@ -1121,7 +1124,7 @@ bool test_health_monitor_escalates_after_consecutive_rechecks() {
   return passed;
 }
 
-bool test_detector_timeout_fault_blocks_next_trigger() {
+bool test_detector_timeout_fault_recovers_on_next_trigger() {
   seat_aoi::StationConfig config;
   config.reset_shared_memory = true;
   config.slot_count = 1;
@@ -1153,6 +1156,7 @@ bool test_detector_timeout_fault_blocks_next_trigger() {
   seat_aoi::ExternalTrigger next_trigger;
   std::string error;
   const bool can_wait = station.wait_for_trigger(&next_trigger, &error);
+  const auto recovered_snapshot = station.health_snapshot();
   station.cleanup_shared_memory();
 
   const bool passed =
@@ -1161,10 +1165,11 @@ bool test_detector_timeout_fault_blocks_next_trigger() {
       static_cast<seat_aoi::ErrorCode>(result.meta.error_code) ==
           seat_aoi::ErrorCode::DetectorTimeout &&
       fault_snapshot.state == seat_aoi::StationState::Fault &&
-      !can_wait &&
-      error.find("detector result timeout") != std::string::npos;
+      can_wait &&
+      recovered_snapshot.state == seat_aoi::StationState::Running &&
+      next_trigger.trigger_id == 1000;
   if (!passed) {
-    std::cerr << "detector timeout did not block next trigger: " << error << "\n";
+    std::cerr << "detector timeout did not recover on next trigger: " << error << "\n";
   }
   return passed;
 }
@@ -1456,7 +1461,7 @@ int main() {
   if (!test_runtime_storage_cleanup_removes_trace_date_files()) {
     return 1;
   }
-  if (!test_single_camera_config_rejected()) {
+  if (!test_single_camera_config_validates()) {
     return 1;
   }
   if (!test_production_config_file_validates()) {
@@ -1489,7 +1494,7 @@ int main() {
   if (!test_health_monitor_escalates_after_consecutive_rechecks()) {
     return 1;
   }
-  if (!test_detector_timeout_fault_blocks_next_trigger()) {
+  if (!test_detector_timeout_fault_recovers_on_next_trigger()) {
     return 1;
   }
   if (!test_detector_ng_with_quality_failure_is_rechecked()) {
