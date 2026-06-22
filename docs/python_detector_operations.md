@@ -115,7 +115,7 @@ cpp_controller/config/station_runtime.robot_flyshot.example.conf
 
 ### V4 光源映射
 
-当前固定双机位产线使用 1 个 ROI 定位语义光源和 3 个必需检测语义光源。`DOME_ROI` 只供 ROI 定位，质量门禁和模型输入仍要求三路检测光：
+当前固定双机位产线使用 3 个必需检测语义光源。`DOME` ROI 定位语义当前暂映射到第一路 `DIFFUSE`，不额外要求 C++ 发布 `DOME_ROI` 采集轮次；质量门禁和模型输入要求三路检测光：
 
 ```yaml
 quality:
@@ -130,14 +130,14 @@ V4.0 语义光源通过 `v4_lights.semantic_to_light_id` 映射到当前协议 l
 ```yaml
 v4_lights:
   semantic_to_light_id:
-    DOME: DOME_ROI
+    DOME: DIFFUSE
     DARKFIELD_L: HIGH_LEFT
     BRIGHTFIELD: POLAR_DIFFUSE
 ```
 
-`DOME` 映射到工位顶部常亮 Dome ROI 图 `DOME_ROI`，只用于 ROI 定位；`DARKFIELD_L` 和 `BRIGHTFIELD` 分别映射到 `HIGH_LEFT` 与 `POLAR_DIFFUSE`，属于当前检测链路必需语义。`DARKFIELD_R/HIGH_RIGHT` 是预留扩展光源，不属于当前 3 个检测光源生产配方。增强光源如 `LOW_LEFT`、`LOW_RIGHT`、`HIGH_FRONT`、`HIGH_REAR`、`NIR` 只能作为 ROI 增强光源，不能成为默认输出 `OK` 的隐藏依赖。
+`DOME` 当前映射到 `DIFFUSE`，只用于为 ROI 定位后端选择输入图；`DARKFIELD_L` 和 `BRIGHTFIELD` 分别映射到 `HIGH_LEFT` 与 `POLAR_DIFFUSE`，属于当前检测链路必需语义。`DARKFIELD_R/HIGH_RIGHT` 和独立 `DOME_ROI` 是预留扩展光源，不属于当前 3 个检测光源生产配方。增强光源如 `LOW_LEFT`、`LOW_RIGHT`、`HIGH_FRONT`、`HIGH_REAR`、`NIR` 只能作为 ROI 增强光源，不能成为默认输出 `OK` 的隐藏依赖。
 
-当前固定机位工控机配置 `cpp_controller/config/station_runtime.production.conf` 采集 `12,1,2,3` 四个轮次：`12 -> DOME_ROI` 是常亮 Dome ROI 定位图，不由 Python 或 C++ 控光；`1 -> DIFFUSE`、`2 -> POLAR_DIFFUSE`、`3 -> HIGH_LEFT` 是三路检测光源。`production_recipe.yaml` 顶层 `light_order` 与 C++ 采集顺序一致，`camera_defaults.light_order`、`quality.required_lights` 和模型输入通道仍只包含三路检测光，模型输入通道为 `ch0_diffuse/ch1_polar_diffuse/ch2_high_left`。如果未来增加第 4 路 `HIGH_RIGHT`，需要同步 C++ 配置、生产配方、模型输入通道、训练资产和相关测试。
+当前固定机位工控机配置 `cpp_controller/config/station_runtime.production.conf` 采集 `1,2,3` 三个轮次：`1 -> DIFFUSE`、`2 -> POLAR_DIFFUSE`、`3 -> HIGH_LEFT`。`production_recipe.yaml` 顶层 `light_order` 与 C++ 采集顺序一致，`camera_defaults.light_order`、`quality.required_lights` 和模型输入通道均为这三路检测光，模型输入通道为 `ch0_diffuse/ch1_polar_diffuse/ch2_high_left`。如果未来增加常亮 `DOME_ROI` 或第 4 路 `HIGH_RIGHT`，需要同步 C++ 配置、生产配方、模型输入通道、训练资产和相关测试。
 
 ### ROI 定位与配准
 
@@ -167,7 +167,7 @@ roi_locator:
 - `onnx_yolo_seg`：读取 Dome ROI 图，调用 YOLO segmentation ONNX，按 mask 自动生成运行时 `polygon_xy`；模板只作为安全边界和 `output_size` 约束。
 
 缺 Dome ROI 图、输出越界、置信度不足、seg mask 面积异常、越出安全边界、姿态误差超差或类别未映射时返回 `RECHECK`。
-配置了 `input_width/input_height` 时，ROI 定位输入会先 letterbox 到模型训练尺寸；`input_channels=3` 会把 Mono8 `DOME_ROI` 图复制为 3 通道，匹配 Ultralytics segmentation ONNX 的常见输入。
+配置了 `input_width/input_height` 时，ROI 定位输入会先 letterbox 到模型训练尺寸；`input_channels=3` 会把当前 `DOME` 语义映射到的 Mono8 图复制为 3 通道，匹配 Ultralytics segmentation ONNX 的常见输入。
 
 配准使用 `registration.method`：
 

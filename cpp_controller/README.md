@@ -45,6 +45,8 @@ flowchart LR
 
 C++ 主控只保留上述当前链路。非当前链路的兼容路径、未使用 backend 枚举和对应源码已移除；共享内存协议布局保持与 Python detector 二进制兼容，C++ 结构命名统一为固定机位视图语义。
 
+当前工控机已调通链路的模块职责、源码调用关系、采集时序和故障闭环见 [C++ 主控当前逻辑梳理](../docs/cpp_controller_current_logic.md)。
+
 ## 文件结构
 
 ```text

@@ -9,7 +9,8 @@
 | [V4.0 双采集模式架构对齐说明](v4_architecture_alignment.md) | 当前目标架构、已实现能力、生产差距和补齐顺序。 |
 | [共享内存协议](shm_protocol.md) | C++ 与 Python 在线 IPC 的固定布局、状态机、错误码和校验要求。 |
 | [项目调用关系摘要](project_function_call_map.md) | 端到端调用链、关键模块边界和阅读顺序。 |
-| [C++ 主控部署与硬件运维](cpp_controller_operations.md) | PLC、相机、频闪、机器人、生产配置、上线 SOP、测试机联调和失败场景。 |
+| [C++ 主控当前逻辑梳理](cpp_controller_current_logic.md) | 当前工控机已调通固定双机位 + 三路共享频闪链路的模块职责、采集时序和故障闭环。 |
+| [C++ 主控部署与硬件运维](cpp_controller_operations.md) | 外部信号、相机、频闪、生产配置、上线 SOP、测试机联调和失败场景。 |
 | [Python 检测算法与模型运维](python_detector_operations.md) | Python 算法入口、配方、ROI/标定、模型后端、trace、训练样本、回放、benchmark 和上机预检。 |
 | [工控机上线补齐报告](deployment_readiness_report.md) | 当前固定双机位 + 三光源工控机交接状态、接线、待确认项和启动流程。 |
 
@@ -43,8 +44,9 @@
 1. 先读根目录 [README](../README.md)，确认当前能力、运行命令和开发约束。
 2. 再读 [V4.0 双采集模式架构对齐说明](v4_architecture_alignment.md)，确认目标架构和生产差距。
 3. 涉及在线 IPC 时读 [共享内存协议](shm_protocol.md)。
-4. 接硬件、上线、测试机联调时读 [C++ 主控部署与硬件运维](cpp_controller_operations.md)。
-5. 改 Python 算法、配方、模型、trace 或训练闭环时读 [Python 检测算法与模型运维](python_detector_operations.md)。
-6. 需要快速定位代码调用链时读 [项目调用关系摘要](project_function_call_map.md)。
-7. 固定双机位 + 三光源工控机交接时读 [工控机上线补齐报告](deployment_readiness_report.md)，确认 COM 口、触发端 IP、光源数量和模型资产状态。
-8. 上 Windows 工控机前运行 `uv run python -m tools.validate_deployment_preflight`；放行前再运行 `uv run python -m tools.validate_deployment_preflight --strict-production`。
+4. 梳理当前 C++ 已调通链路时读 [C++ 主控当前逻辑梳理](cpp_controller_current_logic.md)。
+5. 接硬件、上线、测试机联调时读 [C++ 主控部署与硬件运维](cpp_controller_operations.md)。
+6. 改 Python 算法、配方、模型、trace 或训练闭环时读 [Python 检测算法与模型运维](python_detector_operations.md)。
+7. 需要快速定位代码调用链时读 [项目调用关系摘要](project_function_call_map.md)。
+8. 固定双机位 + 三光源工控机交接时读 [工控机上线补齐报告](deployment_readiness_report.md)，确认 COM 口、触发端 IP、光源数量和模型资产状态。
+9. 上 Windows 工控机前运行 `uv run python -m tools.validate_deployment_preflight`；放行前再运行 `uv run python -m tools.validate_deployment_preflight --strict-production`。

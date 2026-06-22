@@ -1,6 +1,6 @@
 # 工控机上线补齐报告
 
-> 目标工位：固定双机位 + 常亮 Dome ROI + 三光源频闪
+> 目标工位：固定双机位 + 三路共享频闪
 > 生成日期：2026-06-18
 
 ---
@@ -87,24 +87,24 @@
 | 5 | JSON 输出 | `json_output.enabled=false` | 当前关闭，无影响 |
 | 6 | 图像落盘 | `image_save.enabled=false` | 生产环境建议关闭；启用时写入 `images/YYYYMMDD/<seat_id>/`，可用容量低于 20% 时按文件时间清理最早图片 |
 | 7 | 站位 ID | `signal.station_id=LINE1_AOI_01` | 可自定义 |
-| 8 | 第 4 路检测光源 | FL-ACDH 通道 4 | 当前预留，不属于产线必需检测光源；常亮 Dome ROI 图已作为 `light.12` 单独采集 |
+| 8 | 第 4 路检测光源 | FL-ACDH 通道 4 | 当前预留，不属于产线必需检测光源；当前 C++ 生产配置只采集 `light_order=1,2,3` |
 
 ---
 
-## 四、Dome ROI + 三检测光源生产配方已对齐
+## 四、三检测光源生产配方已对齐
 
-当前产线明确为固定双机位 + 常亮 Dome ROI + 三光源频闪，C++ 与 Python 已按采集用途对齐。Dome 图只做 ROI 定位，不进入特征构建或模型输入。
+当前产线明确为固定双机位 + 三路共享频闪。C++ 当前采集 `light_order=1,2,3`，Python 生产配方的三路必需检测光源与 C++ 采集顺序保持一致。
 
 | 层 | 文件 | 光源配置 |
 |----|------|----------|
-| C++ config | `station_runtime.production.conf` | `light_order=12,1,2,3`，`light.12.acquisition_mode=ambient` |
-| C++→Python 映射 | `python_detector/ipc/shm_client.py` | `12→DOME_ROI, 1→DIFFUSE, 2→POLAR_DIFFUSE, 3→HIGH_LEFT` |
+| C++ config | `station_runtime.production.conf` | `light_order=1,2,3` |
+| C++→Python 映射 | `python_detector/ipc/shm_client.py` | `1→DIFFUSE, 2→POLAR_DIFFUSE, 3→HIGH_LEFT` |
 | Python recipe | `production_recipe.yaml` | `required_lights: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT]` |
 | Python model input | `production_recipe.yaml` | `ch0_diffuse/ch1_polar_diffuse/ch2_high_left` |
 
-质量门禁会要求这 3 路检测光源全部存在、时间戳按配置顺序单调、帧号/光源序号唯一、曝光/增益一致、亮度和配准通过；`DOME_ROI` 会按顶层采集顺序校验并供 ROI 定位使用。缺 Dome ROI 图、缺任一路检测光源、超时、CRC/协议错误或质量门禁失败仍会返回 `RECHECK` 或 `ERROR`，不会输出 `OK`。
+质量门禁会要求这 3 路检测光源全部存在、时间戳按配置顺序单调、帧号/光源序号唯一、曝光/增益一致、亮度和配准通过。当前 Python 生产配方将 `DOME` 语义暂映射到 `DIFFUSE`，ROI 定位复用第一路频闪图，不额外要求 C++ 发布 `DOME_ROI` 采集轮次。缺任一路检测光源、超时、CRC/协议错误或质量门禁失败仍会返回 `RECHECK` 或 `ERROR`，不会输出 `OK`。
 
-如果未来新增第 4 路 `HIGH_RIGHT`，需要同时修改 C++ `light_order` 和 `light.4.*`、Python `production_recipe.yaml` 的 `required_lights`/`input_channels`、模型训练资产和相关测试。
+如果未来新增常亮 Dome ROI 或第 4 路 `HIGH_RIGHT`，需要同时修改 C++ `light_order` 和对应 `light.<N>.*`、C++ 采集编排、Python `production_recipe.yaml` 的语义光源/`required_lights`/`input_channels`、模型训练资产和相关测试。
 
 ---
 
@@ -199,11 +199,11 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1 --grid-layout 2x1
 
 ### 实验室联调启动（无外部信号，手动触发）
 
-C++ 用 `lab_manual.conf` 替代 `production.conf`（已预置好序列号）：
+C++ 用 `station_runtime.test.conf` 替代 `production.conf`（已预置好序列号）：
 
 ```powershell
 # 终端 2 改为：
-.\cpp_controller\build\Release\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.lab_manual.conf --once
+.\cpp_controller\build\Release\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.test.conf --once
 ```
 
 每次运行处理一个手动触发，不需要外部信号。

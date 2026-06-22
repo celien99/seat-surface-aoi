@@ -5,7 +5,7 @@
 ## 总体边界
 
 ```text
-PLC / 相机 / 频闪 / 机器人
+外部信号 / 相机 / 频闪
   -> cpp_controller
   -> 共享内存 frame ring
   -> python_detector
@@ -39,11 +39,10 @@ main.cpp
   -> HardwareFactory
   -> StationController
       -> ISignalClient.wait_trigger()
-      -> FrameAssembler.capture_job()
-          -> RobotClient.wait_pose_ready()
+      -> FrameAssembler.acquire_bundles()
           -> LightController.prepare_sequence()
-          -> LightController.arm_hardware_trigger()
           -> CameraWorker.arm()
+          -> LightController.trigger_channel()
           -> CameraWorker.wait_frame()
       -> FrameRingBuffer.publish()
       -> ResultRingBuffer.wait_result()
@@ -55,11 +54,10 @@ main.cpp
 关键封装：
 
 - `StationController`：工位级状态机和结果保守降级。
-- `FrameAssembler`：固定机位/机器人飞拍 capture plan、逐视角逐光源采集和结构化采集错误。
+- `FrameAssembler`：固定机位 capture plan、共享光源并行采集和结构化采集错误。
 - `CameraWorker` / `CameraDevice`：相机初始化、arm、取帧、健康状态和模拟图像生成。
 - `LightController`：光源通道参数、硬触发 arm、触发确认和异常关闭。
-- `ISignalClient`：触发输入、SN/seat 元数据、结果输出和外部信号健康状态；当前实现包括 simulated、manual_trigger、external_signal、tcp_signal 和 distance_trigger。
-- `RobotClient`：机器人 ready/fault、SHOT_ID、PHOTO_TRIGGER 和 TCP 位姿。
+- `ISignalClient`：触发输入、SN/seat 元数据、结果输出和外部信号健康状态；当前实现包括 simulated、manual_trigger、external_signal 和 tcp_signal。
 - `FrameRingBuffer` / `ResultRingBuffer`：固定布局共享内存读写、状态机、CRC 和超时。
 
 C++ 不能实现深度学习推理；真实硬件驱动接入点见 [C++ 主控部署与硬件运维](cpp_controller_operations.md)。
