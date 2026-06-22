@@ -479,7 +479,7 @@ bool FrameAssembler::wait_view_light_frame(const ExternalTrigger& trigger,
 
 void FrameAssembler::handle_acquisition_failure() {
   ++consecutive_failures_;
-  if (consecutive_failures_ >= kMaxConsecutiveFailuresBeforeReset) {
+  if (consecutive_failures_ >= config_.max_camera_failures_before_reset) {
     std::cerr << "frame_assembler: " << consecutive_failures_
               << " consecutive acquisition failures, resetting all devices" << std::endl;
     reset_devices();
@@ -493,7 +493,7 @@ void FrameAssembler::record_camera_success(std::uint32_t camera_index) {
 
 void FrameAssembler::record_camera_failure(std::uint32_t camera_index) {
   ++camera_failures_[camera_index];
-  if (camera_failures_[camera_index] >= kMaxConsecutiveFailuresBeforeReset) {
+  if (camera_failures_[camera_index] >= config_.max_camera_failures_before_reset) {
     std::cerr << "frame_assembler: camera_index=" << camera_index
               << " failed " << camera_failures_[camera_index]
               << " consecutive times, resetting camera" << std::endl;

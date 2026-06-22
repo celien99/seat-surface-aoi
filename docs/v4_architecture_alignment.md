@@ -37,7 +37,7 @@
 - 参考算法配方和模拟运行配置使用 `DIFFUSE`、`POLAR_DIFFUSE`、`HIGH_LEFT`、`HIGH_RIGHT` 四个 V4 语义光源；当前固定机位产线硬件已经按 2 相机 + 常亮 Dome ROI + 3 共享频闪光源落地为 `light_order=12,1,2,3` 与 `capture_schedule=shared_light_parallel`，Python 生产配方同步为 `DOME_ROI + DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。
 - Python 配方通过 `v4_lights.semantic_to_light_id` 统一 V4 语义光源；当前固定机位生产映射为 `DOME -> DOME_ROI`、`DARKFIELD_L -> HIGH_LEFT`、`BRIGHTFIELD -> POLAR_DIFFUSE`，`DARKFIELD_R/HIGH_RIGHT` 保留为扩展检测光源。
 - Python 检测层把 `cameras` 视为检测视角配置，固定机位通常 `pose_id == camera_id`；机器人飞拍允许多个 `pose_id` 共享同一个末端相机 `camera_id=EYE_IN_HAND`。
-- C++ 运行配置通过相机 `trigger_line`、`exposure_output_line` 和频闪 `trigger_input_line` 记录触发接线；当前 FL-ACDH 方案以控制器 F 口同步输出触发相机 Line0，Line1 ExposureStartActive 保留用于调试或后续 GPIO 同步方案。
+- C++ 运行配置通过相机 `trigger_line`、`exposure_output_line` 和频闪 `trigger_input_line` 记录触发接线；当前 FL-ACDH 方案以控制器同步输出 `F1` 总线触发两台相机黄色 Line0，现场已将输出接口 F1~F4 并联到 F1，Line1 ExposureStartActive 仅保留用于调试/示波器输出。
 
 差距：
 

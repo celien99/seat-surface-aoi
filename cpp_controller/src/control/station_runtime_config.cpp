@@ -743,6 +743,14 @@ bool load_station_runtime_config(const std::string& path,
                            error_message)) {
         return false;
       }
+    } else if (key == "max_camera_failures_before_reset") {
+      if (!parse_int_field("max_camera_failures_before_reset",
+                           value,
+                           false,
+                           &config.max_camera_failures_before_reset,
+                           error_message)) {
+        return false;
+      }
     } else if (key == "warning_recheck_threshold") {
       if (!parse_uint32_field("warning_recheck_threshold",
                               value,
@@ -891,6 +899,12 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
       config.publish_timeout_ms <= 0 || config.camera_timeout_ms <= 0 ||
       config.light_timeout_ms <= 0) {
     if (error_message != nullptr) *error_message = "所有 timeout_ms 配置都必须大于 0";
+    return false;
+  }
+  if (config.max_camera_failures_before_reset <= 0) {
+    if (error_message != nullptr) {
+      *error_message = "max_camera_failures_before_reset 必须大于 0";
+    }
     return false;
   }
   if (config.warning_recheck_threshold == 0 ||

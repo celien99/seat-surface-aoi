@@ -26,6 +26,7 @@ flowchart LR
 - 连接当前型号频闪控制器：`light.backend=serial_ascii`，适配 FL-ACDH。
 - 相机链路：本地回归 `simulated`，现场 `hikrobot_mvs`；真实采集会先让取帧线程排空缓冲区再进入 `GetImageBuffer` 硬触发等待，再由 FL-ACDH 触发曝光。单台相机连续失败后自动 stop+start 重启恢复，FL-ACDH 触发失败时立即中断等待避免主线程阻塞。
 - 固定采集方式：2 个机位共享 3 路光源，`capture_mode=fixed_camera`、`capture_schedule=shared_light_parallel`、`light_order=1,2,3`。
+- 当前现场接线：工控机通过 RS232/USB 转串口连接 FL-ACDH；FL-ACDH 同步输出 F1~F4 已并联到 F1 总线，F1 总线并联到两台相机黄色 `Line0`；相机 `Line1` 仅保留为调试输出。
 - 在线模式使用共享内存和 Python detector；采图模式不启用共享内存，只采图保存原图并向外部信号回传 `RECHECK`。
 
 C++ 主控只保留上述当前链路。非当前链路的兼容路径、未使用 backend 枚举和对应源码已移除；共享内存协议布局保持与 Python detector 二进制兼容，C++ 结构命名统一为固定机位视图语义。

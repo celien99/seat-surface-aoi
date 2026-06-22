@@ -94,7 +94,6 @@ private:
   std::vector<std::unique_ptr<ILightController>> light_controllers_;
   std::vector<std::unique_ptr<ICamera>> cameras_;
   int consecutive_failures_ = 0;
-  static constexpr int kMaxConsecutiveFailuresBeforeReset = 2;
   std::map<std::uint32_t, int> camera_failures_;
 };
 

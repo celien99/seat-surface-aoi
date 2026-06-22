@@ -494,6 +494,10 @@ bool test_runtime_light_channel_config_parses() {
                       config.light_channels[2].physical_channel == 3 &&
                       config.light_channels[2].strobe_width_us == 650 &&
                       config.light_channels[2].current_percent == 55.0F &&
+                      config.lights[0].serial_port == "COM1" &&
+                      config.lights[0].baud_rate == 9600 &&
+                      config.lights[0].trigger_input_line == "F1" &&
+                      config.max_camera_failures_before_reset == 2 &&
                       config.lights[0].response_mode ==
                           seat_aoi::LightSerialResponseMode::None &&
                       config.image_save.enabled &&
@@ -874,7 +878,8 @@ bool test_single_camera_config_validates() {
         << "camera.0.exposure_output_line=Line1\n"
         << "camera.0.buffer_count=8\n"
         << "light.device_id=FL-ACDH-20048-4\n"
-        << "light.trigger_input_line=TriggerIn1\n"
+        << "light.baud_rate=9600\n"
+        << "light.trigger_input_line=F1\n"
         << "light.1.physical_channel=1\n"
         << "light.1.exposure_us=800\n"
         << "light.1.strobe_width_us=700\n"
@@ -931,6 +936,10 @@ bool test_production_config_file_validates() {
                       config.light_order[2] == 3 &&
                       config.cameras.size() == 2 &&
                       config.light_channels.size() >= 3 &&
+                      config.lights[0].serial_port == "COM1" &&
+                      config.lights[0].baud_rate == 9600 &&
+                      config.lights[0].trigger_input_line == "F1" &&
+                      config.max_camera_failures_before_reset == 2 &&
                       config.lights[0].response_mode ==
                           seat_aoi::LightSerialResponseMode::None;
   if (!passed) {
@@ -952,9 +961,9 @@ seat_aoi::StationRuntimeConfig make_filled_production_runtime_config() {
   config.signal.default_seat_id = "EXTERNAL_SEAT";
   config.signal.default_sku = "seat_a_black_leather";
   config.lights[0].device_id = "STROBE_01";
-  config.lights[0].serial_port = "/dev/ttyUSB0";
-  config.lights[0].baud_rate = 115200;
-  config.lights[0].trigger_input_line = "TRIG_IN1";
+  config.lights[0].serial_port = "COM1";
+  config.lights[0].baud_rate = 9600;
+  config.lights[0].trigger_input_line = "F1";
   for (auto& camera : config.cameras) {
     camera.serial_number = "CAM_SN_" + std::to_string(camera.camera_index);
     camera.trigger_line = "Line0";

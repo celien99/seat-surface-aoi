@@ -118,6 +118,7 @@ struct StationRuntimeConfig {
   int camera_timeout_ms = 200;
   int light_timeout_ms = 200;
   int arm_settle_ms = 5;
+  int max_camera_failures_before_reset = 2;
   std::uint32_t warning_recheck_threshold = 3;
   std::uint32_t critical_recheck_threshold = 5;
   int max_jobs = 0;
