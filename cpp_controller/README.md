@@ -95,9 +95,9 @@ cpp_controller/
 
 | 文件 | 模式 | 说明 |
 | --- | --- | --- |
-| `config/station_runtime.production.conf` | `online` | 生产 TCP 外部信号 + Hikrobot MVS + FL-ACDH + 共享内存检测。 |
-| `config/station_runtime.test.conf` | `online` | 手动触发联调真实相机和频闪，仍走共享内存检测。 |
-| `config/station_runtime.capture_only.conf` | `capture_only` | 手动触发采图，只保存 PGM 原图，不启用共享内存。 |
+| `config/station_runtime.production.conf` | `online` | 生产 TCP 外部信号 + Hikrobot MVS + FL-ACDH + 共享内存检测；默认 10ms 曝光和 100/200/300us 频闪脉宽。 |
+| `config/station_runtime.test.conf` | `online` | 手动触发联调真实相机和频闪，仍走共享内存检测；频闪参数对齐外部成功程序。 |
+| `config/station_runtime.capture_only.conf` | `capture_only` | 手动触发采图，只保存 PGM 原图，不启用共享内存；频闪参数对齐外部成功程序。 |
 | `config/station_runtime.capture_only.single_camera.conf` | `capture_only` | 单相机诊断采图，对齐外部成功程序的 `DA9184676 + COM1 + 光源1`。 |
 
 关键字段：
@@ -119,6 +119,13 @@ light.serial_port=COM1
 light.baud_rate=9600
 light.response_mode=ack
 light.trigger_input_line=F1
+
+light.1.exposure_us=10000
+light.1.strobe_width_us=100
+light.2.exposure_us=10000
+light.2.strobe_width_us=200
+light.3.exposure_us=10000
+light.3.strobe_width_us=300
 
 # 超时配置（毫秒）
 camera_timeout_ms=5000
