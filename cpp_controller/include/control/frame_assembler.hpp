@@ -71,6 +71,18 @@ private:
                                             const std::vector<RuntimeCaptureSlotConfig>& capture_plan,
                                             std::vector<CapturedFrame>* frames,
                                             AcquisitionError* error);
+  bool arm_all_views_parallel(const ExternalTrigger& trigger,
+                               const std::vector<RuntimeCaptureSlotConfig>& views,
+                               const LightChannelParam& light_param,
+                               std::uint32_t light_seq_index,
+                               AcquisitionError* error);
+  bool fire_one_light_step(const ExternalTrigger& trigger,
+                            const std::vector<RuntimeCaptureSlotConfig>& views,
+                            const LightChannelParam& light_param,
+                            std::uint32_t light_seq_index,
+                            std::vector<std::vector<CapturedFrame>>& frames_by_view,
+                            std::vector<std::vector<bool>>& captured,
+                            AcquisitionError* error);
   bool arm_view_camera(const ExternalTrigger& trigger,
                        const RuntimeCaptureSlotConfig& view,
                        const LightChannelParam& light_param,
