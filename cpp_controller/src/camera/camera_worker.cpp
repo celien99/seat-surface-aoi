@@ -36,6 +36,10 @@ bool SimCamera::wait_frame(std::uint64_t trigger_id,
   return device_.capture(trigger_id, light_param, light_seq_index, out_frame, timeout_ms);
 }
 
+void SimCamera::cancel_wait() {
+  device_.cancel_wait();
+}
+
 CameraHealth SimCamera::get_health() const {
   return device_.get_health();
 }

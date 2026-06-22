@@ -248,9 +248,12 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
         }));
       }
       bool any_arm_failed = false;
-      for (auto& f : arm_futures) {
-        if (!f.get()) {
+      for (std::size_t vi = 0; vi < arm_futures.size(); ++vi) {
+        if (!arm_futures[vi].get()) {
           any_arm_failed = true;
+          record_camera_failure(capture_plan[vi].camera_index);
+        } else {
+          record_camera_success(capture_plan[vi].camera_index);
         }
       }
       if (any_arm_failed) {
@@ -320,6 +323,14 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
                               light_param.light_index,
                               light_seq_index,
                               detail);
+        // 中断所有相机正在阻塞的 GetImageBuffer，
+        // 避免 std::future 析构时阻塞主线程（Windows MSVC 行为）。
+        for (auto& camera : cameras_) {
+          camera->cancel_wait();
+        }
+        for (auto& f : frame_futures) {
+          f.wait();
+        }
         handle_acquisition_failure();
         return false;
       }
@@ -328,8 +339,10 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
         auto result = f.get();
         if (!result.ok) {
           any_wait_failed = true;
+          record_camera_failure(capture_plan[result.view_index].camera_index);
           continue;
         }
+        record_camera_success(capture_plan[result.view_index].camera_index);
         frames_by_view[result.view_index][light_seq_index] = std::move(result.frame);
         captured[result.view_index][light_seq_index] = true;
       }
@@ -464,6 +477,31 @@ void FrameAssembler::handle_acquisition_failure() {
               << " consecutive acquisition failures, resetting all devices" << std::endl;
     reset_devices();
     consecutive_failures_ = 0;
+  }
+}
+
+void FrameAssembler::record_camera_success(std::uint32_t camera_index) {
+  camera_failures_[camera_index] = 0;
+}
+
+void FrameAssembler::record_camera_failure(std::uint32_t camera_index) {
+  ++camera_failures_[camera_index];
+  if (camera_failures_[camera_index] >= kMaxConsecutiveFailuresBeforeReset) {
+    std::cerr << "frame_assembler: camera_index=" << camera_index
+              << " failed " << camera_failures_[camera_index]
+              << " consecutive times, resetting camera" << std::endl;
+    reset_camera(camera_index);
+    camera_failures_[camera_index] = 0;
+  }
+}
+
+void FrameAssembler::reset_camera(std::uint32_t camera_index) {
+  auto* cam = camera_for_index(camera_index);
+  if (cam != nullptr) {
+    cam->stop();
+    cam->start();
+    std::cerr << "frame_assembler: camera_index=" << camera_index
+              << " stop+start cycle complete" << std::endl;
   }
 }
 

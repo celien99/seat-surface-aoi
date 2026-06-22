@@ -85,6 +85,10 @@ bool CameraDevice::capture(std::uint64_t trigger_id,
   return true;
 }
 
+void CameraDevice::cancel_wait() {
+  armed_ = false;
+}
+
 CameraHealth CameraDevice::get_health() const {
   return CameraHealth{initialized_, 0, initialized_ ? "simulated" : "not initialized"};
 }

@@ -392,9 +392,12 @@ bool FlAcdhLightController::send_command(char cmd, char channel,
     return true;
   }
   if (allow_rejection) {
-    // C/B 命令：记录日志但继续执行
+    // C/B 命令可能被部分 FL-ACDH 拒绝，记录日志并继续执行，
+    // 但累计计数用于健康监控，避免故障被长期掩盖。
+    ++c_b_rejected_count_;
     std::cout << "FL-ACDH " << serial_port_ << " cmd " << cmd
-              << " rejected (non-critical): " << cmd_error << std::endl;
+              << " rejected (non-critical, count=" << c_b_rejected_count_
+              << "): " << cmd_error << std::endl;
     return true;  // 不被视为失败
   }
   if (error_message != nullptr) {
@@ -532,10 +535,15 @@ LightHealth FlAcdhLightController::get_health() const {
     health.message = "FL-ACDH 串口未打开";
   else if (simulate_fault_)
     health.message = "FL-ACDH 模拟故障";
-  else
+  else {
     health.message = "FL-ACDH serial " + serial_port_ + " @ " +
                      std::to_string(baud_rate_) + " response_mode=" +
                      (response_mode_ == LightSerialResponseMode::None ? "none" : "ack");
+    if (c_b_rejected_count_ >= kCBRejectedWarningThreshold) {
+      health.message += " C/B_rejected=" + std::to_string(c_b_rejected_count_);
+      health.ok = false;
+    }
+  }
   return health;
 }
 

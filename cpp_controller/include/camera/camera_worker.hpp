@@ -19,6 +19,7 @@ public:
                   std::uint32_t light_seq_index,
                   CapturedFrame* out_frame,
                   int timeout_ms) override;
+  void cancel_wait() override;
   CameraHealth get_health() const override;
 
 private:

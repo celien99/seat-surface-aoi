@@ -64,6 +64,8 @@ private:
   std::uint64_t trigger_count_ = 0;
   std::uint32_t last_light_index_ = 0;
   std::uint32_t last_physical_channel_ = 0;
+  std::uint64_t c_b_rejected_count_ = 0;
+  static constexpr std::uint64_t kCBRejectedWarningThreshold = 5;
 };
 
 }  // namespace seat_aoi

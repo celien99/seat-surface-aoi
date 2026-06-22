@@ -24,7 +24,7 @@ flowchart LR
 
 - 接收外部信号：`manual_trigger`、`external_signal`、`tcp_signal`，以及本地回归用 `simulated`。
 - 连接当前型号频闪控制器：`light.backend=serial_ascii`，适配 FL-ACDH。
-- 相机链路：本地回归 `simulated`，现场 `hikrobot_mvs`；真实采集会先让相机取帧线程进入硬触发等待，再由 FL-ACDH 触发曝光。
+- 相机链路：本地回归 `simulated`，现场 `hikrobot_mvs`；真实采集会先让取帧线程排空缓冲区再进入 `GetImageBuffer` 硬触发等待，再由 FL-ACDH 触发曝光。单台相机连续失败后自动 stop+start 重启恢复，FL-ACDH 触发失败时立即中断等待避免主线程阻塞。
 - 固定采集方式：2 个机位共享 3 路光源，`capture_mode=fixed_camera`、`capture_schedule=shared_light_parallel`、`light_order=1,2,3`。
 - 在线模式使用共享内存和 Python detector；采图模式不启用共享内存，只采图保存原图并向外部信号回传 `RECHECK`。
 

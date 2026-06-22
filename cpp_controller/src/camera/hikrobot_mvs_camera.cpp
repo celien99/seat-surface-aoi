@@ -381,6 +381,8 @@ bool HikrobotMvsCamera::arm(std::uint64_t trigger_id,
   armed_trigger_id_ = trigger_id;
   armed_light_index_ = light_param.light_index;
   armed_light_seq_index_ = light_seq_index;
+  healthy_ = true;
+  health_message_ = "hikrobot_mvs armed";
   return true;
 }
 
@@ -400,6 +402,15 @@ bool HikrobotMvsCamera::wait_frame(std::uint64_t trigger_id,
   set_error("Hikrobot MVS SDK 未启用，无法读取真实图像");
   return false;
 #else
+  // 排空 SDK 缓冲区中可能残留的过期帧（EMI 伪触发、FL-ACDH 残余沿等），
+  // 避免 LatestImagesOnly 策略下 GetImageBuffer 立即返回旧帧。
+  {
+    MV_FRAME_OUT drain{};
+    while (MV_CC_GetImageBuffer(handle_, &drain, 100) == MV_OK) {
+      MV_CC_FreeImageBuffer(handle_, &drain);
+    }
+  }
+
   MV_FRAME_OUT frame{};
   const int ret = MV_CC_GetImageBuffer(handle_, &frame, timeout_ms);
   if (ret != kMvsOk) {
@@ -470,6 +481,21 @@ bool HikrobotMvsCamera::wait_frame(std::uint64_t trigger_id,
   health_message_ = "hikrobot_mvs frame captured";
   return true;
 #endif
+}
+
+void HikrobotMvsCamera::cancel_wait() {
+#ifdef SEAT_AOI_ENABLE_HIKROBOT_MVS
+  if (handle_ != nullptr && grabbing_) {
+    MV_CC_StopGrabbing(handle_);
+    MV_CC_StartGrabbing(handle_);
+    // 排空重启抓流后的残留帧
+    MV_FRAME_OUT drain{};
+    while (MV_CC_GetImageBuffer(handle_, &drain, 100) == MV_OK) {
+      MV_CC_FreeImageBuffer(handle_, &drain);
+    }
+  }
+#endif
+  armed_ = false;
 }
 
 CameraHealth HikrobotMvsCamera::get_health() const {

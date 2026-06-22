@@ -44,6 +44,7 @@ public:
                           std::uint32_t light_seq_index,
                           CapturedFrame* out_frame,
                           int timeout_ms) = 0;
+  virtual void cancel_wait() = 0;
   virtual CameraHealth get_health() const = 0;
 };
 

@@ -118,6 +118,8 @@ public:
     return false;
   }
 
+  void cancel_wait() override {}
+
   CameraHealth get_health() const override {
     return CameraHealth{false, 0, unsupported_driver_message("Camera", backend_)};
   }

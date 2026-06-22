@@ -18,6 +18,7 @@ public:
                std::uint32_t light_seq_index,
                CapturedFrame* out_frame,
                int timeout_ms);
+  void cancel_wait();
   CameraHealth get_health() const;
 
 private:
