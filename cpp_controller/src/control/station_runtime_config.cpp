@@ -56,20 +56,12 @@ bool parse_int_field(const std::string& field_name,
                      bool allow_zero,
                      int* out_value,
                      std::string* error_message) {
-  try {
-    const int parsed = std::stoi(value);
-    if (parsed < 0 || (!allow_zero && parsed == 0)) {
-      throw std::invalid_argument(field_name);
-    }
-    *out_value = parsed;
-    return true;
-  } catch (const std::exception&) {
-    if (error_message != nullptr) {
-      *error_message = field_name + " 必须是" +
-                       std::string(allow_zero ? "非负整数" : "正整数") + ": " + value;
-    }
+  std::uint32_t parsed = 0;
+  if (!parse_uint32_field(field_name, value, allow_zero, &parsed, error_message)) {
     return false;
   }
+  *out_value = static_cast<int>(parsed);
+  return true;
 }
 
 bool parse_float_field(const std::string& field_name,
