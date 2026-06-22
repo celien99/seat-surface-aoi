@@ -290,6 +290,13 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
         frame_futures.push_back(std::async(std::launch::async, [&, vi]() -> FrameResult {
           FrameResult result;
           result.view_index = vi;
+          // 先排空 SDK 缓冲区残留帧，再通知主线程 ready。
+          // 若 ready 信号在排空之前发出，主线程可能在排空期间触发
+          // FL-ACDH，导致触发帧被 drain 误吞，最终相机超时。
+          auto* cam = camera_for_index(capture_plan[vi].camera_index);
+          if (cam != nullptr) {
+            cam->drain_stale_frames(100);
+          }
           {
             std::lock_guard<std::mutex> lock(wait_mutex);
             ++waiters_ready;

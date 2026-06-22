@@ -45,6 +45,7 @@ public:
                           CapturedFrame* out_frame,
                           int timeout_ms) = 0;
   virtual void cancel_wait() = 0;
+  virtual void drain_stale_frames(int timeout_ms) { (void)timeout_ms; }
   virtual CameraHealth get_health() const = 0;
 };
 

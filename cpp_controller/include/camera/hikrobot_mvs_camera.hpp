@@ -26,6 +26,7 @@ public:
                   CapturedFrame* out_frame,
                   int timeout_ms) override;
   void cancel_wait() override;
+  void drain_stale_frames(int timeout_ms) override;
   CameraHealth get_health() const override;
 
 private:

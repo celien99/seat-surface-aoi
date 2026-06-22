@@ -402,15 +402,6 @@ bool HikrobotMvsCamera::wait_frame(std::uint64_t trigger_id,
   set_error("Hikrobot MVS SDK 未启用，无法读取真实图像");
   return false;
 #else
-  // 排空 SDK 缓冲区中可能残留的过期帧（EMI 伪触发、FL-ACDH 残余沿等），
-  // 避免 LatestImagesOnly 策略下 GetImageBuffer 立即返回旧帧。
-  {
-    MV_FRAME_OUT drain{};
-    while (MV_CC_GetImageBuffer(handle_, &drain, 100) == MV_OK) {
-      MV_CC_FreeImageBuffer(handle_, &drain);
-    }
-  }
-
   MV_FRAME_OUT frame{};
   const int ret = MV_CC_GetImageBuffer(handle_, &frame, timeout_ms);
   if (ret != kMvsOk) {
@@ -483,15 +474,30 @@ bool HikrobotMvsCamera::wait_frame(std::uint64_t trigger_id,
 #endif
 }
 
+void HikrobotMvsCamera::drain_stale_frames(int timeout_ms) {
+#ifdef SEAT_AOI_ENABLE_HIKROBOT_MVS
+  if (handle_ == nullptr || !grabbing_) {
+    return;
+  }
+  MV_FRAME_OUT drain{};
+  while (MV_CC_GetImageBuffer(handle_, &drain, timeout_ms) == MV_OK) {
+    MV_CC_FreeImageBuffer(handle_, &drain);
+  }
+#else
+  (void)timeout_ms;
+#endif
+}
+
 void HikrobotMvsCamera::cancel_wait() {
 #ifdef SEAT_AOI_ENABLE_HIKROBOT_MVS
   if (handle_ != nullptr && grabbing_) {
     MV_CC_StopGrabbing(handle_);
-    MV_CC_StartGrabbing(handle_);
-    // 排空重启抓流后的残留帧
-    MV_FRAME_OUT drain{};
-    while (MV_CC_GetImageBuffer(handle_, &drain, 100) == MV_OK) {
-      MV_CC_FreeImageBuffer(handle_, &drain);
+    const int ret = MV_CC_StartGrabbing(handle_);
+    if (ret != kMvsOk) {
+      grabbing_ = false;
+      set_error(mvs_error("MV_CC_StartGrabbing", ret));
+    } else {
+      drain_stale_frames(100);
     }
   }
 #endif
