@@ -273,8 +273,8 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
     if (config_.arm_settle_ms > 0) {
       std::this_thread::sleep_for(std::chrono::milliseconds(config_.arm_settle_ms));
     }
-    // 所有相机先进入 GetImageBuffer 等待，再触发 FL-ACDH。
-    // 这与现场验证程序一致，可避免触发沿早于 SDK 取帧等待而丢帧。
+    // 对齐现场可工作的参考程序：先触发 FL-ACDH 产生硬触发帧，
+    // 再调用 GetImageBuffer 读取 SDK 已缓存的帧。
     {
       struct FrameResult {
         bool ok = false;
@@ -283,35 +283,45 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
       };
       std::mutex wait_mutex;
       std::condition_variable wait_cv;
-      std::uint32_t waiters_ready = 0;
-      std::vector<std::future<FrameResult>> frame_futures;
-      frame_futures.reserve(capture_plan.size());
+      std::uint32_t cameras_ready = 0;
+      std::vector<std::future<bool>> drain_futures;
+      drain_futures.reserve(capture_plan.size());
       for (std::size_t vi = 0; vi < capture_plan.size(); ++vi) {
-        frame_futures.push_back(std::async(std::launch::async, [&, vi]() -> FrameResult {
-          FrameResult result;
-          result.view_index = vi;
-          // 先排空 SDK 缓冲区残留帧，再通知主线程 ready。
-          // 若 ready 信号在排空之前发出，主线程可能在排空期间触发
-          // FL-ACDH，导致触发帧被 drain 误吞，最终相机超时。
+        drain_futures.push_back(std::async(std::launch::async, [&, vi]() {
           auto* cam = camera_for_index(capture_plan[vi].camera_index);
           if (cam != nullptr) {
             cam->drain_stale_frames(100);
           }
           {
             std::lock_guard<std::mutex> lock(wait_mutex);
-            ++waiters_ready;
+            ++cameras_ready;
           }
           wait_cv.notify_one();
-          result.ok = wait_view_light_frame(trigger, capture_plan[vi], light_param,
-                                            light_seq_index, &result.frame, nullptr);
-          return result;
+          return cam != nullptr;
         }));
       }
       {
         std::unique_lock<std::mutex> lock(wait_mutex);
         wait_cv.wait(lock, [&]() {
-          return waiters_ready == static_cast<std::uint32_t>(capture_plan.size());
+          return cameras_ready == static_cast<std::uint32_t>(capture_plan.size());
         });
+      }
+      bool any_prepare_failed = false;
+      for (auto& f : drain_futures) {
+        if (!f.get()) {
+          any_prepare_failed = true;
+        }
+      }
+      if (any_prepare_failed) {
+        set_acquisition_error(error,
+                              ErrorCode::CameraFault,
+                              AcquisitionStage::ArmCamera,
+                              capture_plan.front().camera_index,
+                              light_param.light_index,
+                              light_seq_index,
+                              "one or more cameras missing before light trigger");
+        handle_acquisition_failure();
+        return false;
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(2));
       if (!light_controllers_.front()->trigger_channel(
@@ -330,16 +340,19 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
                               light_param.light_index,
                               light_seq_index,
                               detail);
-        // 中断所有相机正在阻塞的 GetImageBuffer，
-        // 避免 std::future 析构时阻塞主线程（Windows MSVC 行为）。
-        for (auto& camera : cameras_) {
-          camera->cancel_wait();
-        }
-        for (auto& f : frame_futures) {
-          f.wait();
-        }
         handle_acquisition_failure();
         return false;
+      }
+      std::vector<std::future<FrameResult>> frame_futures;
+      frame_futures.reserve(capture_plan.size());
+      for (std::size_t vi = 0; vi < capture_plan.size(); ++vi) {
+        frame_futures.push_back(std::async(std::launch::async, [&, vi]() -> FrameResult {
+          FrameResult result;
+          result.view_index = vi;
+          result.ok = wait_view_light_frame(trigger, capture_plan[vi], light_param,
+                                            light_seq_index, &result.frame, nullptr);
+          return result;
+        }));
       }
       bool any_wait_failed = false;
       for (auto& f : frame_futures) {

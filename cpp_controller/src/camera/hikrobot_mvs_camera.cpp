@@ -298,13 +298,9 @@ bool HikrobotMvsCamera::initialize(const CameraConfig& config) {
     }
   }
 
-  if (!set_enum_by_string(handle_, "LineSelector", config_.exposure_output_line, &error) ||
-      !set_enum_by_string(handle_, "LineSource", "ExposureStartActive", &error) ||
-      !set_bool_value(handle_, "StrobeEnable", true, &error) ||
-      !set_int_value(handle_, "StrobeLineDuration", 0, &error) ||
-      !set_int_value(handle_, "StrobeLineDelay", 0, &error) ||
-      !set_int_value(handle_, "StrobeLinePreDelay", 0, &error) ||
-      !set_image_node_num(handle_, std::max<std::uint32_t>(config_.buffer_count, 1U), &error) ||
+  // 现场可工作的参考程序只配置 Line0 硬触发输入，不强制配置相机侧
+  // Line1/StrobeEnable 输出；当前接线由 FL-ACDH F1 触发相机 Line0。
+  if (!set_image_node_num(handle_, std::max<std::uint32_t>(config_.buffer_count, 1U), &error) ||
       !set_grab_strategy(handle_, MV_GrabStrategy_LatestImagesOnly, &error)) {
     set_error(error);
     close();
