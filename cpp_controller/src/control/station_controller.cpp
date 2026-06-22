@@ -9,6 +9,44 @@
 
 namespace seat_aoi {
 
+StationConfig to_station_config(const StationRuntimeConfig& config) {
+  StationConfig out;
+  out.hardware_mode = config.hardware_mode;
+  out.camera_backend = config.camera_backend;
+  out.reset_shared_memory = config.reset_shared_memory;
+  out.slot_count = config.slot_count;
+  out.frame_slot_size = config.frame_slot_size;
+  out.result_slot_size = config.result_slot_size;
+  out.publish_timeout_ms = config.publish_timeout_ms;
+  out.detector_timeout_ms = config.detector_timeout_ms;
+  out.trigger_timeout_ms = config.trigger_timeout_ms;
+  out.camera_timeout_ms = config.camera_timeout_ms;
+  out.light_timeout_ms = config.light_timeout_ms;
+  out.arm_settle_ms = config.arm_settle_ms;
+  out.warning_recheck_threshold = config.warning_recheck_threshold;
+  out.critical_recheck_threshold = config.critical_recheck_threshold;
+  out.max_jobs = config.max_jobs;
+  out.recipe_id = config.recipe_id;
+  out.trace_root = config.trace_root;
+  out.light_order = config.light_order;
+  out.controller_mode = config.controller_mode;
+  out.capture_mode = config.capture_mode;
+  out.capture_schedule = config.capture_schedule;
+  out.cameras = config.cameras;
+  out.light = config.lights.empty() ? RuntimeLightConfig{} : config.lights[0];
+  out.lights = config.lights;
+  out.light_channels = config.light_channels;
+  out.signal = config.signal;
+  out.simulate_light_fault = !config.lights.empty() && config.lights[0].simulate_fault;
+  out.simulate_trigger_timeout = config.signal.simulate_trigger_timeout;
+  out.simulate_signal_result_fault = config.signal.simulate_output_fault;
+  for (const auto& camera : config.cameras) {
+    out.simulate_missing_frame = out.simulate_missing_frame || camera.simulate_missing_frame;
+  }
+  out.image_save = config.image_save;
+  return out;
+}
+
 namespace {
 
 SignalClientConfig make_signal_client_config(const RuntimeSignalConfig& config) {
@@ -99,6 +137,7 @@ bool StationController::initialize(const StationConfig& config) {
   runtime_config.light_channels = config.light_channels;
   runtime_config.signal = config.signal;
   runtime_config.image_save = config.image_save;
+  // 传播 CLI 模拟标志到运行时配置
   if (runtime_config.lights.empty()) {
     runtime_config.lights.emplace_back();
   }

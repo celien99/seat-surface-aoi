@@ -58,6 +58,8 @@ struct StationConfig {
   ImageSaveConfig image_save;
 };
 
+StationConfig to_station_config(const StationRuntimeConfig& config);
+
 class StationController {
 public:
   ~StationController();

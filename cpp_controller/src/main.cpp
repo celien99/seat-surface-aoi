@@ -40,43 +40,6 @@ int int_arg(int argc, char** argv, const std::string& name, int fallback) {
   return fallback;
 }
 
-void apply_runtime_config(const seat_aoi::StationRuntimeConfig& runtime_config,
-                          seat_aoi::StationConfig* config) {
-  config->hardware_mode = runtime_config.hardware_mode;
-  config->camera_backend = runtime_config.camera_backend;
-  config->reset_shared_memory = runtime_config.reset_shared_memory;
-  config->slot_count = runtime_config.slot_count;
-  config->frame_slot_size = runtime_config.frame_slot_size;
-  config->result_slot_size = runtime_config.result_slot_size;
-  config->publish_timeout_ms = runtime_config.publish_timeout_ms;
-  config->detector_timeout_ms = runtime_config.detector_timeout_ms;
-  config->trigger_timeout_ms = runtime_config.trigger_timeout_ms;
-  config->camera_timeout_ms = runtime_config.camera_timeout_ms;
-  config->light_timeout_ms = runtime_config.light_timeout_ms;
-  config->arm_settle_ms = runtime_config.arm_settle_ms;
-  config->warning_recheck_threshold = runtime_config.warning_recheck_threshold;
-  config->critical_recheck_threshold = runtime_config.critical_recheck_threshold;
-  config->max_jobs = runtime_config.max_jobs;
-  config->recipe_id = runtime_config.recipe_id;
-  config->trace_root = runtime_config.trace_root;
-  config->light_order = runtime_config.light_order;
-  config->controller_mode = runtime_config.controller_mode;
-  config->capture_mode = runtime_config.capture_mode;
-  config->capture_schedule = runtime_config.capture_schedule;
-  config->cameras = runtime_config.cameras;
-  config->light = runtime_config.lights.empty() ? seat_aoi::RuntimeLightConfig{} : runtime_config.lights[0];
-  config->lights = runtime_config.lights;
-  config->light_channels = runtime_config.light_channels;
-  config->signal = runtime_config.signal;
-  config->simulate_light_fault = !runtime_config.lights.empty() && runtime_config.lights[0].simulate_fault;
-  config->simulate_trigger_timeout = runtime_config.signal.simulate_trigger_timeout;
-  config->simulate_signal_result_fault = runtime_config.signal.simulate_output_fault;
-  for (const auto& camera : runtime_config.cameras) {
-    config->simulate_missing_frame = config->simulate_missing_frame || camera.simulate_missing_frame;
-  }
-  config->image_save = runtime_config.image_save;
-}
-
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -89,7 +52,7 @@ int main(int argc, char** argv) {
       std::cerr << error << std::endl;
       return 2;
     }
-    apply_runtime_config(runtime_config, &config);
+    config = seat_aoi::to_station_config(runtime_config);
   }
 
   if (has_arg(argc, argv, "--validate-config")) {
