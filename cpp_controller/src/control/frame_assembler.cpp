@@ -587,25 +587,8 @@ bool FrameAssembler::build_light_sequence(const Recipe& recipe,
       return false;
     }
     const auto& configured = iter->second;
-    if (configured.controller_index != 0 ||
-        configured.acquisition_mode != LightAcquisitionMode::Strobe ||
-        configured.physical_channel == 0 ||
-        configured.exposure_us == 0 ||
-        configured.strobe_width_us == 0 ||
-        configured.strobe_width_us > configured.exposure_us ||
-        configured.gain <= 0.0F ||
-        configured.current_percent <= 0.0F ||
-        configured.current_percent > 100.0F) {
-      set_acquisition_error(error,
-                            ErrorCode::ConfigurationError,
-                            AcquisitionStage::Configuration,
-                            0,
-                            light_index,
-                            light_seq_index,
-                            "light channel config is invalid");
-      return false;
-    }
-
+    // 通道参数合法性已由 validate_station_runtime_config 校验，
+    // 此处仅校验 light_order 引用的 light_index 是否存在
     LightChannelParam param;
     param.controller_index = 0;
     param.light_index = configured.light_index;
