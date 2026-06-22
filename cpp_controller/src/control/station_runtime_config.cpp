@@ -626,15 +626,6 @@ bool load_station_runtime_config(const std::string& path,
       config.signal.recheck_text = value;
     } else if (key == "signal.error_text") {
       config.signal.error_text = value;
-    } else if (key == "plc.host" || key == "plc.trigger_source" ||
-               key == "plc.trigger_id_source" || key == "plc.seat_id_source" ||
-               key == "plc.ok_output" || key == "plc.ng_output" ||
-               key == "plc.recheck_output" || key == "plc.ack_input" ||
-               key == "plc.output_hold_ms") {
-      if (error_message != nullptr) {
-        *error_message = key + " 已移除；C++ 只接收归一化外部信号，请使用 signal.*";
-      }
-      return false;
     } else if (key == "light.device_id") {
       config.lights[0].device_id = value;
     } else if (key == "light.host") {
