@@ -662,7 +662,7 @@ bool test_capture_only_bypasses_shared_memory_and_saves_images() {
   if (std::filesystem::exists(root / "images")) {
     for (const auto& entry :
          std::filesystem::recursive_directory_iterator(root / "images", walk_ec)) {
-      if (!walk_ec && entry.is_regular_file() && entry.path().extension() == ".pgm") {
+      if (!walk_ec && entry.is_regular_file() && entry.path().extension() == ".png") {
         ++image_count;
       }
     }
@@ -747,7 +747,7 @@ bool test_image_save_path_uses_date_directory() {
       path.find("images") != std::string::npos &&
       path.find("20260619") != std::string::npos &&
       path.find("SEAT_001") != std::string::npos &&
-      path.find("TOP_BACK_1234567_L2_original.pgm") != std::string::npos;
+      path.find("TOP_BACK_1234567_L2_original.png") != std::string::npos;
   if (!passed) {
     std::cerr << "image save path did not include sanitized date/seat/camera: " << path
               << "\n";
@@ -763,21 +763,21 @@ bool test_image_save_cleanup_removes_files_without_deleting_date_dirs() {
   std::filesystem::create_directories(root / "20260619" / "CURRENT_SEAT");
   std::filesystem::create_directories(root / "misc");
   {
-    std::ofstream oldest(root / "20250101" / "OLD_SEAT" / "oldest.pgm", std::ios::binary);
+    std::ofstream oldest(root / "20250101" / "OLD_SEAT" / "oldest.png", std::ios::binary);
     const std::string chunk(1024U * 1024U, '\0');
     for (std::size_t written = 0; written < kOldestFileBytes; written += chunk.size()) {
       oldest.write(chunk.data(), static_cast<std::streamsize>(chunk.size()));
     }
-    std::ofstream(root / "20250101" / "OLD_SEAT" / "newer.pgm") << "newer";
-    std::ofstream(root / "20260619" / "CURRENT_SEAT" / "current.pgm") << "current";
+    std::ofstream(root / "20250101" / "OLD_SEAT" / "newer.png") << "newer";
+    std::ofstream(root / "20260619" / "CURRENT_SEAT" / "current.png") << "current";
     std::ofstream(root / "misc" / "keep.txt") << "keep";
   }
   const auto base_time = std::filesystem::file_time_type::clock::now();
-  std::filesystem::last_write_time(root / "20250101" / "OLD_SEAT" / "oldest.pgm",
+  std::filesystem::last_write_time(root / "20250101" / "OLD_SEAT" / "oldest.png",
                                    base_time - std::chrono::hours(4));
-  std::filesystem::last_write_time(root / "20250101" / "OLD_SEAT" / "newer.pgm",
+  std::filesystem::last_write_time(root / "20250101" / "OLD_SEAT" / "newer.png",
                                    base_time - std::chrono::hours(3));
-  std::filesystem::last_write_time(root / "20260619" / "CURRENT_SEAT" / "current.pgm",
+  std::filesystem::last_write_time(root / "20260619" / "CURRENT_SEAT" / "current.png",
                                    base_time - std::chrono::hours(1));
 
   seat_aoi::ImageSaveConfig config;
@@ -790,9 +790,9 @@ bool test_image_save_cleanup_removes_files_without_deleting_date_dirs() {
   const bool ok = seat_aoi::cleanup_old_image_data_if_needed(config, &message);
 
   const bool passed = ok &&
-                      !std::filesystem::exists(root / "20250101" / "OLD_SEAT" / "oldest.pgm") &&
-                      !std::filesystem::exists(root / "20250101" / "OLD_SEAT" / "newer.pgm") &&
-                      !std::filesystem::exists(root / "20260619" / "CURRENT_SEAT" / "current.pgm") &&
+                      !std::filesystem::exists(root / "20250101" / "OLD_SEAT" / "oldest.png") &&
+                      !std::filesystem::exists(root / "20250101" / "OLD_SEAT" / "newer.png") &&
+                      !std::filesystem::exists(root / "20260619" / "CURRENT_SEAT" / "current.png") &&
                       std::filesystem::exists(root / "20250101") &&
                       std::filesystem::exists(root / "20260619") &&
                       std::filesystem::exists(root / "misc" / "keep.txt");
@@ -812,7 +812,7 @@ bool test_runtime_storage_cleanup_removes_trace_date_files() {
   std::filesystem::create_directories(trace_root / "20250101" / "OLD_SEAT_1");
   std::filesystem::create_directories(trace_root / "misc");
   {
-    std::ofstream(trace_root / "20250101" / "OLD_SEAT_1" / "raw.pgm") << "raw";
+    std::ofstream(trace_root / "20250101" / "OLD_SEAT_1" / "raw.png") << "raw";
     std::ofstream(trace_root / "display_latest.json") << "{}";
     std::ofstream(trace_root / "misc" / "keep.txt") << "keep";
   }
@@ -826,7 +826,7 @@ bool test_runtime_storage_cleanup_removes_trace_date_files() {
   const bool ok = seat_aoi::cleanup_runtime_storage_if_needed(
       config, trace_root.string(), &message);
   const bool passed = ok &&
-                      !std::filesystem::exists(trace_root / "20250101" / "OLD_SEAT_1" / "raw.pgm") &&
+                      !std::filesystem::exists(trace_root / "20250101" / "OLD_SEAT_1" / "raw.png") &&
                       std::filesystem::exists(trace_root / "20250101") &&
                       std::filesystem::exists(trace_root / "display_latest.json") &&
                       std::filesystem::exists(trace_root / "misc" / "keep.txt") &&

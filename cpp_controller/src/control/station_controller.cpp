@@ -62,7 +62,7 @@ bool save_original_images(const ImageSaveConfig& config,
   for (const auto& frame : bundle.frames) {
     const std::string path = build_original_image_path(config, date_dir, seat_id, frame);
     std::string save_error;
-    if (!write_pgm(path, frame.bytes, frame.meta.width, frame.meta.height, &save_error)) {
+    if (!write_png(path, frame.bytes, frame.meta.width, frame.meta.height, &save_error)) {
       const std::string message = "image save failed: " + save_error;
       if (force_fail_on_error || config.fail_on_save_error) {
         if (error_message != nullptr) {

@@ -11,6 +11,9 @@
 #include <system_error>
 #include <vector>
 
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "common/stb_image_write.h"
+
 #include "common/string_utils.hpp"
 #include "control/station_runtime_config.hpp"
 #include "ipc/frame_ring_buffer.hpp"
@@ -257,7 +260,7 @@ std::string build_original_image_path(const ImageSaveConfig& config,
   const std::string camera_id = fixed_cstr_to_string(frame.meta.camera_id, kStringIdSize);
   std::ostringstream filename;
   filename << safe_path_name(camera_id) << "_" << frame.meta.timestamp_us << "_L"
-           << frame.meta.light_index << "_original.pgm";
+           << frame.meta.light_index << "_original.png";
   const std::filesystem::path path =
       std::filesystem::path(config.root_dir) / safe_path_name(date_dir) /
       safe_path_name(seat_id) / filename.str();
@@ -374,6 +377,44 @@ bool runtime_storage_has_required_free_ratio(const ImageSaveConfig& config,
   if (config.cleanup_trace_root && !trace_root.empty() && !check_one(trace_root, "trace目录")) {
     return false;
   }
+  return true;
+}
+
+bool write_png(const std::string& path,
+               const std::vector<std::uint8_t>& bytes,
+               std::uint32_t width,
+               std::uint32_t height,
+               std::string* error) {
+  if (bytes.empty() || width == 0 || height == 0) {
+    if (error != nullptr) *error = "write_png: invalid image data";
+    return false;
+  }
+
+  // 确保目录存在
+  const auto last_sep = path.find_last_of("/\\");
+  if (last_sep != std::string::npos) {
+    std::string dir_error;
+    if (!make_dirs(path.substr(0, last_sep), &dir_error)) {
+      std::cerr << "image_writer mkdir warning: " << dir_error << std::endl;
+    }
+  }
+
+  const int stride = static_cast<int>(width);
+  const int result = stbi_write_png(
+      path.c_str(),
+      static_cast<int>(width),
+      static_cast<int>(height),
+      1,  // Mono8 = 1 channel
+      bytes.data(),
+      stride);
+
+  if (result == 0) {
+    if (error != nullptr) *error = "write_png: stbi_write_png failed " + path;
+    return false;
+  }
+
+  std::cout << "Image saved: " << path << " (" << bytes.size() << " bytes)"
+            << std::endl;
   return true;
 }
 
