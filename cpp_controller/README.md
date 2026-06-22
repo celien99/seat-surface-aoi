@@ -197,13 +197,13 @@ cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --cleanup
 ## 验证
 
 ```powershell
-cmake --build cpp_controller/build/codex-check --config Release
-cpp_controller\build\codex-check\Release\ipc_safety_checks.exe
+cmake --build cpp_controller/build --config Release
+cpp_controller\build\ipc_safety_checks.exe
 uv run python -m tools.validate_protocol
 uv run python tools/run_simulated_ipc.py
 ```
 
-本次主控收敛后，`ipc_safety_checks` 覆盖了以下关键点：
+本次主控收敛及代码优化后，`ipc_safety_checks` 覆盖了以下关键点：
 
 - CRC/slot 状态错误必须 fail closed。
 - 光源故障、缺帧、槽不可用、检测超时必须返回 `RECHECK`。
