@@ -502,10 +502,13 @@ bool FlAcdhLightController::trigger_channel(const LightChannelParam& channel,
             << "us delay=" << channel.trigger_delay_us
             << "us light_seq_index=" << light_seq_index << std::endl;
 
-  // 对齐 Deploy：每条命令按 C->B->8->9->A->7 顺序发送
+  // 当前已知 FL-ACDH 协议命令（来自手册）：C/B/9/A/D/E。
+  // 命令 '8' 未在用户 FL-ACDH 协议手册中记录，来自对齐的 Deploy 参考程序。
+  // 如果现场 FL-ACDH 返回 &（拒绝）且触发失败，将下方 allow_rejection 改为 true 跳过该命令，
+  // 或联系 FL-ACDH 厂商确认 '8' 命令含义后移除。
   if (!send_command('C', ch, "000", true, timeout_ms, error_message)) return false;
   if (!send_command('B', ch, "001", true, timeout_ms, error_message)) return false;
-  if (!send_command('8', ch, "000", false, timeout_ms, error_message)) return false;
+  if (!send_command('8', ch, "000", false, timeout_ms, error_message)) return false;  // ⚠️ 手册未记录
   if (!send_command('9', ch, strobe_val, false, timeout_ms, error_message)) return false;
   if (!send_command('A', ch, delay_val, false, timeout_ms, error_message)) return false;
   if (!send_command('7', ch, "000", false, timeout_ms, error_message)) return false;
