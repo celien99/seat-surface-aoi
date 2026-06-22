@@ -463,11 +463,28 @@ bool FrameAssembler::wait_view_light_frame(const ExternalTrigger& trigger,
                               light_seq_index,
                               out_frame,
                               config_.camera_timeout_ms)) {
+    const auto health = camera_ptr->get_health();
+    std::string serial_number;
+    std::string trigger_line;
+    for (const auto& camera : config_.cameras) {
+      if (camera.camera_index == view.camera_index) {
+        serial_number = camera.serial_number;
+        trigger_line = camera.trigger_line;
+        break;
+      }
+    }
     std::ostringstream oss;
     oss << "camera frame timeout view_id=" << view.view_id
         << " camera_index=" << view.camera_index
+        << " camera_id=" << view.camera_id
+        << " serial_number=" << serial_number
+        << " trigger_line=" << trigger_line
         << " light_index=" << light_param.light_index
-        << " light_seq_index=" << light_seq_index;
+        << " light_seq_index=" << light_seq_index
+        << " timeout_ms=" << config_.camera_timeout_ms
+        << " camera_health_ok=" << (health.ok ? "true" : "false")
+        << " dropped_frames=" << health.dropped_frames
+        << " camera_message=" << health.message;
     set_acquisition_error(error,
                           ErrorCode::MissingFrame,
                           AcquisitionStage::WaitFrame,

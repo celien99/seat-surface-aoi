@@ -12,7 +12,7 @@ flowchart LR
   Strobe --> L1["光源 1"]
   Strobe --> L2["光源 2"]
   Strobe --> L3["光源 3"]
-  Strobe --> F1["同步输出 F1 总线\nF1~F4 并联"]
+  Strobe --> F1["同步输出 F1 总线"]
   F1 --> Cam0["camera.0 TOP_BACK\n黄色 Line0"]
   F1 --> Cam1["camera.1 TOP_CUSHION\n黄色 Line0"]
   Cam0 --> Assembler
@@ -39,7 +39,8 @@ flowchart LR
 当前现场接线事实：
 
 - 工控机通过 RS232/USB 转串口连接 FL-ACDH，当前串口为 `COM1 / 9600 8N1`。
-- FL-ACDH 同步输出接口 `F1~F4` 已并联到 `F1` 总线，`F1` 总线并联到两台相机黄色 `Line0` 硬触发输入。
+- FL-ACDH 同步输出接口 `F1` 并联到两台相机黄色 `Line0` 硬触发输入；`F2/F3/F4` 不并接到 `F1`。
+- FL-ACDH `GND` 需要与两台相机 IO `GND` 共地。
 - 相机 `Line1` 的 `ExposureStartActive` 仅保留为调试/示波器输出，不参与当前触发闭环。
 
 C++ 主控只保留上述当前链路。非当前链路的兼容路径、未使用 backend 枚举和对应源码已移除；共享内存协议布局保持与 Python detector 二进制兼容，C++ 结构命名统一为固定机位视图语义。
@@ -97,6 +98,7 @@ cpp_controller/
 | `config/station_runtime.production.conf` | `online` | 生产 TCP 外部信号 + Hikrobot MVS + FL-ACDH + 共享内存检测。 |
 | `config/station_runtime.test.conf` | `online` | 手动触发联调真实相机和频闪，仍走共享内存检测。 |
 | `config/station_runtime.capture_only.conf` | `capture_only` | 手动触发采图，只保存 PGM 原图，不启用共享内存。 |
+| `config/station_runtime.capture_only.single_camera.conf` | `capture_only` | 单相机诊断采图，对齐外部成功程序的 `DA9184676 + COM1 + 光源1`。 |
 
 关键字段：
 
@@ -166,6 +168,9 @@ cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --config cpp_co
 
 # 采图模式，只保存原图
 cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.capture_only.conf --once
+
+# 单相机诊断采图，对齐外部成功程序
+cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.capture_only.single_camera.conf --once
 
 # 清理共享内存
 cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --cleanup
