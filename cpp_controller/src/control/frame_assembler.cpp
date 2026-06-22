@@ -35,19 +35,6 @@ void set_acquisition_error(AcquisitionError* error,
   error->message = message;
 }
 
-LightControllerConfig make_light_controller_config(const RuntimeLightConfig& config) {
-  LightControllerConfig controller_config;
-  controller_config.device_id = config.device_id;
-  controller_config.host = config.host;
-  controller_config.port = config.port;
-  controller_config.serial_port = config.serial_port;
-  controller_config.baud_rate = config.baud_rate;
-  controller_config.trigger_input_line = config.trigger_input_line;
-  controller_config.response_mode = config.response_mode;
-  controller_config.simulate_fault = config.simulate_fault;
-  return controller_config;
-}
-
 }  // namespace
 
 void FrameAssembler::configure(const StationRuntimeConfig& config) {

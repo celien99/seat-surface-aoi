@@ -9,6 +9,7 @@
 #include "control/fl_acdh_light_controller.hpp"
 #include "control/light_controller.hpp"
 #include "control/signal_client.hpp"
+#include "control/station_runtime_config.hpp"
 #include "control/tcp_signal_client.hpp"
 
 namespace seat_aoi {
@@ -129,6 +130,43 @@ private:
 };
 
 }  // namespace detail
+
+inline SignalClientConfig make_signal_client_config(const RuntimeSignalConfig& config) {
+  SignalClientConfig client_config;
+  client_config.station_id = config.station_id;
+  client_config.default_seat_id = config.default_seat_id;
+  client_config.default_sku = config.default_sku;
+  client_config.trigger_queue_path = config.trigger_queue_path;
+  client_config.result_queue_path = config.result_queue_path;
+  client_config.port = config.port;
+  client_config.delimiter = config.delimiter;
+  client_config.terminator = config.terminator;
+  client_config.ok_response = config.ok_response;
+  client_config.result_host = config.result_host;
+  client_config.result_port = config.result_port;
+  client_config.result_prefix = config.result_prefix;
+  client_config.result_delimiter = config.result_delimiter;
+  client_config.ok_text = config.ok_text;
+  client_config.ng_text = config.ng_text;
+  client_config.recheck_text = config.recheck_text;
+  client_config.error_text = config.error_text;
+  client_config.simulate_output_fault = config.simulate_output_fault;
+  client_config.simulate_trigger_timeout = config.simulate_trigger_timeout;
+  return client_config;
+}
+
+inline LightControllerConfig make_light_controller_config(const RuntimeLightConfig& config) {
+  LightControllerConfig controller_config;
+  controller_config.device_id = config.device_id;
+  controller_config.host = config.host;
+  controller_config.port = config.port;
+  controller_config.serial_port = config.serial_port;
+  controller_config.baud_rate = config.baud_rate;
+  controller_config.trigger_input_line = config.trigger_input_line;
+  controller_config.response_mode = config.response_mode;
+  controller_config.simulate_fault = config.simulate_fault;
+  return controller_config;
+}
 
 inline std::unique_ptr<ISignalClient> create_signal_client(HardwareBackend backend) {
   if (is_manual_trigger_backend(backend)) {
