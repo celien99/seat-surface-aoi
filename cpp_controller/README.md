@@ -12,7 +12,7 @@ flowchart LR
   Strobe --> L1["光源 1"]
   Strobe --> L2["光源 2"]
   Strobe --> L3["光源 3"]
-  Strobe --> F1["同步输出 F1 总线"]
+  Strobe --> F1["同步输出 F1~F3 合线"]
   F1 --> Cam0["camera.0 TOP_BACK\n黄色 Line0"]
   F1 --> Cam1["camera.1 TOP_CUSHION\n黄色 Line0"]
   Cam0 --> Assembler
@@ -39,7 +39,7 @@ flowchart LR
 当前现场接线事实：
 
 - 工控机通过 RS232/USB 转串口连接 FL-ACDH，当前串口为 `COM1 / 9600 8N1`。
-- FL-ACDH 同步输出接口 `F1` 并联到两台相机黄色 `Line0` 硬触发输入；`F2/F3/F4` 不并接到 `F1`。
+- FL-ACDH 同步输出接口 `F1~F3` 已短接合成一根触发线，并联到两台相机黄色 `Line0` 硬触发输入。
 - FL-ACDH `GND` 需要与两台相机 IO `GND` 共地。
 - 相机 `Line1` 的 `ExposureStartActive` 仅保留为调试/示波器输出，不参与当前触发闭环。
 
@@ -75,7 +75,7 @@ cpp_controller/
 
 1. 等待外部信号，生成 `ExternalTrigger`。
 2. `FrameAssembler` 初始化 1 台 FL-ACDH 和 2 台相机。
-3. 按光源顺序 1、2、3 逐路执行：先 arm 两台相机（更新曝光/增益）并排空 SDK 缓存，再触发 FL-ACDH，最后调用 `GetImageBuffer` 读取两台相机已缓存的硬触发帧。
+3. 按光源顺序 1、2、3 逐路执行：先 arm 两台相机（更新曝光/增益）并排空 SDK 缓存，再按 `C/B/8/9/A/7` 触发 FL-ACDH 且每条命令等待 `$` ACK，最后调用 `GetImageBuffer` 读取两台相机已缓存的硬触发帧。
 4. 组包为 6 帧，发布到 `/seat_aoi_cpp_to_py_frames_v1`。
 5. 等待 Python detector 写回 `/seat_aoi_py_to_cpp_results_v1`。
 6. 校验 `sequence_id`、`trigger_id`、`seat_id`、CRC 和结果语义。
@@ -117,12 +117,12 @@ camera.1.camera_id=TOP_CUSHION
 
 light.serial_port=COM1
 light.baud_rate=9600
-light.response_mode=none
+light.response_mode=ack
 light.trigger_input_line=F1
 
 # 超时配置（毫秒）
 camera_timeout_ms=5000
-light_timeout_ms=800
+light_timeout_ms=3000
 # arm 完成后到触发频闪前的相机稳定等待 (ms)
 arm_settle_ms=50
 # 单台相机连续失败多少次后自动重启该相机 (stop+start)，默认 2
@@ -200,6 +200,7 @@ uv run python tools/run_simulated_ipc.py
 - 光源故障、缺帧、槽不可用、检测超时必须返回 `RECHECK`。
 - `capture_only` 必须保存 6 张原图，且不能创建 Frame/Result 共享内存。
 - detector 返回语义非法时不能输出 `OK`。
+- 并行相机等待失败会透传单台相机的 `camera_message`，避免只看到泛化的 `camera timeout`。
 
 ## 安全规则
 

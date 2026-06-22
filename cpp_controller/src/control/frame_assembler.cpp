@@ -280,6 +280,7 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
         bool ok = false;
         CapturedFrame frame;
         std::size_t view_index = 0;
+        AcquisitionError error;
       };
       std::mutex wait_mutex;
       std::condition_variable wait_cv;
@@ -350,16 +351,21 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
           FrameResult result;
           result.view_index = vi;
           result.ok = wait_view_light_frame(trigger, capture_plan[vi], light_param,
-                                            light_seq_index, &result.frame, nullptr);
+                                            light_seq_index, &result.frame, &result.error);
           return result;
         }));
       }
       bool any_wait_failed = false;
+      std::ostringstream wait_failure_detail;
       for (auto& f : frame_futures) {
         auto result = f.get();
         if (!result.ok) {
           any_wait_failed = true;
           record_camera_failure(capture_plan[result.view_index].camera_index);
+          if (wait_failure_detail.tellp() > 0) {
+            wait_failure_detail << " | ";
+          }
+          wait_failure_detail << result.error.message;
           continue;
         }
         record_camera_success(capture_plan[result.view_index].camera_index);
@@ -373,7 +379,9 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
                               capture_plan.front().camera_index,
                               light_param.light_index,
                               light_seq_index,
-                              "one or more cameras timed out waiting for frame");
+                              wait_failure_detail.tellp() > 0
+                                  ? wait_failure_detail.str()
+                                  : "one or more cameras timed out waiting for frame");
         handle_acquisition_failure();
         return false;
       }

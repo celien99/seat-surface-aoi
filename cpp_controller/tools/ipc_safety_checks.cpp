@@ -499,7 +499,7 @@ bool test_runtime_light_channel_config_parses() {
                       config.lights[0].trigger_input_line == "F1" &&
                       config.max_camera_failures_before_reset == 2 &&
                       config.lights[0].response_mode ==
-                          seat_aoi::LightSerialResponseMode::None &&
+                          seat_aoi::LightSerialResponseMode::Ack &&
                       config.image_save.enabled &&
                       config.image_save.cleanup_enabled &&
                       config.image_save.cleanup_min_free_ratio == 0.20F;
@@ -898,7 +898,7 @@ bool test_single_camera_config_validates() {
         << "light.3.trigger_delay_us=10\n"
         << "light.3.gain=1.0\n"
         << "light.3.current_percent=55\n"
-        << "light.response_mode=none\n";
+        << "light.response_mode=ack\n";
   }
   seat_aoi::StationRuntimeConfig config;
   std::string error;
@@ -941,7 +941,7 @@ bool test_production_config_file_validates() {
                       config.lights[0].trigger_input_line == "F1" &&
                       config.max_camera_failures_before_reset == 2 &&
                       config.lights[0].response_mode ==
-                          seat_aoi::LightSerialResponseMode::None;
+                          seat_aoi::LightSerialResponseMode::Ack;
   if (!passed) {
     std::cerr << "production config did not validate expected fixed-camera strobe setup: "
               << error << "\n";

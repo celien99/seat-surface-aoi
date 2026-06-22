@@ -24,7 +24,7 @@ PLC/工位触发
 
 C++ 主控通过 `capture_schedule` 配置采集调度。`view_serial_tdm` 会让当前视角完成全部光源后再切换下一视角；`shared_light_parallel` 仅用于固定机位共享光源场景，同一路光源频闪前先 arm 所有固定机位相机并同步收图。固定机位模式下检测视角通常等于 `camera_id`；机器人飞拍模式下检测视角等于 `pose_id`，必须保持 pose 级串行，不能配置共享光源并行。
 
-当前固定机位接线以 FL-ACDH 同步输出 `F1` 总线触发相机 `Line0`，现场已将输出接口 `F1~F4` 并联到 `F1`，再并联到两台相机黄色 `Line0`。相机 `Line1` 的 `ExposureStartActive` 仅保留用于调试/示波器输出。C++ 负责配置、arm、收图和故障判断；真实频闪时刻由频闪控制器、相机触发线或现场 IO/PLC/运动控制器完成，不能让 Python 参与触发时序。
+当前固定机位接线以 FL-ACDH 同步输出触发相机 `Line0`，现场已将输出接口 `F1~F3` 短接合成一根触发线，再并联到两台相机黄色 `Line0`。相机 `Line1` 的 `ExposureStartActive` 仅保留用于调试/示波器输出。C++ 负责配置、arm、收图和故障判断；真实频闪时刻由频闪控制器、相机触发线或现场 IO/PLC/运动控制器完成，不能让 Python 参与触发时序。
 
 ## 常用运行命令
 
@@ -221,7 +221,7 @@ light.backend=serial_ascii
 light.device_id=FL-ACDH-20048-4
 light.serial_port=COM1
 light.baud_rate=9600
-light.response_mode=none
+light.response_mode=ack
 light.trigger_input_line=F1
 
 capture_mode=fixed_camera
@@ -244,7 +244,7 @@ light.1.current_percent=60
 
 `light.<N>.acquisition_mode` 默认为 `strobe`，会校验 `physical_channel/strobe_width_us/current_percent` 并触发频闪控制器；`ambient` 用于常亮 Dome ROI 采图，只校验曝光和增益，C++ 不会准备或触发频闪控制器，Hikrobot MVS 后端会改用 `TriggerSource=Software` 取图。
 
-`light.response_mode` 默认为 `ack`，要求 FL-ACDH 每条串口命令返回 `$`。若现场控制器或接线确认无回包，可在联调配置中改为 `none`，程序只校验串口写入成功；后续仍必须通过相机取帧、控制器指示灯或示波器确认 `7` 命令触发成功。写入失败、取帧超时、协议错误或未确认状态仍必须输出 `RECHECK/ERROR`，不能放行 `OK`。
+`light.response_mode` 默认为 `ack`，要求 FL-ACDH 每条串口命令返回 `$`，并利用 ACK 读回节拍避免 `C/B/8/9/A/7` 连续过快写入导致触发命令早于控制器参数生效。若现场控制器或接线确认无回包，可在联调配置中临时改为 `none`，程序只校验串口写入成功；后续仍必须通过相机取帧、控制器指示灯或示波器确认 `7` 命令触发成功。写入失败、取帧超时、协议错误或未确认状态仍必须输出 `RECHECK/ERROR`，不能放行 `OK`。
 
 要求 `strobe_width_us <= exposure_us`，电流、脉宽和触发延时不得超过控制器与光源规格。
 
