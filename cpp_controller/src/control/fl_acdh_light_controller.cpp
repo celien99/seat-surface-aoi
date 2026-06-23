@@ -402,7 +402,8 @@ bool FlAcdhLightController::send_command(char cmd, char channel,
   }
   if (error_message != nullptr) {
     std::ostringstream oss;
-    oss << "FL-ACDH cmd " << cmd << " ch=" << channel << " failed: " << cmd_error;
+    oss << "FL-ACDH cmd " << cmd << " ch=" << channel << " value=" << value
+        << " frame=" << build_frame(cmd, channel, value) << " failed: " << cmd_error;
     *error_message = oss.str();
   }
   return false;

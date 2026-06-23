@@ -97,9 +97,9 @@ cpp_controller/
 
 | 文件 | 模式 | 说明 |
 | --- | --- | --- |
-| `config/station_runtime.production.conf` | `online` | 生产 TCP 外部信号 + Hikrobot MVS + FL-ACDH + 共享内存检测；10ms 曝光，300/500/800us 频闪，gain=2.0，115200 波特率。 |
-| `config/station_runtime.test.conf` | `online` | 手动触发联调真实相机和频闪，仍走共享内存检测；参数同生产配置。 |
-| `config/station_runtime.capture_only.conf` | `capture_only` | 手动触发采图，保存 PNG 原图，不启用共享内存；参数同生产配置。 |
+| `config/station_runtime.production.conf` | `online` | 生产 TCP 外部信号 + Hikrobot MVS + FL-ACDH + 共享内存检测；COM1 / 9600 8N1，10ms 曝光，100/200/300us 频闪，gain=1.0。 |
+| `config/station_runtime.test.conf` | `online` | 手动触发联调真实相机和频闪，仍走共享内存检测；COM1 / 9600 8N1，参数同生产配置。 |
+| `config/station_runtime.capture_only.conf` | `capture_only` | 手动触发采图，保存 PNG 原图，不启用共享内存；COM1 / 9600 8N1，参数同生产配置。 |
 | `config/station_runtime.capture_only.single_camera.conf` | `capture_only` | 单相机诊断采图，对齐外部成功程序的 `DA9184676 + COM1 + 光源1`。 |
 
 关键字段：
@@ -118,23 +118,23 @@ camera.0.camera_id=TOP_BACK
 camera.1.camera_id=TOP_CUSHION
 
 light.serial_port=COM1
-light.baud_rate=115200          # 建议 ≥115200，9600 太慢
+light.baud_rate=9600            # FL-ACDH 说明书默认 9600 8N1，现场配置固定使用该值
 light.response_mode=ack
 light.trigger_input_line=F1
 
 # 频闪参数：strobe_width_us 控制单次脉冲亮度，gain 控制相机模拟增益。
 # 如果采图偏暗：先确认 FL-ACDH 物理旋钮/按键设置的 LED 电流档位足够，
-# 再尝试增大 strobe_width_us（≤ exposure_us）或 gain（≤ 相机上限）。
+# 再在现场可接受范围内尝试增大 strobe_width_us 或 gain（≤ 相机上限）。
 # FL-ACDH 协议手册中无串口电流设置命令，电流只能通过设备面板调节。
 light.1.exposure_us=10000
-light.1.strobe_width_us=300
-light.1.gain=2.0
+light.1.strobe_width_us=100
+light.1.gain=1.0
 light.2.exposure_us=10000
-light.2.strobe_width_us=500
-light.2.gain=2.0
+light.2.strobe_width_us=200
+light.2.gain=1.0
 light.3.exposure_us=10000
-light.3.strobe_width_us=800
-light.3.gain=2.0
+light.3.strobe_width_us=300
+light.3.gain=1.0
 
 # 超时配置（毫秒）
 camera_timeout_ms=5000
@@ -149,7 +149,7 @@ image_save.save_original=true
 ```
 
 > **FL-ACDH 已知协议命令**（来自手册）：C(联动模式)、B(触发电平)、9(联动频闪时间)、A(相机触发延时)、D(序列数)、E(同步信号 ID)。
-> 当前触发序列 `C→B→8→9→A→7` 中命令 `8` 和 `7` 未在手册记录，来自对齐的 Deploy 参考程序。如果现场 FL-ACDH 返回 `&` 拒绝，需排查这两个命令的正确性。
+> 当前触发序列 `C→B→8→9→A→7` 中命令 `8` 和 `7` 未在手册记录，来自对齐的 Deploy 参考程序。当前现场控制器会拒绝部分 `C/B` 设置命令，程序记录为非关键诊断并继续；如果 `9/A/7/8` 返回 `&`，会按光源故障保守输出 `RECHECK`，日志会打印被拒绝命令的通道、值和完整帧。
 
 `hardware_mode=production` 禁止 simulated/manual backend；`hardware_mode=lab` 可用 `manual_trigger` 做手动联调；不传 `--config` 时仍保留内置 simulated fallback，用于本地 IPC 回归。
 
