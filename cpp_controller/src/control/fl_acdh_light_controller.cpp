@@ -63,15 +63,11 @@ std::string FlAcdhLightController::build_frame(char cmd, char channel,
   payload.push_back(cmd);
   payload.push_back(channel);
   payload.append(value);
+  // FL-ACDH 协议帧为固定 8 字节格式：
+  //   特征字($) + 指令字 + 通道字 + 3字节数据 + 2字节异或和校验
+  // 控制器靠字节计数确定帧边界，不需要 \r\n 终结符。
   const std::string checksum = compute_checksum(payload);
-  // FL-ACDH ASCII 协议帧必须以 \r\n 结束，缺少终结符会导致控制器无法
-  // 识别命令边界，引发串口解析混乱并输出 &（拒绝）。
-  std::string frame;
-  frame.reserve(payload.size() + 2 + 2);
-  frame = payload;
-  frame.append(checksum);
-  frame.append("\r\n");
-  return frame;
+  return payload + checksum;
 }
 
 char FlAcdhLightController::channel_char(std::uint32_t physical_channel) {
@@ -512,13 +508,16 @@ bool FlAcdhLightController::trigger_channel(const LightChannelParam& channel,
             << "us delay=" << channel.trigger_delay_us
             << "us light_seq_index=" << light_seq_index << std::endl;
 
-  // 当前已知 FL-ACDH 协议命令（来自手册）：C/B/9/A/D/E。
-  // 命令 '8' 未在用户 FL-ACDH 协议手册中记录，来自对齐的 Deploy 参考程序。
-  // 如果现场 FL-ACDH 返回 &（拒绝）且触发失败，将下方 allow_rejection 改为 true 跳过该命令，
-  // 或联系 FL-ACDH 厂商确认 '8' 命令含义后移除。
+  // FL-ACDH 协议命令（来自手册表9）：
+  //   C: 设置联动模式（000=无联动）
+  //   B: 设置触发电平（001=上升沿触发）
+  //   8: 设置触发模式（000=外触发模式）
+  //   9: 设置联动频闪时间（000~999us）
+  //   A: 设置相机触发延时时间（5~99us）
+  //   7: 远程通信触发（内触发模式下无效）
   if (!send_command('C', ch, "000", true, timeout_ms, error_message)) return false;
   if (!send_command('B', ch, "001", true, timeout_ms, error_message)) return false;
-  if (!send_command('8', ch, "000", false, timeout_ms, error_message)) return false;  // ⚠️ 手册未记录
+  if (!send_command('8', ch, "000", false, timeout_ms, error_message)) return false;
   if (!send_command('9', ch, strobe_val, false, timeout_ms, error_message)) return false;
   if (!send_command('A', ch, delay_val, false, timeout_ms, error_message)) return false;
   if (!send_command('7', ch, "000", false, timeout_ms, error_message)) return false;
