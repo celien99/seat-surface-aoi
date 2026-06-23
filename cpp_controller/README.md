@@ -139,10 +139,8 @@ light.3.gain=1.0
 # 超时配置（毫秒）
 camera_timeout_ms=5000
 light_timeout_ms=3000
-# arm 完成后到触发频闪前的相机稳定等待 (ms)
 arm_settle_ms=50
-# 单台相机连续失败多少次后自动重启该相机 (stop+start)，默认 2
-# max_camera_failures_before_reset=2
+max_camera_failures_before_reset=2
 
 image_save.enabled=true
 image_save.save_original=true
