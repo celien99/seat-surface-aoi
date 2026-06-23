@@ -64,7 +64,14 @@ std::string FlAcdhLightController::build_frame(char cmd, char channel,
   payload.push_back(channel);
   payload.append(value);
   const std::string checksum = compute_checksum(payload);
-  return payload + checksum;
+  // FL-ACDH ASCII 协议帧必须以 \r\n 结束，缺少终结符会导致控制器无法
+  // 识别命令边界，引发串口解析混乱并输出 &（拒绝）。
+  std::string frame;
+  frame.reserve(payload.size() + 2 + 2);
+  frame = payload;
+  frame.append(checksum);
+  frame.append("\r\n");
+  return frame;
 }
 
 char FlAcdhLightController::channel_char(std::uint32_t physical_channel) {
@@ -127,8 +134,8 @@ bool FlAcdhLightController::open_serial(const std::string& port,
   dcb.Parity = NOPARITY;
   dcb.StopBits = ONESTOPBIT;
   dcb.fBinary = TRUE;
-  dcb.fDtrControl = DTR_CONTROL_ENABLE;
-  dcb.fRtsControl = RTS_CONTROL_ENABLE;
+  dcb.fDtrControl = DTR_CONTROL_DISABLE;
+  dcb.fRtsControl = RTS_CONTROL_DISABLE;
   if (!SetCommState(h, &dcb)) {
     CloseHandle(h);
     if (error_message != nullptr) {
