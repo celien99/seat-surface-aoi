@@ -24,7 +24,7 @@ flowchart LR
 
 - 接收外部信号：`manual_trigger`、`external_signal`、`tcp_signal`，以及本地回归用 `simulated`。
 - 连接当前型号频闪控制器：`light.backend=serial_ascii`，适配 FL-ACDH。
-- 相机链路：本地回归 `simulated`，现场 `hikrobot_mvs`；真实采集对齐现场可工作的参考程序，先排空相机 SDK 缓存并 arm 相机，再由 FL-ACDH 触发曝光，最后调用 `GetImageBuffer` 读取已缓存的硬触发帧。当前生产、联调和采图配置统一使用 `COM1 / 9600 8N1`、10ms 相机曝光和 100/200/300us 三路频闪脉宽，避免 FL-ACDH 拒绝超出现场可接受范围的 `9` 频闪时间命令。单台相机连续失败后自动 stop+start 重启恢复。
+- 相机链路：本地回归 `simulated`，现场 `hikrobot_mvs`；真实采集对齐现场可工作的参考程序，启动/重启相机时排空 SDK 缓存，采集轮次只 arm 相机并等待 FL-ACDH 硬触发，触发后调用 `GetImageBuffer` 读取硬触发帧。当前生产、联调和采图配置统一使用 `COM1 / 9600 8N1`、10ms 相机曝光和 100/200/300us 三路频闪脉宽，避免 FL-ACDH 拒绝超出现场可接受范围的 `9` 频闪时间命令。单台相机连续失败后自动 stop+start 重启恢复。
 - 固定采集方式：2 个机位共享 3 路光源，`capture_mode=fixed_camera`、`capture_schedule=shared_light_parallel`、`light_order=1,2,3`。
 - 当前现场接线：工控机通过 RS232/USB 转串口连接 FL-ACDH；FL-ACDH 同步输出 `F1~F3` 已短接合成一根触发线，并联到两台相机黄色 `Line0`；FL-ACDH `GND` 与相机 IO `GND` 共地；相机 `Line1` 仅保留为调试输出。
 - 在线模式使用共享内存和 Python detector；采图模式不启用共享内存，只采图保存原图并向外部信号回传 `RECHECK`。

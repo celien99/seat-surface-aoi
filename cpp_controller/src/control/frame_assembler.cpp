@@ -294,49 +294,11 @@ bool FrameAssembler::fire_one_light_step(
     std::vector<std::vector<CapturedFrame>>& frames_by_view,
     std::vector<std::vector<bool>>& captured,
     AcquisitionError* error) {
-  // 对齐现场参考程序：先 drain 残留帧并同步所有相机，再触发 FL-ACDH，最后取帧
+  // 对齐现场参考程序：相机已处于硬触发等待状态，触发 FL-ACDH 后立即取帧。
+  // 不在每轮触发前调用阻塞式 GetImageBuffer drain，避免硬触发模式下额外
+  // 等待取帧扰乱触发窗口。启动和相机重启时仍会排空旧帧。
 
-  // 1. 并行 drain stale frames + 同步屏障
-  {
-    std::mutex wait_mutex;
-    std::condition_variable wait_cv;
-    std::uint32_t cameras_ready = 0;
-    std::vector<std::future<bool>> drain_futures;
-    drain_futures.reserve(views.size());
-    for (std::size_t vi = 0; vi < views.size(); ++vi) {
-      drain_futures.push_back(std::async(std::launch::async, [&, vi]() {
-        auto* cam = camera_for_index(views[vi].camera_index);
-        if (cam != nullptr) {
-          cam->drain_stale_frames(100);
-        }
-        {
-          std::lock_guard<std::mutex> lock(wait_mutex);
-          ++cameras_ready;
-        }
-        wait_cv.notify_one();
-        return cam != nullptr;
-      }));
-    }
-    {
-      std::unique_lock<std::mutex> lock(wait_mutex);
-      wait_cv.wait(lock, [&]() {
-        return cameras_ready == static_cast<std::uint32_t>(views.size());
-      });
-    }
-    for (auto& f : drain_futures) {
-      if (!f.get()) {
-        set_acquisition_error(error, ErrorCode::CameraFault,
-                              AcquisitionStage::ArmCamera,
-                              views.front().camera_index,
-                              light_param.light_index, light_seq_index,
-                              "one or more cameras missing before light trigger");
-        handle_acquisition_failure();
-        return false;
-      }
-    }
-  }
-
-  // 2. 短稳定延迟后触发 FL-ACDH
+  // 1. 短稳定延迟后触发 FL-ACDH
   std::this_thread::sleep_for(std::chrono::milliseconds(2));
   if (!light_controllers_.front()->trigger_channel(
           light_param, trigger.trigger_id, light_seq_index,
@@ -353,7 +315,7 @@ bool FrameAssembler::fire_one_light_step(
     return false;
   }
 
-  // 3. 并行等待所有相机获取硬触发帧
+  // 2. 并行等待所有相机获取硬触发帧
   {
     struct FrameResult {
       bool ok = false;

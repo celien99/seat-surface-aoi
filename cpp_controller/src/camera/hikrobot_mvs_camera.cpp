@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <iostream>
 #include <mutex>
 #include <sstream>
 
@@ -78,6 +79,17 @@ bool set_enum_by_string(void* handle,
     *error_message = mvs_error(key, ret);
   }
   return false;
+}
+
+void try_set_enum_by_string(void* handle,
+                            const char* key,
+                            const std::string& value,
+                            const std::string& camera_id) {
+  std::string error;
+  if (!set_enum_by_string(handle, key, value, &error)) {
+    std::cerr << "Hikrobot MVS camera " << camera_id << ": optional " << key
+              << "=" << value << " failed: " << error << std::endl;
+  }
 }
 
 bool set_float_value(void* handle,
@@ -271,15 +283,25 @@ bool HikrobotMvsCamera::initialize(const CameraConfig& config) {
   if (!set_enum_by_string(handle_, "PixelFormat", config_.pixel_format, &error) ||
       !set_int_value(handle_, "Width", config_.width, &error) ||
       !set_int_value(handle_, "Height", config_.height, &error) ||
-      !set_enum_by_string(handle_, "AcquisitionMode", "Continuous", &error) ||
-      !set_enum_by_string(handle_, "TriggerMode", "On", &error)) {
+      !set_enum_by_string(handle_, "AcquisitionMode", "Continuous", &error)) {
     set_error(error);
     close();
     return false;
   }
-
   if (config_.trigger_line.empty()) {
     set_error("Hikrobot MVS trigger_line is required for FL-ACDH strobe capture");
+    close();
+    return false;
+  }
+  // 明确把触发线配置为输入。LineMode/LineSelector 在不同固件上可能不可写；
+  // 不支持时只输出诊断，避免误伤已经能按默认输入工作的相机。
+  try_set_enum_by_string(handle_, "LineSelector", config_.trigger_line, config_.camera_id);
+  try_set_enum_by_string(handle_, "LineMode", "Input", config_.camera_id);
+  // 部分海康机型默认 TriggerSelector 不一定是 FrameStart，显式设置可避免
+  // Line0 有脉冲但不触发曝光。老固件若不支持该节点，仅记录诊断继续。
+  try_set_enum_by_string(handle_, "TriggerSelector", "FrameStart", config_.camera_id);
+  if (!set_enum_by_string(handle_, "TriggerMode", "On", &error)) {
+    set_error(error);
     close();
     return false;
   }

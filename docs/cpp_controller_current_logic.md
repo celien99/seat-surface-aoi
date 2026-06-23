@@ -65,7 +65,6 @@ main.cpp
           -> 每路光源循环:
               -> 并行 arm 所有相机，仅更新 ExposureTime/Gain
               -> 等待 arm_settle_ms
-              -> 并行 drain_stale_frames()
               -> FL-ACDH trigger_channel(C/B/8/9/A/7)
               -> 并行 wait_frame(GetImageBuffer)
           -> 物理按光源采集，发布前重排为 view 优先
@@ -81,7 +80,7 @@ main.cpp
 
 - 相机初始化时设置 `Continuous + TriggerMode On + TriggerSource=Line0 + RisingEdge`。
 - `arm()` 阶段不重复写 `TriggerSource`，只更新曝光和增益，避免相机短暂错过硬触发沿。
-- 每路光源触发前都会排空旧帧，降低读到上一次缓存帧的风险。
+- SDK 缓存只在相机启动或重启时排空；每路光源触发前不再阻塞调用 `GetImageBuffer` drain，避免硬触发模式下额外等待取帧扰乱触发窗口。
 - 物理采集顺序是“光源优先、相机并行”，共享内存发布顺序是“机位优先、光源顺序”，方便 Python 按视角组包。
 
 ## 在线模式与采图模式
