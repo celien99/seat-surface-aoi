@@ -46,9 +46,9 @@ struct StationConfig {
   RuntimeLightConfig light;
   std::vector<RuntimeLightConfig> lights;
   std::vector<RuntimeLightChannelConfig> light_channels = {
-      RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F},
-      RuntimeLightChannelConfig{0, 2, 2, 800, 800, 0, 1.0F, 60.0F},
-      RuntimeLightChannelConfig{0, 3, 3, 800, 800, 0, 1.0F, 55.0F},
+      RuntimeLightChannelConfig{0, 1, 1, 800, 800, 10, 1.0F, 60.0F},
+      RuntimeLightChannelConfig{0, 2, 2, 800, 800, 10, 1.0F, 60.0F},
+      RuntimeLightChannelConfig{0, 3, 3, 800, 800, 10, 1.0F, 55.0F},
   };
   RuntimeSignalConfig signal;
   bool simulate_light_fault = false;

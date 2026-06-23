@@ -21,7 +21,7 @@ struct LightChannelParam {
   std::uint32_t physical_channel = 0;
   std::uint32_t exposure_us = 0;
   std::uint32_t strobe_width_us = 0;
-  std::uint32_t trigger_delay_us = 0;
+  std::uint32_t trigger_delay_us = 10;
   float gain = 1.0F;
   float current_percent = 0.0F;
   bool enabled = true;                  // 单步跳过（对齐 Deploy lights[].enabled）
@@ -66,7 +66,7 @@ public:
                                 std::uint64_t trigger_id,
                                 int timeout_ms,
                                 std::string* error_message) = 0;
-  /// 完整频闪序列：配置（C→B→8→9→A）→ 点火（7）→ 等待响应。
+  /// 完整频闪序列：配置（8→9→A）→ 点火（7）→ 等待响应。
   /// 对应 Deploy 的每个光源步骤。
   virtual bool trigger_channel(const LightChannelParam& channel,
                                std::uint64_t trigger_id,

@@ -362,7 +362,7 @@ bool test_station_fault_returns_recheck(const std::string& name,
   config.recipe_id = "seat_a_black_leather_v1";
   config.light_order = {1};
   config.light_channels = {
-      seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F},
+      seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 10, 1.0F, 60.0F},
   };
 
   seat_aoi::StationController station;
@@ -485,17 +485,17 @@ bool test_runtime_light_channel_config_parses() {
                       config.light_channels.size() >= 3 &&
                       config.light_channels[0].light_index == 1 &&
                       config.light_channels[0].physical_channel == 1 &&
-                      config.light_channels[0].exposure_us == 10000 &&
-                      config.light_channels[0].strobe_width_us == 100 &&
+                      config.light_channels[0].exposure_us == 15000 &&
+                      config.light_channels[0].strobe_width_us == 300 &&
                       config.light_channels[0].trigger_delay_us == 10 &&
                       config.light_channels[0].gain == 1.0F &&
                       config.light_channels[0].current_percent == 60.0F &&
                       config.light_channels[1].light_index == 2 &&
                       config.light_channels[1].physical_channel == 2 &&
-                      config.light_channels[1].strobe_width_us == 200 &&
+                      config.light_channels[1].strobe_width_us == 500 &&
                       config.light_channels[2].light_index == 3 &&
                       config.light_channels[2].physical_channel == 3 &&
-                      config.light_channels[2].strobe_width_us == 300 &&
+                      config.light_channels[2].strobe_width_us == 700 &&
                       config.light_channels[2].current_percent == 55.0F &&
                       config.lights[0].serial_port == "COM1" &&
                       config.lights[0].baud_rate == 9600 &&
@@ -538,8 +538,8 @@ bool test_runtime_multi_light_controller_config_rejected() {
         << "critical_recheck_threshold=5\n"
         << "light_order=1,2\n"
         << "light.1.physical_channel=1\n"
-        << "light.1.exposure_us=10000\n"
-        << "light.1.strobe_width_us=100\n"
+        << "light.1.exposure_us=15000\n"
+        << "light.1.strobe_width_us=300\n"
         << "light.1.trigger_delay_us=10\n"
         << "light.1.gain=1.0\n"
         << "light.1.current_percent=60\n"
@@ -583,7 +583,7 @@ bool test_station_storage_failure_returns_recheck_before_capture() {
   config.recipe_id = "seat_a_black_leather_v1";
   config.light_order = {1};
   config.light_channels = {
-      seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F},
+      seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 10, 1.0F, 60.0F},
   };
   config.trace_root = trace_root.string();
   config.image_save.enabled = true;
@@ -706,9 +706,9 @@ bool test_invalid_light_controller_index_rejected() {
   seat_aoi::StationRuntimeConfig config;
   config.light_order = {1, 2, 3};
   config.light_channels = {
-      seat_aoi::RuntimeLightChannelConfig{1, 1, 1, 800, 800, 0, 1.0F, 60.0F},
-      seat_aoi::RuntimeLightChannelConfig{0, 2, 2, 800, 800, 0, 1.0F, 60.0F},
-      seat_aoi::RuntimeLightChannelConfig{0, 3, 3, 800, 800, 0, 1.0F, 55.0F},
+      seat_aoi::RuntimeLightChannelConfig{1, 1, 1, 800, 800, 10, 1.0F, 60.0F},
+      seat_aoi::RuntimeLightChannelConfig{0, 2, 2, 800, 800, 10, 1.0F, 60.0F},
+      seat_aoi::RuntimeLightChannelConfig{0, 3, 3, 800, 800, 10, 1.0F, 55.0F},
   };
   config.lights = {seat_aoi::RuntimeLightConfig{}};
   std::string error;
@@ -884,20 +884,20 @@ bool test_single_camera_config_validates() {
         << "light.baud_rate=9600\n"
         << "light.trigger_input_line=F1\n"
         << "light.1.physical_channel=1\n"
-        << "light.1.exposure_us=10000\n"
-        << "light.1.strobe_width_us=100\n"
+        << "light.1.exposure_us=15000\n"
+        << "light.1.strobe_width_us=300\n"
         << "light.1.trigger_delay_us=10\n"
         << "light.1.gain=1.0\n"
         << "light.1.current_percent=60\n"
         << "light.2.physical_channel=2\n"
-        << "light.2.exposure_us=10000\n"
-        << "light.2.strobe_width_us=200\n"
+        << "light.2.exposure_us=15000\n"
+        << "light.2.strobe_width_us=500\n"
         << "light.2.trigger_delay_us=10\n"
         << "light.2.gain=1.0\n"
         << "light.2.current_percent=60\n"
         << "light.3.physical_channel=3\n"
-        << "light.3.exposure_us=10000\n"
-        << "light.3.strobe_width_us=300\n"
+        << "light.3.exposure_us=15000\n"
+        << "light.3.strobe_width_us=700\n"
         << "light.3.trigger_delay_us=10\n"
         << "light.3.gain=1.0\n"
         << "light.3.current_percent=55\n"
@@ -967,6 +967,15 @@ seat_aoi::StationRuntimeConfig make_filled_production_runtime_config() {
   config.lights[0].serial_port = "COM1";
   config.lights[0].baud_rate = 9600;
   config.lights[0].trigger_input_line = "F1";
+  config.light_channels[0].exposure_us = 15000;
+  config.light_channels[0].strobe_width_us = 300;
+  config.light_channels[0].trigger_delay_us = 10;
+  config.light_channels[1].exposure_us = 15000;
+  config.light_channels[1].strobe_width_us = 500;
+  config.light_channels[1].trigger_delay_us = 10;
+  config.light_channels[2].exposure_us = 15000;
+  config.light_channels[2].strobe_width_us = 700;
+  config.light_channels[2].trigger_delay_us = 10;
   for (auto& camera : config.cameras) {
     camera.serial_number = "CAM_SN_" + std::to_string(camera.camera_index);
     camera.trigger_line = "Line0";
@@ -1075,6 +1084,34 @@ bool test_strobe_width_larger_than_exposure_rejected() {
   return passed;
 }
 
+bool test_fl_acdh_timing_limits_rejected() {
+  auto config = make_filled_production_runtime_config();
+  config.light_channels[0].strobe_width_us = 9;
+  std::string error;
+  const bool low_strobe_ok = seat_aoi::validate_station_runtime_config(config, &error);
+
+  config = make_filled_production_runtime_config();
+  config.light_channels[0].strobe_width_us = 1000;
+  error.clear();
+  const bool high_strobe_ok = seat_aoi::validate_station_runtime_config(config, &error);
+
+  config = make_filled_production_runtime_config();
+  config.light_channels[0].trigger_delay_us = 4;
+  error.clear();
+  const bool low_delay_ok = seat_aoi::validate_station_runtime_config(config, &error);
+
+  config = make_filled_production_runtime_config();
+  config.light_channels[0].trigger_delay_us = 100;
+  error.clear();
+  const bool high_delay_ok = seat_aoi::validate_station_runtime_config(config, &error);
+
+  const bool passed = !low_strobe_ok && !high_strobe_ok && !low_delay_ok && !high_delay_ok;
+  if (!passed) {
+    std::cerr << "FL-ACDH timing limits were not rejected\n";
+  }
+  return passed;
+}
+
 bool test_invalid_health_threshold_rejected() {
   auto config = make_filled_production_runtime_config();
   config.warning_recheck_threshold = 3;
@@ -1096,9 +1133,9 @@ bool test_frame_slot_size_accounts_for_pixel_format_bytes() {
   };
   config.light_order = {1, 2, 3};
   config.light_channels = {
-      seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F},
-      seat_aoi::RuntimeLightChannelConfig{0, 2, 2, 800, 800, 0, 1.0F, 60.0F},
-      seat_aoi::RuntimeLightChannelConfig{0, 3, 3, 800, 800, 0, 1.0F, 55.0F},
+      seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 10, 1.0F, 60.0F},
+      seat_aoi::RuntimeLightChannelConfig{0, 2, 2, 800, 800, 10, 1.0F, 60.0F},
+      seat_aoi::RuntimeLightChannelConfig{0, 3, 3, 800, 800, 10, 1.0F, 55.0F},
   };
   config.frame_slot_size =
       static_cast<std::uint32_t>(seat_aoi::frame_slot_image_offset(6) + 64U * 48U * 6U);
@@ -1150,7 +1187,7 @@ bool test_detector_timeout_fault_recovers_on_next_trigger() {
   config.recipe_id = "seat_a_black_leather_v1";
   config.light_order = {1};
   config.light_channels = {
-      seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F},
+      seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 10, 1.0F, 60.0F},
   };
 
   seat_aoi::StationController station;
@@ -1319,7 +1356,7 @@ bool test_station_writes_detector_timeout_event_log() {
   config.recipe_id = "seat_a_black_leather_v1";
   config.light_order = {1};
   config.light_channels = {
-      seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F},
+      seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 10, 1.0F, 60.0F},
   };
   config.trace_root = trace_root.string();
 
@@ -1495,6 +1532,9 @@ int main() {
     return 1;
   }
   if (!test_strobe_width_larger_than_exposure_rejected()) {
+    return 1;
+  }
+  if (!test_fl_acdh_timing_limits_rejected()) {
     return 1;
   }
   if (!test_invalid_health_threshold_rejected()) {

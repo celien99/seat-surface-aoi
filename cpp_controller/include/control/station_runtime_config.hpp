@@ -65,7 +65,7 @@ struct RuntimeLightChannelConfig {
   std::uint32_t physical_channel = 0;
   std::uint32_t exposure_us = 800;
   std::uint32_t strobe_width_us = 800;
-  std::uint32_t trigger_delay_us = 0;
+  std::uint32_t trigger_delay_us = 10;
   float gain = 1.0F;
   float current_percent = 60.0F;
   LightAcquisitionMode acquisition_mode = LightAcquisitionMode::Strobe;
@@ -134,9 +134,9 @@ struct StationRuntimeConfig {
   };
   std::vector<RuntimeLightConfig> lights = {RuntimeLightConfig{}};
   std::vector<RuntimeLightChannelConfig> light_channels = {
-      RuntimeLightChannelConfig{0, 1, 1, 800, 800, 0, 1.0F, 60.0F, LightAcquisitionMode::Strobe},
-      RuntimeLightChannelConfig{0, 2, 2, 800, 800, 0, 1.0F, 60.0F, LightAcquisitionMode::Strobe},
-      RuntimeLightChannelConfig{0, 3, 3, 800, 800, 0, 1.0F, 55.0F, LightAcquisitionMode::Strobe},
+      RuntimeLightChannelConfig{0, 1, 1, 800, 800, 10, 1.0F, 60.0F, LightAcquisitionMode::Strobe},
+      RuntimeLightChannelConfig{0, 2, 2, 800, 800, 10, 1.0F, 60.0F, LightAcquisitionMode::Strobe},
+      RuntimeLightChannelConfig{0, 3, 3, 800, 800, 10, 1.0F, 55.0F, LightAcquisitionMode::Strobe},
   };
   RuntimeSignalConfig signal;
   ImageSaveConfig image_save;

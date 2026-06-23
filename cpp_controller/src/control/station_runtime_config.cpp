@@ -423,8 +423,11 @@ bool validate_light_channels(const StationRuntimeConfig& config,
         channel.acquisition_mode != LightAcquisitionMode::Strobe ||
         channel.physical_channel == 0 ||
         channel.exposure_us == 0 ||
-        channel.strobe_width_us == 0 ||
+        channel.strobe_width_us < 10 ||
+        channel.strobe_width_us > 999 ||
         channel.strobe_width_us > channel.exposure_us ||
+        channel.trigger_delay_us < 5 ||
+        channel.trigger_delay_us > 99 ||
         channel.gain <= 0.0F ||
         channel.current_percent <= 0.0F ||
         channel.current_percent > 100.0F) {

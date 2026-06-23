@@ -387,7 +387,6 @@ bool FlAcdhLightController::send_frame(const std::string& frame,
 
 bool FlAcdhLightController::send_command(char cmd, char channel,
                                           const std::string& value,
-                                          bool allow_rejection,
                                           int timeout_ms,
                                           std::string* error_message) {
   const std::string frame = build_frame(cmd, channel, value);
@@ -395,15 +394,6 @@ bool FlAcdhLightController::send_command(char cmd, char channel,
   const bool ok = send_frame(frame, timeout_ms, &cmd_error);
   if (ok) {
     return true;
-  }
-  if (allow_rejection) {
-    // C/B 命令可能被部分 FL-ACDH 拒绝，记录日志并继续执行，
-    // 但累计计数用于健康监控，避免故障被长期掩盖。
-    ++c_b_rejected_count_;
-    std::cout << "FL-ACDH " << serial_port_ << " cmd " << cmd
-              << " rejected (non-critical, count=" << c_b_rejected_count_
-              << "): " << cmd_error << std::endl;
-    return true;  // 不被视为失败
   }
   if (error_message != nullptr) {
     std::ostringstream oss;
@@ -509,18 +499,19 @@ bool FlAcdhLightController::trigger_channel(const LightChannelParam& channel,
             << "us light_seq_index=" << light_seq_index << std::endl;
 
   // FL-ACDH 协议命令（来自手册表9）：
-  //   C: 设置联动模式（000=无联动）
-  //   B: 设置触发电平（001=上升沿触发）
   //   8: 设置触发模式（000=外触发模式）
   //   9: 设置联动频闪时间（000~999us）
   //   A: 设置相机触发延时时间（5~99us）
   //   7: 远程通信触发（内触发模式下无效）
-  if (!send_command('C', ch, "000", true, timeout_ms, error_message)) return false;
-  if (!send_command('B', ch, "001", true, timeout_ms, error_message)) return false;
-  if (!send_command('8', ch, "000", false, timeout_ms, error_message)) return false;
-  if (!send_command('9', ch, strobe_val, false, timeout_ms, error_message)) return false;
-  if (!send_command('A', ch, delay_val, false, timeout_ms, error_message)) return false;
-  if (!send_command('7', ch, "000", false, timeout_ms, error_message)) return false;
+  //
+  // 当前采图链路使用串口远程触发，不依赖 IO/序列/组合联动，也不依赖
+  // 外部 Tx+/Tx- 输入边沿。现场 FL-ACDH 固件会拒绝 C/B 设置命令，但
+  // 8/9/A/7 可稳定完成采图；因此触发路径只发送关键命令，避免正常采图
+  // 时产生拒绝日志和健康状态噪声。
+  if (!send_command('8', ch, "000", timeout_ms, error_message)) return false;
+  if (!send_command('9', ch, strobe_val, timeout_ms, error_message)) return false;
+  if (!send_command('A', ch, delay_val, timeout_ms, error_message)) return false;
+  if (!send_command('7', ch, "000", timeout_ms, error_message)) return false;
 
   std::cout << "FL-ACDH " << serial_port_ << " ch=" << channel.physical_channel
             << " triggered" << std::endl;
@@ -551,10 +542,6 @@ LightHealth FlAcdhLightController::get_health() const {
     health.message = "FL-ACDH serial " + serial_port_ + " @ " +
                      std::to_string(baud_rate_) + " response_mode=" +
                      (response_mode_ == LightSerialResponseMode::None ? "none" : "ack");
-    if (c_b_rejected_count_ >= kCBRejectedWarningThreshold) {
-      health.message += " C/B_rejected=" + std::to_string(c_b_rejected_count_);
-      health.ok = false;
-    }
   }
   return health;
 }

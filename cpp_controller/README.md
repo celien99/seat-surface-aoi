@@ -77,7 +77,7 @@ cpp_controller/
 
 1. 等待外部信号，生成 `ExternalTrigger`。
 2. `FrameAssembler` 初始化 1 台 FL-ACDH 和 2 台相机。
-3. 按光源顺序 1、2、3 逐路执行：先 arm 两台相机（更新曝光/增益），再并行 drain 所有相机 SDK 缓冲区中的残留帧（arm() 改曝光参数可能在 Continuous 模式下即时产生一帧），然后按 `C/B/8/9/A/7` 触发 FL-ACDH 且每条命令等待 `$` ACK，最后调用 `GetImageBuffer` 读取两台相机已缓存的硬触发帧；相机启动或故障重启时 `start()/cancel_wait()` 也会排空旧帧。
+3. 按光源顺序 1、2、3 逐路执行：先 arm 两台相机（更新曝光/增益），再并行 drain 所有相机 SDK 缓冲区中的残留帧（arm() 改曝光参数可能在 Continuous 模式下即时产生一帧），然后按 `8/9/A/7` 触发 FL-ACDH 且每条命令等待 `$` ACK，最后调用 `GetImageBuffer` 读取两台相机已缓存的硬触发帧；相机启动或故障重启时 `start()/cancel_wait()` 也会排空旧帧。
 4. 组包为 6 帧，发布到 `/seat_aoi_cpp_to_py_frames_v1`。
 5. 等待 Python detector 写回 `/seat_aoi_py_to_cpp_results_v1`。
 6. 校验 `sequence_id`、`trigger_id`、`seat_id`、CRC 和结果语义。
@@ -97,7 +97,7 @@ cpp_controller/
 
 | 文件 | 模式 | 说明 |
 | --- | --- | --- |
-| `config/station_runtime.production.conf` | `online` | 生产 TCP 外部信号 + Hikrobot MVS + FL-ACDH + 共享内存检测；COM1 / 9600 8N1，10ms 曝光，100/200/300us 频闪，gain=1.0。 |
+| `config/station_runtime.production.conf` | `online` | 生产 TCP 外部信号 + Hikrobot MVS + FL-ACDH + 共享内存检测；COM1 / 9600 8N1，15ms 曝光，300/500/700us 频闪，gain=1.0。 |
 | `config/station_runtime.test.conf` | `online` | 手动触发联调真实相机和频闪，仍走共享内存检测；COM1 / 9600 8N1，参数同生产配置。 |
 | `config/station_runtime.capture_only.conf` | `capture_only` | 手动触发采图，保存 PNG 原图，不启用共享内存；COM1 / 9600 8N1，参数同生产配置。 |
 | `config/station_runtime.capture_only.single_camera.conf` | `capture_only` | 单相机诊断采图，对齐外部成功程序的 `DA9184676 + COM1 + 光源1`。 |
@@ -126,14 +126,14 @@ light.trigger_input_line=F1
 # 如果采图偏暗：先确认 FL-ACDH 物理旋钮/按键设置的 LED 电流档位足够，
 # 再在现场可接受范围内尝试增大 strobe_width_us 或 gain（≤ 相机上限）。
 # FL-ACDH 协议手册中无串口电流设置命令，电流只能通过设备面板调节。
-light.1.exposure_us=10000
-light.1.strobe_width_us=100
+light.1.exposure_us=15000
+light.1.strobe_width_us=300
 light.1.gain=1.0
-light.2.exposure_us=10000
-light.2.strobe_width_us=200
+light.2.exposure_us=15000
+light.2.strobe_width_us=500
 light.2.gain=1.0
-light.3.exposure_us=10000
-light.3.strobe_width_us=300
+light.3.exposure_us=15000
+light.3.strobe_width_us=700
 light.3.gain=1.0
 
 # 超时配置（毫秒）
@@ -146,8 +146,8 @@ image_save.enabled=true
 image_save.save_original=true
 ```
 
-> **FL-ACDH 已知协议命令**（来自手册）：C(联动模式)、B(触发电平)、9(联动频闪时间)、A(相机触发延时)、D(序列数)、E(同步信号 ID)。
-> 当前触发序列 `C→B→8→9→A→7` 中命令 `8` 和 `7` 未在手册记录，来自对齐的 Deploy 参考程序。当前现场控制器会拒绝部分 `C/B` 设置命令，程序记录为非关键诊断并继续；如果 `9/A/7/8` 返回 `&`，会按光源故障保守输出 `RECHECK`，日志会打印被拒绝命令的通道、值和完整帧。
+> **FL-ACDH 已知协议命令**（来自手册）：C(联动模式)、B(触发电平)、8(触发模式)、9(频闪时间)、A(相机触发延时)、7(远程通信触发)、D(序列数)、E(同步信号 ID)。
+> 当前串口远程触发链路只发送 `8→9→A→7`。现场控制器会拒绝当前链路不需要的 `C/B` 设置命令，因此不再在每次触发时发送；如果 `8/9/A/7` 返回 `&` 或超时，会按光源故障保守输出 `RECHECK/ERROR`。
 
 `hardware_mode=production` 禁止 simulated/manual backend；`hardware_mode=lab` 可用 `manual_trigger` 做手动联调；不传 `--config` 时仍保留内置 simulated fallback，用于本地 IPC 回归。
 

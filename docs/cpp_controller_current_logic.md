@@ -23,7 +23,7 @@
 | 频闪控制器 | FL-ACDH-20048-4，`COM1 / 9600 8N1` |
 | 频闪触发 | `F1~F3` 短接成同步输出总线，并联到两台相机黄色 `Line0` |
 | 相机调试输出 | `Line1 ExposureStartActive`，只用于示波器调试 |
-| 光源参数 | 10ms 相机曝光，100/200/300us 三路频闪脉宽 |
+| 光源参数 | 15ms 相机曝光，300/500/700us 三路频闪脉宽 |
 | Python 光源语义 | `1 -> DIFFUSE`，`2 -> POLAR_DIFFUSE`，`3 -> HIGH_LEFT` |
 
 当前 C++ 源码不支持生产配置中的 `ambient` 光源采集，也不支持 `light_order=12,1,2,3`。Python 生产配方里 `DOME` 语义暂映射到 `DIFFUSE`，ROI 定位复用第一路频闪图；未来如果补常亮 Dome ROI 采集，需要同步修改 C++ 配置解析、采集编排、共享内存映射、Python 配方和相关测试。
@@ -37,7 +37,7 @@
 | 工位状态机 | `cpp_controller/src/control/station_controller.cpp` | 初始化信号、共享内存、采集器；等待触发；执行一轮检测；校验 Python 结果；回传外部结果。 |
 | 采集编排 | `cpp_controller/src/control/frame_assembler.cpp` | 初始化 FL-ACDH 和相机；构建光源序列与相机视角；按光源轮次并行采集所有机位。 |
 | 海康相机 | `cpp_controller/src/camera/hikrobot_mvs_camera.cpp` | MVS SDK 初始化、硬触发配置、曝光/增益更新、`GetImageBuffer` 取帧和帧元数据填充。 |
-| FL-ACDH 频闪 | `cpp_controller/src/control/fl_acdh_light_controller.cpp` | 串口打开、命令组帧、ACK 等待、`C/B/8/9/A/7` 完整点亮序列。 |
+| FL-ACDH 频闪 | `cpp_controller/src/control/fl_acdh_light_controller.cpp` | 串口打开、命令组帧、ACK 等待、`8/9/A/7` 完整点亮序列。 |
 | 外部信号 | `cpp_controller/src/control/signal_client.cpp`、`cpp_controller/src/control/tcp_signal_client.cpp` | 手动/文件/TCP 触发输入，结果回传和健康状态。 |
 | 共享内存 | `cpp_controller/src/ipc/frame_ring_buffer.cpp`、`cpp_controller/src/ipc/result_ring_buffer.cpp` | Frame/Result ring slot 状态机、CRC 和超时处理。 |
 | 健康状态 | `cpp_controller/src/control/station_health.cpp` | 统计 OK/NG/RECHECK/ERROR、连续复检、设备故障和 detector timeout。 |
@@ -65,7 +65,7 @@ main.cpp
           -> 每路光源循环:
               -> 并行 arm 所有相机，仅更新 ExposureTime/Gain
               -> 等待 arm_settle_ms
-              -> FL-ACDH trigger_channel(C/B/8/9/A/7)
+              -> FL-ACDH trigger_channel(8/9/A/7)
               -> 并行 wait_frame(GetImageBuffer)
           -> 物理按光源采集，发布前重排为 view 优先
       -> 保存原图（如果 image_save.enabled）
