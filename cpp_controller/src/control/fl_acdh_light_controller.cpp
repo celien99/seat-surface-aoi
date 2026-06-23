@@ -134,8 +134,10 @@ bool FlAcdhLightController::open_serial(const std::string& port,
   dcb.Parity = NOPARITY;
   dcb.StopBits = ONESTOPBIT;
   dcb.fBinary = TRUE;
-  dcb.fDtrControl = DTR_CONTROL_DISABLE;
-  dcb.fRtsControl = RTS_CONTROL_DISABLE;
+  // DTR/RTS 必须 ENABLE：工控机 RS232/USB 适配器依赖 DTR 信号线
+  // 供电或使能串口通信，设为 DISABLE 会导致 FL-ACDH 完全不响应（超时）。
+  dcb.fDtrControl = DTR_CONTROL_ENABLE;
+  dcb.fRtsControl = RTS_CONTROL_ENABLE;
   if (!SetCommState(h, &dcb)) {
     CloseHandle(h);
     if (error_message != nullptr) {
