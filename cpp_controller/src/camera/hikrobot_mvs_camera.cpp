@@ -283,7 +283,8 @@ bool HikrobotMvsCamera::initialize(const CameraConfig& config) {
   if (!set_enum_by_string(handle_, "PixelFormat", config_.pixel_format, &error) ||
       !set_int_value(handle_, "Width", config_.width, &error) ||
       !set_int_value(handle_, "Height", config_.height, &error) ||
-      !set_enum_by_string(handle_, "AcquisitionMode", "Continuous", &error)) {
+      !set_enum_by_string(handle_, "AcquisitionMode", "Continuous", &error) ||
+      !set_enum_by_string(handle_, "TriggerMode", "On", &error)) {
     set_error(error);
     close();
     return false;
@@ -300,11 +301,6 @@ bool HikrobotMvsCamera::initialize(const CameraConfig& config) {
   // 部分海康机型默认 TriggerSelector 不一定是 FrameStart，显式设置可避免
   // Line0 有脉冲但不触发曝光。老固件若不支持该节点，仅记录诊断继续。
   try_set_enum_by_string(handle_, "TriggerSelector", "FrameStart", config_.camera_id);
-  if (!set_enum_by_string(handle_, "TriggerMode", "On", &error)) {
-    set_error(error);
-    close();
-    return false;
-  }
   if (!set_enum_by_string(handle_, "TriggerSource", config_.trigger_line, &error)) {
     set_error(error);
     close();

@@ -294,9 +294,39 @@ bool FrameAssembler::fire_one_light_step(
     std::vector<std::vector<CapturedFrame>>& frames_by_view,
     std::vector<std::vector<bool>>& captured,
     AcquisitionError* error) {
-  // 对齐现场参考程序：相机已处于硬触发等待状态，触发 FL-ACDH 后立即取帧。
-  // 不在每轮触发前调用阻塞式 GetImageBuffer drain，避免硬触发模式下额外
-  // 等待取帧扰乱触发窗口。启动和相机重启时仍会排空旧帧。
+  // 在触发 FL-ACDH 前并行 drain 所有相机的残留帧。
+  // arm() 改变 ExposureTime 时，Continuous+Trigger 模式下的相机 SDK
+  // 可能立即生成一帧图像存入内部缓冲区。不排空会导致 GetImageBuffer
+  // 优先取到残留帧而非硬触发帧，造成光源帧全部错位。
+  // 启动和相机重启时 start()/cancel_wait() 仍会排空旧帧。
+  {
+    std::vector<std::future<bool>> drain_futures;
+    drain_futures.reserve(views.size());
+    for (const auto& view : views) {
+      drain_futures.push_back(std::async(std::launch::async, [&]() {
+        auto* cam = camera_for_index(view.camera_index);
+        if (cam != nullptr) {
+          cam->drain_stale_frames(100);
+        }
+        return cam != nullptr;
+      }));
+    }
+    bool any_drain_failed = false;
+    for (auto& f : drain_futures) {
+      if (!f.get()) {
+        any_drain_failed = true;
+      }
+    }
+    if (any_drain_failed) {
+      set_acquisition_error(error, ErrorCode::CameraFault,
+                            AcquisitionStage::ArmCamera,
+                            views.front().camera_index,
+                            light_param.light_index, light_seq_index,
+                            "one or more cameras missing before light trigger");
+      handle_acquisition_failure();
+      return false;
+    }
+  }
 
   // 1. 短稳定延迟后触发 FL-ACDH
   std::this_thread::sleep_for(std::chrono::milliseconds(2));
