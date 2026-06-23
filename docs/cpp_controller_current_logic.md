@@ -80,7 +80,7 @@ main.cpp
 
 - 相机初始化时设置 `Continuous + TriggerMode On + TriggerSource=Line0 + RisingEdge`。
 - `arm()` 阶段不重复写 `TriggerSource`，只更新曝光和增益，避免相机短暂错过硬触发沿。
-- SDK 缓存只在相机启动或重启时排空；每路光源触发前不再阻塞调用 `GetImageBuffer` drain，避免硬触发模式下额外等待取帧扰乱触发窗口。
+- SDK 缓存在每轮频闪触发前并行 drain 所有相机，排空 arm() 改曝光参数可能在 Continuous 模式下即时产生的残留帧，避免误取为硬触发帧；相机启动或故障重启时也会排空旧帧。
 - 物理采集顺序是“光源优先、相机并行”，共享内存发布顺序是“机位优先、光源顺序”，方便 Python 按视角组包。
 
 ## 在线模式与采图模式
