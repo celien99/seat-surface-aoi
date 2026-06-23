@@ -57,7 +57,7 @@ def test_dome_roi_locator_fake_yolo_returns_traceable_report() -> None:
     assert report.backend == "fake_yolo"
     assert report.dome_light_id == "DIFFUSE"
     assert report.is_pass is True
-    assert report.locations[0].roi_name == "full"
+    assert report.locations[0].roi_name == "seat"
     assert report.locations[0].confidence == pytest.approx(0.99)
 
 
@@ -110,7 +110,7 @@ def test_dome_roi_locator_rechecks_duplicate_conflicting_detections() -> None:
     result = pipeline.process(make_simulated_job(), recipe)
 
     assert result.decision == "RECHECK"
-    assert "full: duplicate conflicting ROI detections" in pipeline.last_context["error"]["message"]
+    assert "seat: duplicate conflicting ROI detections" in pipeline.last_context["error"]["message"]
 
 
 def test_dome_roi_locator_yolo_seg_generates_runtime_polygon() -> None:
@@ -189,8 +189,8 @@ def test_dome_roi_locator_yolo_seg_rechecks_outside_safety_template() -> None:
     job = make_simulated_job()
     frame = job.camera_bundles[0].light_frames["DIFFUSE"]
     templates = {
-        "full": RoiTemplate(
-            roi_name="full",
+        "seat": RoiTemplate(
+            roi_name="seat",
             polygon_xy=((16, 12), (47, 12), (47, 35), (16, 35)),
             output_size=(64, 48),
         )
@@ -390,7 +390,7 @@ def test_ecc_registration_applies_translation_before_feature_building() -> None:
         PreparedBundle(
             camera_id="TOP_BACK",
             calibration=calibration,
-            rois={"full": frames},
+            rois={"seat": frames},
             roi_templates={},
         )
     ]

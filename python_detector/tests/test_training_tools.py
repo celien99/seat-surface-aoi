@@ -160,7 +160,7 @@ def test_collect_shm_dataset_reuses_detector_trace_and_manifest(tmp_path: Path) 
 
 
 def _write_trace(trace_dir: Path) -> Path:
-    image_dir = trace_dir / "images" / "TOP_BACK" / "full"
+    image_dir = trace_dir / "images" / "TOP_BACK" / "seat"
     image_dir.mkdir(parents=True)
     for light_id in ("DIFFUSE", "HIGH_LEFT"):
         (image_dir / f"{light_id}.pgm").write_bytes(b"P5\n2 2\n255\n\x01\x02\x03\x04")
@@ -193,7 +193,7 @@ def _write_trace(trace_dir: Path) -> Path:
                         "defect_id": "defect_1",
                         "class_name": "scratch",
                         "camera_id": "TOP_BACK",
-                        "roi_name": "full",
+                        "roi_name": "seat",
                         "bbox_xyxy_pixel": [1, 2, 10, 12],
                     }
                 ],
@@ -206,7 +206,7 @@ def _write_trace(trace_dir: Path) -> Path:
 
 def _write_robot_pose_trace(trace_dir: Path) -> Path:
     for pose_id, pixel in (("T1_BACKREST", b"\x01\x02\x03\x04"), ("T2_CUSHION", b"\x05\x06\x07\x08")):
-        image_dir = trace_dir / "images" / "EYE_IN_HAND" / pose_id / "full"
+        image_dir = trace_dir / "images" / "EYE_IN_HAND" / pose_id / "seat"
         image_dir.mkdir(parents=True)
         for light_id in ("DIFFUSE", "HIGH_LEFT"):
             (image_dir / f"{light_id}.pgm").write_bytes(b"P5\n2 2\n255\n" + pixel)
@@ -240,7 +240,7 @@ def _write_robot_pose_trace(trace_dir: Path) -> Path:
                         "class_name": "scratch",
                         "camera_id": "EYE_IN_HAND",
                         "pose_id": "T1_BACKREST",
-                        "roi_name": "full",
+                        "roi_name": "seat",
                         "bbox_xyxy_pixel": [1, 2, 10, 12],
                     }
                 ],

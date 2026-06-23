@@ -43,7 +43,7 @@ def yolo_dataset(tmp_path: Path) -> Path:
 train: images/train
 val: images/val
 names:
-  0: full
+  0: seat
 """
     (ds_root / "dataset.yaml").write_text(yaml_content)
     return ds_root / "dataset.yaml"

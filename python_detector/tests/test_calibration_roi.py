@@ -48,7 +48,7 @@ def test_calibration_manager_loads_identity_roi() -> None:
         "calib/simulated_v1",
         "python_detector/config/roi/default_roi.yaml",
     )
-    assert calibration.roi_templates["full"].output_size == (64, 48)
+    assert calibration.roi_templates["seat"].output_size == (64, 48)
     assert calibration.light_alignment["DIFFUSE"] == (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
 
 
@@ -62,7 +62,7 @@ def test_calibration_manager_default_path_is_independent_from_cwd(monkeypatch, t
     )
 
     assert calibration.camera_id == "TOP_BACK"
-    assert calibration.roi_templates["full"].output_size == (64, 48)
+    assert calibration.roi_templates["seat"].output_size == (64, 48)
 
 
 def test_calibration_manager_cache_is_scoped_by_roi_template_path(tmp_path: Path) -> None:
@@ -176,7 +176,7 @@ light_alignment:
   DIFFUSE:
     matrix_3x3: [1, 0, 0]
 roi_templates:
-  full:
+  seat:
     polygon_xy:
       - [0, 0]
       - [63, 0]
@@ -313,7 +313,7 @@ def test_registration_error_exceeding_threshold_returns_recheck(tmp_path: Path) 
     (roi_dir / "default_roi.yaml").write_text(
         """
 roi_templates:
-  full:
+  seat:
     polygon_xy:
       - [0, 0]
       - [63, 0]
@@ -343,7 +343,7 @@ light_alignment:
   HIGH_RIGHT:
     matrix_3x3: [1, 0, 0, 0, 1, 0, 0, 0, 1]
 roi_templates:
-  full:
+  seat:
     polygon_xy:
       - [0, 0]
       - [63, 0]

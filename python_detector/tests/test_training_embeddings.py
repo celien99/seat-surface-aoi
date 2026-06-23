@@ -16,7 +16,7 @@ def sample_manifest(tmp_path: Path) -> Path:
     manifest_path = tmp_path / "manifest.jsonl"
     rows = []
     for index, light_id in enumerate(("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")):
-        image_path = Path("images/TOP_BACK/full") / light_id / f"ok_1_{light_id}.pgm"
+        image_path = Path("images/TOP_BACK/seat") / light_id / f"ok_1_{light_id}.pgm"
         full_path = tmp_path / image_path
         full_path.parent.mkdir(parents=True, exist_ok=True)
         pixels = bytes(60 + index * 20 + ((x + y) % 13) for y in range(48) for x in range(64))
@@ -28,7 +28,7 @@ def sample_manifest(tmp_path: Path) -> Path:
             "seat_id": "SIM_1",
             "sequence_id": 1,
             "camera_id": "TOP_BACK",
-            "roi_name": "full",
+            "roi_name": "seat",
             "light_id": light_id,
             "decision": "OK",
             "quality_pass": True,
@@ -85,7 +85,7 @@ def test_extract_embeddings_no_ok_samples(tmp_path: Path) -> None:
     """manifest 中没有 OK 样本时抛出错误。"""
     manifest = tmp_path / "manifest.jsonl"
     manifest.write_text(
-        json.dumps({"sample_id": "ng_1", "decision": "NG", "quality_pass": False, "camera_id": "TOP_BACK", "roi_name": "full", "light_id": "DIFFUSE", "image_path": "x.pgm"}) + "\n",
+        json.dumps({"sample_id": "ng_1", "decision": "NG", "quality_pass": False, "camera_id": "TOP_BACK", "roi_name": "seat", "light_id": "DIFFUSE", "image_path": "x.pgm"}) + "\n",
         encoding="utf-8",
     )
     with pytest.raises(TrainingDataError, match="没有 OK 样本"):

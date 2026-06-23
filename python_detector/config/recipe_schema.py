@@ -39,7 +39,7 @@ class RoiLocatorConfig:
     input_channels: int = 1
     output_decode: str = "yolo_xyxy_rows"
     bbox_format: str = "xyxy_pixel"
-    class_names: tuple[str, ...] = ("full",)
+    class_names: tuple[str, ...] = ("seat",)
     fail_policy: str = "RECHECK"
 
 
@@ -407,7 +407,7 @@ def _roi_locator_from_dict(data: dict[str, Any]) -> RoiLocatorConfig:
         input_channels=input_channels,
         output_decode=output_decode,
         bbox_format=bbox_format,
-        class_names=_unique_str_tuple(data.get("class_names", ("full",)), "roi_locator.class_names"),
+        class_names=_unique_str_tuple(data.get("class_names", ("seat",)), "roi_locator.class_names"),
         fail_policy=_decision(data.get("fail_policy", "RECHECK"), "roi_locator.fail_policy"),
     )
 

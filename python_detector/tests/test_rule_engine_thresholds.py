@@ -24,7 +24,7 @@ def test_rule_engine_uses_recipe_thresholds() -> None:
         candidates=[
             DefectCandidate(
                 camera_id="TOP_BACK",
-                roi_name="full",
+                roi_name="seat",
                 class_name="scratch",
                 score=0.88,
                 bbox_xyxy_pixel=(1, 1, 8, 8),
@@ -53,7 +53,7 @@ def test_rule_engine_ignores_candidates_below_recheck_threshold() -> None:
         candidates=[
             DefectCandidate(
                 camera_id="TOP_BACK",
-                roi_name="full",
+                roi_name="seat",
                 class_name="scratch",
                 score=0.22,
                 bbox_xyxy_pixel=(1, 1, 8, 8),

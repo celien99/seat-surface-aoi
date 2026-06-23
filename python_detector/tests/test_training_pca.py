@@ -19,7 +19,7 @@ def embedding_jsonl(tmp_path: Path) -> Path:
         entries.append(json.dumps({
             "sample_id": f"sample_{idx}",
             "camera_id": "TOP_BACK",
-            "roi_name": "full",
+            "roi_name": "seat",
             "embedding": embedding,
             "embedding_dim": 10,
         }))

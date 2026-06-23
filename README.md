@@ -85,6 +85,8 @@ seat-surface-aoi/
 └── tools/               # 协议校验、模拟 IPC、打包和预检工具
 ```
 
+ROI 定位模型当前使用单类别 `seat`。训练数据应采用 YOLO segmentation 格式，导出的产物放入 `model/roi_yolo/seat_roi_seg.onnx`，并与 `python_detector/config/*recipe*.yaml` 中的 `roi_locator.class_names: [seat]`、ROI 模板和标定文件保持一致。
+
 ## 安全边界
 
 - Python 不控制 PLC、相机或频闪。

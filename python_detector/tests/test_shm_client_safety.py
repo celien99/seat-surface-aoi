@@ -376,7 +376,7 @@ def test_robot_flyshot_camera_index_from_frame_meta_is_used_for_result_serializa
         severity="critical",
         camera_id="EYE_IN_HAND",
         pose_id="T1_BACKREST",
-        roi_name="full",
+        roi_name="seat",
         bbox_xyxy_pixel=(0, 0, 1, 1),
         score=0.9,
         area_px=4,

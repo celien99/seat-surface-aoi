@@ -25,7 +25,7 @@ model/
 
 ## 产物要求
 
-- `seat_roi_seg.onnx`：推荐 ROI 定位产物。输入 Dome 语义光源图，输出 YOLO segmentation mask；在线链路用 mask 自动生成运行时 `polygon_xy`，`roi_templates` 只作为安全边界和 `output_size` 约束。类别需与 `roi_locator.class_names` 一致。
+- `seat_roi_seg.onnx`：推荐 ROI 定位产物。输入 Dome 语义光源图，输出 YOLO segmentation mask；在线链路用 mask 自动生成运行时 `polygon_xy`，`roi_templates` 只作为安全边界和 `output_size` 约束。当前项目 ROI 单类别为 `seat`，需与 `roi_locator.class_names` 一致。
 - `seat_roi_yolo.onnx`：兼容 bbox ROI 产物。输入 Dome 语义光源图，输出 `[x1, y1, x2, y2, score, class_id]` 行表，或使用 `output_decode: ultralytics_yolo` 直接接 Ultralytics ONNX 输出。
 - `seat_defect_detector.onnx`：输入 ROI 多光源特征 `NCHW` tensor，输出 `[x1, y1, x2, y2, score, class_id]` 行表，或使用 `output_decode: ultralytics_yolo` 直接接 Ultralytics ONNX 输出；类别需与配方 `class_names` 和 `thresholds` 一致。
 - `seat_wrn50_embedding.onnx`：输出一维 embedding，维度需与 `embedding_dim` 一致。

@@ -18,9 +18,9 @@ camera_defaults:
   base_light_id: POLAR_DIFFUSE
   light_order: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT]
   roi_models:
-    full: supervised_defect_onnx
+    seat: supervised_defect_onnx
   roi_safety_net_models:
-    full: patchcore_unknown_safety_net
+    seat: patchcore_unknown_safety_net
 cameras:
   TOP_BACK: {}
   TOP_CUSHION: {}
@@ -52,7 +52,7 @@ roi_locator:
   max_pose_error_px: 4.0
   output_decode: ultralytics_yolo_seg
   bbox_format: xyxy_pixel
-  class_names: [full]
+  class_names: [seat]
   fail_policy: RECHECK
 registration:
   base_light_id: POLAR_DIFFUSE

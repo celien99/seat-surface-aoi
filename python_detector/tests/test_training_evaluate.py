@@ -75,7 +75,7 @@ def test_evaluate_end_to_end_json(tmp_path: Path) -> None:
     manifest = tmp_path / "manifest.jsonl"
     entries = []
     for index, light_id in enumerate(("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")):
-        image_path = Path("images/TOP_BACK/full") / light_id / f"sample_1_{light_id}.pgm"
+        image_path = Path("images/TOP_BACK/seat") / light_id / f"sample_1_{light_id}.pgm"
         full_path = tmp_path / image_path
         full_path.parent.mkdir(parents=True, exist_ok=True)
         pixels = bytes(80 + index * 10 + ((x + y) % 9) for y in range(48) for x in range(64))
@@ -89,7 +89,7 @@ def test_evaluate_end_to_end_json(tmp_path: Path) -> None:
             "decision": "NG",
             "quality_pass": True,
             "camera_id": "TOP_BACK",
-            "roi_name": "full",
+            "roi_name": "seat",
             "light_id": light_id,
             "image_path": image_path.as_posix(),
             "split": "test",
@@ -120,7 +120,7 @@ def test_collect_trace_dataset_filter_decision(tmp_path: Path) -> None:
 
     for decision, seq_id in [("OK", 1), ("NG", 2)]:
         trace_dir = tmp_path / "trace" / f"SIM_{seq_id}_{seq_id}"
-        images_dir = trace_dir / "images" / "TOP_BACK" / "full"
+        images_dir = trace_dir / "images" / "TOP_BACK" / "seat"
         images_dir.mkdir(parents=True, exist_ok=True)
         (images_dir / "DIFFUSE.pgm").write_bytes(b"P5\n1 1\n255\n\x80")
         (trace_dir / "result.json").write_text(json.dumps({
@@ -129,7 +129,7 @@ def test_collect_trace_dataset_filter_decision(tmp_path: Path) -> None:
             "decision": decision,
             "quality_pass": decision == "OK",
             "defects": [] if decision == "OK" else [
-                {"class_name": "scratch", "camera_id": "TOP_BACK", "roi_name": "full", "bbox_xyxy_pixel": [10, 10, 20, 20]}
+                {"class_name": "scratch", "camera_id": "TOP_BACK", "roi_name": "seat", "bbox_xyxy_pixel": [10, 10, 20, 20]}
             ],
         }), encoding="utf-8")
 

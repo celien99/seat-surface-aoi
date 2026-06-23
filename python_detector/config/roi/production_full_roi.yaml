@@ -1,5 +1,5 @@
 roi_templates:
-  full:
+  seat:
     polygon_xy:
       - [0, 0]
       - [4095, 0]

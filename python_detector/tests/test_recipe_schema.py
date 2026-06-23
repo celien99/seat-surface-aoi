@@ -31,7 +31,7 @@ def test_recipe_manager_loads_robot_production_yaml() -> None:
         ("EYE_IN_HAND", "T1_BACKREST"),
         ("EYE_IN_HAND", "T2_CUSHION"),
     ]
-    assert recipe.model_key_for("EYE_IN_HAND", "full", "T2_CUSHION") == "supervised_defect_onnx"
+    assert recipe.model_key_for("EYE_IN_HAND", "seat", "T2_CUSHION") == "supervised_defect_onnx"
 
 
 def test_recipe_rejects_missing_required_field() -> None:
@@ -145,7 +145,7 @@ def test_recipe_rejects_safety_net_as_primary_roi_model() -> None:
                 "recipe_id": "bad_safety_net_ref",
                 "sku": "sku",
                 "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
-                "cameras": {"TOP": {"roi_models": {"full": "unknown_safety_net"}}},
+                "cameras": {"TOP": {"roi_models": {"seat": "unknown_safety_net"}}},
                 "models": {
                     "unknown_safety_net": {
                         "backend": "fake",
@@ -159,8 +159,8 @@ def test_recipe_rejects_safety_net_as_primary_roi_model() -> None:
 
 def test_recipe_accepts_roi_primary_and_safety_net_models() -> None:
     recipe = RecipeManager().load("seat_a_black_leather_v1")
-    assert recipe.model_key_for("TOP_BACK", "full") == "fake_default"
-    assert recipe.safety_net_model_keys_for("TOP_BACK", "full") == ("unknown_safety_net",)
+    assert recipe.model_key_for("TOP_BACK", "seat") == "fake_default"
+    assert recipe.safety_net_model_keys_for("TOP_BACK", "seat") == ("unknown_safety_net",)
 
 
 def test_recipe_applies_camera_defaults_to_reduce_per_camera_repetition() -> None:
@@ -182,8 +182,8 @@ def test_recipe_applies_camera_defaults_to_reduce_per_camera_repetition() -> Non
                 "roi_template": "python_detector/config/roi/production_full_roi.yaml",
                 "base_light_id": "POLAR_DIFFUSE",
                 "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT"],
-                "roi_models": {"full": "detector"},
-                "roi_safety_net_models": {"full": "patchcore"},
+                "roi_models": {"seat": "detector"},
+                "roi_safety_net_models": {"seat": "patchcore"},
             },
             "quality": {"required_lights": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT"]},
             "cameras": {
@@ -213,8 +213,8 @@ def test_recipe_applies_camera_defaults_to_reduce_per_camera_repetition() -> Non
     assert top_back.roi_template == "python_detector/config/roi/production_full_roi.yaml"
     assert top_back.calibration_id == "calib/top_back_production_v1"
     assert top_back.light_order == ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT")
-    assert recipe.model_key_for("TOP_CUSHION", "full") == "detector"
-    assert recipe.safety_net_model_keys_for("TOP_CUSHION", "full") == ("patchcore",)
+    assert recipe.model_key_for("TOP_CUSHION", "seat") == "detector"
+    assert recipe.safety_net_model_keys_for("TOP_CUSHION", "seat") == ("patchcore",)
 
 
 def test_recipe_parses_onnx_model_io_contract() -> None:
@@ -416,7 +416,7 @@ def test_recipe_preserves_list_cameras_with_same_camera_different_pose() -> None
         ("EYE_IN_HAND", "T1_BACKREST"),
         ("EYE_IN_HAND", "T2_CUSHION"),
     ]
-    assert recipe.model_key_for("EYE_IN_HAND", "full", "T2_CUSHION") == "default"
+    assert recipe.model_key_for("EYE_IN_HAND", "seat", "T2_CUSHION") == "default"
 
 
 def test_default_camera_accepts_dynamic_pose_without_explicit_pose_config() -> None:
@@ -425,7 +425,7 @@ def test_default_camera_accepts_dynamic_pose_without_explicit_pose_config() -> N
     assert recipe.accepts_camera_pose("TOP_BACK", "PITCH_15") is True
     assert recipe.pose_uses_default_camera("TOP_BACK", "PITCH_15") is True
     assert recipe.camera("TOP_BACK", "PITCH_15") == recipe.default_camera("TOP_BACK")
-    assert recipe.model_key_for("TOP_BACK", "full", "PITCH_15") == "fake_default"
+    assert recipe.model_key_for("TOP_BACK", "seat", "PITCH_15") == "fake_default"
 
 
 def test_explicit_robot_pose_recipe_rejects_unknown_pose_fallback() -> None:
@@ -434,7 +434,7 @@ def test_explicit_robot_pose_recipe_rejects_unknown_pose_fallback() -> None:
     assert recipe.accepts_camera_pose("EYE_IN_HAND", "T3_UNKNOWN") is False
     assert recipe.pose_uses_default_camera("EYE_IN_HAND", "T3_UNKNOWN") is False
     assert recipe.camera("EYE_IN_HAND", "T3_UNKNOWN") is None
-    assert recipe.model_key_for("EYE_IN_HAND", "full", "T3_UNKNOWN") == "default"
+    assert recipe.model_key_for("EYE_IN_HAND", "seat", "T3_UNKNOWN") == "default"
 
 
 def test_recipe_rejects_duplicate_list_camera_pose() -> None:

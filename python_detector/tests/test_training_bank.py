@@ -127,7 +127,7 @@ def _write_ok_manifest(tmp_path: Path, count: int) -> Path:
     for sample_index in range(count):
         for light_index, light_id in enumerate(("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")):
             sample_id = f"ok_{sample_index}_{light_id}"
-            image_path = Path("images/TOP_BACK/full") / light_id / f"{sample_id}.pgm"
+            image_path = Path("images/TOP_BACK/seat") / light_id / f"{sample_id}.pgm"
             full_path = tmp_path / image_path
             full_path.parent.mkdir(parents=True, exist_ok=True)
             pixels = bytes(
@@ -145,7 +145,7 @@ def _write_ok_manifest(tmp_path: Path, count: int) -> Path:
                 "decision": "OK",
                 "quality_pass": True,
                 "camera_id": "TOP_BACK",
-                "roi_name": "full",
+                "roi_name": "seat",
                 "light_id": light_id,
                 "image_path": image_path.as_posix(),
                 "split": "train",

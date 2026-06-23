@@ -155,7 +155,7 @@ roi_locator:
   input_channels: 3
   output_decode: yolo_xyxy_rows
   bbox_format: xyxy_pixel
-  class_names: [full]
+  class_names: [seat]
   fail_policy: RECHECK
 ```
 

@@ -19,9 +19,9 @@ camera_defaults:
   base_light_id: POLAR_DIFFUSE
   light_order: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT, HIGH_RIGHT]
   roi_models:
-    full: fake_default
+    seat: fake_default
   roi_safety_net_models:
-    full: unknown_safety_net
+    seat: unknown_safety_net
 cameras:
   TOP_BACK: {}
   TOP_CUSHION: {}
@@ -51,7 +51,7 @@ roi_locator:
   output_decode: yolo_xyxy_rows
   bbox_format: xyxy_pixel
   class_names:
-    - full
+    - seat
   fail_policy: RECHECK
 registration:
   base_light_id: POLAR_DIFFUSE

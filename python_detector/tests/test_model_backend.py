@@ -18,7 +18,7 @@ def _feature_group() -> FeatureGroup:
     return FeatureGroup(
         sequence_id=1,
         camera_id="TOP_BACK",
-        roi_name="full",
+        roi_name="seat",
         model_key="fake_default",
         features={"ch4_high_max_min": [0] * 64},
         roi_bbox_xyxy_pixel=(10, 20, 73, 67),
@@ -63,11 +63,11 @@ def test_onnx_missing_model_path_fails_conservatively() -> None:
         InferenceEngine(ModelRegistry()).infer([_feature_group()], recipe)
     assert exc_info.value.context() == {
         "type": "ModelAssetUnavailableInferenceError",
-        "message": "TOP_BACK/full/fake_default: 模型资产未就绪，保存采集样本: ONNX detection 模型文件不存在: missing.onnx",
+        "message": "TOP_BACK/seat/fake_default: 模型资产未就绪，保存采集样本: ONNX detection 模型文件不存在: missing.onnx",
         "model_key": "fake_default",
         "backend": "onnx",
         "camera_id": "TOP_BACK",
-        "roi_name": "full",
+        "roi_name": "seat",
         "tensor_shape_nchw": [1, 1, 48, 64],
         "cause_type": "ModelAssetUnavailableError",
         "asset_unavailable": True,

@@ -37,8 +37,8 @@ def test_v2_roi_features_include_primary_and_safety_net_models() -> None:
     cubes = pipeline.reflectance_cube_builder.build(make_simulated_job(), prepared, recipe)
     features = FeatureBuilder().build(cubes, recipe)
     model_keys = {(group.camera_id, group.roi_name, group.model_key) for group in features}
-    assert ("TOP_BACK", "full", "fake_default") in model_keys
-    assert ("TOP_BACK", "full", "unknown_safety_net") in model_keys
+    assert ("TOP_BACK", "seat", "fake_default") in model_keys
+    assert ("TOP_BACK", "seat", "unknown_safety_net") in model_keys
 
 
 def test_feature_builder_rejects_mismatched_feature_source_shapes() -> None:
@@ -48,7 +48,7 @@ def test_feature_builder_rejects_mismatched_feature_source_shapes() -> None:
         trigger_id=1001,
         seat_id="SIM_1",
         camera_id="TOP_BACK",
-        roi_name="full",
+        roi_name="seat",
         base_light_id="POLAR_DIFFUSE",
         light_order=("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"),
         frames={
@@ -59,7 +59,7 @@ def test_feature_builder_rejects_mismatched_feature_source_shapes() -> None:
         },
         registration=RegistrationReport(
             camera_id="TOP_BACK",
-            roi_name="full",
+            roi_name="seat",
             base_light_id="POLAR_DIFFUSE",
             calibration_id="calib/simulated_v1",
             max_error_px=0.0,

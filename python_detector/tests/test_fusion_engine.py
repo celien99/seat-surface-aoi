@@ -15,7 +15,7 @@ def _candidate(
     x0, y0, x1, y1 = bbox_xyxy_pixel
     return DefectCandidate(
         camera_id=camera_id,
-        roi_name="full",
+        roi_name="seat",
         class_name=class_name,
         score=score,
         bbox_xyxy_pixel=bbox_xyxy_pixel,

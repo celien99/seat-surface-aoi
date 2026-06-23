@@ -51,7 +51,7 @@ def test_trace_writer_generates_result_files(tmp_path: Path) -> None:
     assert (trace_dir / "timings.json").exists()
     assert (trace_dir / "error.json").exists()
     assert (trace_dir / "raw_images" / "TOP_BACK" / "TOP_BACK" / "DIFFUSE.pgm").exists()
-    assert (trace_dir / "images" / "TOP_BACK" / "TOP_BACK" / "full" / "DIFFUSE.pgm").exists()
+    assert (trace_dir / "images" / "TOP_BACK" / "TOP_BACK" / "seat" / "DIFFUSE.pgm").exists()
 
 
 def test_trace_writer_generates_defect_overlay(tmp_path: Path) -> None:
@@ -90,7 +90,7 @@ def test_trace_writer_separates_robot_flyshot_pose_images(tmp_path: Path) -> Non
             {
                 "camera_id": "EYE_IN_HAND",
                 "pose_id": "T1_BACKREST",
-                "rois": {"full": frame_a},
+                "rois": {"seat": frame_a},
             },
         )(),
         type(
@@ -99,7 +99,7 @@ def test_trace_writer_separates_robot_flyshot_pose_images(tmp_path: Path) -> Non
             {
                 "camera_id": "EYE_IN_HAND",
                 "pose_id": "T2_CUSHION",
-                "rois": {"full": frame_b},
+                "rois": {"seat": frame_b},
             },
         )(),
     ]
@@ -115,8 +115,8 @@ def test_trace_writer_separates_robot_flyshot_pose_images(tmp_path: Path) -> Non
     trace_dir = TraceWriter(recipe.trace.root_dir).write(job, recipe, result, {"prepared_bundles": prepared})
 
     assert trace_dir is not None
-    assert (trace_dir / "images" / "EYE_IN_HAND" / "T1_BACKREST" / "full" / "DIFFUSE.pgm").exists()
-    assert (trace_dir / "images" / "EYE_IN_HAND" / "T2_CUSHION" / "full" / "DIFFUSE.pgm").exists()
+    assert (trace_dir / "images" / "EYE_IN_HAND" / "T1_BACKREST" / "seat" / "DIFFUSE.pgm").exists()
+    assert (trace_dir / "images" / "EYE_IN_HAND" / "T2_CUSHION" / "seat" / "DIFFUSE.pgm").exists()
 
 
 def test_trace_writer_uses_deterministic_ok_sampling(tmp_path: Path) -> None:
@@ -204,11 +204,11 @@ def test_pipeline_model_error_context_is_traceable(tmp_path: Path) -> None:
     assert pipeline.last_context["error"]["model_key"] == "fake_default"
     assert pipeline.last_context["error"]["backend"] == "onnx"
     assert pipeline.last_context["error"]["camera_id"] == "TOP_BACK"
-    assert pipeline.last_context["error"]["roi_name"] == "full"
+    assert pipeline.last_context["error"]["roi_name"] == "seat"
     assert pipeline.last_context["error"]["tensor_shape_nchw"] == [1, 5, 48, 64]
     assert trace_dir is not None
     assert (trace_dir / "raw_images" / "TOP_BACK" / "TOP_BACK" / "DIFFUSE.pgm").exists()
-    assert (trace_dir / "images" / "TOP_BACK" / "TOP_BACK" / "full" / "DIFFUSE.pgm").exists()
+    assert (trace_dir / "images" / "TOP_BACK" / "TOP_BACK" / "seat" / "DIFFUSE.pgm").exists()
     error = json.loads((trace_dir / "error.json").read_text(encoding="utf-8"))
     assert error["type"] == "ModelAssetUnavailableInferenceError"
     assert error["model_key"] == "fake_default"

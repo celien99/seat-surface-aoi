@@ -13,7 +13,7 @@ from training_tools.job_fixture import make_simulated_job
 def test_build_display_event_includes_result_and_trace_assets(tmp_path: Path) -> None:
     trace_dir = tmp_path / "trace" / "20260618" / "SIM_1_1"
     raw_dir = trace_dir / "raw_images" / "TOP_BACK" / "TOP_BACK"
-    image_dir = trace_dir / "images" / "TOP_BACK" / "TOP_BACK" / "full"
+    image_dir = trace_dir / "images" / "TOP_BACK" / "TOP_BACK" / "seat"
     overlay_dir = trace_dir / "overlays"
     raw_dir.mkdir(parents=True)
     image_dir.mkdir(parents=True)
@@ -28,7 +28,7 @@ def test_build_display_event_includes_result_and_trace_assets(tmp_path: Path) ->
         severity="critical",
         camera_id="TOP_BACK",
         pose_id="TOP_BACK",
-        roi_name="full",
+        roi_name="seat",
         bbox_xyxy_pixel=(0, 0, 1, 1),
         score=0.91,
         area_px=12,

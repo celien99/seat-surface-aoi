@@ -27,7 +27,7 @@ def test_production_robot_recipe_uses_patchcore_safety_net() -> None:
     assert recipe.recipe_id == "seat_a_robot_flyshot_production_v1"
     assert recipe.registration.method == "ecc"
     assert recipe.roi_locator.backend == "onnx_yolo_seg"
-    assert recipe.safety_net_model_keys_for("EYE_IN_HAND", "full", "T1_BACKREST") == (
+    assert recipe.safety_net_model_keys_for("EYE_IN_HAND", "seat", "T1_BACKREST") == (
         "patchcore_unknown_safety_net",
     )
 

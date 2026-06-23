@@ -166,6 +166,8 @@ training_tools/
 └── pipeline_report.py          # 回放和 benchmark 报告格式化
 ```
 
+ROI 定位类别当前统一为 `seat`。`roi_locator.class_names`、ROI 模板、标定文件、trace 目录和训练用 YOLO segmentation 数据集都应使用该 ROI 名称；`production_full_roi.yaml` 的文件名仅表示全座椅安全边界模板，不代表类别名。
+
 根目录 `tools/validate_architecture_readiness.py` 用于把 V4/PPT 架构要求固化成静态检查项：
 
 - `--scope reference` 校验参考实现是否具备固定机位、机器人飞拍、共享内存 v2、质量门禁、trace、ROI/ECC/ONNX/PatchCore/FAISS 接入点等能力。
