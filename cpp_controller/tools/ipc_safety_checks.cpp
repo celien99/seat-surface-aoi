@@ -485,7 +485,7 @@ bool test_runtime_light_channel_config_parses() {
                       config.light_channels.size() >= 3 &&
                       config.light_channels[0].light_index == 1 &&
                       config.light_channels[0].physical_channel == 1 &&
-                      config.light_channels[0].exposure_us == 15000 &&
+                      config.light_channels[0].exposure_us == 30000 &&
                       config.light_channels[0].strobe_width_us == 300 &&
                       config.light_channels[0].trigger_delay_us == 10 &&
                       config.light_channels[0].gain == 1.0F &&
@@ -538,7 +538,7 @@ bool test_runtime_multi_light_controller_config_rejected() {
         << "critical_recheck_threshold=5\n"
         << "light_order=1,2\n"
         << "light.1.physical_channel=1\n"
-        << "light.1.exposure_us=15000\n"
+        << "light.1.exposure_us=30000\n"
         << "light.1.strobe_width_us=300\n"
         << "light.1.trigger_delay_us=10\n"
         << "light.1.gain=1.0\n"
@@ -884,19 +884,19 @@ bool test_single_camera_config_validates() {
         << "light.baud_rate=9600\n"
         << "light.trigger_input_line=F1\n"
         << "light.1.physical_channel=1\n"
-        << "light.1.exposure_us=15000\n"
+        << "light.1.exposure_us=30000\n"
         << "light.1.strobe_width_us=300\n"
         << "light.1.trigger_delay_us=10\n"
         << "light.1.gain=1.0\n"
         << "light.1.current_percent=60\n"
         << "light.2.physical_channel=2\n"
-        << "light.2.exposure_us=15000\n"
+        << "light.2.exposure_us=30000\n"
         << "light.2.strobe_width_us=500\n"
         << "light.2.trigger_delay_us=10\n"
         << "light.2.gain=1.0\n"
         << "light.2.current_percent=60\n"
         << "light.3.physical_channel=3\n"
-        << "light.3.exposure_us=15000\n"
+        << "light.3.exposure_us=30000\n"
         << "light.3.strobe_width_us=700\n"
         << "light.3.trigger_delay_us=10\n"
         << "light.3.gain=1.0\n"
@@ -967,13 +967,13 @@ seat_aoi::StationRuntimeConfig make_filled_production_runtime_config() {
   config.lights[0].serial_port = "COM1";
   config.lights[0].baud_rate = 9600;
   config.lights[0].trigger_input_line = "F1";
-  config.light_channels[0].exposure_us = 15000;
+  config.light_channels[0].exposure_us = 30000;
   config.light_channels[0].strobe_width_us = 300;
   config.light_channels[0].trigger_delay_us = 10;
-  config.light_channels[1].exposure_us = 15000;
+  config.light_channels[1].exposure_us = 30000;
   config.light_channels[1].strobe_width_us = 500;
   config.light_channels[1].trigger_delay_us = 10;
-  config.light_channels[2].exposure_us = 15000;
+  config.light_channels[2].exposure_us = 30000;
   config.light_channels[2].strobe_width_us = 700;
   config.light_channels[2].trigger_delay_us = 10;
   for (auto& camera : config.cameras) {

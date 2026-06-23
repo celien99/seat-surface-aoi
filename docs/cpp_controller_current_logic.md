@@ -23,7 +23,7 @@
 | 频闪控制器 | FL-ACDH-20048-4，`COM1 / 9600 8N1` |
 | 频闪触发 | `F1~F3` 短接成同步输出总线，并联到两台相机黄色 `Line0` |
 | 相机调试输出 | `Line1 ExposureStartActive`，只用于示波器调试 |
-| 光源参数 | 15ms 相机曝光，300/500/700us 三路频闪脉宽 |
+| 光源参数 | 30ms 相机曝光，300/500/700us 三路频闪脉宽 |
 | Python 光源语义 | `1 -> DIFFUSE`，`2 -> POLAR_DIFFUSE`，`3 -> HIGH_LEFT` |
 
 当前 C++ 源码不支持生产配置中的 `ambient` 光源采集，也不支持 `light_order=12,1,2,3`。Python 生产配方里 `DOME` 语义暂映射到 `DIFFUSE`，ROI 定位复用第一路频闪图；未来如果补常亮 Dome ROI 采集，需要同步修改 C++ 配置解析、采集编排、共享内存映射、Python 配方和相关测试。

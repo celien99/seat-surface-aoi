@@ -97,7 +97,7 @@ cpp_controller/
 
 | 文件 | 模式 | 说明 |
 | --- | --- | --- |
-| `config/station_runtime.production.conf` | `online` | 生产 TCP 外部信号 + Hikrobot MVS + FL-ACDH + 共享内存检测；COM1 / 9600 8N1，15ms 曝光，300/500/700us 频闪，gain=1.0。 |
+| `config/station_runtime.production.conf` | `online` | 生产 TCP 外部信号 + Hikrobot MVS + FL-ACDH + 共享内存检测；COM1 / 9600 8N1，30ms 曝光，300/500/700us 频闪，gain=1.0。 |
 | `config/station_runtime.test.conf` | `online` | 手动触发联调真实相机和频闪，仍走共享内存检测；COM1 / 9600 8N1，参数同生产配置。 |
 | `config/station_runtime.capture_only.conf` | `capture_only` | 手动触发采图，保存 PNG 原图，不启用共享内存；COM1 / 9600 8N1，参数同生产配置。 |
 | `config/station_runtime.capture_only.single_camera.conf` | `capture_only` | 单相机诊断采图，对齐外部成功程序的 `DA9184676 + COM1 + 光源1`。 |
@@ -126,13 +126,13 @@ light.trigger_input_line=F1
 # 如果采图偏暗：先确认 FL-ACDH 物理旋钮/按键设置的 LED 电流档位足够，
 # 再在现场可接受范围内尝试增大 strobe_width_us 或 gain（≤ 相机上限）。
 # FL-ACDH 协议手册中无串口电流设置命令，电流只能通过设备面板调节。
-light.1.exposure_us=15000
+light.1.exposure_us=30000
 light.1.strobe_width_us=300
 light.1.gain=1.0
-light.2.exposure_us=15000
+light.2.exposure_us=30000
 light.2.strobe_width_us=500
 light.2.gain=1.0
-light.3.exposure_us=15000
+light.3.exposure_us=30000
 light.3.strobe_width_us=700
 light.3.gain=1.0
 
