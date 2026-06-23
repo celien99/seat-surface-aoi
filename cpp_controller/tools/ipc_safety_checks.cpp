@@ -492,10 +492,10 @@ bool test_runtime_light_channel_config_parses() {
                       config.light_channels[0].current_percent == 60.0F &&
                       config.light_channels[1].light_index == 2 &&
                       config.light_channels[1].physical_channel == 2 &&
-                      config.light_channels[1].strobe_width_us == 500 &&
+                      config.light_channels[1].strobe_width_us == 200 &&
                       config.light_channels[2].light_index == 3 &&
                       config.light_channels[2].physical_channel == 3 &&
-                      config.light_channels[2].strobe_width_us == 700 &&
+                      config.light_channels[2].strobe_width_us == 300 &&
                       config.light_channels[2].current_percent == 55.0F &&
                       config.lights[0].serial_port == "COM1" &&
                       config.lights[0].baud_rate == 9600 &&
@@ -891,13 +891,13 @@ bool test_single_camera_config_validates() {
         << "light.1.current_percent=60\n"
         << "light.2.physical_channel=2\n"
         << "light.2.exposure_us=30000\n"
-        << "light.2.strobe_width_us=500\n"
+        << "light.2.strobe_width_us=200\n"
         << "light.2.trigger_delay_us=10\n"
         << "light.2.gain=1.0\n"
         << "light.2.current_percent=60\n"
         << "light.3.physical_channel=3\n"
         << "light.3.exposure_us=30000\n"
-        << "light.3.strobe_width_us=700\n"
+        << "light.3.strobe_width_us=300\n"
         << "light.3.trigger_delay_us=10\n"
         << "light.3.gain=1.0\n"
         << "light.3.current_percent=55\n"
@@ -971,10 +971,10 @@ seat_aoi::StationRuntimeConfig make_filled_production_runtime_config() {
   config.light_channels[0].strobe_width_us = 300;
   config.light_channels[0].trigger_delay_us = 10;
   config.light_channels[1].exposure_us = 30000;
-  config.light_channels[1].strobe_width_us = 500;
+  config.light_channels[1].strobe_width_us = 200;
   config.light_channels[1].trigger_delay_us = 10;
   config.light_channels[2].exposure_us = 30000;
-  config.light_channels[2].strobe_width_us = 700;
+  config.light_channels[2].strobe_width_us = 300;
   config.light_channels[2].trigger_delay_us = 10;
   for (auto& camera : config.cameras) {
     camera.serial_number = "CAM_SN_" + std::to_string(camera.camera_index);
