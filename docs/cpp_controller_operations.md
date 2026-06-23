@@ -198,11 +198,23 @@ light.1.strobe_width_us=300
 light.1.trigger_delay_us=10
 light.1.gain=1.0
 light.1.current_percent=60
+light.2.physical_channel=2
+light.2.exposure_us=30000
+light.2.strobe_width_us=500
+light.2.trigger_delay_us=10
+light.2.gain=1.0
+light.2.current_percent=60
+light.3.physical_channel=3
+light.3.exposure_us=30000
+light.3.strobe_width_us=700
+light.3.trigger_delay_us=10
+light.3.gain=1.0
+light.3.current_percent=55
 ```
 
 `light.<N>.acquisition_mode` 当前只允许 `strobe`，会校验 `physical_channel/strobe_width_us/current_percent` 并触发频闪控制器。C++ 当前不支持 `ambient` 或软件触发采集常亮 Dome ROI 图。
 
-`light.response_mode` 默认为 `ack`，要求 FL-ACDH 每条串口命令返回 `$`，并利用 ACK 读回节拍避免 `8/9/A/7` 连续过快写入导致触发命令早于控制器参数生效。当前串口远程触发链路不使用 IO/序列/组合联动，也不使用外部 Tx+/Tx- 输入边沿，因此不会在每次触发时发送现场控制器会拒绝的 `C/B` 命令。若现场控制器或接线确认无回包，可在联调配置中临时改为 `none`，程序只校验串口写入成功；后续仍必须通过相机取帧、控制器指示灯或示波器确认 `7` 命令触发成功。写入失败、取帧超时、协议错误或未确认状态仍必须输出 `RECHECK/ERROR`，不能放行 `OK`。
+`light.response_mode` 默认为 `ack`，要求 FL-ACDH 每条串口命令返回 `$`，并利用 ACK 读回节拍避免 `8/9/A/7` 连续过快写入导致触发命令早于控制器参数生效。当前串口远程触发链路不使用 IO/序列/组合联动，也不使用外部 Tx+/Tx- 输入边沿，因此不会在每次触发时发送现场控制器会拒绝的 `C/B` 命令。`9` 命令频闪时间按三位十六进制数据发送，例如通道 2 的 `500us` 为 `$921F46C`。若现场控制器或接线确认无回包，可在联调配置中临时改为 `none`，程序只校验串口写入成功；后续仍必须通过相机取帧、控制器指示灯或示波器确认 `7` 命令触发成功。写入失败、取帧超时、协议错误或未确认状态仍必须输出 `RECHECK/ERROR`，不能放行 `OK`。
 
 要求 `10 <= strobe_width_us <= 999`、`5 <= trigger_delay_us <= 99` 且 `strobe_width_us <= exposure_us`，电流、脉宽和触发延时不得超过控制器与光源规格。
 

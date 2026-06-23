@@ -54,8 +54,8 @@ std::string FlAcdhLightController::compute_checksum(const std::string& payload) 
   return oss.str();
 }
 
-std::string FlAcdhLightController::build_frame(char cmd, char channel,
-                                                const std::string& value) {
+std::string FlAcdhLightController::build_protocol_frame(char cmd, char channel,
+                                                        const std::string& value) {
   // payload = $ + cmd + channel + value (before checksum)
   std::string payload;
   payload.reserve(1 + 1 + 1 + 3);
@@ -76,9 +76,10 @@ char FlAcdhLightController::channel_char(std::uint32_t physical_channel) {
 }
 
 std::string FlAcdhLightController::format_strobe_width(std::uint32_t strobe_width_us) {
-  // 3 位十进制，零填充，如 100 -> "100", 50 -> "050"
+  // 9 命令的数据字段是 3 位大写十六进制；500us -> 1F4 -> $921F46C。
   std::ostringstream oss;
-  oss << std::setw(3) << std::setfill('0') << strobe_width_us;
+  oss << std::uppercase << std::hex << std::setw(3) << std::setfill('0')
+      << strobe_width_us;
   return oss.str();
 }
 
@@ -389,7 +390,7 @@ bool FlAcdhLightController::send_command(char cmd, char channel,
                                           const std::string& value,
                                           int timeout_ms,
                                           std::string* error_message) {
-  const std::string frame = build_frame(cmd, channel, value);
+  const std::string frame = build_protocol_frame(cmd, channel, value);
   std::string cmd_error;
   const bool ok = send_frame(frame, timeout_ms, &cmd_error);
   if (ok) {
@@ -398,7 +399,8 @@ bool FlAcdhLightController::send_command(char cmd, char channel,
   if (error_message != nullptr) {
     std::ostringstream oss;
     oss << "FL-ACDH cmd " << cmd << " ch=" << channel << " value=" << value
-        << " frame=" << build_frame(cmd, channel, value) << " failed: " << cmd_error;
+        << " frame=" << build_protocol_frame(cmd, channel, value)
+        << " failed: " << cmd_error;
     *error_message = oss.str();
   }
   return false;

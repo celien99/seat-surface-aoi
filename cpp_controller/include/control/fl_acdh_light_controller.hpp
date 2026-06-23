@@ -15,6 +15,11 @@ public:
   FlAcdhLightController& operator=(const FlAcdhLightController&) = delete;
   ~FlAcdhLightController() override;
 
+  /// 构造一条 FL-ACDH 原始协议帧，供协议回归测试直接校验。
+  static std::string build_protocol_frame(char cmd, char channel, const std::string& value);
+  /// 格式化 9 命令频闪脉宽；控制器要求 3 位十六进制数据。
+  static std::string format_strobe_width(std::uint32_t strobe_width_us);
+
   bool initialize(const LightControllerConfig& config) override;
   bool prepare_sequence(const LightSequence& sequence,
                         std::uint64_t trigger_id,
@@ -36,10 +41,8 @@ private:
                     int timeout_ms, std::string* error_message);
 
   // ---- 协议工具 ----
-  static std::string build_frame(char cmd, char channel, const std::string& value);
   static std::string compute_checksum(const std::string& payload);
   static char channel_char(std::uint32_t physical_channel);
-  static std::string format_strobe_width(std::uint32_t strobe_width_us);
   static std::string format_delay(std::uint32_t trigger_delay_us);
   bool send_frame(const std::string& frame, int timeout_ms, std::string* error_message);
 

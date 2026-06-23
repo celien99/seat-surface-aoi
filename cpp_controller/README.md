@@ -97,7 +97,7 @@ cpp_controller/
 
 | 文件 | 模式 | 说明 |
 | --- | --- | --- |
-| `config/station_runtime.production.conf` | `online` | 生产 TCP 外部信号 + Hikrobot MVS + FL-ACDH + 共享内存检测；COM1 / 9600 8N1，30ms 曝光，300/200/300us 频闪，gain=1.0。 |
+| `config/station_runtime.production.conf` | `online` | 生产 TCP 外部信号 + Hikrobot MVS + FL-ACDH + 共享内存检测；COM1 / 9600 8N1，30ms 曝光，300/500/700us 频闪，gain=1.0。 |
 | `config/station_runtime.test.conf` | `online` | 手动触发联调真实相机和频闪，仍走共享内存检测；COM1 / 9600 8N1，参数同生产配置。 |
 | `config/station_runtime.capture_only.conf` | `capture_only` | 手动触发采图，保存 PNG 原图，不启用共享内存；COM1 / 9600 8N1，参数同生产配置。 |
 | `config/station_runtime.capture_only.single_camera.conf` | `capture_only` | 单相机诊断采图，对齐外部成功程序的 `DA9184676 + COM1 + 光源1`。 |
@@ -130,10 +130,10 @@ light.1.exposure_us=30000
 light.1.strobe_width_us=300
 light.1.gain=1.0
 light.2.exposure_us=30000
-light.2.strobe_width_us=200
+light.2.strobe_width_us=500
 light.2.gain=1.0
 light.3.exposure_us=30000
-light.3.strobe_width_us=300
+light.3.strobe_width_us=700
 light.3.gain=1.0
 
 # 超时配置（毫秒）
@@ -147,7 +147,7 @@ image_save.save_original=true
 ```
 
 > **FL-ACDH 已知协议命令**（来自手册）：C(联动模式)、B(触发电平)、8(触发模式)、9(频闪时间)、A(相机触发延时)、7(远程通信触发)、D(序列数)、E(同步信号 ID)。
-> 当前串口远程触发链路只发送 `8→9→A→7`。现场控制器会拒绝当前链路不需要的 `C/B` 设置命令，因此不再在每次触发时发送；如果 `8/9/A/7` 返回 `&` 或超时，会按光源故障保守输出 `RECHECK/ERROR`。
+> 当前串口远程触发链路只发送 `8→9→A→7`。现场控制器会拒绝当前链路不需要的 `C/B` 设置命令，因此不再在每次触发时发送；`9` 命令频闪时间按三位十六进制数据发送，例如配置 `strobe_width_us=500` 时帧为 `$921F46C`。如果 `8/9/A/7` 返回 `&` 或超时，会按光源故障保守输出 `RECHECK/ERROR`。
 
 `hardware_mode=production` 禁止 simulated/manual backend；`hardware_mode=lab` 可用 `manual_trigger` 做手动联调；不传 `--config` 时仍保留内置 simulated fallback，用于本地 IPC 回归。
 
