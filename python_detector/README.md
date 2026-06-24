@@ -285,7 +285,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 2. **小缺陷召回率提升**：Global Average Pooling 不再淹没小面积缺陷信号。
 3. **检测热力图**：TraceWriter 自动将 anomaly_map 渲染为 JET 伪彩色热力图叠加到灰度 ROI（40% 热力 + 60% 底图），同时绘制绿色 bbox 轮廓，替代旧的红色 ROI 边框。
 
-空间模式要求：`embedding_backend=onnx_wideresnet50`、`spatial_layers` 非空（如 `[layer2, layer3]`），并使用 `--spatial-mode` 重新导出 ONNX 模型和重新训练记忆库。关闭 `spatial_mode`（默认）时完全回退到向后兼容的全局嵌入路径。
+空间模式要求：`embedding_backend=onnx_wideresnet50`、`spatial_layers` 非空（如 `[layer2, layer3]`），并使用 `--spatial-mode` 重新导出 ONNX 模型和重新训练记忆库。**生产配方默认启用 `spatial_mode: true`**，生成像素级 anomaly_map 热力图。若需回退到全局嵌入路径（整个 ROI → 1 个向量 → 标量分数），在配方中设置 `spatial_mode: false`。
 
 模型资产缺失、占位文件未替换、后端依赖缺失、PCA 参数或 PatchCore memory bank 未就绪会抛出 `ModelAssetUnavailableError`，由 pipeline 转成 `RECHECK` + `CONFIGURATION_ERROR`，并写入 `sample_collection.reason=model_asset_unavailable`。模型已经加载但输出为空、bbox 越界、class id 错误或维度不匹配仍按模型运行异常处理，不能静默降级为 `OK`。
 

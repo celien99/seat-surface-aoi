@@ -99,6 +99,8 @@ models:
     knn_k: 1
     anomaly_score_scale: 1.0
     score_threshold: 0.20
+    spatial_mode: true
+    spatial_layers: [layer2, layer3]
 trace:
   enabled: true
   root_dir: trace
