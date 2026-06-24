@@ -159,7 +159,7 @@ def test_dome_roi_locator_yolo_seg_input_letterbox_transform() -> None:
             output_decode="segmentation_rows",
             input_width=128,
             input_height=128,
-            input_channels=3,
+            input_channels=2,
             min_confidence=0.5,
             min_mask_area_px=4,
             max_pose_error_px=0.0,
@@ -171,7 +171,7 @@ def test_dome_roi_locator_yolo_seg_input_letterbox_transform() -> None:
     tensor, transform = locator._frame_to_nchw(frame, recipe, np)  # noqa: SLF001
     mapped = locator._bbox_from_model_input((32.0, 40.0, 95.0, 87.0), transform, frame)  # noqa: SLF001
 
-    assert tensor.shape == (1, 3, 128, 128)
+    assert tensor.shape == (1, 2, 128, 128)
     assert transform.scale == pytest.approx(2.0)
     assert transform.pad_y == pytest.approx(16.0)
     assert mapped == pytest.approx((16.0, 12.0, 47.5, 35.5))
@@ -264,7 +264,7 @@ def test_production_roi_source_reuses_diffuse_without_extra_feature_channel() ->
     assert report.dome_light_id == "DIFFUSE"
     assert all("DOME_ROI" not in summary["tensor_channel_names"] for summary in pipeline.last_context["feature_summary"])
     assert all(
-        summary["tensor_channel_names"] == ["ch0_diffuse", "ch1_polar_diffuse", "ch2_high_left"]
+        summary["tensor_channel_names"] == ["light:DIFFUSE", "light:POLAR_DIFFUSE", "light:HIGH_LEFT"]
         for summary in pipeline.last_context["feature_summary"]
     )
 

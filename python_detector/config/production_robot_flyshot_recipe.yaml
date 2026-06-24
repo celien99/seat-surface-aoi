@@ -86,9 +86,9 @@ models:
     role: primary
     class_names: [unknown_anomaly]
     input_channels:
-      - ch0_diffuse
-      - ch1_polar_diffuse
-      - ch2_high_left
+      - light:DIFFUSE
+      - light:POLAR_DIFFUSE
+      - light:HIGH_LEFT
     embedding_backend: onnx_wideresnet50
     embedding_model_path: model/wideresnet50/seat_wrn50_embedding.onnx
     embedding_version: wrn50_seat_v1

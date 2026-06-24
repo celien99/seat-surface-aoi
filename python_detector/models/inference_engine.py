@@ -105,7 +105,7 @@ class FakeModel:
             return [self._candidate(feature_group, 0.88)]
         if self.mode == "recheck":
             return [self._candidate(feature_group, 0.22)]
-        suspicious = max(feature_group.features.get("ch4_high_max_min", [0]))
+        suspicious = self._max_tensor_feature_value(feature_group)
         if suspicious > 240:
             return [self._candidate(feature_group, 0.22)]
         return []
@@ -133,7 +133,13 @@ class FakeModel:
         evidence: list[str] = []
         for channel_name in feature_group.tensor_channel_names:
             evidence.extend(feature_group.evidence_lights_by_channel.get(channel_name, ()))
-        return list(dict.fromkeys(evidence)) or ["HIGH_LEFT"]
+        return list(dict.fromkeys(evidence))
+
+    def _max_tensor_feature_value(self, feature_group: FeatureGroup) -> int:
+        values: list[int] = []
+        for channel_name in feature_group.tensor_channel_names:
+            values.extend(feature_group.features.get(channel_name, ()))
+        return max(values, default=0)
 
 
 class OnnxModel:
@@ -325,7 +331,7 @@ class PatchCoreModel:
         evidence: list[str] = []
         for channel_name in feature_group.tensor_channel_names:
             evidence.extend(feature_group.evidence_lights_by_channel.get(channel_name, ()))
-        return list(dict.fromkeys(evidence)) or ["DIFFUSE"]
+        return list(dict.fromkeys(evidence))
 
 
 class ModelRegistry:

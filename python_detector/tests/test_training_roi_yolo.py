@@ -141,4 +141,12 @@ def test_export_wideresnet_embedding_reports_missing_dependencies(monkeypatch: p
     monkeypatch.setattr(builtins, "__import__", fake_import)
 
     with pytest.raises(OnnxExportError, match="导出依赖未安装"):
-        export_wideresnet_embedding(tmp_path / "embedding.onnx")
+        export_wideresnet_embedding(tmp_path / "embedding.onnx", input_channels=2)
+
+
+def test_export_wideresnet_embedding_requires_explicit_input_channels(tmp_path: Path) -> None:
+    from training_tools.export_wideresnet_embedding import main
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["--output", str(tmp_path / "embedding.onnx")])
+    assert exc_info.value.code == 2

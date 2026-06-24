@@ -13,7 +13,7 @@ class _WideResNetEmbeddingExportError(OnnxExportError):
 def export_wideresnet_embedding(
     output: Path,
     *,
-    input_channels: int = 3,
+    input_channels: int,
     embedding_dim: int = 1024,
     input_height: int = 48,
     input_width: int = 64,
@@ -21,6 +21,8 @@ def export_wideresnet_embedding(
     opset: int = 17,
 ) -> dict:
     """导出与 python_detector EmbeddingExtractor 兼容的 WideResNet50 ONNX embedding 模型。"""
+    if input_channels <= 0:
+        raise _WideResNetEmbeddingExportError("--input-channels 必须是正整数")
     try:
         import onnx  # type: ignore
         import torch  # type: ignore
@@ -104,7 +106,7 @@ def export_wideresnet_embedding(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="导出 WideResNet50 embedding ONNX，供 PatchCore safety net 使用")
     parser.add_argument("--output", type=Path, default=Path("model/wideresnet50/seat_wrn50_embedding.onnx"))
-    parser.add_argument("--input-channels", type=int, default=3)
+    parser.add_argument("--input-channels", type=int, required=True, help="模型输入通道数，必须与配方 models.<key>.input_channels 数量一致")
     parser.add_argument("--embedding-dim", type=int, default=1024)
     parser.add_argument("--input-height", type=int, default=48)
     parser.add_argument("--input-width", type=int, default=64)

@@ -19,15 +19,8 @@ from training_tools.pipeline_report import (
 
 def _recipe(root_dir: Path, save_ok_ratio: float = 1.0, fake_mode: str = "auto"):
     recipe = RecipeManager().load("seat_a_black_leather_v1")
-    return recipe.__class__(
-        recipe_id=recipe.recipe_id,
-        sku=recipe.sku,
-        light_order=recipe.light_order,
-        cameras=recipe.cameras,
-        quality=recipe.quality,
-        registration=recipe.registration,
-        fusion=recipe.fusion,
-        thresholds=recipe.thresholds,
+    return replace(
+        recipe,
         models={
             **recipe.models,
             "fake_default": replace(recipe.models["fake_default"], fake_mode=fake_mode),
@@ -182,7 +175,7 @@ def test_pipeline_model_error_context_is_traceable(tmp_path: Path) -> None:
         recipe,
         models={
             **recipe.models,
-            "fake_default": ModelConfig(backend="onnx", model_path="missing.onnx", role="primary"),
+            "fake_default": replace(recipe.models["fake_default"], backend="onnx", model_path="missing.onnx"),
         },
     )
     pipeline = InspectionPipeline()

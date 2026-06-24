@@ -101,7 +101,7 @@ uv run python -m training_tools.collect_capture_dataset `
 ```
 
 `collect_capture_dataset` 默认按所选配方的 `light_order` 生成 `L1/L2/L3...` 到算法光源 ID 的映射；当前生产配方即 `L1/L2/L3 -> DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。它调用 `model/roi_yolo/seat_roi_seg.onnx` 做 ROI 定位，输出 `dataset_manifest.jsonl` 和当前配方光源数量一致的 ROI PGM。ROI 冲突、低置信或越界样本会被跳过，不进入训练集。PatchCore 只能用人工确认的正常样本建库；`seat_defect_detector.onnx` 仍需要按缺陷类别人工标注后的 YOLO detect 数据集训练。
-生产缺陷判定链路采用无监督 PatchCore 主模型，不依赖 `model/supervised_defect/seat_defect_detector.onnx`。真实 OK 样本用于训练 WideResNet50 embedding、PCA、PatchCore memory bank 和可选 FAISS 索引；训练 embedding 默认使用配方 `models.<key>.input_channels`，与在线检测层保持一致，不固定 4 光源或 4/5 通道。NG/RECHECK 与人工复核样本用于阈值曲线和放行验证。
+生产缺陷判定链路采用无监督 PatchCore 主模型，不依赖 `model/supervised_defect/seat_defect_detector.onnx`。真实 OK 样本用于训练 WideResNet50 embedding、PCA、PatchCore memory bank 和可选 FAISS 索引；训练 embedding 默认使用配方 `models.<key>.input_channels`，与在线检测层保持一致，当前 2 个机位、3 种光源只是生产配方事实，算法层不固定光源数或输入通道数。NG/RECHECK 与人工复核样本用于阈值曲线和放行验证。
 
 ## 安全边界
 

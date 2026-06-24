@@ -8,6 +8,11 @@ def test_recipe_manager_loads_default_yaml() -> None:
     assert recipe.recipe_id == "seat_a_black_leather_v1"
     assert recipe.cameras[0].camera_id == "TOP_BACK"
     assert recipe.models["fake_default"].backend == "fake"
+    assert recipe.models["fake_default"].input_channels == (
+        "light:DIFFUSE",
+        "light:POLAR_DIFFUSE",
+        "light:HIGH_LEFT",
+    )
 
 
 def test_recipe_manager_loads_production_yaml() -> None:
@@ -52,6 +57,27 @@ def test_recipe_rejects_required_light_not_in_light_order() -> None:
         )
 
 
+def test_recipe_defaults_required_lights_and_registration_from_light_order() -> None:
+    recipe = recipe_from_dict(
+        {
+            "recipe_id": "two_light_defaults",
+            "sku": "sku",
+            "light_order": ["KEY", "SIDE"],
+            "cameras": {"TOP": {"model_key": "detector"}},
+            "thresholds": {"scratch": {"ng_score": 0.35, "recheck_score": 0.20}},
+            "models": {"detector": {"backend": "fake", "role": "primary", "class_names": ["scratch"]}},
+        }
+    )
+
+    assert recipe.quality.required_lights == ("KEY", "SIDE")
+    assert recipe.registration.base_light_id == "KEY"
+    assert recipe.registration.base_light_fallback == "KEY"
+    assert recipe.semantic_light_id("DOME") == "KEY"
+    assert recipe.semantic_light_id("DARKFIELD_L") == "DARKFIELD_L"
+    assert recipe.camera_defaults.light_order == ("KEY", "SIDE")
+    assert recipe.models["detector"].input_channels == ("light:KEY", "light:SIDE")
+
+
 def test_recipe_rejects_registration_lights_not_in_light_order() -> None:
     with pytest.raises(RecipeValidationError, match="registration.base_light_id 不在 light_order 中"):
         recipe_from_dict(
@@ -70,6 +96,7 @@ def test_recipe_rejects_registration_lights_not_in_light_order() -> None:
                 "recipe_id": "bad_fallback_light",
                 "sku": "sku",
                 "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT", "LOW_LEFT"],
+                "quality": {"required_lights": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"]},
                 "registration": {"base_light_id": "POLAR_DIFFUSE", "base_light_fallback": "LOW_LEFT"},
                 "cameras": {
                     "TOP": {
@@ -244,7 +271,7 @@ def test_recipe_parses_onnx_model_io_contract() -> None:
                     "model_path": "models/scratch.onnx",
                     "model_family": "supervised",
                     "role": "primary",
-                    "input_channels": ["ch0_diffuse", "ch4_high_max_min"],
+                    "input_channels": ["light:DIFFUSE", "max_min:HIGH_LEFT:HIGH_RIGHT"],
                     "input_scale": 255.0,
                     "class_names": ["scratch", "dent"],
                     "output_decode": "detection_rows",
@@ -255,7 +282,7 @@ def test_recipe_parses_onnx_model_io_contract() -> None:
         }
     )
     model = recipe.models["scratch_onnx"]
-    assert model.input_channels == ("ch0_diffuse", "ch4_high_max_min")
+    assert model.input_channels == ("light:DIFFUSE", "max_min:HIGH_LEFT:HIGH_RIGHT")
     assert model.class_names == ("scratch", "dent")
     assert model.output_decode == "detection_rows"
     assert model.bbox_format == "xyxy_normalized"
@@ -346,7 +373,28 @@ def test_recipe_rejects_yolo_seg_with_bbox_decode() -> None:
         )
 
 
-def test_recipe_rejects_invalid_roi_locator_input_channels() -> None:
+def test_recipe_accepts_arbitrary_positive_roi_locator_input_channels() -> None:
+    recipe = recipe_from_dict(
+        {
+            "recipe_id": "two_channel_roi",
+            "sku": "sku",
+            "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+            "roi_locator": {
+                "backend": "onnx_yolo_seg",
+                "model_path": "model/roi_yolo/seat_roi_seg.onnx",
+                "output_decode": "ultralytics_yolo_seg",
+                "input_channels": 2,
+            },
+            "cameras": {"TOP": {"model_key": "detector"}},
+            "thresholds": {"scratch": {"ng_score": 0.35, "recheck_score": 0.2}},
+            "models": {"detector": {"backend": "fake", "role": "primary", "class_names": ["scratch"]}},
+        }
+    )
+
+    assert recipe.roi_locator.input_channels == 2
+
+
+def test_recipe_rejects_non_positive_roi_locator_input_channels() -> None:
     with pytest.raises(RecipeValidationError, match="input_channels"):
         recipe_from_dict(
             {
@@ -357,7 +405,7 @@ def test_recipe_rejects_invalid_roi_locator_input_channels() -> None:
                     "backend": "onnx_yolo_seg",
                     "model_path": "model/roi_yolo/seat_roi_seg.onnx",
                     "output_decode": "ultralytics_yolo_seg",
-                    "input_channels": 2,
+                    "input_channels": 0,
                 },
                 "cameras": {"TOP": {"model_key": "detector"}},
                 "thresholds": {"scratch": {"ng_score": 0.35, "recheck_score": 0.2}},
@@ -639,7 +687,7 @@ def test_recipe_rejects_unsafe_model_io_config() -> None:
                     "detector": {
                         "backend": "fake",
                         "role": "primary",
-                        "input_channels": ["ch0_diffuse", "ch0_diffuse"],
+                        "input_channels": ["light:DIFFUSE", "light:DIFFUSE"],
                     }
                 },
             }

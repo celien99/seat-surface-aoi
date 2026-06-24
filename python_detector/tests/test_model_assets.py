@@ -13,9 +13,9 @@ def test_production_recipe_loads_full_model_chain() -> None:
     assert recipe.model_key_for("TOP_BACK", "seat") == "patchcore_unknown_detector"
     assert recipe.safety_net_model_keys_for("TOP_BACK", "seat") == ()
     assert recipe.models["patchcore_unknown_detector"].input_channels == (
-        "ch0_diffuse",
-        "ch1_polar_diffuse",
-        "ch2_high_left",
+        "light:DIFFUSE",
+        "light:POLAR_DIFFUSE",
+        "light:HIGH_LEFT",
     )
     assert recipe.roi_locator.backend == "onnx_yolo_seg"
     assert recipe.roi_locator.model_path == "model/roi_yolo/seat_roi_seg.onnx"

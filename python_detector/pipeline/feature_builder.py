@@ -27,6 +27,25 @@ class FeatureGroup:
     anomaly_summary: dict[str, object] | None = None
 
 
+@dataclass(frozen=True)
+class FeatureChannelSpec:
+    operation: str
+    light_ids: tuple[str, ...]
+
+
+_CHANNEL_ALIASES: dict[str, FeatureChannelSpec] = {
+    "ch0_diffuse": FeatureChannelSpec("light", ("DIFFUSE",)),
+    "ch1_polar_diffuse": FeatureChannelSpec("light", ("POLAR_DIFFUSE",)),
+    "ch2_high_left": FeatureChannelSpec("light", ("HIGH_LEFT",)),
+    "ch3_high_right": FeatureChannelSpec("light", ("HIGH_RIGHT",)),
+    "ch4_high_max_min": FeatureChannelSpec("max_min", ("HIGH_LEFT", "HIGH_RIGHT")),
+    "optional_dark_low_lr_diff": FeatureChannelSpec("abs_diff", ("LOW_LEFT", "LOW_RIGHT")),
+    "optional_dark_low_max_min": FeatureChannelSpec("max_min", ("LOW_LEFT", "LOW_RIGHT")),
+    "aux_local_contrast": FeatureChannelSpec("local_contrast", ("DIFFUSE",)),
+    "aux_specular_removed": FeatureChannelSpec("abs_diff", ("DIFFUSE", "POLAR_DIFFUSE")),
+}
+
+
 class FeatureBuilder:
     def build(self, reflectance_cubes: list[ReflectanceCube], recipe: Recipe) -> list[FeatureGroup]:
         feature_groups: list[FeatureGroup] = []
@@ -51,40 +70,23 @@ class FeatureBuilder:
         return {channel_name: self._build_channel(cube, channel_name) for channel_name in channel_names}
 
     def _build_channel(self, cube: ReflectanceCube, channel_name: str) -> list[int]:
-        if channel_name == "ch0_diffuse":
-            return self._required(cube.get("DIFFUSE"), channel_name, "DIFFUSE")
-        if channel_name == "ch1_polar_diffuse":
-            return self._required(cube.get("POLAR_DIFFUSE"), channel_name, "POLAR_DIFFUSE")
-        if channel_name == "ch2_high_left":
-            return self._required(cube.get("HIGH_LEFT"), channel_name, "HIGH_LEFT")
-        if channel_name == "ch3_high_right":
-            return self._required(cube.get("HIGH_RIGHT"), channel_name, "HIGH_RIGHT")
-        if channel_name == "ch4_high_max_min":
+        spec = self._parse_channel_spec(channel_name)
+        if spec.operation == "light":
+            return self._required(cube.get(spec.light_ids[0]), channel_name, spec.light_ids[0])
+        if spec.operation == "abs_diff":
+            return self._abs_diff(
+                self._required_frame(cube.get(spec.light_ids[0]), channel_name, spec.light_ids[0]),
+                self._required_frame(cube.get(spec.light_ids[1]), channel_name, spec.light_ids[1]),
+            )
+        if spec.operation == "max_min":
             return self._max_min(
                 [
-                    self._required_frame(cube.get("HIGH_LEFT"), channel_name, "HIGH_LEFT"),
-                    self._required_frame(cube.get("HIGH_RIGHT"), channel_name, "HIGH_RIGHT"),
+                    self._required_frame(cube.get(light_id), channel_name, light_id)
+                    for light_id in spec.light_ids
                 ]
             )
-        if channel_name == "optional_dark_low_lr_diff":
-            return self._abs_diff(
-                self._required_frame(cube.get("LOW_LEFT"), channel_name, "LOW_LEFT"),
-                self._required_frame(cube.get("LOW_RIGHT"), channel_name, "LOW_RIGHT"),
-            )
-        if channel_name == "optional_dark_low_max_min":
-            return self._max_min(
-                [
-                    self._required_frame(cube.get("LOW_LEFT"), channel_name, "LOW_LEFT"),
-                    self._required_frame(cube.get("LOW_RIGHT"), channel_name, "LOW_RIGHT"),
-                ]
-            )
-        if channel_name == "aux_local_contrast":
-            return self._local_contrast(self._required_frame(cube.get("DIFFUSE"), channel_name, "DIFFUSE"))
-        if channel_name == "aux_specular_removed":
-            return self._abs_diff(
-                self._required_frame(cube.get("DIFFUSE"), channel_name, "DIFFUSE"),
-                self._required_frame(cube.get("POLAR_DIFFUSE"), channel_name, "POLAR_DIFFUSE"),
-            )
+        if spec.operation == "local_contrast":
+            return self._local_contrast(self._required_frame(cube.get(spec.light_ids[0]), channel_name, spec.light_ids[0]))
         raise ValueError(f"unsupported model input channel: {channel_name}")
 
     def _make_feature_group(
@@ -109,7 +111,7 @@ class FeatureBuilder:
             feature_shape_hw=feature_shape,
             tensor_nchw=tensor,
             tensor_channel_names=model_config.input_channels,
-            evidence_lights_by_channel=self._evidence_lights_by_channel(),
+            evidence_lights_by_channel=self._evidence_lights_by_channel(tuple(features)),
             roi_to_source_matrix=cube.roi_to_source_matrix,
             source_to_roi_matrix=cube.source_to_roi_matrix,
         )
@@ -215,15 +217,27 @@ class FeatureBuilder:
         if len(set(lengths)) != 1:
             raise ValueError(f"{operation} feature source length mismatch: {lengths}")
 
-    def _evidence_lights_by_channel(self) -> dict[str, tuple[str, ...]]:
+    def _evidence_lights_by_channel(self, channel_names: tuple[str, ...]) -> dict[str, tuple[str, ...]]:
         return {
-            "ch0_diffuse": ("DIFFUSE",),
-            "ch1_polar_diffuse": ("POLAR_DIFFUSE",),
-            "ch2_high_left": ("HIGH_LEFT",),
-            "ch3_high_right": ("HIGH_RIGHT",),
-            "ch4_high_max_min": ("HIGH_LEFT", "HIGH_RIGHT"),
-            "optional_dark_low_lr_diff": ("LOW_LEFT", "LOW_RIGHT"),
-            "optional_dark_low_max_min": ("LOW_LEFT", "LOW_RIGHT"),
-            "aux_local_contrast": ("DIFFUSE",),
-            "aux_specular_removed": ("DIFFUSE", "POLAR_DIFFUSE"),
+            channel_name: self._parse_channel_spec(channel_name).light_ids
+            for channel_name in channel_names
         }
+
+    def _parse_channel_spec(self, channel_name: str) -> FeatureChannelSpec:
+        alias = _CHANNEL_ALIASES.get(channel_name)
+        if alias is not None:
+            return alias
+        parts = tuple(part.strip() for part in channel_name.split(":"))
+        if len(parts) < 2 or not all(parts):
+            raise ValueError(f"unsupported model input channel: {channel_name}")
+        operation = parts[0]
+        light_ids = parts[1:]
+        if operation == "light" and len(light_ids) == 1:
+            return FeatureChannelSpec(operation, light_ids)
+        if operation == "abs_diff" and len(light_ids) == 2:
+            return FeatureChannelSpec(operation, light_ids)
+        if operation == "max_min" and len(light_ids) >= 2:
+            return FeatureChannelSpec(operation, light_ids)
+        if operation == "local_contrast" and len(light_ids) == 1:
+            return FeatureChannelSpec(operation, light_ids)
+        raise ValueError(f"unsupported model input channel: {channel_name}")

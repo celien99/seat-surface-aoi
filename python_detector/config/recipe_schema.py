@@ -15,13 +15,7 @@ class RecipeValidationError(ValueError):
 
 @dataclass(frozen=True)
 class V4LightConfig:
-    semantic_to_light_id: dict[str, str] = field(
-        default_factory=lambda: {
-            "DOME": "DIFFUSE",
-            "DARKFIELD_L": "HIGH_LEFT",
-            "BRIGHTFIELD": "POLAR_DIFFUSE",
-        }
-    )
+    semantic_to_light_id: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -45,7 +39,7 @@ class RoiLocatorConfig:
 
 @dataclass(frozen=True)
 class QualityConfig:
-    required_lights: tuple[str, ...] = ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT")
+    required_lights: tuple[str, ...] = ()
     max_saturation_ratio: float = 0.01
     min_mean_gray: float = 20.0
     max_mean_gray: float = 235.0
@@ -62,8 +56,8 @@ class QualityConfig:
 
 @dataclass(frozen=True)
 class RegistrationConfig:
-    base_light_id: str = "POLAR_DIFFUSE"
-    base_light_fallback: str = "DIFFUSE"
+    base_light_id: str = ""
+    base_light_fallback: str = ""
     fail_policy: str = "RECHECK"
     method: str = "fixed_calibration"
     max_iterations: int = 30
@@ -81,8 +75,8 @@ class CameraRecipe:
     safety_net_model_key: str | None = None
     roi_template: str = "config/roi/default_roi.yaml"
     calibration_id: str = "calib/simulated_v1"
-    base_light_id: str = "POLAR_DIFFUSE"
-    light_order: tuple[str, ...] = ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT")
+    base_light_id: str = ""
+    light_order: tuple[str, ...] = ()
     roi_models: dict[str, str] = field(default_factory=dict)
     roi_safety_net_models: dict[str, str] = field(default_factory=dict)
     pixel_size_mm: float | None = None
@@ -94,8 +88,8 @@ class CameraDefaults:
     safety_net_model_key: str | None = None
     roi_template: str = "python_detector/config/roi/default_roi.yaml"
     calibration_id: str = "calib/simulated_v1"
-    base_light_id: str = "POLAR_DIFFUSE"
-    light_order: tuple[str, ...] = ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT")
+    base_light_id: str = ""
+    light_order: tuple[str, ...] = ()
     roi_models: dict[str, str] = field(default_factory=dict)
     roi_safety_net_models: dict[str, str] = field(default_factory=dict)
     pixel_size_mm: float | None = None
@@ -122,11 +116,7 @@ class ModelConfig:
     fake_mode: str = "auto"
     model_family: str = "supervised"
     role: str = "primary"
-    input_channels: tuple[str, ...] = (
-        "ch0_diffuse",
-        "ch1_polar_diffuse",
-        "ch2_high_left",
-    )
+    input_channels: tuple[str, ...] = ()
     input_scale: float = 255.0
     class_names: tuple[str, ...] = ("scratch",)
     output_decode: str = "none"
@@ -159,7 +149,7 @@ class TraceConfig:
 class Recipe:
     recipe_id: str
     sku: str
-    light_order: tuple[str, ...] = ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT")
+    light_order: tuple[str, ...] = ()
     v4_lights: V4LightConfig = field(default_factory=V4LightConfig)
     camera_defaults: CameraDefaults = field(default_factory=CameraDefaults)
     cameras: tuple[CameraRecipe, ...] = field(default_factory=tuple)
@@ -282,11 +272,11 @@ def load_recipe_file(path: str | Path) -> Recipe:
 def recipe_from_dict(data: dict[str, Any]) -> Recipe:
     recipe_id = _required_str(data, "recipe_id")
     sku = _required_str(data, "sku")
-    light_order = _str_tuple(data.get("light_order", ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT")), "light_order")
-    v4_lights = _v4_lights_from_dict(_dict(data.get("v4_lights", {}), "v4_lights"))
-    quality = _quality_from_dict(_dict(data.get("quality", {}), "quality"))
+    light_order = _recipe_light_order_from_dict(data)
+    v4_lights = _v4_lights_from_dict(_dict(data.get("v4_lights", {}), "v4_lights"), light_order)
+    quality = _quality_from_dict(_dict(data.get("quality", {}), "quality"), light_order)
     roi_locator = _roi_locator_from_dict(_dict(data.get("roi_locator", {}), "roi_locator"))
-    registration = _registration_from_dict(_dict(data.get("registration", {}), "registration"))
+    registration = _registration_from_dict(_dict(data.get("registration", {}), "registration"), quality.required_lights)
     fusion = _fusion_from_dict(_dict(data.get("fusion", {}), "fusion"))
     camera_defaults = _camera_defaults_from_dict(
         _dict(data.get("camera_defaults", {}), "camera_defaults"),
@@ -295,7 +285,7 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
     )
     cameras = _cameras_from_dict(data.get("cameras", {}), camera_defaults)
     thresholds = _thresholds_from_dict(_dict(data.get("thresholds", {}), "thresholds"))
-    models = _models_from_dict(_dict(data.get("models", {"default": {"backend": "fake"}}), "models"))
+    models = _models_from_dict(_dict(data.get("models", {"default": {"backend": "fake"}}), "models"), light_order)
     trace = _trace_from_dict(_dict(data.get("trace", {}), "trace"))
 
     _validate_lights(light_order, quality.required_lights)
@@ -324,7 +314,29 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
     )
 
 
-def _quality_from_dict(data: dict[str, Any]) -> QualityConfig:
+def _recipe_light_order_from_dict(data: dict[str, Any]) -> tuple[str, ...]:
+    raw = data.get("light_order")
+    if raw is not None:
+        return _str_tuple(raw, "light_order")
+    quality = data.get("quality")
+    if isinstance(quality, dict) and "required_lights" in quality:
+        return _str_tuple(quality["required_lights"], "quality.required_lights")
+    camera_defaults = data.get("camera_defaults")
+    if isinstance(camera_defaults, dict) and "light_order" in camera_defaults:
+        return _str_tuple(camera_defaults["light_order"], "camera_defaults.light_order")
+    cameras = data.get("cameras")
+    if isinstance(cameras, dict):
+        for camera_id, raw_camera in cameras.items():
+            if isinstance(raw_camera, dict) and "light_order" in raw_camera:
+                return _str_tuple(raw_camera["light_order"], f"cameras.{camera_id}.light_order")
+    if isinstance(cameras, list):
+        for index, raw_camera in enumerate(cameras):
+            if isinstance(raw_camera, dict) and "light_order" in raw_camera:
+                return _str_tuple(raw_camera["light_order"], f"cameras[{index}].light_order")
+    raise RecipeValidationError("缺少必填字段: light_order")
+
+
+def _quality_from_dict(data: dict[str, Any], default_required_lights: tuple[str, ...]) -> QualityConfig:
     min_mean_gray = _gray_value(data.get("min_mean_gray", 20.0), "quality.min_mean_gray")
     max_mean_gray = _gray_value(data.get("max_mean_gray", 235.0), "quality.max_mean_gray")
     if min_mean_gray > max_mean_gray:
@@ -332,7 +344,7 @@ def _quality_from_dict(data: dict[str, Any]) -> QualityConfig:
             f"quality.min_mean_gray 不能大于 max_mean_gray: {min_mean_gray} > {max_mean_gray}"
         )
     return QualityConfig(
-        required_lights=_str_tuple(data.get("required_lights", ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT")), "quality.required_lights"),
+        required_lights=_str_tuple(data.get("required_lights", default_required_lights), "quality.required_lights"),
         max_saturation_ratio=_ratio(data.get("max_saturation_ratio", 0.01), "quality.max_saturation_ratio"),
         min_mean_gray=min_mean_gray,
         max_mean_gray=max_mean_gray,
@@ -348,15 +360,8 @@ def _quality_from_dict(data: dict[str, Any]) -> QualityConfig:
     )
 
 
-def _v4_lights_from_dict(data: dict[str, Any]) -> V4LightConfig:
-    raw_mapping = data.get(
-        "semantic_to_light_id",
-        {
-            "DOME": "DIFFUSE",
-            "DARKFIELD_L": "HIGH_LEFT",
-            "BRIGHTFIELD": "POLAR_DIFFUSE",
-        },
-    )
+def _v4_lights_from_dict(data: dict[str, Any], light_order: tuple[str, ...]) -> V4LightConfig:
+    raw_mapping = data.get("semantic_to_light_id", {"DOME": light_order[0]})
     mapping = {
         _str(key, f"v4_lights.semantic_to_light_id.{key}"): _str(
             value,
@@ -364,10 +369,6 @@ def _v4_lights_from_dict(data: dict[str, Any]) -> V4LightConfig:
         )
         for key, value in _dict(raw_mapping, "v4_lights.semantic_to_light_id").items()
     }
-    required_semantics = ("DOME", "DARKFIELD_L", "BRIGHTFIELD")
-    missing = [semantic for semantic in required_semantics if semantic not in mapping]
-    if missing:
-        raise RecipeValidationError(f"v4_lights.semantic_to_light_id 缺少 V4 语义光源: {missing}")
     return V4LightConfig(semantic_to_light_id=mapping)
 
 
@@ -386,8 +387,6 @@ def _roi_locator_from_dict(data: dict[str, Any]) -> RoiLocatorConfig:
     if backend in {"fake_yolo", "onnx_yolo"} and output_decode not in {"yolo_xyxy_rows", "ultralytics_yolo"}:
         raise RecipeValidationError("roi_locator bbox 后端必须使用 yolo_xyxy_rows 或 ultralytics_yolo")
     input_channels = _positive_int(data.get("input_channels", 1), "roi_locator.input_channels")
-    if input_channels not in {1, 3}:
-        raise RecipeValidationError("roi_locator.input_channels 必须是 1 或 3")
     bbox_format = _bbox_format(data.get("bbox_format", "xyxy_pixel"), "roi_locator.bbox_format")
     return RoiLocatorConfig(
         backend=backend,
@@ -410,13 +409,14 @@ def _roi_locator_from_dict(data: dict[str, Any]) -> RoiLocatorConfig:
     )
 
 
-def _registration_from_dict(data: dict[str, Any]) -> RegistrationConfig:
+def _registration_from_dict(data: dict[str, Any], default_required_lights: tuple[str, ...]) -> RegistrationConfig:
     method = _str(data.get("method", "fixed_calibration"), "registration.method")
     if method not in {"fixed_calibration", "ecc"}:
         raise RecipeValidationError("registration.method 必须是 fixed_calibration 或 ecc")
+    default_base_light_id = default_required_lights[0]
     return RegistrationConfig(
-        base_light_id=_str(data.get("base_light_id", "POLAR_DIFFUSE"), "registration.base_light_id"),
-        base_light_fallback=_str(data.get("base_light_fallback", "DIFFUSE"), "registration.base_light_fallback"),
+        base_light_id=_str(data.get("base_light_id", default_base_light_id), "registration.base_light_id"),
+        base_light_fallback=_str(data.get("base_light_fallback", default_base_light_id), "registration.base_light_fallback"),
         fail_policy=_decision(data.get("fail_policy", "RECHECK"), "registration.fail_policy"),
         method=method,
         max_iterations=_positive_int(data.get("max_iterations", 30), "registration.max_iterations"),
@@ -551,7 +551,7 @@ def _thresholds_from_dict(data: dict[str, Any]) -> dict[str, ThresholdConfig]:
     return thresholds
 
 
-def _models_from_dict(data: dict[str, Any]) -> dict[str, ModelConfig]:
+def _models_from_dict(data: dict[str, Any], light_order: tuple[str, ...]) -> dict[str, ModelConfig]:
     models: dict[str, ModelConfig] = {}
     for model_key, raw in data.items():
         raw = _dict(raw, f"models.{model_key}")
@@ -572,7 +572,7 @@ def _models_from_dict(data: dict[str, Any]) -> dict[str, ModelConfig]:
         input_channels = _unique_str_tuple(
             raw.get(
                 "input_channels",
-                ("ch0_diffuse", "ch1_polar_diffuse", "ch2_high_left"),
+                _default_model_input_channels(light_order),
             ),
             f"models.{model_key}.input_channels",
         )
@@ -625,8 +625,12 @@ def _models_from_dict(data: dict[str, Any]) -> dict[str, ModelConfig]:
             ),
         )
     if "default" not in models:
-        models["default"] = ModelConfig()
+        models["default"] = ModelConfig(input_channels=_default_model_input_channels(light_order))
     return models
+
+
+def _default_model_input_channels(light_order: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(f"light:{light_id}" for light_id in light_order)
 
 
 def _trace_from_dict(data: dict[str, Any]) -> TraceConfig:

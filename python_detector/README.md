@@ -226,7 +226,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 模型补齐后，固定机位生产任务应使用 `recipe_id=seat_a_black_leather_production_v1`，机器人飞拍生产任务应使用 `recipe_id=seat_a_robot_flyshot_production_v1`。这两个配方会启用 `onnx_yolo_seg` Dome ROI segmentation、`ecc` 多光源配准、WideResNet50 embedding、PCA、PatchCore KNN 和可选 FAISS 无监督异常检测主模型；仓库内生产标定和 `production_full_roi.yaml` 是可校验模板，其中 ROI `polygon_xy` 作为安全边界和 `output_size` 约束，真实 ROI polygon 由 segmentation mask 在线生成。
 
-当前固定机位 C++ 生产配置是双相机 + FL-ACDH 三路共享频闪光源，采集顺序为 `light_order=1,2,3`，映射到 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。`production_recipe.yaml` 顶层 `light_order`、`camera_defaults.light_order`、`quality.required_lights` 和模型输入通道均保持这三路检测光源一致；DOME 语义暂时映射到 `DIFFUSE`，仅为 ROI 定位后端提供输入图，不额外要求 C++ 发布 `DOME_ROI` 采集轮次。若未来补常亮 Dome ROI 或第 4 路 `HIGH_RIGHT`，必须同步 C++ 配置、生产配方、模型输入通道、训练资产和测试。
+当前固定机位 C++ 生产配置是双相机 + FL-ACDH 三路共享频闪光源，采集顺序为 `light_order=1,2,3`，映射到 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。`production_recipe.yaml` 顶层 `light_order`、`camera_defaults.light_order`、`quality.required_lights` 和模型输入通道均保持这三路检测光源一致；DOME 语义暂时映射到 `DIFFUSE`，仅为 ROI 定位后端提供输入图，不额外要求 C++ 发布 `DOME_ROI` 采集轮次。若未来补常亮 Dome ROI 或新增其它检测光源，必须同步 C++ 配置、生产配方、模型输入通道、训练资产和测试；Python 特征构建和训练工具按配方通道声明处理，不把三路作为算法常量。
 
 配方 schema 会校验：
 
@@ -259,13 +259,13 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 `ReflectanceCubeBuilder` 将同一 ROI 下多个检测光源图组织成 cube，并按当前视角的 `light_order` 保留可用检测光源。固定机位生产配方当前只使用 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 三路；DOME 语义映射到 `DIFFUSE` 只影响 ROI 定位输入选择，不新增特征通道。`fixed_calibration` 模式检查标定矩阵角点误差；`ecc` 模式以 `base_light_id` ROI 为基准，对其余光源做整数像素平移搜索，记录相关系数、位移和误差，并在配准通过时把非基准光源 ROI 重采样到基准坐标后再进入特征构建。配准失败、相关性不足或位移超过阈值时仍走质量失败结果，不输出 `OK`。
 
-`FeatureBuilder` 按模型 `input_channels` 惰性构建特征，不再隐式固定 4 光源或 4/5 通道。当前生产模型声明的标准三通道为：
+`FeatureBuilder` 按模型 `input_channels` 惰性构建特征，不隐式固定光源数、通道数或通道序号。未显式声明 `input_channels` 的模型会从配方 `light_order` 生成 `light:<LIGHT_ID>` 通道；生产配方当前显式声明为：
 
-- `ch0_diffuse`
-- `ch1_polar_diffuse`
-- `ch2_high_left`
+- `light:DIFFUSE`
+- `light:POLAR_DIFFUSE`
+- `light:HIGH_LEFT`
 
-模型显式声明时，才会额外构建 `ch3_high_right`、`ch4_high_max_min`、低角度暗场差分、局部对比和高光抑制等扩展通道；缺少未声明光源不会影响三路生产链路。模型输入 tensor 使用 `NCHW`，并保留 `evidence_lights_by_channel` 供结果回写和 trace 使用。
+模型可声明表达式通道，例如 `light:HIGH_RIGHT`、`max_min:HIGH_LEFT:HIGH_RIGHT`、`abs_diff:LOW_LEFT:LOW_RIGHT`、`local_contrast:DIFFUSE`；旧配方中的 `ch0_diffuse`、`ch1_polar_diffuse`、`ch2_high_left`、`ch3_high_right`、`ch4_high_max_min` 仍作为兼容别名解析。缺少未声明光源不会影响当前生产链路。模型输入 tensor 使用 `NCHW`，并保留 `evidence_lights_by_channel` 供结果回写和 trace 使用。
 
 ### 模型后端
 
@@ -346,6 +346,7 @@ uv run python tools/run_simulated_ipc.py --config cpp_controller/config/station_
 uv run python -m training_tools.collect_trace_dataset --trace-root trace --output datasets/seat_trace_v1
 uv run python -m training_tools.collect_shm_dataset --output datasets/seat_shm_v1 --max-jobs 10 --trace-root trace/training_shm
 uv run python -m training_tools.collect_capture_dataset --input images_capture/20260623/LINE1_AOI_CAPTURE_MANUAL_SEAT_9000 --output datasets/seat_capture_20260623_9000 --recipe seat_a_black_leather_production_v1 --split train --label-status unverified_ok --roi-output-size 64x48 --skip-failed
+# --input-channels 必须显式等于所选配方 models.<key>.input_channels 数量；当前生产配方为 3。
 uv run python -m training_tools.export_wideresnet_embedding --output model/wideresnet50/seat_wrn50_embedding.onnx --input-channels 3 --embedding-dim 1024
 uv run python -m training_tools.extract_embeddings --manifest datasets/seat_trace_v1/dataset_manifest.jsonl --output datasets/seat_trace_v1/embeddings.jsonl --backend statistical
 uv run python -m training_tools.train_patchcore_assets --manifest datasets/seat_trace_v1/dataset_manifest.jsonl --output-dir model/patchcore --split train --pca-components 3 --coreset-ratio 0.1
