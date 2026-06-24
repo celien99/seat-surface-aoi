@@ -630,19 +630,59 @@ class RoiLocator:
         mask_bbox: tuple[int, int, int, int],
         output_size: tuple[int, int],
     ) -> RoiMask:
+        """将低分辨率 mask 双线性上采样到输出尺寸，阈值化后 1px 侵蚀消除边界锯齿。
+
+        原实现使用最近邻上采样，放大倍率约 12-16× 时每个源像素变成
+        输出空间中的方块，产生阶梯锯齿。双线性插值 + 0.5 阈值切割
+        可获得亚像素级平滑边界。
+        """
+        np = numpy_module("ROI mask 上采样")
+
         output_width, output_height = output_size
         x0, y0, x1, y1 = mask_bbox
-        bbox_width = max(1, x1 - x0 + 1)
-        bbox_height = max(1, y1 - y0 + 1)
-        # 先上采样到输出尺寸，再在输出空间做 1px 侵蚀
-        pixels = bytearray(output_width * output_height)
-        for y in range(output_height):
-            source_y = y0 + min(bbox_height - 1, int(float(y) * float(bbox_height) / float(output_height)))
-            for x in range(output_width):
-                source_x = x0 + min(bbox_width - 1, int(float(x) * float(bbox_width) / float(output_width)))
-                if float(mask[source_y][source_x]) > 0.0:
-                    pixels[y * output_width + x] = 255
-        # 在输出空间做 1px 4-邻域侵蚀
+        bbox_w = max(1, x1 - x0 + 1)
+        bbox_h = max(1, y1 - y0 + 1)
+
+        # 提取源 mask 裁剪区域 → float32 数组
+        src = np.array(
+            [[float(mask[y][x]) for x in range(x0, x1 + 1)] for y in range(y0, y1 + 1)],
+            dtype=np.float32,
+        )
+        src_h, src_w = src.shape  # 即 bbox_h × bbox_w
+
+        # 归一化到 [0, 1]（兼容源 mask 值为 0/1 或 0/255）
+        src_max = float(np.max(src))
+        if src_max > 0.0:
+            src = src / src_max
+
+        if src_h == output_height and src_w == output_width:
+            # 免去上采样 —— 直接二值化
+            upsampled = np.where(src > 0.5, np.uint8(255), np.uint8(0))
+        else:
+            # 构建归一化源坐标网格
+            y_src = np.linspace(0, src_h - 1, output_height, dtype=np.float32)
+            x_src = np.linspace(0, src_w - 1, output_width, dtype=np.float32)
+
+            y0_idx = np.floor(y_src).astype(np.int32)
+            y1_idx = np.clip(y0_idx + 1, 0, src_h - 1)
+            wy = (y_src - y0_idx.astype(np.float32)).reshape(-1, 1)
+
+            x0_idx = np.floor(x_src).astype(np.int32)
+            x1_idx = np.clip(x0_idx + 1, 0, src_w - 1)
+            wx = (x_src - x0_idx.astype(np.float32)).reshape(1, -1)
+
+            # 双线性插值: f(x,y) = (1-wy)*(1-wx)*v00 + wy*(1-wx)*v10 + (1-wy)*wx*v01 + wy*wx*v11
+            upsampled = (
+                src[y0_idx.reshape(-1, 1), x0_idx.reshape(1, -1)] * (1.0 - wy) * (1.0 - wx)
+                + src[y1_idx.reshape(-1, 1), x0_idx.reshape(1, -1)] * wy * (1.0 - wx)
+                + src[y0_idx.reshape(-1, 1), x1_idx.reshape(1, -1)] * (1.0 - wy) * wx
+                + src[y1_idx.reshape(-1, 1), x1_idx.reshape(1, -1)] * wy * wx
+            )
+            # 阈值 0.5（源 mask 已归一化到 [0, 1]）
+            upsampled = np.where(upsampled > 0.5, np.uint8(255), np.uint8(0))
+
+        # 转为 bytearray 做 1px 4-邻域腐蚀
+        pixels = bytearray(upsampled.ravel().tolist())
         eroded = _erode_output_mask_1px(pixels, output_width, output_height)
         return RoiMask(width=output_width, height=output_height, pixels=bytes(eroded))
 

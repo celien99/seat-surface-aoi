@@ -302,12 +302,11 @@ def _collect_capture_group(
                     _safe_name(source_dir.name),
                     f"{sequence_id:04d}",
                     _safe_name(first.camera_id),
-                    _safe_name(first.camera_id),
                     _safe_name(roi_name),
                 ]
             )
             sample_id = f"{sample_base}_{light_id}"
-            image_path = Path("images") / first.camera_id / first.camera_id / roi_name / light_id / f"{sample_id}.png"
+            image_path = Path("images") / first.camera_id / roi_name / light_id / f"{sample_id}.png"
             destination = output_dir / image_path
             _write_png(destination, frame)
             samples.append(
