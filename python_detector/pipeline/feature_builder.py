@@ -31,37 +31,61 @@ class FeatureBuilder:
     def build(self, reflectance_cubes: list[ReflectanceCube], recipe: Recipe) -> list[FeatureGroup]:
         feature_groups: list[FeatureGroup] = []
         for cube in reflectance_cubes:
-            features = self._build_feature_dict(cube)
             primary_model_key = recipe.model_key_for(cube.camera_id, cube.roi_name, cube.pose_id)
+            model_keys = (primary_model_key, *recipe.safety_net_model_keys_for(cube.camera_id, cube.roi_name, cube.pose_id))
+            features = self._build_feature_dict(cube, self._required_channels(recipe, model_keys))
             feature_groups.append(self._make_feature_group(cube, primary_model_key, recipe.models[primary_model_key], features))
-            for model_key in recipe.safety_net_model_keys_for(cube.camera_id, cube.roi_name, cube.pose_id):
+            for model_key in model_keys[1:]:
                 feature_groups.append(self._make_feature_group(cube, model_key, recipe.models[model_key], features))
         return feature_groups
 
-    def _build_feature_dict(self, cube: ReflectanceCube) -> dict[str, list[int]]:
-        diffuse = cube.get("DIFFUSE")
-        polar = cube.get("POLAR_DIFFUSE")
-        high_left = cube.get("HIGH_LEFT")
-        high_right = cube.get("HIGH_RIGHT")
-        low_left = cube.get("LOW_LEFT")
-        low_right = cube.get("LOW_RIGHT")
+    def _required_channels(self, recipe: Recipe, model_keys: tuple[str, ...]) -> tuple[str, ...]:
+        channels: list[str] = []
+        for model_key in model_keys:
+            for channel_name in recipe.models[model_key].input_channels:
+                if channel_name not in channels:
+                    channels.append(channel_name)
+        return tuple(channels)
 
-        features = {
-            "ch0_diffuse": self._required(diffuse, "ch0_diffuse"),
-            "ch1_polar_diffuse": self._required(polar, "ch1_polar_diffuse"),
-            "ch2_high_left": self._required(high_left, "ch2_high_left"),
-        }
-        if high_right is not None:
-            features["ch3_high_right"] = self._sample(high_right)
-            features["ch4_high_max_min"] = self._max_min([high_left, high_right])
-        if low_left is not None and low_right is not None:
-            features["optional_dark_low_lr_diff"] = self._abs_diff(low_left, low_right)
-            features["optional_dark_low_max_min"] = self._max_min([low_left, low_right])
-        if diffuse is not None:
-            features["aux_local_contrast"] = self._local_contrast(diffuse)
-        if diffuse is not None and polar is not None:
-            features["aux_specular_removed"] = self._abs_diff(diffuse, polar)
-        return features
+    def _build_feature_dict(self, cube: ReflectanceCube, channel_names: tuple[str, ...]) -> dict[str, list[int]]:
+        return {channel_name: self._build_channel(cube, channel_name) for channel_name in channel_names}
+
+    def _build_channel(self, cube: ReflectanceCube, channel_name: str) -> list[int]:
+        if channel_name == "ch0_diffuse":
+            return self._required(cube.get("DIFFUSE"), channel_name, "DIFFUSE")
+        if channel_name == "ch1_polar_diffuse":
+            return self._required(cube.get("POLAR_DIFFUSE"), channel_name, "POLAR_DIFFUSE")
+        if channel_name == "ch2_high_left":
+            return self._required(cube.get("HIGH_LEFT"), channel_name, "HIGH_LEFT")
+        if channel_name == "ch3_high_right":
+            return self._required(cube.get("HIGH_RIGHT"), channel_name, "HIGH_RIGHT")
+        if channel_name == "ch4_high_max_min":
+            return self._max_min(
+                [
+                    self._required_frame(cube.get("HIGH_LEFT"), channel_name, "HIGH_LEFT"),
+                    self._required_frame(cube.get("HIGH_RIGHT"), channel_name, "HIGH_RIGHT"),
+                ]
+            )
+        if channel_name == "optional_dark_low_lr_diff":
+            return self._abs_diff(
+                self._required_frame(cube.get("LOW_LEFT"), channel_name, "LOW_LEFT"),
+                self._required_frame(cube.get("LOW_RIGHT"), channel_name, "LOW_RIGHT"),
+            )
+        if channel_name == "optional_dark_low_max_min":
+            return self._max_min(
+                [
+                    self._required_frame(cube.get("LOW_LEFT"), channel_name, "LOW_LEFT"),
+                    self._required_frame(cube.get("LOW_RIGHT"), channel_name, "LOW_RIGHT"),
+                ]
+            )
+        if channel_name == "aux_local_contrast":
+            return self._local_contrast(self._required_frame(cube.get("DIFFUSE"), channel_name, "DIFFUSE"))
+        if channel_name == "aux_specular_removed":
+            return self._abs_diff(
+                self._required_frame(cube.get("DIFFUSE"), channel_name, "DIFFUSE"),
+                self._required_frame(cube.get("POLAR_DIFFUSE"), channel_name, "POLAR_DIFFUSE"),
+            )
+        raise ValueError(f"unsupported model input channel: {channel_name}")
 
     def _make_feature_group(
         self,
@@ -90,10 +114,13 @@ class FeatureBuilder:
             source_to_roi_matrix=cube.source_to_roi_matrix,
         )
 
-    def _required(self, image: LightFrame | None, name: str) -> list[int]:
+    def _required(self, image: LightFrame | None, name: str, light_id: str) -> list[int]:
+        return self._sample(self._required_frame(image, name, light_id))
+
+    def _required_frame(self, image: LightFrame | None, name: str, light_id: str) -> LightFrame:
         if image is None:
-            raise ValueError(f"required feature source missing: {name}")
-        return self._sample(image)
+            raise ValueError(f"required feature source missing: {name} needs {light_id}")
+        return image
 
     def _optional(self, image: LightFrame | None) -> list[int]:
         if image is None:

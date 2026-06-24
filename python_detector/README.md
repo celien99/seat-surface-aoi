@@ -251,22 +251,21 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 ### 质量门禁与预处理
 
-`ImageQualityGate` 在进入模型前拦截不可靠输入，包括缺少必需机位/检测光源、未启用的显式机器人 pose、非单调时间戳、重复帧号、曝光/增益漂移、过曝欠曝、锐度不足、光源亮度漂移，以及同一视角必需检测光源间的 `shot_id`、机器人时间戳、TCP 坐标和 RPY 姿态不一致。固定机位默认配置可接收同一机位的动态 `pose_id`，但仍要求每个动态视角自己的三路必需检测光源完整、时序一致、质量通过；`DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 的 `light_seq_index` 必须分别匹配顶层采集顺序 `0/1/2`。固定机位可以保留空的机器人字段，一旦任一必需检测光源携带机器人字段，其余必需检测光源必须保持一致。失败结果进入 `RuleEngine.make_quality_fail_result()`，不会输出 `OK`。
+`ImageQualityGate` 在进入模型前拦截不可靠输入，包括缺少必需机位/检测光源、未启用的显式机器人 pose、非单调时间戳、重复帧号、曝光/增益漂移、过曝欠曝、锐度不足、光源亮度漂移，以及同一视角必需检测光源间的 `shot_id`、机器人时间戳、TCP 坐标和 RPY 姿态不一致。固定机位默认配置可接收同一机位的动态 `pose_id`，但仍要求每个动态视角自己的 `quality.required_lights` 完整、时序一致、质量通过；当前生产配方为 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 三路，`light_seq_index` 分别匹配顶层采集顺序 `0/1/2`。固定机位可以保留空的机器人字段，一旦任一必需检测光源携带机器人字段，其余必需检测光源必须保持一致。失败结果进入 `RuleEngine.make_quality_fail_result()`，不会输出 `OK`。
 
 `Preprocessor` 只接受当前实现支持的 `MONO8` / `UINT8` / 单通道图像，并显式检查 stride、图像长度、标定版本和图像尺寸。ROI 可以是轴对齐矩形裁剪，也可以是四点透视展开。Dome ROI 定位会按 `roi_name` 聚合同名候选，优先选择置信度最高、姿态误差最低的候选；bbox 后端输出矩形 ROI，seg 后端从 mask 自动生成运行时 `polygon_xy`，并用模板边界、mask 面积和重复候选冲突保护不确定状态。同名 ROI 出现互相冲突的框或 mask 时返回 `RECHECK`，避免重复检测静默覆盖 ROI。
 
 ### 多光源特征
 
-`ReflectanceCubeBuilder` 将同一 ROI 下多个检测光源图组织成 cube。固定机位生产配方只使用 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 进入 cube；DOME 语义映射到 `DIFFUSE` 只影响 ROI 定位输入选择，不新增特征通道。`fixed_calibration` 模式检查标定矩阵角点误差；`ecc` 模式以 `base_light_id` ROI 为基准，对其余光源做整数像素平移搜索，记录相关系数、位移和误差，并在配准通过时把非基准光源 ROI 重采样到基准坐标后再进入特征构建。配准失败、相关性不足或位移超过阈值时仍走质量失败结果，不输出 `OK`。
+`ReflectanceCubeBuilder` 将同一 ROI 下多个检测光源图组织成 cube，并按当前视角的 `light_order` 保留可用检测光源。固定机位生产配方当前只使用 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 三路；DOME 语义映射到 `DIFFUSE` 只影响 ROI 定位输入选择，不新增特征通道。`fixed_calibration` 模式检查标定矩阵角点误差；`ecc` 模式以 `base_light_id` ROI 为基准，对其余光源做整数像素平移搜索，记录相关系数、位移和误差，并在配准通过时把非基准光源 ROI 重采样到基准坐标后再进入特征构建。配准失败、相关性不足或位移超过阈值时仍走质量失败结果，不输出 `OK`。
 
-`FeatureBuilder` 构建当前标准通道：
+`FeatureBuilder` 按模型 `input_channels` 惰性构建特征，不再隐式固定 4 光源或 4/5 通道。当前生产模型声明的标准三通道为：
 
 - `ch0_diffuse`
 - `ch1_polar_diffuse`
 - `ch2_high_left`
-- 参考/扩展 4 光源方案可额外使用 `ch3_high_right` 和 `ch4_high_max_min`
 
-可选增强包括低角度暗场差分、局部对比和高光抑制。模型输入 tensor 使用 `NCHW`，并保留 `evidence_lights_by_channel` 供结果回写和 trace 使用。
+模型显式声明时，才会额外构建 `ch3_high_right`、`ch4_high_max_min`、低角度暗场差分、局部对比和高光抑制等扩展通道；缺少未声明光源不会影响三路生产链路。模型输入 tensor 使用 `NCHW`，并保留 `evidence_lights_by_channel` 供结果回写和 trace 使用。
 
 ### 模型后端
 
@@ -283,13 +282,13 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 离线训练工具复用同一套模型输入契约：
 
 - `training_tools.dataset_manifest` 读取 `dataset_manifest.jsonl` 和 ROI `P5` PGM 图，将同一 trace/camera/pose/ROI 下的多光源样本聚合；旧 manifest 没有 `pose_id` 时默认回退到 `camera_id`。
-- `training_tools.extract_embeddings` 调用在线 `FeatureBuilder` 和 `EmbeddingExtractor`，确保训练出的 PCA/PatchCore 资产与在线 `NCHW` 输入通道一致。
+- `training_tools.extract_embeddings` 调用在线 `FeatureBuilder` 和 `EmbeddingExtractor`，默认使用配方 `models.<key>.input_channels`，确保训练出的 PCA/PatchCore 资产与在线 `NCHW` 输入通道一致；只有显式传 `--channel-order` 时才覆盖通道顺序。
 - `training_tools.evaluate_pipeline` 调用在线 `InferenceEngine`，按 manifest 中的人工标注或弱标签计算整体、类别、ROI、camera 和 split 指标。
 - `training_tools.collect_trace_dataset` 同时兼容旧 trace 目录 `images/<camera>/<roi>/<light>.pgm` 和新目录 `images/<camera>/<pose>/<roi>/<light>.pgm`，生成的样本路径与 manifest 都包含 `pose_id`，避免机器人飞拍同一末端相机下的不同 pose 互相覆盖。
 - `training_tools.collect_shm_dataset` 调用在线 `ShmClient`、`SeatSurfaceAoiAlgorithm` 和 `TraceWriter`，从 C++ 共享内存任务获取多相机多光源图像，保存按 `camera_id/pose_id` 分目录的 `raw_images/`、`raw_frame_manifest.jsonl`，并生成 trace/训练 manifest；它不控制 PLC、相机或频闪。
-- `training_tools.collect_capture_dataset` 用于现场 `capture_only` 平铺 PNG，例如 `TOP_BACK_<timestamp>_L1_original.png`。它按相机和光源序号组包，默认将 `L1/L2/L3` 映射为 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`，调用当前配方的 `onnx_yolo_seg` ROI 模型生成 ROI PGM 和 manifest。ROI 多候选冲突、低置信、越界或缺光源样本会跳过或失败，不进入训练集。
+- `training_tools.collect_capture_dataset` 用于现场 `capture_only` 平铺 PNG，例如 `TOP_BACK_<timestamp>_L1_original.png`。它按相机和光源序号组包，默认按当前配方 `light_order` 生成 `L1/L2/L3...` 映射；当前生产配方即 `L1/L2/L3 -> DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。工具会调用当前配方的 `onnx_yolo_seg` ROI 模型生成 ROI PGM 和 manifest。ROI 多候选冲突、低置信、越界或缺光源样本会跳过或失败，不进入训练集。
 - `training_tools.train_patchcore_assets` 训练 PatchCore safety net 所需的 embedding/PCA/memory bank/FAISS 资产；`training_tools.export_wideresnet_embedding` 生成生产配方引用的 WideResNet50 embedding ONNX。
-- `training_tools.train_patchcore_assets` 使用真实 OK 样本训练 PatchCore 无监督主模型所需的 embedding/PCA/memory bank/FAISS 资产；`training_tools.export_wideresnet_embedding` 生成生产配方引用的 WideResNet50 embedding ONNX。
+- `training_tools.train_patchcore_assets` 使用真实 OK 样本训练 PatchCore 无监督主模型所需的 embedding/PCA/memory bank/FAISS 资产；`training_tools.build_faiss_index` 写出索引后会校验维度和向量数，`FlatL2` 额外做 smoke search，`IVFFlat` 的召回和延迟由部署评估阶段验证；FAISS 测试用子进程隔离，避免 Windows 上不同 OpenMP runtime 在同一 pytest 进程内互相污染；`training_tools.export_wideresnet_embedding` 生成生产配方引用的 WideResNet50 embedding ONNX。
 
 ### 融合、规则和追溯
 

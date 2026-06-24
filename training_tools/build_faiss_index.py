@@ -59,10 +59,15 @@ def build_faiss_index(
     faiss.write_index(index, str(output))
 
     loaded = faiss.read_index(str(output))
-    query = np.zeros((1, dimension), dtype=np.float32)
-    distances, indices = loaded.search(query, 1)
-    if distances.shape != (1, 1):
-        raise EmbeddingExtractionError("FAISS 索引校验失败：搜索返回形状不正确")
+    if loaded.d != dimension:
+        raise EmbeddingExtractionError(f"FAISS 索引校验失败：维度不匹配 {loaded.d} != {dimension}")
+    if loaded.ntotal != len(vectors_raw):
+        raise EmbeddingExtractionError(f"FAISS 索引校验失败：向量数不匹配 {loaded.ntotal} != {len(vectors_raw)}")
+    if index_type == "FlatL2":
+        query = np.zeros((1, dimension), dtype=np.float32)
+        distances, _indices = loaded.search(query, 1)
+        if distances.shape != (1, 1):
+            raise EmbeddingExtractionError("FAISS 索引校验失败：搜索返回形状不正确")
 
     return {
         "index_type": index_type,

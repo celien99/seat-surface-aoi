@@ -23,11 +23,7 @@ def extract_embeddings(
     embedding_dim: int | None = None,
     backend: str = "statistical",
     model_path: str | None = None,
-    channel_order: tuple[str, ...] = (
-        "ch0_diffuse",
-        "ch1_polar_diffuse",
-        "ch2_high_left",
-    ),
+    channel_order: tuple[str, ...] | None = None,
     split: str | None = None,
 ) -> list[dict]:
     try:
@@ -106,7 +102,7 @@ def _embedding_model_config(
     backend: str,
     model_path: str | None,
     embedding_dim: int | None,
-    channel_order: tuple[str, ...],
+    channel_order: tuple[str, ...] | None,
 ) -> ModelConfig:
     if backend not in {"statistical", "onnx_wideresnet50"}:
         raise EmbeddingExtractionError(f"不支持的 embedding backend: {backend}")
@@ -118,7 +114,7 @@ def _embedding_model_config(
         fake_mode=base.fake_mode,
         model_family=base.model_family,
         role=base.role,
-        input_channels=channel_order or base.input_channels,
+        input_channels=channel_order if channel_order is not None else base.input_channels,
         input_scale=base.input_scale,
         class_names=base.class_names,
         output_decode=base.output_decode,
@@ -159,10 +155,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--backend", default="statistical", choices=["statistical", "onnx_wideresnet50"])
     parser.add_argument("--embedding-dim", type=int, default=None)
     parser.add_argument("--split", default=None, help="只提取指定 split 的 OK 样本")
-    parser.add_argument("--channel-order", default="ch0_diffuse,ch1_polar_diffuse,ch2_high_left")
+    parser.add_argument("--channel-order", default=None, help="覆盖模型输入通道；默认使用配方 models.<key>.input_channels")
     args = parser.parse_args(argv)
 
-    channel_order: tuple[str, ...] = tuple(ch.strip() for ch in args.channel_order.split(",") if ch.strip())
+    channel_order: tuple[str, ...] | None = None
+    if args.channel_order is not None:
+        channel_order = tuple(ch.strip() for ch in args.channel_order.split(",") if ch.strip())
     try:
         results = extract_embeddings(
             manifest_path=args.manifest,

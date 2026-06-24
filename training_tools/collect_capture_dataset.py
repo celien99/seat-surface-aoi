@@ -62,7 +62,7 @@ def collect_capture_dataset(
     if not input_dir.is_dir():
         raise TrainingDataError(f"采图目录不存在: {input_dir}")
     recipe = RecipeManager().load(recipe_id)
-    resolved_light_map = light_map or {"L1": "DIFFUSE", "L2": "POLAR_DIFFUSE", "L3": "HIGH_LEFT"}
+    resolved_light_map = light_map or _default_light_map(recipe)
     grouped = _group_capture_images(input_dir, resolved_light_map)
     if not grouped:
         raise TrainingDataError(f"采图目录没有匹配的 PNG: {input_dir}")
@@ -154,7 +154,7 @@ def _group_capture_images(input_dir: Path, light_map: dict[str, str]) -> dict[st
         )
 
     grouped: dict[str, list[tuple[CaptureImage, ...]]] = {}
-    required_lights = tuple(sorted(light_map))
+    required_lights = tuple(sorted(light_map, key=_capture_light_sort_key))
     for camera_id, light_entries in by_camera_light.items():
         missing = [light_id for light_id in required_lights if light_id not in light_entries]
         if missing:
@@ -420,7 +420,7 @@ def _write_pgm(path: Path, frame: LightFrame) -> None:
 
 def _parse_light_map(values: list[str] | None) -> dict[str, str]:
     if not values:
-        return {"L1": "DIFFUSE", "L2": "POLAR_DIFFUSE", "L3": "HIGH_LEFT"}
+        return {}
     result: dict[str, str] = {}
     for value in values:
         if "=" not in value:
@@ -432,6 +432,17 @@ def _parse_light_map(values: list[str] | None) -> dict[str, str]:
             raise ValueError(f"--light-map 包含空值: {value}")
         result[key] = mapped
     return result
+
+
+def _default_light_map(recipe: Recipe) -> dict[str, str]:
+    return {f"L{index}": light_id for index, light_id in enumerate(recipe.light_order, start=1)}
+
+
+def _capture_light_sort_key(light_id: str) -> tuple[int, int | str]:
+    match = re.fullmatch(r"L(\d+)", light_id.upper())
+    if match is not None:
+        return (0, int(match.group(1)))
+    return (1, light_id)
 
 
 def _parse_roi_output_size(value: str | None) -> tuple[int, int] | None:

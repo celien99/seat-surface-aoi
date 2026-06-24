@@ -79,21 +79,8 @@ models:
     fake_mode: auto
     model_family: patchcore
     role: primary
-  supervised_defect_onnx:
-    backend: onnx
-    model_path: model/supervised_defect/seat_defect_detector.onnx
-    model_family: supervised
-    role: primary
-    input_channels:
-      - ch0_diffuse
-      - ch1_polar_diffuse
-      - ch2_high_left
-    input_scale: 255.0
-    class_names: [scratch, dent]
-    output_decode: ultralytics_yolo
-    bbox_format: xyxy_pixel
-    score_threshold: 0.20
-  patchcore_unknown_safety_net:
+    class_names: [unknown_anomaly]
+  patchcore_unknown_detector:
     backend: patchcore_knn
     model_family: patchcore
     role: primary

@@ -181,7 +181,13 @@ def build_feature_group_from_manifest_group(
         roi_bbox_xyxy_pixel=first_frame.bbox_xyxy_pixel,
     )
     builder = feature_builder or FeatureBuilder()
-    return builder._make_feature_group(cube, selected_model_key, recipe.models[selected_model_key], builder._build_feature_dict(cube))
+    model_config = recipe.models[selected_model_key]
+    return builder._make_feature_group(
+        cube,
+        selected_model_key,
+        model_config,
+        builder._build_feature_dict(cube, model_config.input_channels),
+    )
 
 
 def light_frame_from_manifest_row(row: ManifestRow, dataset_root: Path) -> LightFrame:

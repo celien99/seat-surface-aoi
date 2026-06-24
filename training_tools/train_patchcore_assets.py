@@ -20,11 +20,7 @@ def train_patchcore_assets(
     embedding_backend: str = "statistical",
     embedding_model_path: str | None = None,
     embedding_dim: int | None = None,
-    channel_order: tuple[str, ...] = (
-        "ch0_diffuse",
-        "ch1_polar_diffuse",
-        "ch2_high_left",
-    ),
+    channel_order: tuple[str, ...] | None = None,
     split: str | None = "train",
     pca_components: int | None = None,
     pca_version: str = "pca_seat_v1",
@@ -121,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--embedding-backend", default="statistical", choices=["statistical", "onnx_wideresnet50"])
     parser.add_argument("--embedding-model", default=None, help="onnx_wideresnet50 模型路径")
     parser.add_argument("--embedding-dim", type=int, default=None)
-    parser.add_argument("--channel-order", default="ch0_diffuse,ch1_polar_diffuse,ch2_high_left")
+    parser.add_argument("--channel-order", default=None, help="覆盖模型输入通道；默认使用配方 models.<key>.input_channels")
     parser.add_argument("--split", default="train", help="用于训练的 split；传空字符串表示不过滤")
     parser.add_argument("--pca-components", type=int, default=None, help="启用 PCA 并指定目标维度")
     parser.add_argument("--pca-version", default="pca_seat_v1")
@@ -133,7 +129,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--faiss-nlist", type=int, default=None)
     args = parser.parse_args(argv)
 
-    channel_order = tuple(ch.strip() for ch in args.channel_order.split(",") if ch.strip())
+    channel_order = None
+    if args.channel_order is not None:
+        channel_order = tuple(ch.strip() for ch in args.channel_order.split(",") if ch.strip())
     split = args.split if args.split else None
     try:
         summary = train_patchcore_assets(

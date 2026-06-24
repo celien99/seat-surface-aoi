@@ -193,6 +193,32 @@ def test_collect_capture_dataset_from_flat_png_dir(tmp_path: Path) -> None:
     assert first_image.read_bytes().startswith(b"P5\n16 12\n255\n")
 
 
+def test_collect_capture_dataset_default_light_map_uses_recipe_order(tmp_path: Path) -> None:
+    input_dir = tmp_path / "capture"
+    input_dir.mkdir()
+    for camera_id in ("TOP_BACK", "TOP_CUSHION"):
+        for index, light_id in enumerate(("L1", "L2", "L3"), start=1):
+            _write_png_gray(
+                input_dir / f"{camera_id}_{2000 + index}_{light_id}_original.png",
+                width=64,
+                height=48,
+                value=25 + index,
+            )
+    output = tmp_path / "dataset"
+
+    result = collect_capture_dataset(
+        input_dir,
+        output,
+        recipe_id="seat_a_black_leather_v1",
+        split="train",
+        label_status="verified_ok",
+        roi_output_size=(16, 12),
+    )
+
+    rows = [json.loads(line) for line in result.manifest_path.read_text(encoding="utf-8").splitlines()]
+    assert {row["light_id"] for row in rows} == {"DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT"}
+
+
 def _write_trace(trace_dir: Path) -> Path:
     image_dir = trace_dir / "images" / "TOP_BACK" / "seat"
     image_dir.mkdir(parents=True)

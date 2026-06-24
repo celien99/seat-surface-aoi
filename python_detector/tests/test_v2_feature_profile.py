@@ -106,6 +106,21 @@ def test_v2_roi_features_include_primary_and_safety_net_models() -> None:
 
 def test_feature_builder_rejects_mismatched_feature_source_shapes() -> None:
     recipe = RecipeManager().load("seat_a_black_leather_v1")
+    recipe = replace(
+        recipe,
+        models={
+            **recipe.models,
+            "fake_default": replace(
+                recipe.models["fake_default"],
+                input_channels=(
+                    "ch0_diffuse",
+                    "ch1_polar_diffuse",
+                    "ch2_high_left",
+                    "ch4_high_max_min",
+                ),
+            ),
+        },
+    )
     cube = ReflectanceCube(
         sequence_id=1,
         trigger_id=1001,
@@ -138,6 +153,44 @@ def test_feature_builder_rejects_mismatched_feature_source_shapes() -> None:
 
     with pytest.raises(ValueError, match="max_min feature source length mismatch"):
         FeatureBuilder().build([cube], recipe)
+
+
+def test_feature_builder_does_not_read_unrequested_extension_channels() -> None:
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    cube = ReflectanceCube(
+        sequence_id=1,
+        trigger_id=1001,
+        seat_id="SIM_1",
+        camera_id="TOP_BACK",
+        roi_name="seat",
+        base_light_id="POLAR_DIFFUSE",
+        light_order=("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"),
+        frames={
+            "DIFFUSE": _roi_frame("DIFFUSE", 4, 4),
+            "POLAR_DIFFUSE": _roi_frame("POLAR_DIFFUSE", 4, 4),
+            "HIGH_LEFT": _roi_frame("HIGH_LEFT", 4, 4),
+            "HIGH_RIGHT": _roi_frame("HIGH_RIGHT", 3, 4),
+        },
+        registration=RegistrationReport(
+            camera_id="TOP_BACK",
+            roi_name="seat",
+            base_light_id="POLAR_DIFFUSE",
+            calibration_id="calib/simulated_v1",
+            max_error_px=0.0,
+            mean_error_px=0.0,
+            method="fixed_calibration",
+            is_pass=True,
+            message="ok",
+        ),
+        pixel_size_mm=0.12,
+        calibration_id="calib/simulated_v1",
+        roi_bbox_xyxy_pixel=(0, 0, 3, 3),
+    )
+
+    first = FeatureBuilder().build([cube], recipe)[0]
+
+    assert first.tensor_channel_names == ("ch0_diffuse", "ch1_polar_diffuse", "ch2_high_left")
+    assert set(first.features) == {"ch0_diffuse", "ch1_polar_diffuse", "ch2_high_left"}
 
 
 def _roi_frame(light_id: str, width: int, height: int) -> LightFrame:
