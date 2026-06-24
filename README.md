@@ -90,6 +90,7 @@ ROI 定位模型当前使用单类别 `seat`。训练数据应采用 YOLO segmen
 已有 ROI 模型和 `images_capture/` 真实平铺 PNG 后，先把采图目录转换成现有训练链路可消费的 ROI manifest，再训练 PatchCore/PCA/FAISS 或监督模型：
 
 ```powershell
+uv sync --group training
 uv run python -m training_tools.collect_capture_dataset `
   --input images_capture\20260623\LINE1_AOI_CAPTURE_MANUAL_SEAT_9000 `
   --output datasets\seat_capture_20260623_9000 `

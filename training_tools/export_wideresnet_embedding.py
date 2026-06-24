@@ -25,6 +25,7 @@ def export_wideresnet_embedding(
         raise _WideResNetEmbeddingExportError("--input-channels 必须是正整数")
     try:
         import onnx  # type: ignore
+        import onnxscript  # type: ignore  # noqa: F401
         import torch  # type: ignore
         from torch import nn  # type: ignore
         from torchvision.models import Wide_ResNet50_2_Weights, wide_resnet50_2  # type: ignore
@@ -77,18 +78,24 @@ def export_wideresnet_embedding(
 
     dummy = torch.zeros(1, input_channels, input_height, input_width, dtype=torch.float32)
     output.parent.mkdir(parents=True, exist_ok=True)
-    torch.onnx.export(
-        model,
-        dummy,
-        str(output),
-        input_names=["input"],
-        output_names=["embedding"],
-        dynamic_axes={
-            "input": {0: "batch", 2: "height", 3: "width"},
-            "embedding": {0: "batch"},
-        },
-        opset_version=opset,
-    )
+    try:
+        torch.onnx.export(
+            model,
+            dummy,
+            str(output),
+            input_names=["input"],
+            output_names=["embedding"],
+            dynamic_axes={
+                "input": {0: "batch", 2: "height", 3: "width"},
+                "embedding": {0: "batch"},
+            },
+            opset_version=opset,
+            dynamo=False,
+        )
+    except ModuleNotFoundError as exc:
+        raise _WideResNetEmbeddingExportError(
+            f"ONNX 导出依赖缺失: {exc.name}. 安装: uv sync --group training"
+        ) from exc
     if not output.exists() or output.stat().st_size <= 1:
         raise _WideResNetEmbeddingExportError(f"ONNX 导出文件无效: {output}")
     exported = onnx.load(str(output))
