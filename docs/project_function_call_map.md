@@ -142,7 +142,6 @@ Python 不能控制 PLC、相机或频闪；算法和模型运维细节见 [Pyth
 模型资产生成入口：
 
 - `training_tools.train_roi_yolo`
-- `training_tools.train_supervised_yolo`
 - `training_tools.export_wideresnet_embedding`
 - `training_tools.train_patchcore_assets`
 
@@ -153,7 +152,7 @@ Python 不能控制 PLC、相机或频闪；算法和模型运维细节见 [Pyth
 - 缺帧、超时、协议错误、CRC 错误、slot 满、质量门禁失败、模型异常都不能输出 `OK`。
 - C++ 必须校验 Python 结果中的 `sequence_id`、`trigger_id`、`seat_id`、decision、质量状态、错误码和缺陷数量。
 - Python 必须校验 shape、dtype、channel order、stride、bbox 格式、光源、机位、时间戳和配方引用。
-- PatchCore 只能作为 safety net，低置信但可疑样本走 `RECHECK`。
+- 生产缺陷判定采用 PatchCore 无监督主模型，低置信但可疑样本走 `RECHECK`。
 - 共享内存协议变更必须双端同步并运行 `tools.validate_protocol`。
 
 ## 阅读顺序

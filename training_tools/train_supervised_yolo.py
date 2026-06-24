@@ -17,7 +17,10 @@ def train_supervised_yolo(
     output: Path | None = None,
     opset: int = 17,
 ) -> dict:
-    """训练已知缺陷监督检测 YOLO 并导出 ONNX。"""
+    """训练可选监督缺陷 YOLO 实验模型并导出 ONNX。
+
+    当前生产配方不依赖该模型；生产缺陷判定使用 PatchCore 无监督主链路。
+    """
     return train_roi_yolo(
         data_path=data_path,
         model=model,
@@ -31,13 +34,17 @@ def train_supervised_yolo(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="训练已知缺陷监督检测 YOLO 模型并导出 ONNX")
+    parser = argparse.ArgumentParser(description="训练可选监督缺陷 YOLO 实验模型并导出 ONNX")
     parser.add_argument("--data", required=True, type=Path, help="YOLO 格式 dataset.yaml")
     parser.add_argument("--model", default="yolov8n.pt", help="预训练权重或 checkpoint")
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--imgsz", type=int, default=640)
     parser.add_argument("--batch", type=int, default=16)
-    parser.add_argument("--output", type=Path, default=Path("model/supervised_defect/seat_defect_detector.onnx"))
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("experiments/supervised_defect/seat_defect_detector.onnx"),
+    )
     parser.add_argument("--opset", type=int, default=17)
     args = parser.parse_args(argv)
 

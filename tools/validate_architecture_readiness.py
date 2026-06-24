@@ -362,46 +362,44 @@ def _check_v4_algorithm_contract(scope: ReadinessScope) -> list[ReadinessItem]:
             )
         )
 
-    primary_onnx = [
+    unsupervised_patchcore = [
         key
         for key, model in recipe.models.items()
-        if model.role == "primary" and model.backend == "onnx" and model.model_family == "supervised"
-    ]
-    patchcore = [
-        key
-        for key, model in recipe.models.items()
-        if model.role == "safety_net"
+        if model.role == "primary"
         and model.backend == "patchcore_knn"
+        and model.model_family == "patchcore"
         and model.embedding_backend == "onnx_wideresnet50"
         and model.pca_path
         and model.memory_bank_path
         and model.faiss_index_path
     ]
-    if primary_onnx and patchcore:
+    if unsupervised_patchcore:
         items.append(
             _ok(
                 "V4 AI Runtime",
-                "V4.0 双采集模式统一架构要求 ONNX 监督模型 + WideResNet50/PCA/PatchCore/FAISS safety net 接入点。",
-                f"primary_onnx={primary_onnx}; patchcore_safety_net={patchcore}",
+                "生产 AI Runtime 使用 ROI segmentation + WideResNet50/PCA/PatchCore/FAISS 无监督异常检测主链路。",
+                f"patchcore_primary={unsupervised_patchcore}",
             )
         )
     else:
         items.append(
             _blocked(
                 "V4 AI Runtime",
-                "生产模型配方必须同时声明监督 ONNX 与 PatchCore safety net 工程入口。",
-                f"primary_onnx={primary_onnx}; patchcore_safety_net={patchcore}",
-                "补齐 production_recipe.yaml 的模型后端声明。",
+                "生产模型配方必须声明 PatchCore 无监督主检测工程入口。",
+                f"patchcore_primary={unsupervised_patchcore}",
+                "补齐 production_recipe.yaml 的 patchcore_knn 主模型、WideResNet50、PCA、memory bank 和 FAISS 配置。",
             )
         )
 
     if set(recipe.quality.required_lights) == {"DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT"}:
+        model_key = recipe.camera_defaults.roi_models.get("seat", recipe.camera_defaults.model_key)
+        model_channels = list(recipe.models[model_key].input_channels) if model_key in recipe.models else []
         items.append(
             _ok(
                 "固定机位生产光源证据",
                 "当前固定双机位产线采用 3 路共享频闪检测光源，Python 生产配方不得要求额外采集轮次。",
                 f"required_lights={list(recipe.quality.required_lights)}; "
-                f"model_channels={list(recipe.models['supervised_defect_onnx'].input_channels)}",
+                f"model_key={model_key}; model_channels={model_channels}",
             )
         )
     else:
@@ -419,7 +417,7 @@ def _check_v4_algorithm_contract(scope: ReadinessScope) -> list[ReadinessItem]:
         items.append(
             _blocked(
                 "生产模型资产",
-                "生产上线必须替换真实 YOLO/ONNX/WideResNet50/PCA/PatchCore/FAISS 资产。",
+                "生产上线必须替换真实 ROI YOLO segmentation、WideResNet50、PCA、PatchCore 和 FAISS 资产。",
                 _format_asset_issues(asset_issues),
                 "替换 model/ 下占位资产并运行 tools.validate_model_assets。",
             )
@@ -459,7 +457,6 @@ def _check_trace_training_and_ops(scope: ReadinessScope) -> list[ReadinessItem]:
         "training_tools/build_patchcore_memory_bank.py",
         "training_tools/build_faiss_index.py",
         "training_tools/train_roi_yolo.py",
-        "training_tools/train_supervised_yolo.py",
         "docs/python_detector_operations.md",
     ]
     missing = [path for path in required_paths if not (REPO_ROOT / path).exists()]
@@ -476,8 +473,8 @@ def _check_trace_training_and_ops(scope: ReadinessScope) -> list[ReadinessItem]:
         items.append(
             _ok(
                 "追溯与训练闭环",
-                "NG/RECHECK trace 与共享内存多光源任务应能转训练样本，并支持真实 ROI 图 embedding、评估、WideResNet/PatchCore/FAISS 资产训练、YOLO 导出、回放和性能 benchmark。",
-                "trace_writer、共享内存采集、manifest、embedding、evaluate、WideResNet、PatchCore/FAISS、YOLO、benchmark 工具均存在。",
+                "NG/RECHECK trace 与共享内存多光源任务应能转训练样本，并支持真实 ROI 图 embedding、评估、WideResNet/PatchCore/FAISS 无监督资产训练、ROI YOLO 导出、回放和性能 benchmark。",
+                "trace_writer、共享内存采集、manifest、embedding、evaluate、WideResNet、PatchCore/FAISS、ROI YOLO、benchmark 工具均存在。",
             )
         )
 
