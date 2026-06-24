@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from python_detector.config.recipe_schema import RecipeManager
@@ -8,7 +10,7 @@ from python_detector.pipeline.reflectance_cube import ReflectanceCube, Registrat
 from training_tools.job_fixture import make_simulated_job
 
 
-def test_v2_production_feature_profile_uses_five_standard_channels() -> None:
+def test_v2_production_feature_profile_uses_three_standard_channels() -> None:
     recipe = RecipeManager().load("seat_a_black_leather_v1")
     pipeline = InspectionPipeline()
     prepared = pipeline.preprocessor.run(make_simulated_job(), recipe)
@@ -16,17 +18,78 @@ def test_v2_production_feature_profile_uses_five_standard_channels() -> None:
     features = FeatureBuilder().build(cubes, recipe)
     first = features[0]
     assert first.model_key == "fake_default"
-    assert {"ch0_diffuse", "ch1_polar_diffuse", "ch2_high_left", "ch3_high_right", "ch4_high_max_min"}.issubset(first.features)
+    assert {"ch0_diffuse", "ch1_polar_diffuse", "ch2_high_left"}.issubset(first.features)
+    assert "ch3_high_right" not in first.features
+    assert "ch4_high_max_min" not in first.features
     assert "optional_dark_low_lr_diff" not in first.features
-    assert first.tensor_channel_names == ("ch0_diffuse", "ch1_polar_diffuse", "ch2_high_left", "ch3_high_right", "ch4_high_max_min")
+    assert first.tensor_channel_names == ("ch0_diffuse", "ch1_polar_diffuse", "ch2_high_left")
     assert first.feature_shape_hw == (48, 64)
     assert len(first.features["ch0_diffuse"]) == 48 * 64
     assert len(first.tensor_nchw or []) == 1
-    assert len(first.tensor_nchw[0]) == 5
+    assert len(first.tensor_nchw[0]) == 3
     assert len(first.tensor_nchw[0][0]) == 48
     assert len(first.tensor_nchw[0][0][0]) == 64
     assert 0.0 <= first.tensor_nchw[0][0][0][0] <= 1.0
     assert first.evidence_lights_by_channel["ch0_diffuse"] == ("DIFFUSE",)
+
+
+def test_v2_feature_profile_keeps_explicit_four_light_extension() -> None:
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    recipe = replace(
+        recipe,
+        models={
+            **recipe.models,
+            "fake_default": replace(
+                recipe.models["fake_default"],
+                input_channels=(
+                    "ch0_diffuse",
+                    "ch1_polar_diffuse",
+                    "ch2_high_left",
+                    "ch3_high_right",
+                    "ch4_high_max_min",
+                ),
+            ),
+        },
+    )
+    cube = ReflectanceCube(
+        sequence_id=1,
+        trigger_id=1001,
+        seat_id="SIM_1",
+        camera_id="TOP_BACK",
+        roi_name="seat",
+        base_light_id="POLAR_DIFFUSE",
+        light_order=("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"),
+        frames={
+            "DIFFUSE": _roi_frame("DIFFUSE", 4, 4),
+            "POLAR_DIFFUSE": _roi_frame("POLAR_DIFFUSE", 4, 4),
+            "HIGH_LEFT": _roi_frame("HIGH_LEFT", 4, 4),
+            "HIGH_RIGHT": _roi_frame("HIGH_RIGHT", 4, 4),
+        },
+        registration=RegistrationReport(
+            camera_id="TOP_BACK",
+            roi_name="seat",
+            base_light_id="POLAR_DIFFUSE",
+            calibration_id="calib/simulated_v1",
+            max_error_px=0.0,
+            mean_error_px=0.0,
+            method="fixed_calibration",
+            is_pass=True,
+            message="ok",
+        ),
+        pixel_size_mm=0.12,
+        calibration_id="calib/simulated_v1",
+        roi_bbox_xyxy_pixel=(0, 0, 3, 3),
+    )
+
+    first = FeatureBuilder().build([cube], recipe)[0]
+
+    assert first.tensor_channel_names == (
+        "ch0_diffuse",
+        "ch1_polar_diffuse",
+        "ch2_high_left",
+        "ch3_high_right",
+        "ch4_high_max_min",
+    )
     assert first.evidence_lights_by_channel["ch4_high_max_min"] == ("HIGH_LEFT", "HIGH_RIGHT")
 
 

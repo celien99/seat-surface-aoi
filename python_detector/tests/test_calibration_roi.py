@@ -10,7 +10,7 @@ from python_detector.pipeline.preprocessor import Preprocessor
 from python_detector.pipeline.reflectance_cube import ReflectanceCubeBuilder
 
 
-LIGHT_ORDER = ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")
+LIGHT_ORDER = ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT")
 
 
 def _frame(light_id: str, calibration_id: str = "calib/simulated_v1", camera_id: str = "TOP_BACK") -> LightFrame:

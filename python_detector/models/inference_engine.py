@@ -126,8 +126,14 @@ class FakeModel:
             score=score,
             bbox_xyxy_pixel=bbox,
             area_px=(bbox[2] - bbox[0] + 1) * (bbox[3] - bbox[1] + 1),
-            evidence_lights=["HIGH_LEFT", "HIGH_RIGHT"],
+            evidence_lights=self._evidence_lights(feature_group),
         )
+
+    def _evidence_lights(self, feature_group: FeatureGroup) -> list[str]:
+        evidence: list[str] = []
+        for channel_name in feature_group.tensor_channel_names:
+            evidence.extend(feature_group.evidence_lights_by_channel.get(channel_name, ()))
+        return list(dict.fromkeys(evidence)) or ["HIGH_LEFT"]
 
 
 class OnnxModel:

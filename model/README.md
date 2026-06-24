@@ -67,16 +67,31 @@ uv run python -m training_tools.train_supervised_yolo `
 # WideResNet50 embedding
 uv run python -m training_tools.export_wideresnet_embedding `
   --output model/wideresnet50/seat_wrn50_embedding.onnx `
+  --input-channels 3 `
   --embedding-dim 1024
 
 # PatchCore PCA、memory bank、可选 FAISS
 uv run python -m training_tools.train_patchcore_assets `
   --manifest datasets/seat_trace_v1/dataset_manifest.jsonl `
   --output-dir model/patchcore `
+  --channel-order ch0_diffuse,ch1_polar_diffuse,ch2_high_left `
   --split train `
   --pca-components 3 `
   --coreset-ratio 0.1 `
   --build-faiss
 ```
 
-`train_patchcore_assets` 从 trace manifest 的真实 ROI 多光源 PGM 图提取 embedding，确保 PCA 和 memory bank 与在线 `FeatureBuilder` 的输入通道一致。
+如果真实样本来自 `images_capture/` 平铺 PNG，而不是 detector trace，先用已经训练好的 ROI 模型生成 ROI manifest：
+
+```powershell
+uv run python -m training_tools.collect_capture_dataset `
+  --input images_capture\20260623\LINE1_AOI_CAPTURE_MANUAL_SEAT_9000 `
+  --output datasets\seat_capture_20260623_9000 `
+  --recipe seat_a_black_leather_production_v1 `
+  --split train `
+  --label-status unverified_ok `
+  --roi-output-size 64x48 `
+  --skip-failed
+```
+
+`collect_capture_dataset` 默认将 `L1/L2/L3` 映射为当前固定机位生产配方的 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`，调用 `model/roi_yolo/seat_roi_seg.onnx` 输出 ROI PGM 和 `dataset_manifest.jsonl`。`train_patchcore_assets` 从 manifest 的真实 ROI 多光源 PGM 图提取 embedding，确保 PCA 和 memory bank 与在线 `FeatureBuilder` 的输入通道一致。PatchCore 只能用人工确认的正常样本建库；`seat_defect_detector.onnx` 必须基于缺陷类别和 bbox 人工标注后的 YOLO detect 数据集训练，不能只用未标注 OK 样本替代。

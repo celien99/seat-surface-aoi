@@ -13,7 +13,7 @@ class _WideResNetEmbeddingExportError(OnnxExportError):
 def export_wideresnet_embedding(
     output: Path,
     *,
-    input_channels: int = 5,
+    input_channels: int = 3,
     embedding_dim: int = 1024,
     input_height: int = 48,
     input_width: int = 64,
@@ -104,7 +104,7 @@ def export_wideresnet_embedding(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="导出 WideResNet50 embedding ONNX，供 PatchCore safety net 使用")
     parser.add_argument("--output", type=Path, default=Path("model/wideresnet50/seat_wrn50_embedding.onnx"))
-    parser.add_argument("--input-channels", type=int, default=5)
+    parser.add_argument("--input-channels", type=int, default=3)
     parser.add_argument("--embedding-dim", type=int, default=1024)
     parser.add_argument("--input-height", type=int, default=48)
     parser.add_argument("--input-width", type=int, default=64)

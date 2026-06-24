@@ -87,6 +87,21 @@ seat-surface-aoi/
 
 ROI 定位模型当前使用单类别 `seat`。训练数据应采用 YOLO segmentation 格式，导出的产物放入 `model/roi_yolo/seat_roi_seg.onnx`，并与 `python_detector/config/*recipe*.yaml` 中的 `roi_locator.class_names: [seat]`、ROI 模板和标定文件保持一致。
 
+已有 ROI 模型和 `images_capture/` 真实平铺 PNG 后，先把采图目录转换成现有训练链路可消费的 ROI manifest，再训练 PatchCore/PCA/FAISS 或监督模型：
+
+```powershell
+uv run python -m training_tools.collect_capture_dataset `
+  --input images_capture\20260623\LINE1_AOI_CAPTURE_MANUAL_SEAT_9000 `
+  --output datasets\seat_capture_20260623_9000 `
+  --recipe seat_a_black_leather_production_v1 `
+  --split train `
+  --label-status unverified_ok `
+  --roi-output-size 64x48 `
+  --skip-failed
+```
+
+`collect_capture_dataset` 默认把 `L1/L2/L3` 映射为 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`，调用 `model/roi_yolo/seat_roi_seg.onnx` 做 ROI 定位，输出 `dataset_manifest.jsonl` 和三光源 ROI PGM。ROI 冲突、低置信或越界样本会被跳过，不进入训练集。PatchCore 只能用人工确认的正常样本建库；`seat_defect_detector.onnx` 仍需要按缺陷类别人工标注后的 YOLO detect 数据集训练。
+
 ## 安全边界
 
 - Python 不控制 PLC、相机或频闪。

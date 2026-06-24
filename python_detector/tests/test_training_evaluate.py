@@ -74,7 +74,7 @@ def test_evaluate_end_to_end_json(tmp_path: Path) -> None:
 
     manifest = tmp_path / "manifest.jsonl"
     entries = []
-    for index, light_id in enumerate(("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")):
+    for index, light_id in enumerate(("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT")):
         image_path = Path("images/TOP_BACK/seat") / light_id / f"sample_1_{light_id}.pgm"
         full_path = tmp_path / image_path
         full_path.parent.mkdir(parents=True, exist_ok=True)
@@ -111,7 +111,7 @@ def test_evaluate_end_to_end_json(tmp_path: Path) -> None:
     assert "image_metrics" in report
     assert report["overall"]["total_samples"] == 1
     assert "by_class" in report["breakdown"]
-    assert report["image_metrics"][0]["lights"] == ["DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT", "POLAR_DIFFUSE"]
+    assert report["image_metrics"][0]["lights"] == ["DIFFUSE", "HIGH_LEFT", "POLAR_DIFFUSE"]
 
 
 def test_collect_trace_dataset_filter_decision(tmp_path: Path) -> None:

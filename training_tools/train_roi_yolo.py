@@ -43,6 +43,7 @@ def train_roi_yolo(
     if hasattr(results, "results_dict"):
         metrics = {str(k): float(v) if isinstance(v, (int, float)) else v
                    for k, v in results.results_dict.items()}
+    metrics = _normalize_metrics(metrics, task)
 
     if output is not None:
         exported_path = yolo_model.export(format="onnx", opset=opset, imgsz=imgsz)
@@ -56,6 +57,20 @@ def train_roi_yolo(
         returned_model = onnx.load(str(output))
         onnx.checker.check_model(returned_model)
 
+    return metrics
+
+
+def _normalize_metrics(metrics: dict, task: str) -> dict:
+    if "mAP50" in metrics:
+        return metrics
+    preferred_keys = (
+        ("metrics/mAP50(M)", "metrics/mAP50(B)")
+        if task == "segment"
+        else ("metrics/mAP50(B)", "metrics/mAP50(M)")
+    )
+    for key in preferred_keys:
+        if key in metrics:
+            return {**metrics, "mAP50": metrics[key]}
     return metrics
 
 

@@ -150,6 +150,7 @@ python_detector/
 training_tools/
 ├── collect_shm_dataset.py      # 复用 ShmClient/算法/trace，从共享内存多光源图生成 raw 图、trace 和训练 manifest
 ├── collect_trace_dataset.py    # 从 trace 生成训练样本 manifest 和 ROI 图像副本，兼容 pose 目录
+├── collect_capture_dataset.py  # 从 capture_only 平铺 PNG 目录调用 ROI 模型生成 ROI PGM manifest
 ├── dataset_manifest.py         # 读取 manifest、PGM ROI 图并按 camera/pose/ROI 聚合多光源训练样本
 ├── extract_embeddings.py       # 复用在线 FeatureBuilder/EmbeddingExtractor 从真实 ROI 图提取 embedding
 ├── compute_pca.py              # 从 embedding JSONL 计算 PCA 参数和可选降维 embedding
@@ -286,6 +287,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 - `training_tools.evaluate_pipeline` 调用在线 `InferenceEngine`，按 manifest 中的人工标注或弱标签计算整体、类别、ROI、camera 和 split 指标。
 - `training_tools.collect_trace_dataset` 同时兼容旧 trace 目录 `images/<camera>/<roi>/<light>.pgm` 和新目录 `images/<camera>/<pose>/<roi>/<light>.pgm`，生成的样本路径与 manifest 都包含 `pose_id`，避免机器人飞拍同一末端相机下的不同 pose 互相覆盖。
 - `training_tools.collect_shm_dataset` 调用在线 `ShmClient`、`SeatSurfaceAoiAlgorithm` 和 `TraceWriter`，从 C++ 共享内存任务获取多相机多光源图像，保存按 `camera_id/pose_id` 分目录的 `raw_images/`、`raw_frame_manifest.jsonl`，并生成 trace/训练 manifest；它不控制 PLC、相机或频闪。
+- `training_tools.collect_capture_dataset` 用于现场 `capture_only` 平铺 PNG，例如 `TOP_BACK_<timestamp>_L1_original.png`。它按相机和光源序号组包，默认将 `L1/L2/L3` 映射为 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`，调用当前配方的 `onnx_yolo_seg` ROI 模型生成 ROI PGM 和 manifest。ROI 多候选冲突、低置信、越界或缺光源样本会跳过或失败，不进入训练集。
 - `training_tools.train_patchcore_assets` 训练 PatchCore safety net 所需的 embedding/PCA/memory bank/FAISS 资产；`training_tools.export_wideresnet_embedding` 生成生产配方引用的 WideResNet50 embedding ONNX。
 
 ### 融合、规则和追溯
@@ -343,7 +345,8 @@ uv run python tools/run_simulated_ipc.py --config cpp_controller/config/station_
 ```powershell
 uv run python -m training_tools.collect_trace_dataset --trace-root trace --output datasets/seat_trace_v1
 uv run python -m training_tools.collect_shm_dataset --output datasets/seat_shm_v1 --max-jobs 10 --trace-root trace/training_shm
-uv run python -m training_tools.export_wideresnet_embedding --output model/wideresnet50/seat_wrn50_embedding.onnx --embedding-dim 1024
+uv run python -m training_tools.collect_capture_dataset --input images_capture/20260623/LINE1_AOI_CAPTURE_MANUAL_SEAT_9000 --output datasets/seat_capture_20260623_9000 --recipe seat_a_black_leather_production_v1 --split train --label-status unverified_ok --roi-output-size 64x48 --skip-failed
+uv run python -m training_tools.export_wideresnet_embedding --output model/wideresnet50/seat_wrn50_embedding.onnx --input-channels 3 --embedding-dim 1024
 uv run python -m training_tools.extract_embeddings --manifest datasets/seat_trace_v1/dataset_manifest.jsonl --output datasets/seat_trace_v1/embeddings.jsonl --backend statistical
 uv run python -m training_tools.train_patchcore_assets --manifest datasets/seat_trace_v1/dataset_manifest.jsonl --output-dir model/patchcore --split train --pca-components 3 --coreset-ratio 0.1
 uv run python -m training_tools.evaluate_pipeline --manifest datasets/seat_trace_v1/dataset_manifest.jsonl --output reports/evaluation_report.json --split test

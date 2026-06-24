@@ -20,14 +20,25 @@ def _feature_group() -> FeatureGroup:
         camera_id="TOP_BACK",
         roi_name="seat",
         model_key="fake_default",
-        features={"ch4_high_max_min": [0] * 64},
+        features={
+            "ch0_diffuse": [10] * 64,
+            "ch1_polar_diffuse": [20] * 64,
+            "ch2_high_left": [30] * 64,
+        },
         roi_bbox_xyxy_pixel=(10, 20, 73, 67),
         feature_shape_hw=(48, 64),
-        tensor_nchw=[[[[0.1 for _ in range(64)] for _ in range(48)]]],
-        tensor_channel_names=("ch0_diffuse", "ch4_high_max_min"),
+        tensor_nchw=[
+            [
+                [[0.1 for _ in range(64)] for _ in range(48)],
+                [[0.2 for _ in range(64)] for _ in range(48)],
+                [[0.3 for _ in range(64)] for _ in range(48)],
+            ]
+        ],
+        tensor_channel_names=("ch0_diffuse", "ch1_polar_diffuse", "ch2_high_left"),
         evidence_lights_by_channel={
             "ch0_diffuse": ("DIFFUSE",),
-            "ch4_high_max_min": ("HIGH_LEFT", "HIGH_RIGHT"),
+            "ch1_polar_diffuse": ("POLAR_DIFFUSE",),
+            "ch2_high_left": ("HIGH_LEFT",),
         },
     )
 
@@ -68,7 +79,7 @@ def test_onnx_missing_model_path_fails_conservatively() -> None:
         "backend": "onnx",
         "camera_id": "TOP_BACK",
         "roi_name": "seat",
-        "tensor_shape_nchw": [1, 1, 48, 64],
+        "tensor_shape_nchw": [1, 3, 48, 64],
         "cause_type": "ModelAssetUnavailableError",
         "asset_unavailable": True,
         "asset": {
@@ -151,7 +162,7 @@ def test_onnx_detection_rows_decode_maps_normalized_roi_bbox() -> None:
     assert candidates[0].score == pytest.approx(0.91)
     assert candidates[0].bbox_xyxy_pixel == (26, 32, 42, 44)
     assert candidates[0].area_px == 17 * 13
-    assert candidates[0].evidence_lights == ["DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"]
+    assert candidates[0].evidence_lights == ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT"]
     assert model.session.last_inputs["input"][0][0][0][0] == pytest.approx(0.1)
 
 

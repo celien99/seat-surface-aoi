@@ -24,7 +24,7 @@ def test_default_recipe_declares_v4_light_mapping_and_roi_locator() -> None:
     recipe = RecipeManager().load("seat_a_black_leather_v1")
     assert recipe.semantic_light_id("DOME") == "DIFFUSE"
     assert recipe.semantic_light_id("DARKFIELD_L") == "HIGH_LEFT"
-    assert recipe.semantic_light_id("DARKFIELD_R") == "HIGH_RIGHT"
+    assert recipe.semantic_light_id("BRIGHTFIELD") == "POLAR_DIFFUSE"
     assert recipe.roi_locator.backend == "template"
     assert recipe.registration.method == "fixed_calibration"
 
@@ -36,8 +36,15 @@ def test_recipe_rejects_v4_semantic_light_not_in_light_order() -> None:
                 "recipe_id": "bad_v4_light",
                 "sku": "sku",
                 "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
-                "v4_lights": {"semantic_to_light_id": {"DOME": "LIGHT_99", "DARKFIELD_L": "HIGH_LEFT", "DARKFIELD_R": "HIGH_RIGHT"}},
+                "v4_lights": {
+                    "semantic_to_light_id": {
+                        "DOME": "LIGHT_99",
+                        "DARKFIELD_L": "HIGH_LEFT",
+                        "BRIGHTFIELD": "POLAR_DIFFUSE",
+                    }
+                },
                 "cameras": {"TOP": {"model_key": "default"}},
+                "thresholds": {"scratch": {"ng_score": 0.35, "recheck_score": 0.2}},
                 "models": {"default": {"backend": "fake", "role": "primary"}},
             }
         )

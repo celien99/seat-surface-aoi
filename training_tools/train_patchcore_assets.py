@@ -24,8 +24,6 @@ def train_patchcore_assets(
         "ch0_diffuse",
         "ch1_polar_diffuse",
         "ch2_high_left",
-        "ch3_high_right",
-        "ch4_high_max_min",
     ),
     split: str | None = "train",
     pca_components: int | None = None,
@@ -123,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--embedding-backend", default="statistical", choices=["statistical", "onnx_wideresnet50"])
     parser.add_argument("--embedding-model", default=None, help="onnx_wideresnet50 模型路径")
     parser.add_argument("--embedding-dim", type=int, default=None)
-    parser.add_argument("--channel-order", default="ch0_diffuse,ch1_polar_diffuse,ch2_high_left,ch3_high_right,ch4_high_max_min")
+    parser.add_argument("--channel-order", default="ch0_diffuse,ch1_polar_diffuse,ch2_high_left")
     parser.add_argument("--split", default="train", help="用于训练的 split；传空字符串表示不过滤")
     parser.add_argument("--pca-components", type=int, default=None, help="启用 PCA 并指定目标维度")
     parser.add_argument("--pca-version", default="pca_seat_v1")

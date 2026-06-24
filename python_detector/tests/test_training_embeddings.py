@@ -15,7 +15,7 @@ def sample_manifest(tmp_path: Path) -> Path:
     """构造一个模拟 manifest，包含一组 OK 多光源 ROI 样本。"""
     manifest_path = tmp_path / "manifest.jsonl"
     rows = []
-    for index, light_id in enumerate(("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")):
+    for index, light_id in enumerate(("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT")):
         image_path = Path("images/TOP_BACK/seat") / light_id / f"ok_1_{light_id}.pgm"
         full_path = tmp_path / image_path
         full_path.parent.mkdir(parents=True, exist_ok=True)
@@ -44,7 +44,7 @@ def test_manifest_groups_load_pgm_images(tmp_path: Path, sample_manifest: Path) 
     """manifest 数据层能聚合多光源样本并读取 PGM 图像。"""
     groups = load_manifest_groups(sample_manifest)
     assert len(groups) == 1
-    assert groups[0].lights == ("DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT", "POLAR_DIFFUSE")
+    assert groups[0].lights == ("DIFFUSE", "HIGH_LEFT", "POLAR_DIFFUSE")
     image = read_pgm(tmp_path / groups[0].rows[0].image_path)
     assert image.width == 64
     assert image.height == 48
@@ -70,7 +70,7 @@ def test_extract_embeddings_with_statistical_fallback(tmp_path: Path, sample_man
         assert len(entry["embedding"]) == 10
         assert all(isinstance(v, float) for v in entry["embedding"])
         assert entry["embedding"][0] > 0.0
-        assert entry["input_shape_nchw"] == [1, 5, 48, 64]
+        assert entry["input_shape_nchw"] == [1, 3, 48, 64]
 
 
 def test_extract_embeddings_empty_manifest(tmp_path: Path) -> None:

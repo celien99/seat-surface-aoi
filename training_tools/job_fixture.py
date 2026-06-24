@@ -21,7 +21,7 @@ def make_simulated_job(sequence_id: int = 1) -> SeatInspectionJob:
 def _frames(camera_id: str) -> dict[str, LightFrame]:
     return {
         light_id: _frame(camera_id, light_id, index + 1)
-        for index, light_id in enumerate(("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"))
+        for index, light_id in enumerate(("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT"))
     }
 
 

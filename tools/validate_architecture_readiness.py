@@ -259,24 +259,24 @@ def _check_python_recipes() -> list[ReadinessItem]:
 
 def _check_recipe_light_quality_trace(recipe: Recipe, area: str) -> list[ReadinessItem]:
     items: list[ReadinessItem] = []
-    required_semantics = ["DOME", "DARKFIELD_L", "DARKFIELD_R", "BRIGHTFIELD"]
+    required_semantics = ["DOME", "DARKFIELD_L", "BRIGHTFIELD"]
     semantic_missing = _missing_required(required_semantics, recipe.v4_lights.semantic_to_light_id.keys())
-    required_lights = ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"]
+    required_lights = ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT"]
     light_missing = _missing_required(required_lights, recipe.quality.required_lights)
     if semantic_missing or light_missing:
         items.append(
             _blocked(
                 area,
-                "配方必须包含 V4 语义光源映射和 4 路基础质量门禁光源。",
+                "配方必须包含当前三光源生产链路所需 V4 语义光源映射和质量门禁光源。",
                 f"missing_semantics={semantic_missing}, missing_required_lights={light_missing}",
-                "补齐 DOME/DARKFIELD_L/DARKFIELD_R/BRIGHTFIELD 映射和 required_lights。",
+                "补齐 DOME/DARKFIELD_L/BRIGHTFIELD 映射和三路 required_lights。",
             )
         )
     else:
         items.append(
             _ok(
                 area,
-                "配方需声明 Dome、左右暗场和 BrightField 的语义光源映射。",
+                "配方需声明 Dome、左暗场和 BrightField 的三光源语义映射。",
                 f"recipe_id={recipe.recipe_id}; required_lights={list(recipe.quality.required_lights)}",
             )
         )

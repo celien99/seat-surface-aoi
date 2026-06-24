@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from training_tools.collect_capture_dataset import collect_capture_dataset
 from training_tools.build_patchcore_memory_bank import build_memory_bank
 from training_tools.collect_shm_dataset import collect_shm_dataset
 from training_tools.collect_trace_dataset import TraceDatasetError, collect_trace_dataset, main as collect_main
@@ -147,16 +148,49 @@ def test_collect_shm_dataset_reuses_detector_trace_and_manifest(tmp_path: Path) 
     assert len(result.trace_dirs) == 1
     assert result.manifest_path.exists()
     assert result.raw_frame_manifest_path.exists()
-    assert len(result.samples) == 8
+    assert len(result.samples) == 6
     assert client.published[0].decision == "OK"
     assert client.closed is True
     rows = [json.loads(line) for line in result.manifest_path.read_text(encoding="utf-8").splitlines()]
     assert {row["camera_id"] for row in rows} == {"TOP_BACK", "TOP_CUSHION"}
-    assert {row["light_id"] for row in rows} == {"DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"}
+    assert {row["light_id"] for row in rows} == {"DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT"}
     raw_rows = [json.loads(line) for line in result.raw_frame_manifest_path.read_text(encoding="utf-8").splitlines()]
-    assert len(raw_rows) == 8
+    assert len(raw_rows) == 6
     assert {row["camera_id"] for row in raw_rows} == {"TOP_BACK", "TOP_CUSHION"}
     assert (output / raw_rows[0]["image_path"]).read_bytes().startswith(b"P5\n")
+
+
+def test_collect_capture_dataset_from_flat_png_dir(tmp_path: Path) -> None:
+    input_dir = tmp_path / "capture"
+    input_dir.mkdir()
+    for camera_id in ("TOP_BACK", "TOP_CUSHION"):
+        for index, light_id in enumerate(("L1", "L2", "L3"), start=1):
+            _write_png_gray(
+                input_dir / f"{camera_id}_{1000 + index}_{light_id}_original.png",
+                width=64,
+                height=48,
+                value=20 + index,
+            )
+    output = tmp_path / "dataset"
+
+    result = collect_capture_dataset(
+        input_dir,
+        output,
+        recipe_id="seat_a_black_leather_v1",
+        light_map={"L1": "DIFFUSE", "L2": "POLAR_DIFFUSE", "L3": "HIGH_LEFT"},
+        split="train",
+        label_status="verified_ok",
+        roi_output_size=(16, 12),
+    )
+
+    rows = [json.loads(line) for line in result.manifest_path.read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 6
+    assert {row["camera_id"] for row in rows} == {"TOP_BACK", "TOP_CUSHION"}
+    assert {row["light_id"] for row in rows} == {"DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT"}
+    assert all(row["decision"] == "OK" for row in rows)
+    assert all(row["quality_pass"] is True for row in rows)
+    first_image = output / rows[0]["image_path"]
+    assert first_image.read_bytes().startswith(b"P5\n16 12\n255\n")
 
 
 def _write_trace(trace_dir: Path) -> Path:
@@ -202,6 +236,29 @@ def _write_trace(trace_dir: Path) -> Path:
         encoding="utf-8",
     )
     return trace_dir
+
+
+def _write_png_gray(path: Path, *, width: int, height: int, value: int) -> None:
+    import zlib
+
+    raw_rows = b"".join(bytes([0]) + bytes([value] * width) for _ in range(height))
+    payload = zlib.compress(raw_rows)
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        import struct
+        import zlib
+
+        crc = zlib.crc32(kind + data) & 0xFFFFFFFF
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", crc)
+
+    import struct
+
+    path.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0))
+        + chunk(b"IDAT", payload)
+        + chunk(b"IEND", b"")
+    )
 
 
 def _write_robot_pose_trace(trace_dir: Path) -> Path:

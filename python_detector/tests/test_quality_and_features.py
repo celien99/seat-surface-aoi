@@ -6,7 +6,7 @@ from python_detector.pipeline.pipeline import InspectionPipeline
 from python_detector.pipeline.quality_gate import ImageQualityGate
 
 
-LIGHTS = ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")
+LIGHTS = ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT")
 
 
 def _frame(light_id: str, value: int = 80, frame_index: int = 1, timestamp_us: int = 1) -> LightFrame:
@@ -72,7 +72,7 @@ def test_pipeline_returns_ok_for_complete_simulated_bundle() -> None:
 def test_missing_required_light_returns_recheck() -> None:
     pipeline = InspectionPipeline()
     recipe = RecipeManager().load("seat_a_black_leather_v1")
-    result = pipeline.process(_job(("DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")), recipe)
+    result = pipeline.process(_job(("DIFFUSE", "HIGH_LEFT")), recipe)
     assert result.decision == "RECHECK"
     assert result.quality_pass is False
 
@@ -226,7 +226,7 @@ def test_inconsistent_required_light_robot_pose_returns_recheck() -> None:
         frame.robot_timestamp_us = 1_000_000
         frame.robot_tcp_xyz_mm = (100.0, 200.0, 300.0)
         frame.robot_rpy_deg = (1.0, 2.0, 3.0)
-    job.camera_bundles[0].light_frames["HIGH_RIGHT"].robot_tcp_xyz_mm = (100.5, 200.0, 300.0)
+    job.camera_bundles[0].light_frames["HIGH_LEFT"].robot_tcp_xyz_mm = (100.5, 200.0, 300.0)
 
     result = pipeline.process(job, recipe)
 

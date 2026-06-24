@@ -125,7 +125,7 @@ def _write_ok_manifest(tmp_path: Path, count: int) -> Path:
     manifest = tmp_path / "manifest.jsonl"
     rows = []
     for sample_index in range(count):
-        for light_index, light_id in enumerate(("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT")):
+        for light_index, light_id in enumerate(("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT")):
             sample_id = f"ok_{sample_index}_{light_id}"
             image_path = Path("images/TOP_BACK/seat") / light_id / f"{sample_id}.pgm"
             full_path = tmp_path / image_path

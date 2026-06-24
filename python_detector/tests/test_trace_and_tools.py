@@ -205,7 +205,7 @@ def test_pipeline_model_error_context_is_traceable(tmp_path: Path) -> None:
     assert pipeline.last_context["error"]["backend"] == "onnx"
     assert pipeline.last_context["error"]["camera_id"] == "TOP_BACK"
     assert pipeline.last_context["error"]["roi_name"] == "seat"
-    assert pipeline.last_context["error"]["tensor_shape_nchw"] == [1, 5, 48, 64]
+    assert pipeline.last_context["error"]["tensor_shape_nchw"] == [1, 3, 48, 64]
     assert trace_dir is not None
     assert (trace_dir / "raw_images" / "TOP_BACK" / "TOP_BACK" / "DIFFUSE.pgm").exists()
     assert (trace_dir / "images" / "TOP_BACK" / "TOP_BACK" / "seat" / "DIFFUSE.pgm").exists()

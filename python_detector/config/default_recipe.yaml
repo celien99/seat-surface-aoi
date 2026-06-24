@@ -4,12 +4,10 @@ light_order:
   - DIFFUSE
   - POLAR_DIFFUSE
   - HIGH_LEFT
-  - HIGH_RIGHT
 v4_lights:
   semantic_to_light_id:
     DOME: DIFFUSE
     DARKFIELD_L: HIGH_LEFT
-    DARKFIELD_R: HIGH_RIGHT
     BRIGHTFIELD: POLAR_DIFFUSE
 camera_defaults:
   model_key: fake_default
@@ -17,7 +15,7 @@ camera_defaults:
   roi_template: python_detector/config/roi/default_roi.yaml
   calibration_id: calib/simulated_v1
   base_light_id: POLAR_DIFFUSE
-  light_order: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT, HIGH_RIGHT]
+  light_order: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT]
   roi_models:
     seat: fake_default
   roi_safety_net_models:
@@ -30,7 +28,6 @@ quality:
     - DIFFUSE
     - POLAR_DIFFUSE
     - HIGH_LEFT
-    - HIGH_RIGHT
   max_saturation_ratio: 0.01
   min_mean_gray: 20
   max_mean_gray: 235

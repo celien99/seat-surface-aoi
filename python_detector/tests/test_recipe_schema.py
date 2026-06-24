@@ -89,12 +89,14 @@ def test_recipe_rejects_camera_light_order_missing_required_lights() -> None:
                 "recipe_id": "bad_camera_required_lights",
                 "sku": "sku",
                 "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                "quality": {"required_lights": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"]},
                 "cameras": {
                     "TOP": {
                         "model_key": "default",
                         "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT"],
                     }
                 },
+                "thresholds": {"scratch": {"ng_score": 0.35, "recheck_score": 0.2}},
                 "models": {"default": {"backend": "fake", "role": "primary"}},
             }
         )

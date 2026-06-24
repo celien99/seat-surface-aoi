@@ -24,7 +24,9 @@ def extract_embeddings(
     backend: str = "statistical",
     model_path: str | None = None,
     channel_order: tuple[str, ...] = (
-        "ch0_diffuse", "ch1_polar_diffuse", "ch2_high_left", "ch3_high_right", "ch4_high_max_min",
+        "ch0_diffuse",
+        "ch1_polar_diffuse",
+        "ch2_high_left",
     ),
     split: str | None = None,
 ) -> list[dict]:
@@ -157,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--backend", default="statistical", choices=["statistical", "onnx_wideresnet50"])
     parser.add_argument("--embedding-dim", type=int, default=None)
     parser.add_argument("--split", default=None, help="只提取指定 split 的 OK 样本")
-    parser.add_argument("--channel-order", default="ch0_diffuse,ch1_polar_diffuse,ch2_high_left,ch3_high_right,ch4_high_max_min")
+    parser.add_argument("--channel-order", default="ch0_diffuse,ch1_polar_diffuse,ch2_high_left")
     args = parser.parse_args(argv)
 
     channel_order: tuple[str, ...] = tuple(ch.strip() for ch in args.channel_order.split(",") if ch.strip())

@@ -331,11 +331,27 @@ uv run python -m training_tools.collect_shm_dataset `
 
 该入口只复用 Python detector 的 `ShmClient`、算法流水线和 trace 写入能力，消费 C++ 已采集并写入共享内存的多相机多光源图像；它会保存 `raw_images/`、`raw_frame_manifest.jsonl` 和可训练 ROI manifest，不控制 PLC、相机、机器人或频闪。
 
+从 `capture_only` 平铺 PNG 采图目录生成 ROI manifest：
+
+```powershell
+uv run python -m training_tools.collect_capture_dataset `
+  --input images_capture\20260623\LINE1_AOI_CAPTURE_MANUAL_SEAT_9000 `
+  --output datasets\seat_capture_20260623_9000 `
+  --recipe seat_a_black_leather_production_v1 `
+  --split train `
+  --label-status unverified_ok `
+  --roi-output-size 64x48 `
+  --skip-failed
+```
+
+该入口按文件名中的 `TOP_BACK/TOP_CUSHION`、`L1/L2/L3` 和时间戳组包，默认将三路采集光映射为 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`，调用当前配方的 `seat_roi_seg.onnx` 做 ROI 定位并输出三光源 ROI PGM。ROI 多候选冲突、低置信、越界或缺光源样本会跳过或失败，不进入 PatchCore 正常库。`unverified_ok` 只表示采集来源未被人工标注，训练正式阈值前必须人工确认正常/缺陷标签。
+
 导出 PatchCore 所需 WideResNet50 embedding ONNX：
 
 ```powershell
 uv run python -m training_tools.export_wideresnet_embedding `
   --output model/wideresnet50/seat_wrn50_embedding.onnx `
+  --input-channels 3 `
   --embedding-dim 1024
 ```
 
