@@ -11,6 +11,7 @@ from python_detector.config.calibration_manager import CalibrationManager, RoiTe
 from python_detector.config.recipe_schema import Recipe, RecipeManager, RecipeValidationError
 from python_detector.image_codec import ImageCodecError, load_gray_image, write_gray_png
 from python_detector.ipc.data_types import CameraBundle, LightFrame, SeatInspectionJob
+from python_detector.pipeline.ecc_registration import EccRegistration
 from python_detector.pipeline.preprocessor import PreprocessRecheckError, Preprocessor
 from training_tools.collect_trace_dataset import DatasetSample
 from training_tools.training_errors import TrainingDataError
@@ -276,11 +277,20 @@ def _collect_capture_group(
         raise TrainingDataError(f"{first.camera_id}: ROI 定位失败: {roi_report.message}")
 
     samples: list[DatasetSample] = []
+    ecc_registration = EccRegistration()
     for roi_name, roi_template in sorted(located_templates.items()):
         roi_frames = {
             light_id: preprocessor._crop_to_roi(frame, roi_template)
             for light_id, frame in frames.items()
         }
+        # 多光源 ECC 配准，确保训练 ROI 与在线推理特征一致
+        roi_frames = _align_roi_frames(
+            roi_frames,
+            recipe,
+            ecc_registration,
+            camera_id=first.camera_id,
+            roi_name=roi_name,
+        )
         if roi_output_size is not None:
             roi_frames = {
                 light_id: _resize_frame_letterbox(frame, roi_output_size)
@@ -333,6 +343,44 @@ def _write_png(path: Path, frame: LightFrame) -> None:
             compact[row * frame.width:(row + 1) * frame.width] = frame.image[source_start:source_start + frame.width]
         pixels = bytes(compact)
     write_gray_png(path, frame.width, frame.height, pixels)
+
+
+def _align_roi_frames(
+    roi_frames: dict[str, LightFrame],
+    recipe: Recipe,
+    ecc_registration: EccRegistration,
+    *,
+    camera_id: str = "",
+    roi_name: str = "",
+) -> dict[str, LightFrame]:
+    """对多光源 ROI 帧做 ECC 配准，确保训练特征与在线推理一致。"""
+    if recipe.registration.method != "ecc":
+        return roi_frames
+    reg_config = recipe.registration
+    base_light_id = reg_config.base_light_id
+    if base_light_id not in roi_frames:
+        base_light_id = reg_config.base_light_fallback
+    base = roi_frames.get(base_light_id)
+    if base is None:
+        return roi_frames
+    aligned = dict(roi_frames)
+    for light_id, frame in roi_frames.items():
+        if light_id == base_light_id:
+            continue
+        try:
+            result = ecc_registration.align_translation(
+                base,
+                frame,
+                reg_config.search_radius_px,
+                reg_config.max_iterations,
+                reg_config.convergence_epsilon,
+                reg_config.min_correlation,
+            )
+        except Exception:
+            continue
+        if result.converged:
+            aligned[light_id] = ecc_registration.apply_translation(frame, result.shift_xy)
+    return aligned
 
 
 def _resize_frame_letterbox(frame: LightFrame, output_size: tuple[int, int]) -> LightFrame:

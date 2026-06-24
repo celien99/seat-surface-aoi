@@ -53,6 +53,9 @@ class RoiLocationReport:
 
 
 class RoiLocator:
+    def __init__(self) -> None:
+        self._onnx_sessions: dict[str, Any] = {}
+
     def locate(
         self,
         camera_id: str,
@@ -141,7 +144,7 @@ class RoiLocator:
                 reason="path_not_configured",
             )
         np = numpy_module("YOLO ROI")
-        session = create_onnx_session(model_path, "YOLO ROI")
+        session = self._cached_onnx_session(model_path, "YOLO ROI")
         tensor, _ = self._frame_to_nchw(dome_frame, recipe, np)
         outputs = run_first_input(session, tensor, "YOLO ROI")
         return decode_yolo_rows(
@@ -160,7 +163,7 @@ class RoiLocator:
                 reason="path_not_configured",
         )
         np = numpy_module("YOLO ROI segmentation")
-        session = create_onnx_session(model_path, "YOLO ROI segmentation")
+        session = self._cached_onnx_session(model_path, "YOLO ROI segmentation")
         tensor, transform = self._frame_to_nchw(dome_frame, recipe, np)
         outputs = run_first_input(session, tensor, "YOLO ROI segmentation")
         candidates = decode_yolo_segmentation(
@@ -631,45 +634,17 @@ class RoiLocator:
         x0, y0, x1, y1 = mask_bbox
         bbox_width = max(1, x1 - x0 + 1)
         bbox_height = max(1, y1 - y0 + 1)
-        eroded = self._erode_mask_1px(mask, mask_bbox)
+        # 先上采样到输出尺寸，再在输出空间做 1px 侵蚀
         pixels = bytearray(output_width * output_height)
         for y in range(output_height):
             source_y = y0 + min(bbox_height - 1, int(float(y) * float(bbox_height) / float(output_height)))
             for x in range(output_width):
                 source_x = x0 + min(bbox_width - 1, int(float(x) * float(bbox_width) / float(output_width)))
-                if float(eroded[source_y][source_x]) > 0.0:
+                if float(mask[source_y][source_x]) > 0.0:
                     pixels[y * output_width + x] = 255
-        return RoiMask(width=output_width, height=output_height, pixels=bytes(pixels))
-
-    def _erode_mask_1px(
-        self,
-        mask: Any,
-        mask_bbox: tuple[int, int, int, int],
-    ) -> Any:
-        """对 mask 的 bbox 区域做 1 像素 4-邻域腐蚀，消除分割边界锯齿。"""
-        x0, y0, x1, y1 = mask_bbox
-        height = int(getattr(mask, "shape", (0, 0))[0])
-        width = int(getattr(mask, "shape", (0, 0))[1]) if len(getattr(mask, "shape", ())) >= 2 else 0
-        if width <= 0 or height <= 0:
-            return mask
-        eroded = [[0.0] * width for _ in range(height)]
-        # 复制 bbox 区域
-        for y in range(y0, y1 + 1):
-            for x in range(x0, x1 + 1):
-                eroded[y][x] = float(mask[y][x])
-        # 4-邻域腐蚀：如果自身或任一邻居为 0，则置 0
-        for y in range(y0, y1 + 1):
-            for x in range(x0, x1 + 1):
-                if float(mask[y][x]) <= 0.0:
-                    continue
-                if (
-                    (y > 0 and float(mask[y - 1][x]) <= 0.0)
-                    or (y + 1 < height and float(mask[y + 1][x]) <= 0.0)
-                    or (x > 0 and float(mask[y][x - 1]) <= 0.0)
-                    or (x + 1 < width and float(mask[y][x + 1]) <= 0.0)
-                ):
-                    eroded[y][x] = 0.0
-        return eroded
+        # 在输出空间做 1px 4-邻域侵蚀
+        eroded = _erode_output_mask_1px(pixels, output_width, output_height)
+        return RoiMask(width=output_width, height=output_height, pixels=bytes(eroded))
 
     def _bbox_pose_error_px(self, template: RoiTemplate, polygon: tuple[tuple[int, int], ...]) -> float:
         template_bbox = self._bbox(template.polygon_xy)
@@ -717,3 +692,26 @@ class RoiLocator:
         if denominator <= 0.0:
             return 0.0
         return intersection / denominator
+
+    def _cached_onnx_session(self, model_path: str, label: str) -> Any:
+        if model_path not in self._onnx_sessions:
+            self._onnx_sessions[model_path] = create_onnx_session(model_path, label)
+        return self._onnx_sessions[model_path]
+
+
+def _erode_output_mask_1px(pixels: bytearray, width: int, height: int) -> bytearray:
+    """在输出空间对 mask 做 1 像素 4-邻域腐蚀，消除分割边界锯齿。"""
+    eroded = bytearray(pixels)
+    for y in range(height):
+        for x in range(width):
+            idx = y * width + x
+            if pixels[idx] == 0:
+                continue
+            if (
+                (x == 0 or pixels[idx - 1] == 0)
+                or (x == width - 1 or pixels[idx + 1] == 0)
+                or (y == 0 or pixels[idx - width] == 0)
+                or (y == height - 1 or pixels[idx + width] == 0)
+            ):
+                eroded[idx] = 0
+    return eroded
