@@ -25,6 +25,10 @@ def extract_embeddings(
     model_path: str | None = None,
     channel_order: tuple[str, ...] | None = None,
     split: str | None = None,
+    spatial_mode: bool = False,
+    spatial_layers: tuple[str, ...] = (),
+    spatial_upsample_height: int = 32,
+    spatial_upsample_width: int = 32,
 ) -> list[dict]:
     try:
         manifest_groups = load_manifest_groups(manifest_path)
@@ -48,6 +52,10 @@ def extract_embeddings(
         model_path=model_path,
         embedding_dim=embedding_dim,
         channel_order=channel_order,
+        spatial_mode=spatial_mode,
+        spatial_layers=spatial_layers,
+        spatial_upsample_height=spatial_upsample_height,
+        spatial_upsample_width=spatial_upsample_width,
     )
     results = _extract_group_embeddings(groups, recipe, selected_model_key, model_config)
 
@@ -70,29 +78,61 @@ def _extract_group_embeddings(
     for group in groups:
         try:
             feature_group = build_feature_group_from_manifest_group(group, recipe, model_key=model_key)
-            embedding = extractor.extract(feature_group, model_config)
+            if model_config.spatial_mode and model_config.spatial_layers:
+                spatial = extractor.extract_spatial(feature_group, model_config)
+                for patch_idx, patch_embedding in enumerate(spatial.patch_embeddings):
+                    patch_row = patch_idx // spatial.spatial_shape[1]
+                    patch_col = patch_idx % spatial.spatial_shape[1]
+                    results.append(
+                        {
+                            "sample_id": group.sample_id,
+                            "group_id": group.group_id,
+                            "source_trace_dir": group.source_trace_dir,
+                            "recipe_id": recipe.recipe_id,
+                            "model_key": model_key,
+                            "camera_id": group.camera_id,
+                            "roi_name": group.roi_name,
+                            "split": group.split,
+                            "label_status": group.label_status,
+                            "lights": list(group.lights),
+                            "embedding": list(patch_embedding),
+                            "embedding_dim": len(patch_embedding),
+                            "backend": spatial.backend,
+                            "embedding_version": spatial.version,
+                            "layer_names": list(spatial.layer_names),
+                            "input_shape_nchw": list(spatial.input_shape_nchw) if spatial.input_shape_nchw is not None else None,
+                            "spatial_mode": True,
+                            "patch_index": patch_idx,
+                            "patch_row": patch_row,
+                            "patch_col": patch_col,
+                            "spatial_shape": list(spatial.spatial_shape),
+                            "patch_dim": spatial.patch_dim,
+                        }
+                    )
+            else:
+                embedding = extractor.extract(feature_group, model_config)
+                results.append(
+                    {
+                        "sample_id": group.sample_id,
+                        "group_id": group.group_id,
+                        "source_trace_dir": group.source_trace_dir,
+                        "recipe_id": recipe.recipe_id,
+                        "model_key": model_key,
+                        "camera_id": group.camera_id,
+                        "roi_name": group.roi_name,
+                        "split": group.split,
+                        "label_status": group.label_status,
+                        "lights": list(group.lights),
+                        "embedding": list(embedding.values),
+                        "embedding_dim": len(embedding.values),
+                        "backend": embedding.backend,
+                        "embedding_version": embedding.version,
+                        "layer_names": list(embedding.layer_names),
+                        "input_shape_nchw": list(embedding.input_shape_nchw) if embedding.input_shape_nchw is not None else None,
+                    }
+                )
         except Exception as exc:
             raise EmbeddingExtractionError(f"{group.group_id}: embedding 提取失败: {exc}") from exc
-        results.append(
-            {
-                "sample_id": group.sample_id,
-                "group_id": group.group_id,
-                "source_trace_dir": group.source_trace_dir,
-                "recipe_id": recipe.recipe_id,
-                "model_key": model_key,
-                "camera_id": group.camera_id,
-                "roi_name": group.roi_name,
-                "split": group.split,
-                "label_status": group.label_status,
-                "lights": list(group.lights),
-                "embedding": list(embedding.values),
-                "embedding_dim": len(embedding.values),
-                "backend": embedding.backend,
-                "embedding_version": embedding.version,
-                "layer_names": list(embedding.layer_names),
-                "input_shape_nchw": list(embedding.input_shape_nchw) if embedding.input_shape_nchw is not None else None,
-            }
-        )
     return results
 
 
@@ -103,11 +143,17 @@ def _embedding_model_config(
     model_path: str | None,
     embedding_dim: int | None,
     channel_order: tuple[str, ...] | None,
+    spatial_mode: bool = False,
+    spatial_layers: tuple[str, ...] = (),
+    spatial_upsample_height: int = 32,
+    spatial_upsample_width: int = 32,
 ) -> ModelConfig:
     if backend not in {"statistical", "onnx_wideresnet50"}:
         raise EmbeddingExtractionError(f"不支持的 embedding backend: {backend}")
     if backend == "onnx_wideresnet50" and not (model_path or base.embedding_model_path):
         raise EmbeddingExtractionError("onnx_wideresnet50 backend 必须配置 model_path")
+    if spatial_mode and backend != "onnx_wideresnet50":
+        raise EmbeddingExtractionError("spatial_mode 必须使用 onnx_wideresnet50 backend")
     return ModelConfig(
         backend=base.backend,
         model_path=base.model_path,
@@ -132,6 +178,10 @@ def _embedding_model_config(
         coreset_ratio=base.coreset_ratio,
         knn_k=base.knn_k,
         anomaly_score_scale=base.anomaly_score_scale,
+        spatial_mode=spatial_mode,
+        spatial_layers=spatial_layers if spatial_layers else base.spatial_layers,
+        spatial_upsample_height=spatial_upsample_height,
+        spatial_upsample_width=spatial_upsample_width,
     )
 
 
@@ -156,11 +206,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--embedding-dim", type=int, default=None)
     parser.add_argument("--split", default=None, help="只提取指定 split 的 OK 样本")
     parser.add_argument("--channel-order", default=None, help="覆盖模型输入通道；默认使用配方 models.<key>.input_channels")
+    parser.add_argument("--spatial-mode", action="store_true", help="提取空间 patch embedding（每图 H×W 个向量）")
+    parser.add_argument("--spatial-layers", default="layer2,layer3", help="空间模式下导出的中间层，逗号分隔")
+    parser.add_argument("--spatial-upsample-height", type=int, default=32, help="空间特征上采样目标高度")
+    parser.add_argument("--spatial-upsample-width", type=int, default=32, help="空间特征上采样目标宽度")
     args = parser.parse_args(argv)
 
     channel_order: tuple[str, ...] | None = None
     if args.channel_order is not None:
         channel_order = tuple(ch.strip() for ch in args.channel_order.split(",") if ch.strip())
+    spatial_layers: tuple[str, ...] = ()
+    if args.spatial_mode:
+        spatial_layers = tuple(layer.strip() for layer in args.spatial_layers.split(",") if layer.strip())
     try:
         results = extract_embeddings(
             manifest_path=args.manifest,
@@ -172,12 +229,16 @@ def main(argv: list[str] | None = None) -> int:
             model_path=args.model,
             channel_order=channel_order,
             split=args.split,
+            spatial_mode=args.spatial_mode,
+            spatial_layers=spatial_layers,
+            spatial_upsample_height=args.spatial_upsample_height,
+            spatial_upsample_width=args.spatial_upsample_width,
         )
     except (TrainingDataError, EmbeddingExtractionError) as exc:
         print(f"extract_embeddings_failed={exc}")
         return 2
 
-    print(f"embeddings={args.output} samples={len(results)} backend={args.backend} recipe={args.recipe}")
+    print(f"embeddings={args.output} samples={len(results)} backend={args.backend} recipe={args.recipe} spatial_mode={args.spatial_mode}")
     return 0
 
 

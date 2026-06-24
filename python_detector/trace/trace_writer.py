@@ -44,7 +44,7 @@ class TraceWriter:
         self._write_json(trace_dir / "error.json", context.get("error", {}))
         self._write_raw_images(trace_dir, job)
         self._write_roi_images(trace_dir, context.get("prepared_bundles", []))
-        self._write_defect_overlays(trace_dir, result, context.get("prepared_bundles", []))
+        self._write_defect_overlays(trace_dir, result, context.get("prepared_bundles", []), context.get("feature_summary", []))
         return trace_dir
 
     def _should_write(self, job: SeatInspectionJob, recipe: Recipe, result: InspectionResult) -> bool:
@@ -99,24 +99,46 @@ class TraceWriter:
                     frame,
                 )
 
-    def _write_defect_overlays(self, trace_dir: Path, result: InspectionResult, prepared_bundles: Any) -> None:
+    def _write_defect_overlays(
+        self,
+        trace_dir: Path,
+        result: InspectionResult,
+        prepared_bundles: Any,
+        feature_summary: list[dict[str, object]],
+    ) -> None:
         if not result.defects:
             return
         frame_index = self._frame_index(prepared_bundles)
+        anomaly_maps = self._anomaly_map_index(feature_summary)
         overlay_dir = trace_dir / "overlays"
         for defect in result.defects:
             frame = self._frame_for_defect(defect, frame_index)
             if frame is None:
                 continue
-            self._write_overlay_ppm(
-                overlay_dir
-                / (
-                    f"{_safe_name(defect.defect_id)}_{_safe_name(defect.camera_id)}_"
-                    f"{_safe_name(defect.pose_id or defect.camera_id)}_{_safe_name(defect.roi_name)}.png"
-                ),
-                frame,
-                defect,
+            anomaly_map = anomaly_maps.get(
+                (defect.camera_id, defect.pose_id or defect.camera_id, defect.roi_name)
             )
+            if anomaly_map is not None:
+                self._write_heatmap_overlay(
+                    overlay_dir
+                    / (
+                        f"{_safe_name(defect.defect_id)}_{_safe_name(defect.camera_id)}_"
+                        f"{_safe_name(defect.pose_id or defect.camera_id)}_{_safe_name(defect.roi_name)}.png"
+                    ),
+                    frame,
+                    defect,
+                    anomaly_map,
+                )
+            else:
+                self._write_overlay_ppm(
+                    overlay_dir
+                    / (
+                        f"{_safe_name(defect.defect_id)}_{_safe_name(defect.camera_id)}_"
+                        f"{_safe_name(defect.pose_id or defect.camera_id)}_{_safe_name(defect.roi_name)}.png"
+                    ),
+                    frame,
+                    defect,
+                )
 
     def _frame_index(self, prepared_bundles: Any) -> dict[tuple[str, str, str, str], LightFrame]:
         index: dict[tuple[str, str, str, str], LightFrame] = {}
@@ -164,6 +186,77 @@ class TraceWriter:
                 else:
                     rgb.extend((value, value, value))
         write_rgb_png(path, frame.width, frame.height, bytes(rgb))
+
+    def _anomaly_map_index(
+        self,
+        feature_summary: list[dict[str, object]],
+    ) -> dict[tuple[str, str, str], tuple[tuple[tuple[float, ...], ...], tuple[int, int]]]:
+        """从 feature_summary 中提取 anomaly_map 索引。
+
+        返回 {(camera_id, pose_id, roi_name): (anomaly_map, spatial_shape)}。
+        """
+        index: dict[tuple[str, str, str], tuple[tuple[tuple[float, ...], ...], tuple[int, int]]] = {}
+        for summary in feature_summary or []:
+            if not isinstance(summary, dict):
+                continue
+            anomaly_summary = summary.get("anomaly_summary")
+            if not isinstance(anomaly_summary, dict) or not anomaly_summary.get("spatial_mode"):
+                continue
+            anomaly_map = anomaly_summary.get("anomaly_map")
+            spatial_shape_raw = anomaly_summary.get("spatial_shape")
+            if anomaly_map is None or spatial_shape_raw is None:
+                continue
+            if not isinstance(spatial_shape_raw, list) or len(spatial_shape_raw) != 2:
+                continue
+            spatial_shape = (int(spatial_shape_raw[0]), int(spatial_shape_raw[1]))
+            camera_id = str(summary.get("camera_id", ""))
+            pose_id = str(summary.get("pose_id", "") or camera_id)
+            roi_name = str(summary.get("roi_name", ""))
+            if camera_id and roi_name:
+                anomaly_map_tuple = tuple(
+                    tuple(float(v) for v in row) for row in anomaly_map
+                )
+                index[(camera_id, pose_id, roi_name)] = (anomaly_map_tuple, spatial_shape)
+        return index
+
+    def _write_heatmap_overlay(
+        self,
+        path: Path,
+        frame: LightFrame,
+        defect: DefectResult,
+        anomaly_map: tuple[tuple[float, ...], ...],
+    ) -> None:
+        """渲染 JET 热力图叠加到灰度 ROI 上，并绘制绿色 bbox 轮廓。
+
+        生成 RGB PNG，包含：灰度底图 + JET colormap 异常热力 + 绿色缺陷 bbox。
+        """
+        path.parent.mkdir(parents=True, exist_ok=True)
+        gray = self._frame_bytes(frame)
+        h, w = frame.height, frame.width
+
+        # 将 anomaly_map 上采样到 ROI 尺寸
+        map_h = len(anomaly_map)
+        map_w = len(anomaly_map[0]) if map_h > 0 else 0
+        upsampled = _resize_anomaly_map(anomaly_map, (map_h, map_w), h, w)
+
+        # 构建 RGB 叠加图
+        x0, y0, x1, y1 = self._bbox_in_frame(defect.bbox_xyxy_pixel, frame)
+        rgb = bytearray()
+        for y in range(h):
+            for x in range(w):
+                gray_val = gray[y * w + x]
+                anomaly_val = upsampled[y][x]
+                heat_r, heat_g, heat_b = _jet_colormap(anomaly_val)
+                # alpha blend: 热力图 40% + 灰度图 60%
+                blended_r = int(heat_r * 0.4 + gray_val * 0.6)
+                blended_g = int(heat_g * 0.4 + gray_val * 0.6)
+                blended_b = int(heat_b * 0.4 + gray_val * 0.6)
+                # 在 bbox 轮廓上绘制绿色边框
+                if x0 <= x <= x1 and y0 <= y <= y1 and (x in {x0, x1} or y in {y0, y1}):
+                    rgb.extend((0, 255, 0))
+                else:
+                    rgb.extend((blended_r, blended_g, blended_b))
+        write_rgb_png(path, w, h, bytes(rgb))
 
     def _frame_bytes(self, frame: LightFrame) -> bytes:
         if frame.dtype != "UINT8" or frame.channels != 1:
@@ -238,3 +331,50 @@ def _jsonable(value: Any) -> Any:
 
 def _safe_name(value: str) -> str:
     return "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in str(value))
+
+
+def _jet_colormap(value: float) -> tuple[int, int, int]:
+    """JET colormap: [0, 1] → (R, G, B)。"""
+
+    def _clamp(v: float) -> float:
+        return max(0.0, min(1.0, v))
+
+    def _lerp(a: float, b: float, t: float) -> float:
+        return a + (b - a) * t
+
+    # JET 的关键控制点
+    if value < 0.125:
+        t = value / 0.125
+        return (0, 0, int(_lerp(128, 255, t)))
+    if value < 0.375:
+        t = (value - 0.125) / 0.25
+        return (0, int(_lerp(0, 255, t)), 255)
+    if value < 0.625:
+        t = (value - 0.375) / 0.25
+        return (int(_lerp(0, 255, t)), 255, int(_lerp(255, 0, t)))
+    if value < 0.875:
+        t = (value - 0.625) / 0.25
+        return (255, int(_lerp(255, 0, t)), 0)
+    t = (value - 0.875) / 0.125
+    return (int(_lerp(255, 128, t)), 0, 0)
+
+
+def _resize_anomaly_map(
+    anomaly_map: tuple[tuple[float, ...], ...],
+    src_shape: tuple[int, int],
+    target_h: int,
+    target_w: int,
+) -> list[list[float]]:
+    """最近邻上采样 anomaly_map 到目标尺寸 [target_h, target_w]."""
+    src_h, src_w = src_shape
+    if src_h == target_h and src_w == target_w:
+        return [list(row) for row in anomaly_map]
+    result: list[list[float]] = []
+    for y in range(target_h):
+        src_y = min(int(y * src_h / target_h), src_h - 1)
+        row: list[float] = []
+        for x in range(target_w):
+            src_x = min(int(x * src_w / target_w), src_w - 1)
+            row.append(anomaly_map[src_y][src_x])
+        result.append(row)
+    return result

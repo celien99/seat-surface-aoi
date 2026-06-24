@@ -22,6 +22,10 @@ def train_patchcore_assets(
     embedding_dim: int | None = None,
     channel_order: tuple[str, ...] | None = None,
     split: str | None = "train",
+    spatial_mode: bool = False,
+    spatial_layers: tuple[str, ...] = (),
+    spatial_upsample_height: int = 32,
+    spatial_upsample_width: int = 32,
     pca_components: int | None = None,
     pca_version: str = "pca_seat_v1",
     bank_version: str = "bank_v1",
@@ -48,6 +52,10 @@ def train_patchcore_assets(
         model_path=embedding_model_path,
         channel_order=channel_order,
         split=split,
+        spatial_mode=spatial_mode,
+        spatial_layers=spatial_layers,
+        spatial_upsample_height=spatial_upsample_height,
+        spatial_upsample_width=spatial_upsample_width,
     )
     source_embeddings_path = embeddings_path
     pca_result = None
@@ -145,6 +153,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--embedding-dim", type=int, default=None)
     parser.add_argument("--channel-order", default=None, help="覆盖模型输入通道；默认使用配方 models.<key>.input_channels")
     parser.add_argument("--split", default="train", help="用于训练的 split；传空字符串表示不过滤")
+    parser.add_argument("--spatial-mode", action="store_true", help="使用空间 PatchCore 模式（每图提取 H×W 个 patch embedding）")
+    parser.add_argument("--spatial-layers", default="layer2,layer3", help="空间模式下导出的中间层，逗号分隔")
+    parser.add_argument("--spatial-upsample-height", type=int, default=32)
+    parser.add_argument("--spatial-upsample-width", type=int, default=32)
     parser.add_argument("--pca-components", type=int, default=None, help="启用 PCA 并指定目标维度")
     parser.add_argument("--pca-version", default="pca_seat_v1")
     parser.add_argument("--bank-version", default="bank_v1")
@@ -159,6 +171,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.channel_order is not None:
         channel_order = tuple(ch.strip() for ch in args.channel_order.split(",") if ch.strip())
     split = args.split if args.split else None
+    spatial_layers: tuple[str, ...] = ()
+    if args.spatial_mode:
+        spatial_layers = tuple(layer.strip() for layer in args.spatial_layers.split(",") if layer.strip())
     try:
         summary = train_patchcore_assets(
             manifest_path=args.manifest,
@@ -170,6 +185,10 @@ def main(argv: list[str] | None = None) -> int:
             embedding_dim=args.embedding_dim,
             channel_order=channel_order,
             split=split,
+            spatial_mode=args.spatial_mode,
+            spatial_layers=spatial_layers,
+            spatial_upsample_height=args.spatial_upsample_height,
+            spatial_upsample_width=args.spatial_upsample_width,
             pca_components=args.pca_components,
             pca_version=args.pca_version,
             bank_version=args.bank_version,

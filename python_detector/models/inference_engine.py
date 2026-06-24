@@ -268,6 +268,12 @@ class PatchCoreModel:
         self.knn_index = knn_index or PatchCoreKnnIndex()
 
     def run(self, feature_group: FeatureGroup) -> list[DefectCandidate]:
+        if self.config.spatial_mode and self.config.spatial_layers:
+            return self._run_spatial(feature_group)
+        return self._run_global(feature_group)
+
+    def _run_global(self, feature_group: FeatureGroup) -> list[DefectCandidate]:
+        """全局嵌入路径：整个 ROI → 1 个向量 → 标量异常分数（保持向后兼容）。"""
         embedding = self.embedding_extractor.extract(feature_group, self.config)
         embedding_values = embedding.values
         feature_group.embedding_summary = {
@@ -326,6 +332,92 @@ class PatchCoreModel:
                 evidence_lights=self._evidence_lights(feature_group),
             )
         ]
+
+    def _run_spatial(self, feature_group: FeatureGroup) -> list[DefectCandidate]:
+        """空间 PatchCore 路径：逐 patch KNN 评分 → anomaly_map → 连通域 bbox。"""
+        spatial = self.embedding_extractor.extract_spatial(feature_group, self.config)
+        feature_group.embedding_summary = {
+            "backend": spatial.backend,
+            "version": spatial.version,
+            "embedding_dim": spatial.patch_dim,
+            "layer_names": list(spatial.layer_names),
+            "spatial_shape": list(spatial.spatial_shape),
+            "layer_shapes": {k: list(v) for k, v in spatial.layer_shapes.items()},
+            "input_shape_nchw": list(spatial.input_shape_nchw) if spatial.input_shape_nchw is not None else None,
+        }
+        patch_embeddings = spatial.patch_embeddings
+
+        if self.config.pca_path:
+            pca_result = self.pca_projector.project_batch(patch_embeddings, self.config.pca_path, self.config.pca_version)
+            # 批量 PCA 返回展平的 N*K 个值，需要还原为 N 个 K 维向量
+            output_dim = pca_result.output_dim
+            all_values = pca_result.values
+            patch_embeddings = tuple(
+                all_values[i * output_dim : (i + 1) * output_dim]
+                for i in range(len(all_values) // output_dim)
+            )
+            feature_group.pca_summary = {
+                "version": pca_result.version,
+                "input_dim": pca_result.input_dim,
+                "output_dim": pca_result.output_dim,
+            }
+
+        score = self.knn_index.score_spatial(
+            patch_embeddings,
+            spatial.spatial_shape,
+            self.config.memory_bank_path,
+            self.config.knn_k,
+            self.config.anomaly_score_scale,
+            self.config.pca_version,
+            self.config.faiss_index_path,
+        )
+        feature_group.anomaly_summary = {
+            "model_family": self.config.model_family,
+            "memory_bank_version": score.version,
+            "backend": score.backend,
+            "faiss_index_path": score.faiss_index_path,
+            "fallback_reason": score.fallback_reason,
+            "spatial_mode": True,
+            "spatial_shape": list(score.spatial_shape),
+            "anomaly_map": score.anomaly_map,
+            "nearest_distances": score.nearest_distances,
+            "memory_bank_size": score.memory_bank_size,
+            "embedding_dim": score.embedding_dim,
+            "max_anomaly": max(max(row) for row in score.anomaly_map),
+        }
+
+        max_anomaly = max(max(row) for row in score.anomaly_map)
+        if max_anomaly < self.config.score_threshold:
+            return []
+
+        class_name = self.config.class_names[0] if self.config.class_names else "unknown_anomaly"
+        bboxes = _anomaly_map_bboxes(
+            score.anomaly_map,
+            score.spatial_shape,
+            self.config.score_threshold,
+            feature_group,
+        )
+        if not bboxes:
+            return []
+
+        candidates: list[DefectCandidate] = []
+        for bbox_xyxy, bbox_score in bboxes:
+            area_px = max(bbox_xyxy[2] - bbox_xyxy[0] + 1, 0) * max(bbox_xyxy[3] - bbox_xyxy[1] + 1, 0)
+            if area_px <= 0:
+                continue
+            candidates.append(
+                DefectCandidate(
+                    camera_id=feature_group.camera_id,
+                    pose_id=feature_group.pose_id,
+                    roi_name=feature_group.roi_name,
+                    class_name=class_name,
+                    score=bbox_score,
+                    bbox_xyxy_pixel=bbox_xyxy,
+                    area_px=area_px,
+                    evidence_lights=self._evidence_lights(feature_group),
+                )
+            )
+        return candidates
 
     def _evidence_lights(self, feature_group: FeatureGroup) -> list[str]:
         evidence: list[str] = []
@@ -386,6 +478,10 @@ class ModelRegistry:
             float(config.coreset_ratio),
             int(config.knn_k),
             float(config.anomaly_score_scale),
+            config.spatial_mode,
+            config.spatial_layers,
+            int(config.spatial_upsample_height),
+            int(config.spatial_upsample_width),
         )
 
     def _create_model(self, config: ModelConfig) -> ModelBackend:
@@ -488,3 +584,77 @@ def _apply_homography(matrix: tuple[float, ...], x: float, y: float) -> tuple[fl
     mapped_x = (matrix[0] * x + matrix[1] * y + matrix[2]) / denom
     mapped_y = (matrix[3] * x + matrix[4] * y + matrix[5]) / denom
     return mapped_x, mapped_y
+
+
+def _anomaly_map_bboxes(
+    anomaly_map: tuple[tuple[float, ...], ...],
+    spatial_shape: tuple[int, int],
+    score_threshold: float,
+    feature_group: FeatureGroup,
+) -> list[tuple[tuple[int, int, int, int], float]]:
+    """从 anomaly_map 提取连通域 bbox 列表，按分数降序排列。
+
+    返回 [(bbox_xyxy_source, max_score), ...]，坐标已映射到原图空间。
+    """
+    h_out, w_out = spatial_shape
+    roi_h, roi_w = feature_group.feature_shape_hw
+    if roi_h <= 0 or roi_w <= 0 or h_out <= 0 or w_out <= 0:
+        return []
+
+    max_anomaly = max(max(row) for row in anomaly_map)
+    threshold = max(score_threshold * 0.5, max_anomaly * 0.3)
+
+    # 构建二值掩码
+    mask = [[False] * w_out for _ in range(h_out)]
+    for i in range(h_out):
+        for j in range(w_out):
+            if anomaly_map[i][j] >= threshold:
+                mask[i][j] = True
+
+    # 连通域分析 (BFS)
+    visited = [[False] * w_out for _ in range(h_out)]
+    components: list[list[tuple[int, int]]] = []
+    for i in range(h_out):
+        for j in range(w_out):
+            if mask[i][j] and not visited[i][j]:
+                comp: list[tuple[int, int]] = []
+                queue = [(i, j)]
+                visited[i][j] = True
+                while queue:
+                    ci, cj = queue.pop(0)
+                    comp.append((ci, cj))
+                    for ni, nj in ((ci - 1, cj), (ci + 1, cj), (ci, cj - 1), (ci, cj + 1)):
+                        if 0 <= ni < h_out and 0 <= nj < w_out and mask[ni][nj] and not visited[ni][nj]:
+                            visited[ni][nj] = True
+                            queue.append((ni, nj))
+                if comp:
+                    components.append(comp)
+
+    if not components:
+        return []
+
+    # 每个连通域 → ROI 空间 bbox → 源图空间 bbox
+    x_scale = roi_w / w_out
+    y_scale = roi_h / h_out
+    results: list[tuple[tuple[int, int, int, int], float]] = []
+    for comp in components:
+        rows = [p[0] for p in comp]
+        cols = [p[1] for p in comp]
+        comp_score = max(anomaly_map[r][c] for r, c in comp)
+
+        # 映射到 ROI 特征空间
+        roi_x0 = min(cols) * x_scale
+        roi_y0 = min(rows) * y_scale
+        roi_x1 = (max(cols) + 1) * x_scale
+        roi_y1 = (max(rows) + 1) * y_scale
+
+        # 映射到原图空间
+        bbox_source = _map_roi_bbox_to_source(
+            (roi_x0, roi_y0, roi_x1, roi_y1),
+            feature_group,
+        )
+        results.append((bbox_source, comp_score))
+
+    # 按分数降序
+    results.sort(key=lambda item: item[1], reverse=True)
+    return results

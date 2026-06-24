@@ -279,6 +279,14 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 - `onnx`：可选 ONNX detection rows 后端，要求 `onnxruntime` 和 `numpy`。
 - `patchcore_knn`：PatchCore 无监督异常检测主模型或可选安全网，使用 statistical 或 ONNX embedding、可选 PCA、memory bank；配置 `faiss_index_path` 时优先尝试 FAISS，失败时回退 exact KNN，并在 `anomaly_summary` 写入实际 backend 和 fallback reason。
 
+**空间 PatchCore 模式（`spatial_mode: true`）：** 在配方模型配置中启用 `spatial_mode` 后，PatchCore 从"全局嵌入"（整个 ROI → 1 个向量 → 标量分数）切换为"空间嵌入"（ROI → 中间层特征图 → H×W 个 patch 向量 → anomaly_map 热力图）。空间模式提供三项关键提升：
+
+1. **像素级缺陷定位**：从 anomaly_map 连通域自动生成缺陷 bbox，不再使用整个 ROI 边界。
+2. **小缺陷召回率提升**：Global Average Pooling 不再淹没小面积缺陷信号。
+3. **检测热力图**：TraceWriter 自动将 anomaly_map 渲染为 JET 伪彩色热力图叠加到灰度 ROI（40% 热力 + 60% 底图），同时绘制绿色 bbox 轮廓，替代旧的红色 ROI 边框。
+
+空间模式要求：`embedding_backend=onnx_wideresnet50`、`spatial_layers` 非空（如 `[layer2, layer3]`），并使用 `--spatial-mode` 重新导出 ONNX 模型和重新训练记忆库。关闭 `spatial_mode`（默认）时完全回退到向后兼容的全局嵌入路径。
+
 模型资产缺失、占位文件未替换、后端依赖缺失、PCA 参数或 PatchCore memory bank 未就绪会抛出 `ModelAssetUnavailableError`，由 pipeline 转成 `RECHECK` + `CONFIGURATION_ERROR`，并写入 `sample_collection.reason=model_asset_unavailable`。模型已经加载但输出为空、bbox 越界、class id 错误或维度不匹配仍按模型运行异常处理，不能静默降级为 `OK`。
 
 离线训练工具复用同一套模型输入契约：

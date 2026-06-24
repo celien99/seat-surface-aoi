@@ -33,6 +33,23 @@ class PatchCoreScore:
     fallback_reason: str | None = None
 
 
+@dataclass(frozen=True)
+class SpatialAnomalyScore:
+    """空间 PatchCore 异常分数：每个空间位置的异常值构成的二维热力图。"""
+    anomaly_map: tuple[tuple[float, ...], ...]
+    """异常热力图 [H_out, W_out]，每个值是 [0, 1] 的异常分数。"""
+    spatial_shape: tuple[int, int]
+    """热力图空间尺寸 (H_out, W_out)。"""
+    nearest_distances: tuple[tuple[float, ...], ...]
+    """每个 patch 的最近邻距离 [H_out, W_out]。"""
+    memory_bank_size: int
+    embedding_dim: int
+    backend: str
+    version: str
+    faiss_index_path: str | None = None
+    fallback_reason: str | None = None
+
+
 class PatchCoreKnnIndex:
     def __init__(self) -> None:
         self._cache: dict[str, PatchCoreBank] = {}
@@ -81,8 +98,152 @@ class PatchCoreKnnIndex:
             fallback_reason=fallback_reason,
         )
 
+    def score_spatial(
+        self,
+        patch_embeddings: tuple[tuple[float, ...], ...],
+        spatial_shape: tuple[int, int],
+        memory_bank_path: str,
+        knn_k: int,
+        score_scale: float,
+        expected_pca_version: str | None,
+        faiss_index_path: str | None = None,
+    ) -> SpatialAnomalyScore:
+        """对每个空间 patch 做 KNN 评分，返回二维异常热力图。
+
+        patch_embeddings: H_out × W_out 个 patch_dim 维向量。
+        spatial_shape: (H_out, W_out)。
+        """
+        bank = self._load(memory_bank_path)
+        if bank.model_family != "patchcore":
+            raise RuntimeError(f"memory bank model_family 必须是 patchcore: {bank.model_family}")
+        if not patch_embeddings:
+            raise RuntimeError("patch_embeddings 为空")
+        if len(patch_embeddings[0]) != bank.embedding_dim:
+            raise RuntimeError(
+                f"PatchCore patch embedding 维度不匹配: {len(patch_embeddings[0])} != {bank.embedding_dim}"
+            )
+        if expected_pca_version is not None and bank.pca_version not in (None, expected_pca_version):
+            raise RuntimeError(f"PatchCore memory bank PCA 版本不匹配: {bank.pca_version} != {expected_pca_version}")
+        k = min(knn_k, len(bank.vectors))
+        if k <= 0:
+            raise RuntimeError("PatchCore memory bank 为空")
+
+        h_out, w_out = spatial_shape
+        if len(patch_embeddings) != h_out * w_out:
+            raise RuntimeError(
+                f"patch_embeddings 数量 ({len(patch_embeddings)}) 与 spatial_shape {spatial_shape} 不匹配"
+            )
+
+        faiss_result = self._score_spatial_faiss(
+            patch_embeddings, spatial_shape, bank, k, score_scale, faiss_index_path
+        )
+        if faiss_result is not None:
+            return faiss_result
+
+        fallback_reason = self._faiss_fallback_reason(bank, faiss_index_path)
+        return self._score_spatial_exact(patch_embeddings, spatial_shape, bank, k, score_scale, faiss_index_path, fallback_reason)
+
     def load(self, path_value: str) -> PatchCoreBank:
         return self._load(path_value)
+
+    def _score_spatial_faiss(
+        self,
+        patch_embeddings: tuple[tuple[float, ...], ...],
+        spatial_shape: tuple[int, int],
+        bank: PatchCoreBank,
+        knn_k: int,
+        score_scale: float,
+        faiss_index_path: str | None,
+    ) -> SpatialAnomalyScore | None:
+        if not faiss_index_path:
+            return None
+        path = Path(faiss_index_path)
+        if not path.exists() or path.stat().st_size <= 1:
+            return None
+        try:
+            import faiss  # type: ignore
+            import numpy as np  # type: ignore
+        except Exception:
+            return None
+        try:
+            index = faiss.read_index(str(path))
+            index_dim = int(getattr(index, "d"))
+            if index_dim != bank.embedding_dim:
+                return None
+            queries = np.asarray(patch_embeddings, dtype=np.float32)
+            distances_raw, _indices = index.search(queries, knn_k)
+            h_out, w_out = spatial_shape
+            anomaly_rows: list[tuple[float, ...]] = []
+            dist_rows: list[tuple[float, ...]] = []
+            for i in range(h_out):
+                anomaly_row_vals: list[float] = []
+                dist_row_vals: list[float] = []
+                for j in range(w_out):
+                    idx = i * w_out + j
+                    row_distances = distances_raw[idx]
+                    valid = [math.sqrt(max(float(d), 0.0)) for d in row_distances.tolist() if math.isfinite(float(d))]
+                    if not valid:
+                        anomaly_row_vals.append(0.0)
+                        dist_row_vals.append(0.0)
+                    else:
+                        nearest = valid[0]
+                        score = min(max(nearest * score_scale, 0.0), 1.0)
+                        anomaly_row_vals.append(score)
+                        dist_row_vals.append(nearest)
+                anomaly_rows.append(tuple(anomaly_row_vals))
+                dist_rows.append(tuple(dist_row_vals))
+            return SpatialAnomalyScore(
+                anomaly_map=tuple(anomaly_rows),
+                spatial_shape=spatial_shape,
+                nearest_distances=tuple(dist_rows),
+                memory_bank_size=len(bank.vectors),
+                embedding_dim=bank.embedding_dim,
+                backend="faiss",
+                version=bank.version,
+                faiss_index_path=faiss_index_path,
+                fallback_reason=None,
+            )
+        except Exception:
+            return None
+
+    def _score_spatial_exact(
+        self,
+        patch_embeddings: tuple[tuple[float, ...], ...],
+        spatial_shape: tuple[int, int],
+        bank: PatchCoreBank,
+        knn_k: int,
+        score_scale: float,
+        faiss_index_path: str | None,
+        fallback_reason: str | None,
+    ) -> SpatialAnomalyScore:
+        h_out, w_out = spatial_shape
+        anomaly_rows: list[tuple[float, ...]] = []
+        dist_rows: list[tuple[float, ...]] = []
+        bank_vectors = bank.vectors
+        for i in range(h_out):
+            anomaly_row_vals: list[float] = []
+            dist_row_vals: list[float] = []
+            for j in range(w_out):
+                idx = i * w_out + j
+                embedding = patch_embeddings[idx]
+                distances = sorted(self._euclidean(embedding, vector) for vector in bank_vectors)[:knn_k]
+                nearest = distances[0]
+                score = min(max(nearest * score_scale, 0.0), 1.0)
+                anomaly_row_vals.append(score)
+                dist_row_vals.append(nearest)
+            anomaly_rows.append(tuple(anomaly_row_vals))
+            dist_rows.append(tuple(dist_row_vals))
+        return SpatialAnomalyScore(
+            anomaly_map=tuple(anomaly_rows),
+            spatial_shape=spatial_shape,
+            nearest_distances=tuple(dist_rows),
+            memory_bank_size=len(bank.vectors),
+            embedding_dim=bank.embedding_dim,
+            backend="exact_knn",
+            version=bank.version,
+            faiss_index_path=faiss_index_path,
+            fallback_reason=fallback_reason,
+        )
 
     def _load(self, path_value: str) -> PatchCoreBank:
         if path_value in self._cache:

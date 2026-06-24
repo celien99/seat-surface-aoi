@@ -47,6 +47,40 @@ class PcaProjector:
             output_dim=len(projected),
         )
 
+    def project_batch(
+        self,
+        embeddings: tuple[tuple[float, ...], ...],
+        pca_path: str,
+        expected_version: str | None,
+    ) -> PcaProjectionResult:
+        """批量 PCA 投影，用于空间 PatchCore 的多个 patch embedding 同时降维。
+
+        embeddings: N 个 D 维向量。
+        返回 PcaProjectionResult，其中 values 包含 N*K 个浮点数（展平排列）。
+        """
+        params = self.load(pca_path)
+        if expected_version is not None and params.version != expected_version:
+            raise RuntimeError(f"PCA 版本不匹配: {params.version} != {expected_version}")
+        if not embeddings:
+            raise RuntimeError("批量 PCA 输入为空")
+        input_dim = len(embeddings[0])
+        if input_dim != len(params.mean):
+            raise RuntimeError(f"PCA 输入维度不匹配: {input_dim} != {len(params.mean)}")
+        output_dim = len(params.components)
+        projected_all: list[float] = []
+        for embedding in embeddings:
+            if len(embedding) != input_dim:
+                raise RuntimeError(f"PCA 批量输入维度不一致: {len(embedding)} != {input_dim}")
+            centered = [value - mean for value, mean in zip(embedding, params.mean)]
+            for component in params.components:
+                projected_all.append(sum(value * weight for value, weight in zip(centered, component)))
+        return PcaProjectionResult(
+            values=tuple(projected_all),
+            version=params.version,
+            input_dim=input_dim,
+            output_dim=output_dim,
+        )
+
     def load(self, path_value: str) -> PcaParameters:
         return self._load(path_value)
 

@@ -135,6 +135,10 @@ class ModelConfig:
     coreset_ratio: float = 1.0
     knn_k: int = 1
     anomaly_score_scale: float = 1.0
+    spatial_mode: bool = False
+    spatial_layers: tuple[str, ...] = ()
+    spatial_upsample_height: int = 32
+    spatial_upsample_width: int = 32
 
 
 @dataclass(frozen=True)
@@ -625,6 +629,19 @@ def _models_from_dict(data: dict[str, Any], light_order: tuple[str, ...]) -> dic
                 raw.get("anomaly_score_scale", 1.0),
                 f"models.{model_key}.anomaly_score_scale",
             ),
+            spatial_mode=bool(raw.get("spatial_mode", False)),
+            spatial_layers=_optional_unique_str_tuple(
+                raw.get("spatial_layers", ()),
+                f"models.{model_key}.spatial_layers",
+            ),
+            spatial_upsample_height=_positive_int(
+                raw.get("spatial_upsample_height", 32),
+                f"models.{model_key}.spatial_upsample_height",
+            ),
+            spatial_upsample_width=_positive_int(
+                raw.get("spatial_upsample_width", 32),
+                f"models.{model_key}.spatial_upsample_width",
+            ),
         )
     if "default" not in models:
         models["default"] = ModelConfig(input_channels=_default_model_input_channels(light_order))
@@ -760,6 +777,13 @@ def _validate_model_thresholds(models: dict[str, ModelConfig], thresholds: dict[
                 raise RecipeValidationError(f"models.{model_key}.backend=patchcore_knn 必须配置 memory_bank_path")
             if model.embedding_backend == "none":
                 raise RecipeValidationError(f"models.{model_key}.backend=patchcore_knn 必须配置 embedding_backend")
+            if model.spatial_mode:
+                if model.embedding_backend != "onnx_wideresnet50":
+                    raise RecipeValidationError(
+                        f"models.{model_key}.spatial_mode=True 必须使用 embedding_backend=onnx_wideresnet50"
+                    )
+                if not model.spatial_layers:
+                    raise RecipeValidationError(f"models.{model_key}.spatial_mode=True 必须配置 spatial_layers")
 
 
 def _required_str(data: dict[str, Any], key: str) -> str:
