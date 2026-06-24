@@ -247,8 +247,7 @@ def test_production_roi_source_reuses_diffuse_without_extra_feature_channel() ->
         roi_locator=replace(recipe.roi_locator, backend="fake_yolo", model_path="simulated-yolo.onnx"),
         models={
             **recipe.models,
-            "supervised_defect_onnx": replace(recipe.models["supervised_defect_onnx"], backend="fake"),
-            "patchcore_unknown_safety_net": replace(recipe.models["patchcore_unknown_safety_net"], backend="fake"),
+            "patchcore_unknown_detector": replace(recipe.models["patchcore_unknown_detector"], backend="fake"),
         },
     )
     job = make_simulated_job()
@@ -295,8 +294,7 @@ def test_production_three_strobe_light_seq_index_is_validated() -> None:
         roi_locator=replace(recipe.roi_locator, backend="fake_yolo", model_path="simulated-yolo.onnx"),
         models={
             **recipe.models,
-            "supervised_defect_onnx": replace(recipe.models["supervised_defect_onnx"], backend="fake"),
-            "patchcore_unknown_safety_net": replace(recipe.models["patchcore_unknown_safety_net"], backend="fake"),
+            "patchcore_unknown_detector": replace(recipe.models["patchcore_unknown_detector"], backend="fake"),
         },
     )
     job = make_simulated_job()

@@ -393,10 +393,10 @@ def _check_production_model_assets(strict_production: bool) -> list[PreflightIte
             PreflightItem(
                 status=status,
                 category="生产模型资产",
-                requirement="真实产线必须替换 ROI YOLO segmentation、监督检测、WideResNet50、PCA、PatchCore 和 FAISS 资产。",
+                requirement="真实产线必须替换 ROI YOLO segmentation、WideResNet50、PCA、PatchCore 和 FAISS 无监督检测资产。",
                 evidence=f"issue_counts={issues_by_recipe}; examples={examples[:4]}",
                 owner="算法/数据/模型",
-                next_step="用现场 trace 和人工标注训练资产，替换 model/ 下占位文件并运行 tools.validate_model_assets。",
+                next_step="用现场 OK trace 训练 PatchCore 资产，用人工复核样本标定阈值，替换 model/ 下占位文件并运行 tools.validate_model_assets。",
             )
         ]
     return [

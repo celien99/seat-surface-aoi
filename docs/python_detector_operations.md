@@ -43,7 +43,7 @@ config / ipc data types
 - 默认依赖：`PyYAML`，用于配方、标定和 ROI YAML。
 - `test` dependency group：`pytest`、`numpy`。
 - `dev` dependency group：`pytest`、`numpy`、`ruff`。
-- `onnx` extra：`numpy`、`onnxruntime`，用于 ONNX/YOLO/WideResNet50。
+- `onnx` extra：`numpy`、`onnxruntime`，用于 YOLO ROI、WideResNet50 和可选 ONNX detection 实验后端。
 - `faiss` extra：用于 PatchCore FAISS 索引加速。
 
 默认 fake/statistical/PatchCore exact KNN 参考链路不依赖 ONNX Runtime 或 FAISS。缺少可选后端依赖、模型文件或输出解码配置时，必须返回 `RECHECK` 或 `ERROR`，不能输出 `OK`。
@@ -252,20 +252,19 @@ quality:
 - `onnx_yolo`：Dome ROI bbox 定位，保留兼容。
 - `statistical_embedding`：参考 embedding 后端。
 - `onnx_wideresnet50`：WideResNet50 embedding 入口。
-- `patchcore_knn`：PatchCore safety net，优先 FAISS，缺索引或缺依赖时回退 exact KNN。
+- `patchcore_knn`：PatchCore 无监督异常检测主模型或可选 safety net，优先 FAISS，缺索引或缺依赖时回退 exact KNN。
 
 模型角色：
 
-- `primary`：主检测模型，用于已知缺陷。
-- `safety_net`：安全网模型，用于未知或罕见异常。
+- `primary`：主检测模型；当前生产配方使用 PatchCore 无监督异常检测主模型。
+- `safety_net`：可选安全网模型，用于叠加其它未知或罕见异常检测策略。
 
-PatchCore 只能作为 `safety_net`，不能作为主检测模型。memory bank、PCA 或 embedding 维度不一致时返回 `ERROR`。
+PatchCore 可以作为当前生产无监督主检测模型，也可以在实验配方中作为 `safety_net`。memory bank、PCA 或 embedding 维度不一致时返回 `ERROR`。
 
 真实模型资产默认放在根目录 `model/`：
 
 ```text
 model/roi_yolo/seat_roi_seg.onnx
-model/supervised_defect/seat_defect_detector.onnx
 model/wideresnet50/seat_wrn50_embedding.onnx
 model/patchcore/seat_pca.json
 model/patchcore/seat_patchcore_bank.json
@@ -410,7 +409,7 @@ uv run python -m training_tools.benchmark_pipeline `
 
 - 固定机位：`python_detector/config/production_recipe.yaml`，`recipe_id=seat_a_black_leather_production_v1`。
 - 机器人飞拍：`python_detector/config/production_robot_flyshot_recipe.yaml`，`recipe_id=seat_a_robot_flyshot_production_v1`。
-- 两者都启用 `onnx_yolo_seg` ROI segmentation、`ecc` 配准、监督 ONNX 主检测、WideResNet50 embedding、PCA、PatchCore KNN 和可选 FAISS safety net。
+- 两者都启用 `onnx_yolo_seg` ROI segmentation、`ecc` 配准、WideResNet50 embedding、PCA、PatchCore KNN 和可选 FAISS 无监督异常检测主模型。
 - 仓库内 `production_full_roi.yaml` 和 `*production*.yaml` 标定文件只是可校验模板；ROI 模板中的 `polygon_xy` 用作安全边界和 `output_size` 约束，现场必须用真实像素尺寸、多光源对齐矩阵和 segmentation 训练产物替换。
 
 ## 验证命令

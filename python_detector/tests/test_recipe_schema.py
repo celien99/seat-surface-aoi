@@ -20,8 +20,8 @@ def test_recipe_manager_loads_production_yaml() -> None:
     assert recipe.roi_locator.input_height == 1024
     assert recipe.roi_locator.input_channels == 3
     assert recipe.registration.method == "ecc"
-    assert recipe.models["supervised_defect_onnx"].backend == "onnx"
-    assert recipe.models["patchcore_unknown_safety_net"].backend == "patchcore_knn"
+    assert recipe.models["patchcore_unknown_detector"].backend == "patchcore_knn"
+    assert recipe.models["patchcore_unknown_detector"].role == "primary"
 
 
 def test_recipe_manager_loads_robot_production_yaml() -> None:
@@ -31,7 +31,7 @@ def test_recipe_manager_loads_robot_production_yaml() -> None:
         ("EYE_IN_HAND", "T1_BACKREST"),
         ("EYE_IN_HAND", "T2_CUSHION"),
     ]
-    assert recipe.model_key_for("EYE_IN_HAND", "seat", "T2_CUSHION") == "supervised_defect_onnx"
+    assert recipe.model_key_for("EYE_IN_HAND", "seat", "T2_CUSHION") == "patchcore_unknown_detector"
 
 
 def test_recipe_rejects_missing_required_field() -> None:
@@ -121,23 +121,31 @@ def test_recipe_rejects_camera_base_light_not_in_camera_light_order() -> None:
         )
 
 
-def test_recipe_rejects_patchcore_as_primary_detector() -> None:
-    with pytest.raises(RecipeValidationError):
-        recipe_from_dict(
-            {
-                "recipe_id": "bad_patchcore",
-                "sku": "sku",
-                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
-                "cameras": {"TOP": {"model_key": "patchcore_primary"}},
-                "models": {
-                    "patchcore_primary": {
-                        "backend": "fake",
-                        "model_family": "patchcore",
-                        "role": "primary",
-                    }
-                },
-            }
-        )
+def test_recipe_accepts_patchcore_as_primary_detector() -> None:
+    recipe = recipe_from_dict(
+        {
+            "recipe_id": "patchcore_primary",
+            "sku": "sku",
+            "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+            "cameras": {"TOP": {"model_key": "patchcore_primary"}},
+            "thresholds": {
+                "scratch": {"ng_score": 0.35, "recheck_score": 0.20},
+                "unknown_anomaly": {"ng_score": 0.55, "recheck_score": 0.20},
+            },
+            "models": {
+                "patchcore_primary": {
+                    "backend": "patchcore_knn",
+                    "model_family": "patchcore",
+                    "role": "primary",
+                    "class_names": ["unknown_anomaly"],
+                    "embedding_backend": "statistical",
+                    "memory_bank_path": "model/patchcore/seat_patchcore_bank.json",
+                }
+            },
+        }
+    )
+
+    assert recipe.model_key_for("TOP", "seat") == "patchcore_primary"
 
 
 def test_recipe_rejects_safety_net_as_primary_roi_model() -> None:
@@ -270,7 +278,7 @@ def test_recipe_accepts_ultralytics_yolo_decode_for_training_exports() -> None:
             "models": {
                 "detector": {
                     "backend": "onnx",
-                    "model_path": "model/supervised_defect/seat_defect_detector.onnx",
+                    "model_path": "experiments/supervised_defect/seat_defect_detector.onnx",
                     "role": "primary",
                     "class_names": ["scratch"],
                     "output_decode": "ultralytics_yolo",

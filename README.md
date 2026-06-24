@@ -101,6 +101,7 @@ uv run python -m training_tools.collect_capture_dataset `
 ```
 
 `collect_capture_dataset` 默认把 `L1/L2/L3` 映射为 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`，调用 `model/roi_yolo/seat_roi_seg.onnx` 做 ROI 定位，输出 `dataset_manifest.jsonl` 和三光源 ROI PGM。ROI 冲突、低置信或越界样本会被跳过，不进入训练集。PatchCore 只能用人工确认的正常样本建库；`seat_defect_detector.onnx` 仍需要按缺陷类别人工标注后的 YOLO detect 数据集训练。
+生产缺陷判定链路采用无监督 PatchCore 主模型，不依赖 `model/supervised_defect/seat_defect_detector.onnx`。真实 OK 样本用于训练 WideResNet50 embedding、PCA、PatchCore memory bank 和可选 FAISS 索引；NG/RECHECK 与人工复核样本用于阈值曲线和放行验证。
 
 ## 安全边界
 

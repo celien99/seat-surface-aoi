@@ -564,8 +564,6 @@ def _models_from_dict(data: dict[str, Any]) -> dict[str, ModelConfig]:
         role = _str(raw.get("role", "primary"), f"models.{model_key}.role")
         if role not in {"primary", "safety_net"}:
             raise RecipeValidationError(f"模型角色必须是 primary 或 safety_net: {model_key}")
-        if model_family == "patchcore" and role != "safety_net":
-            raise RecipeValidationError("PatchCore 只能作为 unknown defect safety_net，不能作为全座椅 primary detector")
         if backend == "patchcore_knn" and model_family != "patchcore":
             raise RecipeValidationError(f"models.{model_key}.backend=patchcore_knn 必须配置 model_family=patchcore")
         fake_mode = _str(raw.get("fake_mode", "auto"), f"models.{model_key}.fake_mode")

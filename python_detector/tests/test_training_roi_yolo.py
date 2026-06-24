@@ -95,7 +95,7 @@ def test_train_yolo_onnx_valid(tmp_path: Path, yolo_dataset: Path) -> None:
 
 
 def test_train_supervised_yolo_delegates_to_shared_export(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """监督缺陷 YOLO 训练入口复用同一套 ONNX 导出逻辑，但默认输出到 supervised_defect。"""
+    """可选监督缺陷 YOLO 训练入口复用同一套 ONNX 导出逻辑。"""
     from training_tools import train_supervised_yolo
 
     data = tmp_path / "dataset.yaml"

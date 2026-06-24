@@ -10,15 +10,12 @@ v4_lights:
     DARKFIELD_L: HIGH_LEFT
     BRIGHTFIELD: POLAR_DIFFUSE
 camera_defaults:
-  model_key: supervised_defect_onnx
-  safety_net_model_key: patchcore_unknown_safety_net
+  model_key: patchcore_unknown_detector
   roi_template: python_detector/config/roi/production_full_roi.yaml
   base_light_id: POLAR_DIFFUSE
   light_order: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT]
   roi_models:
-    seat: supervised_defect_onnx
-  roi_safety_net_models:
-    seat: patchcore_unknown_safety_net
+    seat: patchcore_unknown_detector
 cameras:
   T1_BACKREST:
     camera_id: EYE_IN_HAND
@@ -72,14 +69,6 @@ fusion:
   class_aware: true
   max_candidates_per_roi: 16
 thresholds:
-  scratch:
-    ng_score: 0.35
-    recheck_score: 0.20
-    min_area_px: 8
-  dent:
-    ng_score: 0.30
-    recheck_score: 0.18
-    min_area_px: 20
   unknown_anomaly:
     ng_score: 0.55
     recheck_score: 0.20
@@ -88,7 +77,7 @@ models:
   default:
     backend: fake
     fake_mode: auto
-    model_family: supervised
+    model_family: patchcore
     role: primary
   supervised_defect_onnx:
     backend: onnx
@@ -107,7 +96,7 @@ models:
   patchcore_unknown_safety_net:
     backend: patchcore_knn
     model_family: patchcore
-    role: safety_net
+    role: primary
     class_names: [unknown_anomaly]
     input_channels:
       - ch0_diffuse

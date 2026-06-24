@@ -12,7 +12,7 @@
 - 固定机位多光源和机器人飞拍多光源在 C++ Capture Plan 层统一抽象为 `capture_view` / `pose_id` 检测视角序列。
 - Python 作为独立检测进程，按 `(camera_id, pose_id)` 组装 `CameraBundle`，不参与 PLC、相机、频闪或机器人控制。
 - 在线图像与结果通过跨平台共享内存传输，不使用 TCP；Linux/macOS 使用 POSIX 共享内存，Windows 工控机使用 Named Shared Memory。
-- Python AI Runtime 以 ONNX Runtime 作为 YOLO/WideResNet50/FilterClassifier 等模型的推理底座，PatchCore 向量检索优先使用 FAISS，缺索引或缺依赖时回退 exact KNN。
+- Python AI Runtime 以 ONNX Runtime 作为 ROI YOLO/WideResNet50 等模型的推理底座，PatchCore 向量检索优先使用 FAISS，缺索引或缺依赖时回退 exact KNN。
 - 协议错误、CRC 错误、缺帧、超时、机器人 FAULT、质量门禁失败和模型异常都不会输出 `OK`。
 
 当前实现已经从「工业 AOI 参考骨架 + 基础算法流水线」推进到「固定机位/机器人飞拍双模式可验证参考链路 + V4.0 主要算法接口 + 真实模型工程接入点 + 离线训练样本支撑入口」。真实产线仍需要接入设备 SDK、替换 `model/` 下的真实 YOLO/WideResNet50/PatchCore 产物、完成真实标注与训练评估、MES/报警和监控平台。
@@ -217,14 +217,14 @@
 
 统一架构要求：
 
-- AI Runtime 使用 ONNX 作为推理底座，承载 YOLOvX ROI 定位、WideResNet50 特征提取和 FilterClassifier 缺陷过滤分类等模型。
+- AI Runtime 使用 ONNX 作为推理底座，承载 YOLOvX ROI 定位和 WideResNet50 特征提取等模型。
 - 向量检索引擎使用 FAISS，支持 CPU/GPU、IndexFlatL2、IVF、PQ 等部署选择。
 - 基础依赖包括 OpenCV、NumPy、共享内存 SDK 和图像处理组件。
 
 当前状态：
 
 - 已提供统一 ONNX Runtime 适配层，ROI YOLO、通用 ONNX detection rows 和 WideResNet50 embedding 共享 session 创建、输入构建和保守错误处理。
-- 已在 `model/` 目录预留 YOLO ROI、监督缺陷检测、WideResNet50 embedding、PCA、PatchCore memory bank 和 FAISS 索引产物路径。
+- 已在 `model/` 目录预留 YOLO ROI、WideResNet50 embedding、PCA、PatchCore memory bank 和 FAISS 索引产物路径；当前生产链路不依赖监督缺陷检测 ONNX。
 - `pyproject.toml` 已提供 `onnx` 和 `faiss` optional extras；默认模拟链路不强制安装 ONNX Runtime 或 FAISS。
 - PatchCore 在线链路配置 `faiss_index_path` 后优先尝试 FAISS，失败时回退 exact KNN，并在 trace 中记录 `backend` 与 `fallback_reason`。
 - Python 层当前只负责检测算法，不控制 PLC、相机、机器人或频闪。

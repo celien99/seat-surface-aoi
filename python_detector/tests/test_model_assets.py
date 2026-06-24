@@ -10,36 +10,36 @@ def test_production_recipe_loads_full_model_chain() -> None:
 
     assert recipe.recipe_id == "seat_a_black_leather_production_v1"
     assert recipe.quality.required_lights == ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT")
-    assert recipe.models["supervised_defect_onnx"].input_channels == (
+    assert recipe.model_key_for("TOP_BACK", "seat") == "patchcore_unknown_detector"
+    assert recipe.safety_net_model_keys_for("TOP_BACK", "seat") == ()
+    assert recipe.models["patchcore_unknown_detector"].input_channels == (
         "ch0_diffuse",
         "ch1_polar_diffuse",
         "ch2_high_left",
     )
     assert recipe.roi_locator.backend == "onnx_yolo_seg"
     assert recipe.roi_locator.model_path == "model/roi_yolo/seat_roi_seg.onnx"
-    assert recipe.models["supervised_defect_onnx"].backend == "onnx"
-    assert recipe.models["patchcore_unknown_safety_net"].backend == "patchcore_knn"
+    assert recipe.models["patchcore_unknown_detector"].backend == "patchcore_knn"
+    assert recipe.models["patchcore_unknown_detector"].role == "primary"
 
 
-def test_production_robot_recipe_uses_patchcore_safety_net() -> None:
+def test_production_robot_recipe_uses_patchcore_primary_detector() -> None:
     recipe = load_recipe_by_id_or_path("seat_a_robot_flyshot_production_v1")
 
     assert recipe.recipe_id == "seat_a_robot_flyshot_production_v1"
     assert recipe.registration.method == "ecc"
     assert recipe.roi_locator.backend == "onnx_yolo_seg"
-    assert recipe.safety_net_model_keys_for("EYE_IN_HAND", "seat", "T1_BACKREST") == (
-        "patchcore_unknown_safety_net",
-    )
+    assert recipe.model_key_for("EYE_IN_HAND", "seat", "T1_BACKREST") == "patchcore_unknown_detector"
+    assert recipe.safety_net_model_keys_for("EYE_IN_HAND", "seat", "T1_BACKREST") == ()
 
 
 def test_validate_model_assets_reports_placeholder_files(tmp_path: Path) -> None:
     roi_yolo = tmp_path / "seat_roi_seg.onnx"
-    detector = tmp_path / "seat_defect_detector.onnx"
     embedding = tmp_path / "seat_wrn50_embedding.onnx"
     pca = tmp_path / "seat_pca.json"
     bank = tmp_path / "seat_patchcore_bank.json"
     faiss = tmp_path / "seat_patchcore.faiss"
-    for path in (roi_yolo, detector, embedding, pca, bank, faiss):
+    for path in (roi_yolo, embedding, pca, bank, faiss):
         path.write_bytes(b"0")
     recipe_path = tmp_path / "placeholder_recipe.yaml"
     recipe_path.write_text(
@@ -53,22 +53,18 @@ roi_locator:
   output_decode: ultralytics_yolo_seg
 cameras:
   TOP:
-    model_key: detector
-    safety_net_model_key: patchcore
+    model_key: patchcore
 thresholds:
-  scratch: {{ng_score: 0.35, recheck_score: 0.20, min_area_px: 8}}
   unknown_anomaly: {{ng_score: 0.55, recheck_score: 0.20, min_area_px: 1}}
 models:
-  detector:
-    backend: onnx
-    model_path: {detector}
+  default:
+    backend: fake
     role: primary
-    class_names: [scratch]
-    output_decode: ultralytics_yolo
+    class_names: [unknown_anomaly]
   patchcore:
     backend: patchcore_knn
     model_family: patchcore
-    role: safety_net
+    role: primary
     class_names: [unknown_anomaly]
     embedding_backend: onnx_wideresnet50
     embedding_model_path: {embedding}
@@ -84,7 +80,6 @@ models:
     messages = [issue.message for issue in validate_recipe_model_assets(recipe)]
 
     assert any("YOLO ROI segmentation ONNX 文件为空或仍是占位文件" in message for message in messages)
-    assert any("ONNX detection 文件为空或仍是占位文件" in message for message in messages)
     assert any("WideResNet50 embedding ONNX 文件为空或仍是占位文件" in message for message in messages)
     assert any("PCA 参数文件为空或仍是占位文件" in message for message in messages)
     assert any("PatchCore memory bank 为空或仍是占位文件" in message for message in messages)
