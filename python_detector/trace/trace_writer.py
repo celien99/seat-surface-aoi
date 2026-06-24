@@ -44,7 +44,7 @@ class TraceWriter:
         self._write_json(trace_dir / "error.json", context.get("error", {}))
         self._write_raw_images(trace_dir, job)
         self._write_roi_images(trace_dir, context.get("prepared_bundles", []))
-        self._write_defect_overlays(trace_dir, result, context.get("prepared_bundles", []), context.get("feature_summary", []))
+        self._write_defect_overlays(trace_dir, result, context.get("prepared_bundles", []), context.get("spatial_maps", []))
         return trace_dir
 
     def _should_write(self, job: SeatInspectionJob, recipe: Recipe, result: InspectionResult) -> bool:
@@ -104,12 +104,12 @@ class TraceWriter:
         trace_dir: Path,
         result: InspectionResult,
         prepared_bundles: Any,
-        feature_summary: list[dict[str, object]],
+        spatial_maps: list[dict[str, object]],
     ) -> None:
         if not result.defects:
             return
         frame_index = self._frame_index(prepared_bundles)
-        anomaly_maps = self._anomaly_map_index(feature_summary)
+        anomaly_maps = self._anomaly_map_index(spatial_maps)
         overlay_dir = trace_dir / "overlays"
         for defect in result.defects:
             frame = self._frame_for_defect(defect, frame_index)
@@ -189,29 +189,26 @@ class TraceWriter:
 
     def _anomaly_map_index(
         self,
-        feature_summary: list[dict[str, object]],
+        spatial_maps: list[dict[str, object]],
     ) -> dict[tuple[str, str, str], tuple[tuple[tuple[float, ...], ...], tuple[int, int]]]:
-        """从 feature_summary 中提取 anomaly_map 索引。
+        """从 spatial_maps 中提取 anomaly_map 索引。
 
         返回 {(camera_id, pose_id, roi_name): (anomaly_map, spatial_shape)}。
         """
         index: dict[tuple[str, str, str], tuple[tuple[tuple[float, ...], ...], tuple[int, int]]] = {}
-        for summary in feature_summary or []:
-            if not isinstance(summary, dict):
+        for entry in spatial_maps or []:
+            if not isinstance(entry, dict):
                 continue
-            anomaly_summary = summary.get("anomaly_summary")
-            if not isinstance(anomaly_summary, dict) or not anomaly_summary.get("spatial_mode"):
-                continue
-            anomaly_map = anomaly_summary.get("anomaly_map")
-            spatial_shape_raw = anomaly_summary.get("spatial_shape")
+            anomaly_map = entry.get("anomaly_map")
+            spatial_shape_raw = entry.get("spatial_shape")
             if anomaly_map is None or spatial_shape_raw is None:
                 continue
             if not isinstance(spatial_shape_raw, list) or len(spatial_shape_raw) != 2:
                 continue
             spatial_shape = (int(spatial_shape_raw[0]), int(spatial_shape_raw[1]))
-            camera_id = str(summary.get("camera_id", ""))
-            pose_id = str(summary.get("pose_id", "") or camera_id)
-            roi_name = str(summary.get("roi_name", ""))
+            camera_id = str(entry.get("camera_id", ""))
+            pose_id = str(entry.get("pose_id", "") or camera_id)
+            roi_name = str(entry.get("roi_name", ""))
             if camera_id and roi_name:
                 anomaly_map_tuple = tuple(
                     tuple(float(v) for v in row) for row in anomaly_map

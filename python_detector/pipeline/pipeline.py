@@ -20,6 +20,24 @@ from python_detector.pipeline.reflectance_cube import ReflectanceCubeBuilder
 from python_detector.pipeline.rule_engine import RuleEngine
 
 
+def _sanitize_anomaly_summary(anomaly_summary: dict[str, object] | None) -> dict[str, object] | None:
+    """精简 anomaly_summary：移除大数据数组，仅保留统计信息。"""
+    if anomaly_summary is None:
+        return None
+    if not anomaly_summary.get("spatial_mode"):
+        return anomaly_summary
+    anomaly_map = anomaly_summary.get("anomaly_map")
+    sanitized = {k: v for k, v in anomaly_summary.items() if k not in ("anomaly_map", "nearest_distances")}
+    if anomaly_map is not None:
+        flat = [float(v) for row in anomaly_map for v in row]
+        if flat:
+            sanitized["anomaly_map_min"] = min(flat)
+            sanitized["anomaly_map_max"] = max(flat)
+            sanitized["anomaly_map_mean"] = sum(flat) / len(flat)
+            sanitized["anomaly_map_pixels"] = len(flat)
+    return sanitized
+
+
 class InspectionPipeline:
     def __init__(
         self,
@@ -91,6 +109,7 @@ class InspectionPipeline:
                 ],
                 "registration_reports": [cube.registration for cube in cubes],
                 "feature_summary": self._feature_summary(features),
+                "spatial_maps": self._spatial_maps(features),
                 "fusion_summary": {
                     "input_count": len(candidates),
                     "output_count": len(fused.candidates),
@@ -203,7 +222,26 @@ class InspectionPipeline:
                 ],
                 "embedding_summary": group.embedding_summary,
                 "pca_summary": group.pca_summary,
-                "anomaly_summary": group.anomaly_summary,
+                "anomaly_summary": _sanitize_anomaly_summary(group.anomaly_summary),
             }
             for group in features
         ]
+
+    def _spatial_maps(self, features: object) -> list[dict[str, object]]:
+        """提取空间 anomaly_map 原始数据，供 trace writer 热力图渲染使用（不入 JSON）。"""
+        maps: list[dict[str, object]] = []
+        for group in features:
+            anomaly_summary = group.anomaly_summary
+            if not anomaly_summary or not anomaly_summary.get("spatial_mode"):
+                continue
+            anomaly_map = anomaly_summary.get("anomaly_map")
+            if anomaly_map is None:
+                continue
+            maps.append({
+                "camera_id": group.camera_id,
+                "pose_id": group.pose_id,
+                "roi_name": group.roi_name,
+                "anomaly_map": anomaly_map,
+                "spatial_shape": anomaly_summary.get("spatial_shape"),
+            })
+        return maps
