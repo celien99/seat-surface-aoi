@@ -536,6 +536,8 @@ def test_recipe_rejects_model_class_without_explicit_threshold() -> None:
 
 def test_recipe_parses_capture_quality_config() -> None:
     recipe = RecipeManager().load("seat_a_black_leather_v1")
+    assert recipe.quality.max_saturation_ratio == 0.01
+    assert recipe.quality.max_dark_ratio == 0.01
     assert recipe.quality.min_motion_gradient == 1.0
     assert recipe.quality.max_light_mean_delta == 80.0
     assert recipe.quality.max_capture_span_us == 500_000
@@ -611,6 +613,17 @@ def test_recipe_rejects_invalid_capture_quality_config() -> None:
                 "sku": "sku",
                 "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
                 "quality": {"max_saturation_ratio": 1.2},
+                "cameras": {"TOP": {"model_key": "default"}},
+                "models": {"default": {"backend": "fake", "role": "primary"}},
+            }
+        )
+    with pytest.raises(RecipeValidationError, match="quality.max_dark_ratio"):
+        recipe_from_dict(
+            {
+                "recipe_id": "bad_dark_quality",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                "quality": {"max_dark_ratio": -0.1},
                 "cameras": {"TOP": {"model_key": "default"}},
                 "models": {"default": {"backend": "fake", "role": "primary"}},
             }

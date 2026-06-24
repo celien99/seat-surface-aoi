@@ -23,9 +23,10 @@ cameras:
     calibration_id: calib/top_cushion_production_v1
 quality:
   required_lights: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT]
-  max_saturation_ratio: 0.01
-  min_mean_gray: 20
-  max_mean_gray: 235
+  max_saturation_ratio: 0.40
+  max_dark_ratio: 0.40
+  min_mean_gray: 0
+  max_mean_gray: 255
   min_sharpness: 1.0
   min_motion_gradient: 1.0
   max_light_mean_delta: 80

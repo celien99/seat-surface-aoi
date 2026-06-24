@@ -398,7 +398,7 @@
   "memory_bank_dim": 3,
   "memory_bank_path": "model\\patchcore\\seat_patchcore_bank.json",
   "memory_bank_vectors": 42,
-  "memory_bank_version": "bank_seat_20260623_9000_v4_native_roi",
+  "memory_bank_version": "bank_v1",
   "model_key": null,
   "output_dir": "model\\patchcore",
   "pca_embeddings_path": "model\\patchcore\\pca_embeddings.jsonl",

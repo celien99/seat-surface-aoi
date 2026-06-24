@@ -272,7 +272,62 @@ def test_quality_gate_ignores_stride_padding_for_exposure_stats() -> None:
 
     assert report.is_pass is True
     assert report.saturation_ratio == 0.0
+    assert report.dark_ratio == 0.0
     assert 90.0 <= report.mean_gray <= 110.0
+
+
+def test_quality_gate_allows_small_overexposed_and_dark_regions_when_configured() -> None:
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    recipe = replace(
+        recipe,
+        quality=replace(
+            recipe.quality,
+            max_saturation_ratio=0.40,
+            max_dark_ratio=0.40,
+            min_mean_gray=0.0,
+            max_mean_gray=255.0,
+            min_motion_gradient=0.0,
+        ),
+    )
+    pixels = bytearray([80] * (64 * 48))
+    pixels[:300] = b"\xff" * 300
+    pixels[300:600] = b"\x00" * 300
+    frame = _frame("DIFFUSE")
+    frame.image = memoryview(pixels)
+
+    report = ImageQualityGate()._check_frame(frame, recipe)
+
+    assert report.is_pass is True
+    assert 0.09 < report.saturation_ratio < 0.10
+    assert 0.09 < report.dark_ratio < 0.10
+
+
+def test_quality_gate_rechecks_when_dark_or_saturation_ratio_exceeds_config() -> None:
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    recipe = replace(
+        recipe,
+        quality=replace(
+            recipe.quality,
+            max_saturation_ratio=0.40,
+            max_dark_ratio=0.40,
+            min_mean_gray=0.0,
+            max_mean_gray=255.0,
+            min_motion_gradient=0.0,
+        ),
+    )
+    frame = _frame("DIFFUSE")
+    frame.image = memoryview(bytearray([255] * 1300 + [80] * (64 * 48 - 1300)))
+
+    overexposed = ImageQualityGate()._check_frame(frame, recipe)
+
+    assert overexposed.is_pass is False
+    assert "overexposure saturation ratio exceeded" in overexposed.messages
+
+    frame.image = memoryview(bytearray([0] * 1300 + [80] * (64 * 48 - 1300)))
+    underexposed = ImageQualityGate()._check_frame(frame, recipe)
+
+    assert underexposed.is_pass is False
+    assert "underexposure dark ratio exceeded" in underexposed.messages
 
 
 def test_unsupported_pixel_metadata_returns_recheck_before_preprocess() -> None:

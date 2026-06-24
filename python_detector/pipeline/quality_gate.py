@@ -12,6 +12,7 @@ class FrameQuality:
     light_id: str
     mean_gray: float
     saturation_ratio: float
+    dark_ratio: float
     sharpness: float
     motion_gradient: float
     is_pass: bool
@@ -198,21 +199,25 @@ class ImageQualityGate:
                 0.0,
                 0.0,
                 0.0,
+                0.0,
                 False,
                 meta_messages,
             )
         expected_min = frame.stride_bytes * frame.height
         if len(values) < expected_min:
-            return FrameQuality(frame.camera_id, frame.light_id, 0.0, 0.0, 0.0, 0.0, False, ["image shorter than stride"])
+            return FrameQuality(frame.camera_id, frame.light_id, 0.0, 0.0, 0.0, 0.0, 0.0, False, ["image shorter than stride"])
 
         sample = self._active_pixel_bytes(frame)
         mean_gray = sum(sample) / len(sample)
         saturation_ratio = sum(1 for value in sample if value >= 250) / len(sample)
+        dark_ratio = sum(1 for value in sample if value <= 5) / len(sample)
         sharpness = self._sharpness(sample, frame.width, frame.height)
         motion_gradient = self._motion_gradient(sample, frame.width, frame.height)
         messages: list[str] = []
         if saturation_ratio > recipe.quality.max_saturation_ratio:
             messages.append("overexposure saturation ratio exceeded")
+        if dark_ratio > recipe.quality.max_dark_ratio:
+            messages.append("underexposure dark ratio exceeded")
         if mean_gray < recipe.quality.min_mean_gray:
             messages.append("underexposure mean gray below threshold")
         if mean_gray > recipe.quality.max_mean_gray:
@@ -226,6 +231,7 @@ class ImageQualityGate:
             light_id=frame.light_id,
             mean_gray=mean_gray,
             saturation_ratio=saturation_ratio,
+            dark_ratio=dark_ratio,
             sharpness=sharpness,
             motion_gradient=motion_gradient,
             is_pass=not messages,

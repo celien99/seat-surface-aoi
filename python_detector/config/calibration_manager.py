@@ -12,10 +12,18 @@ from python_detector.paths import PACKAGE_ROOT, resolve_package_path
 
 
 @dataclass(frozen=True)
+class RoiMask:
+    width: int
+    height: int
+    pixels: bytes
+
+
+@dataclass(frozen=True)
 class RoiTemplate:
     roi_name: str
     polygon_xy: tuple[tuple[int, int], ...]
     output_size: tuple[int, int]
+    mask: RoiMask | None = None
 
 
 @dataclass(frozen=True)
@@ -113,6 +121,7 @@ def _parse_rois(raw: dict[str, Any]) -> dict[str, RoiTemplate]:
             roi_name=str(roi_name),
             polygon_xy=polygon,
             output_size=output_size,
+            mask=None,
         )
     if not rois:
         raise RecipeValidationError("至少需要一个 ROI 模板")

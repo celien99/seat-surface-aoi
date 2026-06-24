@@ -41,6 +41,7 @@ class RoiLocatorConfig:
 class QualityConfig:
     required_lights: tuple[str, ...] = ()
     max_saturation_ratio: float = 0.01
+    max_dark_ratio: float = 0.01
     min_mean_gray: float = 20.0
     max_mean_gray: float = 235.0
     min_sharpness: float = 1.0
@@ -346,6 +347,7 @@ def _quality_from_dict(data: dict[str, Any], default_required_lights: tuple[str,
     return QualityConfig(
         required_lights=_str_tuple(data.get("required_lights", default_required_lights), "quality.required_lights"),
         max_saturation_ratio=_ratio(data.get("max_saturation_ratio", 0.01), "quality.max_saturation_ratio"),
+        max_dark_ratio=_ratio(data.get("max_dark_ratio", 0.01), "quality.max_dark_ratio"),
         min_mean_gray=min_mean_gray,
         max_mean_gray=max_mean_gray,
         min_sharpness=_non_negative_float(data.get("min_sharpness", 1.0), "quality.min_sharpness"),

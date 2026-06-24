@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 import math
 
-from python_detector.config.calibration_manager import RoiTemplate
+from python_detector.config.calibration_manager import RoiMask, RoiTemplate
 from python_detector.config.recipe_schema import Recipe
 from python_detector.ipc.data_types import LightFrame
 from python_detector.models.asset_errors import ModelAssetUnavailableError
@@ -29,6 +29,17 @@ class RoiLocation:
     output_size: tuple[int, int]
     pose_error_px: float
     source: str
+
+
+@dataclass(frozen=True)
+class RuntimeRoiLocation:
+    roi_name: str
+    confidence: float
+    polygon_xy: tuple[tuple[int, int], ...]
+    output_size: tuple[int, int]
+    pose_error_px: float
+    source: str
+    mask: RoiMask | None = None
 
 
 @dataclass(frozen=True)
@@ -456,7 +467,7 @@ class RoiLocator:
         locations: list[RoiLocation] = []
         located_templates: dict[str, RoiTemplate] = {}
         errors: list[str] = []
-        candidates_by_roi: dict[str, list[RoiLocation]] = {}
+        candidates_by_roi: dict[str, list[RuntimeRoiLocation]] = {}
         for candidate in candidates:
             try:
                 location = self._location_from_segmentation(candidate, dome_frame, by_class_id, recipe)
@@ -483,11 +494,21 @@ class RoiLocator:
             ]
             if conflicting:
                 errors.append(f"{roi_name}: duplicate conflicting ROI segmentations")
-            locations.append(best)
+            locations.append(
+                RoiLocation(
+                    roi_name=best.roi_name,
+                    confidence=best.confidence,
+                    polygon_xy=best.polygon_xy,
+                    output_size=best.output_size,
+                    pose_error_px=best.pose_error_px,
+                    source=best.source,
+                )
+            )
             located_templates[roi_name] = RoiTemplate(
                 roi_name=best.roi_name,
                 polygon_xy=best.polygon_xy,
                 output_size=best.output_size,
+                mask=best.mask,
             )
 
         missing = [roi_name for roi_name in templates if roi_name not in located_templates]
@@ -510,7 +531,7 @@ class RoiLocator:
         dome_frame: LightFrame,
         by_class_id: dict[int, RoiTemplate],
         recipe: Recipe,
-    ) -> RoiLocation:
+    ) -> RuntimeRoiLocation:
         if candidate.score < 0.0 or candidate.score > 1.0:
             raise ValueError(f"YOLO segmentation confidence 越界: {candidate.score}")
         template = by_class_id.get(candidate.class_id)
@@ -559,13 +580,15 @@ class RoiLocator:
             )
         pose_error = self._safety_boundary_error_px(template, polygon)
         native_output_size = self._bbox_output_size(polygon)
-        return RoiLocation(
+        roi_mask = self._mask_to_roi_mask(candidate.mask, mask_bbox, native_output_size)
+        return RuntimeRoiLocation(
             roi_name=template.roi_name,
             confidence=candidate.score,
             polygon_xy=polygon,
             output_size=native_output_size,
             pose_error_px=pose_error,
             source=recipe.roi_locator.backend,
+            mask=roi_mask,
         )
 
     def _mask_bbox(self, mask: Any) -> tuple[int, int, int, int] | None:
@@ -597,6 +620,25 @@ class RoiLocator:
                 if float(mask[y][x]) > 0.0:
                     area += 1
         return area
+
+    def _mask_to_roi_mask(
+        self,
+        mask: Any,
+        mask_bbox: tuple[int, int, int, int],
+        output_size: tuple[int, int],
+    ) -> RoiMask:
+        output_width, output_height = output_size
+        x0, y0, x1, y1 = mask_bbox
+        bbox_width = max(1, x1 - x0 + 1)
+        bbox_height = max(1, y1 - y0 + 1)
+        pixels = bytearray(output_width * output_height)
+        for y in range(output_height):
+            source_y = y0 + min(bbox_height - 1, int(float(y) * float(bbox_height) / float(output_height)))
+            for x in range(output_width):
+                source_x = x0 + min(bbox_width - 1, int(float(x) * float(bbox_width) / float(output_width)))
+                if float(mask[source_y][source_x]) > 0.0:
+                    pixels[y * output_width + x] = 255
+        return RoiMask(width=output_width, height=output_height, pixels=bytes(pixels))
 
     def _bbox_pose_error_px(self, template: RoiTemplate, polygon: tuple[tuple[int, int], ...]) -> float:
         template_bbox = self._bbox(template.polygon_xy)

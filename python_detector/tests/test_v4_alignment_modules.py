@@ -133,6 +133,7 @@ def test_dome_roi_locator_yolo_seg_generates_runtime_polygon() -> None:
     recipe = RecipeManager().load("seat_a_black_leather_v1")
     mask = np.zeros((8, 8), dtype=np.uint8)
     mask[2:6, 1:7] = 1
+    mask[2, 1] = 0
     recipe = replace(
         recipe,
         roi_locator=replace(
@@ -156,6 +157,11 @@ def test_dome_roi_locator_yolo_seg_generates_runtime_polygon() -> None:
     assert report.locations[0].polygon_xy == ((8, 12), (55, 12), (55, 35), (8, 35))
     assert report.locations[0].output_size == (48, 24)
     assert report.locations[0].source == "onnx_yolo_seg"
+    roi_frame = pipeline.last_context["prepared_bundles"][0].rois["seat"]["DIFFUSE"]
+    assert roi_frame.width == 48
+    assert roi_frame.height == 24
+    assert 0 in bytes(roi_frame.image)
+    assert max(roi_frame.image) > 0
 
 
 def test_dome_roi_locator_yolo_seg_keeps_best_overlapping_duplicate() -> None:

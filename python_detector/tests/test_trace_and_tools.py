@@ -253,6 +253,7 @@ def test_replay_report_includes_quality_and_error_context() -> None:
                 light_id="DIFFUSE",
                 mean_gray=0.0,
                 saturation_ratio=0.0,
+                dark_ratio=0.0,
                 sharpness=0.0,
                 motion_gradient=0.0,
                 is_pass=False,

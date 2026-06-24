@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from python_detector.config.calibration_manager import Calibration, CalibrationManager, RoiTemplate
+from python_detector.config.calibration_manager import Calibration, CalibrationManager, RoiMask, RoiTemplate
 from python_detector.config.recipe_schema import Recipe
 from python_detector.ipc.data_types import CameraBundle, LightFrame, SeatInspectionJob
 from python_detector.pipeline.roi_locator import RoiLocationReport, RoiLocator
@@ -153,6 +153,8 @@ class Preprocessor:
             raise ValueError(
                 f"{frame.camera_id}/{frame.light_id}/{roi.roi_name}: 非矩形 ROI 必须提供 4 个点用于透视展开"
             )
+        if roi.mask is not None:
+            cropped = self._apply_roi_mask(cropped, output_width, output_height, roi.mask, frame, roi.roi_name)
         return LightFrame(
             camera_id=frame.camera_id,
             pose_id=frame.pose_id,
@@ -192,6 +194,28 @@ class Preprocessor:
             target_start = row * width
             cropped[target_start : target_start + width] = frame.image[source_start:source_end]
         return cropped
+
+    def _apply_roi_mask(
+        self,
+        pixels: bytearray,
+        width: int,
+        height: int,
+        mask: RoiMask,
+        frame: LightFrame,
+        roi_name: str,
+    ) -> bytearray:
+        if mask.width != width or mask.height != height:
+            raise ValueError(
+                f"{frame.camera_id}/{frame.light_id}/{roi_name}: ROI mask 尺寸不一致 "
+                f"{mask.width}x{mask.height} != {width}x{height}"
+            )
+        if len(mask.pixels) != width * height:
+            raise ValueError(f"{frame.camera_id}/{frame.light_id}/{roi_name}: ROI mask 像素长度不匹配")
+        masked = bytearray(pixels)
+        for index, value in enumerate(mask.pixels):
+            if value == 0:
+                masked[index] = 0
+        return masked
 
     def _warp_quad(
         self,
