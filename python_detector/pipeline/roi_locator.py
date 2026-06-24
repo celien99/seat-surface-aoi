@@ -631,14 +631,45 @@ class RoiLocator:
         x0, y0, x1, y1 = mask_bbox
         bbox_width = max(1, x1 - x0 + 1)
         bbox_height = max(1, y1 - y0 + 1)
+        eroded = self._erode_mask_1px(mask, mask_bbox)
         pixels = bytearray(output_width * output_height)
         for y in range(output_height):
             source_y = y0 + min(bbox_height - 1, int(float(y) * float(bbox_height) / float(output_height)))
             for x in range(output_width):
                 source_x = x0 + min(bbox_width - 1, int(float(x) * float(bbox_width) / float(output_width)))
-                if float(mask[source_y][source_x]) > 0.0:
+                if float(eroded[source_y][source_x]) > 0.0:
                     pixels[y * output_width + x] = 255
         return RoiMask(width=output_width, height=output_height, pixels=bytes(pixels))
+
+    def _erode_mask_1px(
+        self,
+        mask: Any,
+        mask_bbox: tuple[int, int, int, int],
+    ) -> Any:
+        """对 mask 的 bbox 区域做 1 像素 4-邻域腐蚀，消除分割边界锯齿。"""
+        x0, y0, x1, y1 = mask_bbox
+        height = int(getattr(mask, "shape", (0, 0))[0])
+        width = int(getattr(mask, "shape", (0, 0))[1]) if len(getattr(mask, "shape", ())) >= 2 else 0
+        if width <= 0 or height <= 0:
+            return mask
+        eroded = [[0.0] * width for _ in range(height)]
+        # 复制 bbox 区域
+        for y in range(y0, y1 + 1):
+            for x in range(x0, x1 + 1):
+                eroded[y][x] = float(mask[y][x])
+        # 4-邻域腐蚀：如果自身或任一邻居为 0，则置 0
+        for y in range(y0, y1 + 1):
+            for x in range(x0, x1 + 1):
+                if float(mask[y][x]) <= 0.0:
+                    continue
+                if (
+                    (y > 0 and float(mask[y - 1][x]) <= 0.0)
+                    or (y + 1 < height and float(mask[y + 1][x]) <= 0.0)
+                    or (x > 0 and float(mask[y][x - 1]) <= 0.0)
+                    or (x + 1 < width and float(mask[y][x + 1]) <= 0.0)
+                ):
+                    eroded[y][x] = 0.0
+        return eroded
 
     def _bbox_pose_error_px(self, template: RoiTemplate, polygon: tuple[tuple[int, int], ...]) -> float:
         template_bbox = self._bbox(template.polygon_xy)
