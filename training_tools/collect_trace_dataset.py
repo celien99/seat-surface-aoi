@@ -13,7 +13,7 @@ class TraceDatasetError(RuntimeError):
     """trace 转训练样本失败。"""
 
 
-_IMAGE_SUFFIXES = {".png", ".pgm", ".ppm"}
+_IMAGE_SUFFIXES = {".png"}
 
 
 @dataclass(frozen=True)

@@ -229,8 +229,12 @@ def read_gray_image(path: Path) -> RasterImage:
         raise TrainingDataError(str(exc)) from exc
 
 
-def read_pgm(path: Path) -> RasterImage:
+def read_sample_image(path: Path) -> RasterImage:
     return read_gray_image(path)
+
+
+def read_pgm(path: Path) -> RasterImage:
+    return read_sample_image(path)
 
 
 def _row_from_dict(raw: dict[str, Any], line_number: int, manifest_path: Path) -> ManifestRow:

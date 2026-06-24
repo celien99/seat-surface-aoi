@@ -1,6 +1,6 @@
 # 模型产物目录
 
-本目录用于放置 Python 检测层真实模型产物。仓库只提交目录说明和占位文件，不提交真实大权重、现场数据或训练产物。
+本目录用于放置 Python 检测层的真实模型和 PatchCore 资产。仓库可以保留说明、占位文件和小型验证资产；现场大权重、原始采集数据和训练过程数据应按部署流程管理。
 
 ## 目录约定
 
@@ -8,28 +8,31 @@
 model/
 ├── roi_yolo/
 │   ├── .gitkeep
-│   ├── seat_roi_seg.onnx               # 推荐：真实 Dome ROI YOLO segmentation ONNX，部署时放入
-│   └── seat_roi_yolo.onnx              # 兼容：bbox ROI YOLO ONNX，部署时放入
+│   ├── seat_roi_seg.onnx          # 推荐：Dome ROI YOLO segmentation ONNX
+│   └── seat_roi_yolo.onnx         # 兼容：bbox ROI YOLO ONNX
 ├── wideresnet50/
 │   ├── .gitkeep
-│   └── seat_wrn50_embedding.onnx       # WideResNet50 embedding ONNX，部署时放入
+│   └── seat_wrn50_embedding.onnx  # WideResNet50 embedding ONNX
 └── patchcore/
     ├── .gitkeep
-    ├── seat_pca.json                   # PCA 参数，部署时放入
-    ├── seat_patchcore_bank.json        # PatchCore memory bank，部署时放入
-    └── seat_patchcore.faiss            # 可选 FAISS 索引，部署时放入
+    ├── seat_pca.json              # PCA 参数
+    ├── seat_patchcore_bank.json   # PatchCore memory bank
+    ├── seat_patchcore.faiss       # 可选 FAISS 索引
+    ├── embeddings.jsonl           # 本次训练 embedding 明细
+    ├── pca_embeddings.jsonl       # 本次训练 PCA 后 embedding 明细
+    └── patchcore_training_summary.json
 ```
 
 ## 产物要求
 
-- `seat_roi_seg.onnx`：推荐 ROI 定位产物。输入 Dome 语义光源图，输出 YOLO segmentation mask；在线链路用 mask 自动生成运行时 `polygon_xy`，`roi_templates` 只作为安全边界和 `output_size` 约束。当前项目 ROI 单类别为 `seat`，需与 `roi_locator.class_names` 一致。
-- `seat_roi_yolo.onnx`：兼容 bbox ROI 产物。输入 Dome 语义光源图，输出 `[x1, y1, x2, y2, score, class_id]` 行表，或使用 `output_decode: ultralytics_yolo` 直接接 Ultralytics ONNX 输出。
-- `seat_wrn50_embedding.onnx`：输出一维 embedding，维度需与 `embedding_dim` 一致。
-- `seat_pca.json`：包含 `version`、`mean`、`components`，版本需与 `pca_version` 一致。
+- `seat_roi_seg.onnx`：生产推荐 ROI 定位产物。输入当前配方的 `DOME` 语义光源图，输出 YOLO segmentation mask；在线链路用 mask 自动生成运行时 `polygon_xy`，ROI 模板只作为安全边界和默认约束。当前项目 ROI 单类别为 `seat`，必须与 `roi_locator.class_names` 一致。
+- `seat_roi_yolo.onnx`：兼容 bbox ROI 产物。输入 Dome 语义光源图，输出 `[x1, y1, x2, y2, score, class_id]` 行表，或通过 `output_decode: ultralytics_yolo` 解析 Ultralytics ONNX 输出。
+- `seat_wrn50_embedding.onnx`：输出一维 embedding，维度必须与配方 `models.<key>.embedding_dim` 一致；当前导出支持动态高宽输入。
+- `seat_pca.json`：包含 `version`、`mean`、`components`，版本必须与配方 `pca_version` 一致。
 - `seat_patchcore_bank.json`：包含 `version`、`model_family: patchcore`、`embedding_dim`、`coreset_ratio`、`pca_version`、`faiss_enabled` 和 `vectors`。
-- `seat_patchcore.faiss`：可选；缺失或不可加载时在线后端回退 exact KNN，不输出 `OK` 掩盖模型错误。
+- `seat_patchcore.faiss`：可选；缺失或不可加载时在线后端回退 exact KNN，并在 trace 中记录 fallback reason。
 
-当前生产检测链路不依赖 `model/supervised_defect/seat_defect_detector.onnx`。座椅 ROI 定位由 `seat_roi_seg.onnx` 完成，表面异常判定由 WideResNet50 embedding + PCA + PatchCore memory bank/FAISS 无监督主模型完成。监督 YOLO 只能作为离线研究或对比实验资产，不是生产配方必需项。
+当前生产缺陷判定链路不依赖 `model/supervised_defect/seat_defect_detector.onnx`。座椅 ROI 定位由 `seat_roi_seg.onnx` 完成，表面异常判定由 WideResNet50 embedding + PCA + PatchCore memory bank/FAISS 无监督主模型完成。监督 YOLO 只能作为离线研究或对比实验资产，不是生产配方必需项。
 
 部署前执行：
 
@@ -46,36 +49,41 @@ uv run python -m tools.validate_model_assets --recipe production_model_example
 
 ## 训练资产生成入口
 
-当前仓库可生成 `python_detector` 生产配方直接消费的模型资产：
+ROI YOLO segmentation：
 
 ```powershell
-# Dome ROI YOLO segmentation
 uv run python -m training_tools.train_roi_yolo `
   --data datasets/roi_seg/dataset.yaml `
   --task segment `
   --model yolov8n-seg.pt `
   --imgsz 1024 `
   --output model/roi_yolo/seat_roi_seg.onnx
+```
 
-# WideResNet50 embedding
+WideResNet50 embedding：
+
+```powershell
 uv run python -m training_tools.export_wideresnet_embedding `
   --output model/wideresnet50/seat_wrn50_embedding.onnx `
   --input-channels 3 `
   --embedding-dim 1024
+```
 
-# PatchCore PCA、memory bank、可选 FAISS
+PatchCore PCA、memory bank 和可选 FAISS：
+
+```powershell
 uv run python -m training_tools.train_patchcore_assets `
-  --manifest datasets/seat_trace_v1/dataset_manifest.jsonl `
+  --manifest datasets/seat_capture_20260623_9000/dataset_manifest.jsonl `
   --output-dir model/patchcore `
-  --channel-order ch0_diffuse,ch1_polar_diffuse,ch2_high_left `
+  --recipe seat_a_black_leather_production_v1 `
+  --embedding-backend onnx_wideresnet50 `
   --split train `
   --pca-components 3 `
-  --coreset-ratio 0.1 `
+  --coreset-ratio 1.0 `
   --build-faiss
 ```
 
-<<<<<<< HEAD
-如果真实样本来自 `images_capture/` 平铺 PNG，而不是 detector trace，先用已经训练好的 ROI 模型生成 ROI manifest：
+如果真实样本来自 `images_capture/` 平铺 PNG，先用已经训练好的 ROI segmentation 模型生成 ROI PNG 和 manifest：
 
 ```powershell
 uv run python -m training_tools.collect_capture_dataset `
@@ -83,12 +91,10 @@ uv run python -m training_tools.collect_capture_dataset `
   --output datasets\seat_capture_20260623_9000 `
   --recipe seat_a_black_leather_production_v1 `
   --split train `
-  --label-status unverified_ok `
-  --roi-output-size 64x48 `
+  --label-status verified_ok `
   --skip-failed
 ```
 
-`collect_capture_dataset` 默认将 `L1/L2/L3` 映射为当前固定机位生产配方的 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`，调用 `model/roi_yolo/seat_roi_seg.onnx` 输出 ROI PGM 和 `dataset_manifest.jsonl`。`train_patchcore_assets` 从 manifest 的真实 ROI 多光源 PGM 图提取 embedding，确保 PCA 和 memory bank 与在线 `FeatureBuilder` 的输入通道一致。PatchCore 只能用人工确认的正常样本建库；`seat_defect_detector.onnx` 必须基于缺陷类别和 bbox 人工标注后的 YOLO detect 数据集训练，不能只用未标注 OK 样本替代。
-=======
-`train_patchcore_assets` 从 trace manifest 的真实 OK ROI 多光源 PGM 图提取 embedding，确保 PCA 和 memory bank 与在线 `FeatureBuilder` 的输入通道一致。NG、RECHECK、人工复核样本用于阈值曲线和误报/漏检分析，不进入正常样本 memory bank。
->>>>>>> 0e2505a883983ceeb5d08815500c055dc367ee4c
+`collect_capture_dataset` 默认按配方 `light_order` 将 `L1/L2/L3` 映射为 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`，调用 `model/roi_yolo/seat_roi_seg.onnx` 定位真实座椅 ROI，并输出 PNG 图和 `dataset_manifest.jsonl`。默认保留 segmentation 裁出的原生 ROI 尺寸，避免纹理和细小缺陷被压缩失真；只有需要与固定 PatchCore 输入尺寸对齐时，才显式传 `--roi-output-size WIDTHxHEIGHT`，缩放方式是等比例 letterbox，不做直接拉伸。
+
+当前 `model/patchcore/` 资产使用 `datasets/seat_capture_20260623_9000` 训练，输入策略为原生 ROI 尺寸。`patchcore_training_summary.json` 会记录实际进入 embedding 的 `input_shape_summary`，用于确认训练输入与在线检测裁剪策略一致。PatchCore 只能用人工确认正常样本建库；NG、RECHECK 和人工复核样本用于阈值曲线、误报和漏检分析，不进入正常样本 memory bank。

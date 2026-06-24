@@ -88,6 +88,7 @@ def train_patchcore_assets(
         "embedding_backend": embedding_backend,
         "embedding_count": len(embeddings),
         "embedding_dim": len(embeddings[0]["embedding"]) if embeddings else 0,
+        "input_shape_summary": _input_shape_summary(embeddings),
         "embeddings_path": str(embeddings_path),
         "pca_path": str(pca_path) if pca_result is not None else None,
         "pca_embeddings_path": str(pca_embeddings_path) if pca_result is not None else None,
@@ -106,6 +107,31 @@ def train_patchcore_assets(
         encoding="utf-8",
     )
     return summary
+
+
+def _input_shape_summary(embeddings: list[dict]) -> dict:
+    counts: dict[tuple[int, int, int, int] | None, int] = {}
+    for entry in embeddings:
+        raw_shape = entry.get("input_shape_nchw")
+        shape = tuple(int(value) for value in raw_shape) if isinstance(raw_shape, list) and len(raw_shape) == 4 else None
+        counts[shape] = counts.get(shape, 0) + 1
+    shapes = [
+        {
+            "input_shape_nchw": list(shape) if shape is not None else None,
+            "count": count,
+        }
+        for shape, count in sorted(counts.items(), key=lambda item: item[0] or (0, 0, 0, 0))
+    ]
+    heights = [shape[2] for shape in counts if shape is not None]
+    widths = [shape[3] for shape in counts if shape is not None]
+    return {
+        "distinct_shapes": shapes,
+        "height_min": min(heights) if heights else None,
+        "height_max": max(heights) if heights else None,
+        "width_min": min(widths) if widths else None,
+        "width_max": max(widths) if widths else None,
+        "fixed_input_size": len({(shape[2], shape[3]) for shape in counts if shape is not None}) == 1,
+    }
 
 
 def main(argv: list[str] | None = None) -> int:

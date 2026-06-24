@@ -50,7 +50,12 @@ def collect_capture_dataset(
     roi_output_size: tuple[int, int] | None = None,
     skip_failed: bool = False,
 ) -> CaptureDatasetResult:
-    """把 capture_only 平铺 PNG 目录转换成训练用 ROI manifest 和 PNG 图像。"""
+    """把 capture_only 平铺 PNG 目录转换成训练用 ROI manifest 和 PNG 图像。
+
+    默认保留 roi_yolo 分割定位后的原生 ROI 尺寸，避免把座椅表面纹理压缩失真。
+    仅在显式传入 roi_output_size 时，才对已裁好的 ROI 做等比例 letterbox 缩放，
+    供离线 PatchCore 训练与在线检测使用同一输入尺寸。
+    """
     if not input_dir.is_dir():
         raise TrainingDataError(f"采图目录不存在: {input_dir}")
     recipe = RecipeManager().load(recipe_id)
@@ -108,7 +113,19 @@ def collect_capture_dataset(
     )
     summary_path = output_dir / "dataset_summary.json"
     summary_path.write_text(
-        json.dumps(_summary(samples, skipped, input_dir, recipe_id), ensure_ascii=False, indent=2, sort_keys=True),
+        json.dumps(
+            _summary(
+                samples,
+                skipped,
+                input_dir,
+                output_dir,
+                recipe_id,
+                roi_output_size=roi_output_size,
+            ),
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        ),
         encoding="utf-8",
     )
     if skipped:
@@ -260,17 +277,15 @@ def _collect_capture_group(
 
     samples: list[DatasetSample] = []
     for roi_name, roi_template in sorted(located_templates.items()):
-        output_template = roi_template
-        if roi_output_size is not None:
-            output_template = RoiTemplate(
-                roi_name=roi_template.roi_name,
-                polygon_xy=roi_template.polygon_xy,
-                output_size=roi_output_size,
-            )
         roi_frames = {
-            light_id: preprocessor._crop_to_roi(frame, output_template)
+            light_id: preprocessor._crop_to_roi(frame, roi_template)
             for light_id, frame in frames.items()
         }
+        if roi_output_size is not None:
+            roi_frames = {
+                light_id: _resize_frame_letterbox(frame, roi_output_size)
+                for light_id, frame in roi_frames.items()
+            }
         for light_id, frame in sorted(roi_frames.items()):
             sample_base = "_".join(
                 [
@@ -320,6 +335,54 @@ def _write_png(path: Path, frame: LightFrame) -> None:
     write_gray_png(path, frame.width, frame.height, pixels)
 
 
+def _resize_frame_letterbox(frame: LightFrame, output_size: tuple[int, int]) -> LightFrame:
+    target_width, target_height = output_size
+    if target_width <= 0 or target_height <= 0:
+        raise TrainingDataError(f"ROI 输出尺寸无效: {output_size}")
+    if frame.width <= 0 or frame.height <= 0:
+        raise TrainingDataError(f"{frame.camera_id}/{frame.light_id}: ROI 原始尺寸无效")
+    scale = min(float(target_width) / float(frame.width), float(target_height) / float(frame.height))
+    resized_width = max(1, int(round(float(frame.width) * scale)))
+    resized_height = max(1, int(round(float(frame.height) * scale)))
+    pad_x = (target_width - resized_width) // 2
+    pad_y = (target_height - resized_height) // 2
+    padded = bytearray(target_width * target_height)
+    for y in range(resized_height):
+        source_y = min(frame.height - 1, max(0, int(round(float(y) / scale))))
+        for x in range(resized_width):
+            source_x = min(frame.width - 1, max(0, int(round(float(x) / scale))))
+            target_index = (pad_y + y) * target_width + (pad_x + x)
+            source_index = source_y * frame.stride_bytes + source_x
+            padded[target_index] = frame.image[source_index]
+    return LightFrame(
+        camera_id=frame.camera_id,
+        pose_id=frame.pose_id,
+        light_id=frame.light_id,
+        frame_index=frame.frame_index,
+        light_seq_index=frame.light_seq_index,
+        width=target_width,
+        height=target_height,
+        channels=frame.channels,
+        stride_bytes=target_width,
+        pixel_format=frame.pixel_format,
+        bit_depth=frame.bit_depth,
+        color_order=frame.color_order,
+        dtype=frame.dtype,
+        timestamp_us=frame.timestamp_us,
+        exposure_us=frame.exposure_us,
+        gain=frame.gain,
+        calibration_id=frame.calibration_id,
+        image_crc32=frame.image_crc32,
+        image=memoryview(padded),
+        shot_id=frame.shot_id,
+        origin_xy=frame.origin_xy,
+        source_width=frame.source_width,
+        source_height=frame.source_height,
+        roi_to_source_matrix=frame.roi_to_source_matrix,
+        source_to_roi_matrix=frame.source_to_roi_matrix,
+    )
+
+
 def _parse_light_map(values: list[str] | None) -> dict[str, str]:
     if not values:
         return {}
@@ -360,7 +423,15 @@ def _parse_roi_output_size(value: str | None) -> tuple[int, int] | None:
     return (width, height)
 
 
-def _summary(samples: list[DatasetSample], skipped: list[dict[str, Any]], input_dir: Path, recipe_id: str) -> dict[str, Any]:
+def _summary(
+    samples: list[DatasetSample],
+    skipped: list[dict[str, Any]],
+    input_dir: Path,
+    output_dir: Path,
+    recipe_id: str,
+    *,
+    roi_output_size: tuple[int, int] | None,
+) -> dict[str, Any]:
     cameras: dict[str, int] = {}
     lights: dict[str, int] = {}
     roi_names: dict[str, int] = {}
@@ -371,6 +442,9 @@ def _summary(samples: list[DatasetSample], skipped: list[dict[str, Any]], input_
     return {
         "input_dir": str(input_dir),
         "recipe_id": recipe_id,
+        "roi_size_policy": "native_roi" if roi_output_size is None else "letterbox",
+        "roi_output_size": list(roi_output_size) if roi_output_size is not None else None,
+        "roi_image_size_summary": _roi_image_size_summary(samples, output_dir),
         "sample_count": len(samples),
         "group_count": len({(sample.sequence_id, sample.camera_id, sample.pose_id, sample.roi_name) for sample in samples}),
         "camera_counts": cameras,
@@ -383,6 +457,39 @@ def _summary(samples: list[DatasetSample], skipped: list[dict[str, Any]], input_
         },
         "skipped_count": len(skipped),
     }
+
+
+def _roi_image_size_summary(samples: list[DatasetSample], output_dir: Path) -> dict[str, dict[str, Any]]:
+    sizes_by_key: dict[str, list[tuple[int, int]]] = {}
+    for sample in samples:
+        image = load_gray_image(output_dir / sample.image_path)
+        key = f"{sample.camera_id}/{sample.pose_id}/{sample.roi_name}"
+        sizes_by_key.setdefault(key, []).append((image.width, image.height))
+    summary: dict[str, dict[str, Any]] = {}
+    for key, sizes in sorted(sizes_by_key.items()):
+        widths = [size[0] for size in sizes]
+        heights = [size[1] for size in sizes]
+        summary[key] = {
+            "sample_count": len(sizes),
+            "width_min": min(widths),
+            "width_max": max(widths),
+            "width_avg": round(sum(widths) / len(widths), 2),
+            "height_min": min(heights),
+            "height_max": max(heights),
+            "height_avg": round(sum(heights) / len(heights), 2),
+            "distinct_sizes": [
+                {"width": width, "height": height, "count": count}
+                for (width, height), count in _count_sizes(sizes)
+            ],
+        }
+    return summary
+
+
+def _count_sizes(sizes: list[tuple[int, int]]) -> list[tuple[tuple[int, int], int]]:
+    counts: dict[tuple[int, int], int] = {}
+    for size in sizes:
+        counts[size] = counts.get(size, 0) + 1
+    return sorted(counts.items(), key=lambda item: (item[0][0], item[0][1]))
 
 
 def _safe_name(value: str) -> str:
@@ -399,7 +506,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--label-status", default="unverified_ok")
     parser.add_argument("--decision", default="OK", choices=["OK", "NG", "RECHECK", "ERROR"])
     parser.add_argument("--quality-pass", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--roi-output-size", default=None, help="可选：覆盖 ROI 输出尺寸，格式 WIDTHxHEIGHT，例如 64x48")
+    parser.add_argument(
+        "--roi-output-size",
+        default=None,
+        help="可选：把 ROI 等比例 letterbox 到指定尺寸，格式 WIDTHxHEIGHT；仅在需要与 PatchCore 固定输入尺寸对齐时使用",
+    )
     parser.add_argument("--skip-failed", action="store_true", help="单组 ROI 失败时跳过并继续")
     args = parser.parse_args(argv)
 

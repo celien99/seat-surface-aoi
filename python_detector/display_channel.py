@@ -208,7 +208,7 @@ def _quality_messages(quality_report: Any) -> list[str]:
 
 
 def _iter_image_files(root: Path) -> list[Path]:
-    return sorted(path for path in root.rglob("*") if path.is_file() and path.suffix.lower() in {".png", ".pgm", ".ppm"})
+    return sorted(path for path in root.rglob("*") if path.is_file() and path.suffix.lower() == ".png")
 
 
 def _message(quality_messages: list[str], error: Any) -> str:

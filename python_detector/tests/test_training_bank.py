@@ -83,6 +83,10 @@ def test_train_patchcore_assets_from_manifest(tmp_path: Path) -> None:
     assert summary["embedding_count"] == 3
     assert summary["pca_output_dim"] == 3
     assert summary["memory_bank_vectors"] == 3
+    assert summary["input_shape_summary"]["fixed_input_size"] is True
+    assert summary["input_shape_summary"]["distinct_shapes"] == [
+        {"input_shape_nchw": [1, 3, 48, 64], "count": 3}
+    ]
     assert (output_dir / "embeddings.jsonl").exists()
     assert (output_dir / "seat_pca.json").exists()
     assert (output_dir / "seat_patchcore_bank.json").exists()

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from python_detector.image_codec import write_gray_png
-from training_tools.dataset_manifest import load_manifest_groups, read_pgm
+from training_tools.dataset_manifest import load_manifest_groups, read_sample_image
 from training_tools.extract_embeddings import extract_embeddings
 from training_tools.training_errors import TrainingDataError
 
@@ -44,7 +44,7 @@ def test_manifest_groups_load_png_images(tmp_path: Path, sample_manifest: Path) 
     groups = load_manifest_groups(sample_manifest)
     assert len(groups) == 1
     assert groups[0].lights == ("DIFFUSE", "HIGH_LEFT", "POLAR_DIFFUSE")
-    image = read_pgm(tmp_path / groups[0].rows[0].image_path)
+    image = read_sample_image(tmp_path / groups[0].rows[0].image_path)
     assert image.width == 64
     assert image.height == 48
 

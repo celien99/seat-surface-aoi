@@ -152,12 +152,13 @@ training_tools/
 ├── collect_shm_dataset.py      # 复用 ShmClient/算法/trace，从共享内存多光源图生成 raw 图、trace 和训练 manifest
 ├── collect_trace_dataset.py    # 从 trace 生成训练样本 manifest 和 ROI 图像副本，兼容 pose 目录
 ├── collect_capture_dataset.py  # 从 capture_only 平铺 PNG 目录调用 ROI 模型生成 ROI PNG manifest
-├── dataset_manifest.py         # 读取 manifest、PGM ROI 图并按 camera/pose/ROI 聚合多光源训练样本
+├── dataset_manifest.py         # 读取 manifest、PNG ROI 图并按 camera/pose/ROI 聚合多光源训练样本
 ├── extract_embeddings.py       # 复用在线 FeatureBuilder/EmbeddingExtractor 从真实 ROI 图提取 embedding
 ├── compute_pca.py              # 从 embedding JSONL 计算 PCA 参数和可选降维 embedding
 ├── train_patchcore_assets.py   # 串联 embedding、PCA、PatchCore memory bank 和可选 FAISS 索引
 ├── build_faiss_index.py        # 从 PatchCore memory bank 构建 FAISS 索引
 ├── evaluate_pipeline.py        # 用 manifest 标注和真实 ROI 图评估当前配方模型
+├── simulate_capture_detection.py # 从 images_capture 样本模拟完整检测链路并生成检测图
 ├── train_roi_yolo.py           # 训练 Dome ROI YOLO segmentation 或 bbox 模型并导出 ONNX
 ├── train_supervised_yolo.py    # 可选离线研究工具，生产配方不依赖监督缺陷 YOLO
 ├── export_wideresnet_embedding.py # 导出 PatchCore 所需 WideResNet50 embedding ONNX
@@ -210,7 +211,7 @@ uv run python -m python_detector.detector_main `
 
 当 ONNX 模型文件不存在、仍是 1 字节占位文件、ONNX/numpy 依赖缺失、PCA 参数或 PatchCore memory bank 未就绪时，pipeline 会返回 `RECHECK` + `CONFIGURATION_ERROR`，并在 `error.json` 中写入 `asset_unavailable=true` 和具体资产路径。这类状态表示“当前没有足够模型能力判定”，不会输出 `OK`，也不会直接输出 `NG`；trace 会保存 `raw_images/` 原始采集图，前端可直接显示，后续训练工具可继续从 trace/manifest 生成训练样本。
 
-当前仓库已内置 `display_app/` 作为展示通道消费方，迁移并收敛了 `/Users/yyh/code/online-detection-app` 的 PySide6/QML 监控页面。它轮询 `display_latest.json`、读取 C++ 主控事件、读取 trace PNG/PGM/PPM 图像并更新 QML ViewModel，不启动原项目的相机、PLC、触发服务、模型部署或 `seat_defect_core`。前端会持久化 `display_operator_events.jsonl` 和 `display_review_queue.json`，记录操作员复核动作。
+当前仓库已内置 `display_app/` 作为展示通道消费方，迁移并收敛了 `/Users/yyh/code/online-detection-app` 的 PySide6/QML 监控页面。它轮询 `display_latest.json`、读取 C++ 主控事件、读取 trace PNG 图像并更新 QML ViewModel，不启动原项目的相机、PLC、触发服务、模型部署或 `seat_defect_core`。前端会持久化 `display_operator_events.jsonl` 和 `display_review_queue.json`，记录操作员复核动作。
 
 ```powershell
 uv sync --extra display
@@ -282,12 +283,13 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 离线训练工具复用同一套模型输入契约：
 
-- `training_tools.dataset_manifest` 读取 `dataset_manifest.jsonl` 和 ROI PNG 图，并兼容旧 `P5` PGM 图，将同一 trace/camera/pose/ROI 下的多光源样本聚合；旧 manifest 没有 `pose_id` 时默认回退到 `camera_id`。
+- `training_tools.dataset_manifest` 读取 `dataset_manifest.jsonl` 和 ROI PNG 图，将同一 trace/camera/pose/ROI 下的多光源样本聚合；旧 manifest 没有 `pose_id` 时默认回退到 `camera_id`。底层解码仍保留历史 PGM 兼容，但当前训练集和新 trace 均生成 PNG。
 - `training_tools.extract_embeddings` 调用在线 `FeatureBuilder` 和 `EmbeddingExtractor`，默认使用配方 `models.<key>.input_channels`，确保训练出的 PCA/PatchCore 资产与在线 `NCHW` 输入通道一致；只有显式传 `--channel-order` 时才覆盖通道顺序。
 - `training_tools.evaluate_pipeline` 调用在线 `InferenceEngine`，按 manifest 中的人工标注或弱标签计算整体、类别、ROI、camera 和 split 指标。
+- `training_tools.simulate_capture_detection` 从 `images_capture/` 平铺 PNG 选择同一序号的两机位三光源样本，构造 `SeatInspectionJob`，调用生产配方完整检测链路，写 trace、检测摘要和可查看 PNG 检测图；它只做离线算法模拟，不控制 PLC、相机或频闪。
 - `training_tools.collect_trace_dataset` 同时兼容旧 trace 目录 `images/<camera>/<roi>/<light>.png` 和新目录 `images/<camera>/<pose>/<roi>/<light>.png`，生成的样本路径与 manifest 都包含 `pose_id`，避免机器人飞拍同一末端相机下的不同 pose 互相覆盖。
 - `training_tools.collect_shm_dataset` 调用在线 `ShmClient`、`SeatSurfaceAoiAlgorithm` 和 `TraceWriter`，从 C++ 共享内存任务获取多相机多光源图像，保存按 `camera_id/pose_id` 分目录的 `raw_images/`、`raw_frame_manifest.jsonl`，并生成 trace/训练 manifest；它不控制 PLC、相机或频闪。
-- `training_tools.collect_capture_dataset` 用于现场 `capture_only` 平铺 PNG，例如 `TOP_BACK_<timestamp>_L1_original.png`。它按相机和光源序号组包，默认按当前配方 `light_order` 生成 `L1/L2/L3...` 映射；当前生产配方即 `L1/L2/L3 -> DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。工具会调用当前配方的 `onnx_yolo_seg` ROI 模型生成 ROI PNG 和 manifest。ROI 多候选冲突、低置信、越界或缺光源样本会跳过或失败，不进入训练集。
+- `training_tools.collect_capture_dataset` 用于现场 `capture_only` 平铺 PNG，例如 `TOP_BACK_<timestamp>_L1_original.png`。它按相机和光源序号组包，默认按当前配方 `light_order` 生成 `L1/L2/L3...` 映射；当前生产配方即 `L1/L2/L3 -> DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。工具会调用当前配方的 `onnx_yolo_seg` ROI 模型先裁出真实座椅 ROI，再生成 ROI PNG 和 manifest。默认保留 ROI 原生尺寸，避免把纹理和细小缺陷压缩失真；只有在需要与 PatchCore 固定输入尺寸对齐时，才应显式传 `--roi-output-size WIDTHxHEIGHT`，并采用等比例 letterbox 缩放。`dataset_summary.json` 记录 `roi_size_policy` 和 ROI 尺寸分布，`patchcore_training_summary.json` 记录实际训练输入 `input_shape_summary`。ROI 多候选冲突、低置信、越界或缺光源样本会跳过或失败，不进入训练集。
 - `training_tools.train_patchcore_assets` 训练 PatchCore safety net 所需的 embedding/PCA/memory bank/FAISS 资产；`training_tools.export_wideresnet_embedding` 生成生产配方引用的 WideResNet50 embedding ONNX。
 - `training_tools.train_patchcore_assets` 使用真实 OK 样本训练 PatchCore 无监督主模型所需的 embedding/PCA/memory bank/FAISS 资产；`training_tools.build_faiss_index` 写出索引后会校验维度和向量数，`FlatL2` 额外做 smoke search，`IVFFlat` 的召回和延迟由部署评估阶段验证；FAISS 测试用子进程隔离，避免 Windows 上不同 OpenMP runtime 在同一 pytest 进程内互相污染；`training_tools.export_wideresnet_embedding` 生成生产配方引用的 WideResNet50 embedding ONNX。
 
@@ -346,9 +348,11 @@ uv run python tools/run_simulated_ipc.py --config cpp_controller/config/station_
 ```powershell
 uv run python -m training_tools.collect_trace_dataset --trace-root trace --output datasets/seat_trace_v1
 uv run python -m training_tools.collect_shm_dataset --output datasets/seat_shm_v1 --max-jobs 10 --trace-root trace/training_shm
-uv run python -m training_tools.collect_capture_dataset --input images_capture/20260623/LINE1_AOI_CAPTURE_MANUAL_SEAT_9000 --output datasets/seat_capture_20260623_9000 --recipe seat_a_black_leather_production_v1 --split train --label-status unverified_ok --roi-output-size 64x48 --skip-failed
+uv run python -m training_tools.collect_capture_dataset --input images_capture/20260623/LINE1_AOI_CAPTURE_MANUAL_SEAT_9000 --output datasets/seat_capture_20260623_9000 --recipe seat_a_black_leather_production_v1 --split train --label-status unverified_ok --skip-failed
+uv run python -m training_tools.simulate_capture_detection --input images_capture/20260623/LINE1_AOI_CAPTURE_MANUAL_SEAT_9000 --output reports/capture_detection_20260623_9000 --recipe seat_a_black_leather_production_v1 --sample-index 1
+# 仅在需要与固定 PatchCore 输入尺寸对齐时再传 --roi-output-size，例如 1536x2048；缩放方式为等比例 letterbox。
 # --input-channels 必须显式等于所选配方 models.<key>.input_channels 数量；当前生产配方为 3。
-uv run python -m training_tools.export_wideresnet_embedding --output model/wideresnet50/seat_wrn50_embedding.onnx --input-channels 3 --input-width 64 --input-height 48 --embedding-dim 1024
+uv run python -m training_tools.export_wideresnet_embedding --output model/wideresnet50/seat_wrn50_embedding.onnx --input-channels 3 --embedding-dim 1024
 uv run python -m training_tools.extract_embeddings --manifest datasets/seat_trace_v1/dataset_manifest.jsonl --output datasets/seat_trace_v1/embeddings.jsonl --backend statistical
 uv run python -m training_tools.train_patchcore_assets --manifest datasets/seat_trace_v1/dataset_manifest.jsonl --output-dir model/patchcore --split train --pca-components 3 --coreset-ratio 0.1
 uv run python -m training_tools.evaluate_pipeline --manifest datasets/seat_trace_v1/dataset_manifest.jsonl --output reports/evaluation_report.json --split test

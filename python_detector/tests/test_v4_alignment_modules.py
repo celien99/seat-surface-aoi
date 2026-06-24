@@ -101,6 +101,15 @@ class SegRoiLocator(RoiLocator):
         ]
 
 
+class DuplicateSegRoiLocator(RoiLocator):
+    def __init__(self, candidates: list[SegmentationCandidate]) -> None:
+        super().__init__()
+        self.candidates = candidates
+
+    def _onnx_yolo_segmentation(self, dome_frame, recipe):  # type: ignore[no-untyped-def]
+        return self.candidates
+
+
 def test_dome_roi_locator_rechecks_duplicate_conflicting_detections() -> None:
     recipe = RecipeManager().load("seat_a_black_leather_v1")
     recipe = replace(
@@ -145,7 +154,54 @@ def test_dome_roi_locator_yolo_seg_generates_runtime_polygon() -> None:
     assert report.backend == "onnx_yolo_seg"
     assert report.is_pass is True
     assert report.locations[0].polygon_xy == ((8, 12), (55, 12), (55, 35), (8, 35))
+    assert report.locations[0].output_size == (48, 24)
     assert report.locations[0].source == "onnx_yolo_seg"
+
+
+def test_dome_roi_locator_yolo_seg_keeps_best_overlapping_duplicate() -> None:
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    recipe = replace(
+        recipe,
+        roi_locator=replace(
+            recipe.roi_locator,
+            backend="onnx_yolo_seg",
+            model_path="simulated-seg.onnx",
+            output_decode="segmentation_rows",
+            min_confidence=0.5,
+            min_mask_area_px=4,
+            max_pose_error_px=0.0,
+        ),
+    )
+    mask = np.ones((8, 8), dtype=np.uint8)
+    pipeline = InspectionPipeline(
+        preprocessor=Preprocessor(
+            roi_locator=DuplicateSegRoiLocator(
+                [
+                    SegmentationCandidate(
+                        bbox_xyxy=(8.0, 12.0, 55.0, 35.0),
+                        score=0.97,
+                        class_id=0,
+                        mask=mask,
+                        mask_bbox_xyxy=(8.0, 12.0, 55.0, 35.0),
+                    ),
+                    SegmentationCandidate(
+                        bbox_xyxy=(9.0, 12.0, 55.0, 35.0),
+                        score=0.96,
+                        class_id=0,
+                        mask=mask,
+                        mask_bbox_xyxy=(9.0, 12.0, 55.0, 35.0),
+                    ),
+                ]
+            )
+        )
+    )
+
+    result = pipeline.process(make_simulated_job(), recipe)
+
+    assert result.decision == "OK"
+    report = pipeline.last_context["roi_location_reports"][0]
+    assert report.is_pass is True
+    assert report.locations[0].polygon_xy == ((8, 12), (55, 12), (55, 35), (8, 35))
 
 
 def test_dome_roi_locator_yolo_seg_input_letterbox_transform() -> None:
@@ -175,6 +231,57 @@ def test_dome_roi_locator_yolo_seg_input_letterbox_transform() -> None:
     assert transform.scale == pytest.approx(2.0)
     assert transform.pad_y == pytest.approx(16.0)
     assert mapped == pytest.approx((16.0, 12.0, 47.5, 35.5))
+
+
+def test_dome_roi_locator_ultralytics_seg_uses_detection_bbox_for_mask_mapping() -> None:
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    recipe = replace(
+        recipe,
+        roi_locator=replace(
+            recipe.roi_locator,
+            backend="onnx_yolo_seg",
+            output_decode="ultralytics_yolo_seg",
+            input_width=128,
+            input_height=128,
+            input_channels=1,
+            min_confidence=0.5,
+            min_mask_area_px=4,
+            max_pose_error_px=0.0,
+        ),
+    )
+    frame = make_simulated_job().camera_bundles[0].light_frames["DIFFUSE"]
+    locator = RoiLocator()
+    _, transform = locator._frame_to_nchw(frame, recipe, np)  # noqa: SLF001
+    candidate = SegmentationCandidate(
+        bbox_xyxy=(32.0, 40.0, 95.0, 87.0),
+        score=0.97,
+        class_id=0,
+        mask=np.ones((64, 64), dtype=np.uint8),
+        mask_bbox_xyxy=(0.0, 0.0, 63.0, 63.0),
+    )
+
+    mapped = locator._map_segmentation_candidate_from_model_input(  # noqa: SLF001
+        candidate,
+        transform,
+        frame,
+        output_decode="ultralytics_yolo_seg",
+    )
+    location = locator._location_from_segmentation(  # noqa: SLF001
+        mapped,
+        frame,
+        {
+            0: RoiTemplate(
+                roi_name="seat",
+                polygon_xy=((16, 12), (47, 12), (47, 35), (16, 35)),
+                output_size=(64, 48),
+            )
+        },
+        recipe,
+    )
+
+    assert mapped.mask.shape == (24, 32)
+    assert mapped.mask_bbox_xyxy == pytest.approx((16.0, 12.0, 47.5, 35.5))
+    assert location.polygon_xy == ((16, 12), (47, 12), (47, 35), (16, 35))
 
 
 def test_dome_roi_locator_yolo_seg_rechecks_outside_safety_template() -> None:

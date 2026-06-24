@@ -159,16 +159,11 @@ class RoiLocator:
             output_decode=recipe.roi_locator.output_decode,
         )
         return [
-            SegmentationCandidate(
-                bbox_xyxy=self._bbox_from_model_input(candidate.bbox_xyxy, transform, dome_frame),
-                score=candidate.score,
-                class_id=candidate.class_id,
-                mask=candidate.mask,
-                mask_bbox_xyxy=self._bbox_from_model_input(
-                    candidate.mask_bbox_xyxy or candidate.bbox_xyxy,
-                    transform,
-                    dome_frame,
-                ),
+            self._map_segmentation_candidate_from_model_input(
+                candidate,
+                transform,
+                dome_frame,
+                output_decode=recipe.roi_locator.output_decode,
             )
             for candidate in candidates
         ]
@@ -242,6 +237,99 @@ class RoiLocator:
             max(0.0, min(float(frame.width - 1), (x1 - transform.pad_x) / transform.scale)),
             max(0.0, min(float(frame.height - 1), (y1 - transform.pad_y) / transform.scale)),
         )
+
+    def _map_segmentation_candidate_from_model_input(
+        self,
+        candidate: SegmentationCandidate,
+        transform: RoiInputTransform,
+        frame: LightFrame,
+        *,
+        output_decode: str,
+    ) -> SegmentationCandidate:
+        mapped_bbox = self._bbox_from_model_input(candidate.bbox_xyxy, transform, frame)
+        mapped_mask_bbox = self._bbox_from_model_input(
+            candidate.mask_bbox_xyxy or candidate.bbox_xyxy,
+            transform,
+            frame,
+        )
+        mask = candidate.mask
+        if output_decode == "ultralytics_yolo_seg" and self._uses_proto_canvas_bbox(candidate, transform):
+            # Ultralytics seg outputs a proto-canvas mask. The valid mask region must be
+            # cropped to the detection bbox before mapping back to the source image.
+            mask = self._crop_mask_to_canvas_bbox(
+                candidate.mask,
+                candidate.bbox_xyxy,
+                canvas_width=transform.width,
+                canvas_height=transform.height,
+            )
+            mapped_mask_bbox = mapped_bbox
+        return SegmentationCandidate(
+            bbox_xyxy=mapped_bbox,
+            score=candidate.score,
+            class_id=candidate.class_id,
+            mask=mask,
+            mask_bbox_xyxy=mapped_mask_bbox,
+        )
+
+    def _uses_proto_canvas_bbox(
+        self,
+        candidate: SegmentationCandidate,
+        transform: RoiInputTransform,
+    ) -> bool:
+        mask_shape = getattr(candidate.mask, "shape", ())
+        if len(mask_shape) < 2 or candidate.mask_bbox_xyxy is None:
+            return False
+        mask_height = int(mask_shape[0])
+        mask_width = int(mask_shape[1])
+        if mask_width <= 0 or mask_height <= 0:
+            return False
+        if mask_width == transform.width and mask_height == transform.height:
+            return False
+        x0, y0, x1, y1 = candidate.mask_bbox_xyxy
+        return (
+            abs(x0) <= 1e-6
+            and abs(y0) <= 1e-6
+            and abs(x1 - float(mask_width - 1)) <= 1e-6
+            and abs(y1 - float(mask_height - 1)) <= 1e-6
+        )
+
+    def _crop_mask_to_canvas_bbox(
+        self,
+        mask: Any,
+        bbox_xyxy: tuple[float, float, float, float],
+        *,
+        canvas_width: int,
+        canvas_height: int,
+    ) -> Any:
+        mask_shape = getattr(mask, "shape", ())
+        if len(mask_shape) < 2:
+            return mask
+        mask_height = int(mask_shape[0])
+        mask_width = int(mask_shape[1])
+        if mask_width <= 0 or mask_height <= 0 or canvas_width <= 0 or canvas_height <= 0:
+            return mask
+        x0, y0, x1, y1 = bbox_xyxy
+        clamped_x0 = max(0.0, min(float(canvas_width - 1), x0))
+        clamped_y0 = max(0.0, min(float(canvas_height - 1), y0))
+        clamped_x1 = max(clamped_x0, min(float(canvas_width - 1), x1))
+        clamped_y1 = max(clamped_y0, min(float(canvas_height - 1), y1))
+        mask_x0 = max(0, min(mask_width - 1, int(math.floor(clamped_x0 * mask_width / float(canvas_width)))))
+        mask_y0 = max(0, min(mask_height - 1, int(math.floor(clamped_y0 * mask_height / float(canvas_height)))))
+        mask_x1 = max(
+            mask_x0,
+            min(
+                mask_width - 1,
+                int(math.ceil((clamped_x1 + 1.0) * mask_width / float(canvas_width))) - 1,
+            ),
+        )
+        mask_y1 = max(
+            mask_y0,
+            min(
+                mask_height - 1,
+                int(math.ceil((clamped_y1 + 1.0) * mask_height / float(canvas_height))) - 1,
+            ),
+        )
+        return mask[mask_y0 : mask_y1 + 1, mask_x0 : mask_x1 + 1]
 
     def _locations_from_detections(
         self,
@@ -388,7 +476,11 @@ class RoiLocator:
         for roi_name, roi_candidates in candidates_by_roi.items():
             roi_candidates.sort(key=lambda item: (-item.confidence, item.pose_error_px))
             best = roi_candidates[0]
-            conflicting = [candidate for candidate in roi_candidates[1:] if candidate.polygon_xy != best.polygon_xy]
+            conflicting = [
+                candidate
+                for candidate in roi_candidates[1:]
+                if self._bbox_iou(self._bbox(candidate.polygon_xy), self._bbox(best.polygon_xy)) < 0.9
+            ]
             if conflicting:
                 errors.append(f"{roi_name}: duplicate conflicting ROI segmentations")
             locations.append(best)
@@ -466,11 +558,12 @@ class RoiLocator:
                 f"{template.roi_name}: mask area ratio exceeds {recipe.roi_locator.max_mask_area_ratio:.3f}"
             )
         pose_error = self._safety_boundary_error_px(template, polygon)
+        native_output_size = self._bbox_output_size(polygon)
         return RoiLocation(
             roi_name=template.roi_name,
             confidence=candidate.score,
             polygon_xy=polygon,
-            output_size=template.output_size,
+            output_size=native_output_size,
             pose_error_px=pose_error,
             source=recipe.roi_locator.backend,
         )
@@ -526,3 +619,28 @@ class RoiLocator:
         xs = [point[0] for point in polygon]
         ys = [point[1] for point in polygon]
         return (min(xs), min(ys), max(xs), max(ys))
+
+    def _bbox_output_size(self, polygon: tuple[tuple[int, int], ...]) -> tuple[int, int]:
+        x0, y0, x1, y1 = self._bbox(polygon)
+        return (x1 - x0 + 1, y1 - y0 + 1)
+
+    def _bbox_iou(
+        self,
+        bbox_a: tuple[int, int, int, int],
+        bbox_b: tuple[int, int, int, int],
+    ) -> float:
+        ax0, ay0, ax1, ay1 = bbox_a
+        bx0, by0, bx1, by1 = bbox_b
+        inter_x0 = max(ax0, bx0)
+        inter_y0 = max(ay0, by0)
+        inter_x1 = min(ax1, bx1)
+        inter_y1 = min(ay1, by1)
+        if inter_x1 < inter_x0 or inter_y1 < inter_y0:
+            return 0.0
+        intersection = float((inter_x1 - inter_x0 + 1) * (inter_y1 - inter_y0 + 1))
+        area_a = float((ax1 - ax0 + 1) * (ay1 - ay0 + 1))
+        area_b = float((bx1 - bx0 + 1) * (by1 - by0 + 1))
+        denominator = area_a + area_b - intersection
+        if denominator <= 0.0:
+            return 0.0
+        return intersection / denominator

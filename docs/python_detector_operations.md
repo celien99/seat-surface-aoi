@@ -339,12 +339,22 @@ uv run python -m training_tools.collect_capture_dataset `
   --recipe seat_a_black_leather_production_v1 `
   --split train `
   --label-status unverified_ok `
-  --roi-output-size 64x48 `
   --skip-failed
 ```
 
-该入口按文件名中的 `TOP_BACK/TOP_CUSHION`、`L1/L2/L3` 和时间戳组包，默认将三路采集光映射为 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`，调用当前配方的 `seat_roi_seg.onnx` 做 ROI 定位并输出三光源 ROI PNG。ROI 多候选冲突、低置信、越界或缺光源样本会跳过或失败，不进入 PatchCore 正常库。`unverified_ok` 只表示采集来源未被人工标注，训练正式阈值前必须人工确认正常/缺陷标签。
+该入口按文件名中的 `TOP_BACK/TOP_CUSHION`、`L1/L2/L3` 和时间戳组包，默认将三路采集光映射为 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`，调用当前配方的 `seat_roi_seg.onnx` 做 ROI 定位并输出三光源 ROI PNG。默认保留 segmentation 裁出的原生 ROI 尺寸；只有需要与固定 PatchCore 输入尺寸对齐时，才显式传 `--roi-output-size WIDTHxHEIGHT`，缩放方式为等比例 letterbox。`dataset_summary.json` 记录 `roi_size_policy` 和 ROI 尺寸分布，`patchcore_training_summary.json` 记录实际训练输入 `input_shape_summary`。ROI 多候选冲突、低置信、越界或缺光源样本会跳过或失败，不进入 PatchCore 正常库。`unverified_ok` 只表示采集来源未被人工标注，训练正式阈值前必须人工确认正常/缺陷标签。
 
+从 `images_capture` 抽取同一序号的两机位三光源样本做完整链路模拟，并生成可查看检测图：
+
+```powershell
+uv run python -m training_tools.simulate_capture_detection `
+  --input images_capture\20260623\LINE1_AOI_CAPTURE_MANUAL_SEAT_9000 `
+  --output reports\capture_detection_20260623_9000 `
+  --recipe seat_a_black_leather_production_v1 `
+  --sample-index 1
+```
+
+该入口会写出 `detection_summary.json`、trace 和 `detection_images/*.png`，用于检查当前 ROI 定位、PatchCore 判定和检测图是否一致。
 导出 PatchCore 所需 WideResNet50 embedding ONNX：
 
 ```powershell
