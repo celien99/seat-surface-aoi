@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from display_app.infrastructure.image_provider import CameraImageProvider
-from display_app.services.image_loader import NetpbmImageError, load_netpbm_bgr
+from display_app.services.image_loader import RasterImageError, load_raster_bgr
 
 
 DISPLAY_EVENT_SCHEMA = "seat_surface_aoi.display_event.v1"
@@ -102,8 +102,8 @@ class DisplayBridge:
             if not camera_id or not path:
                 continue
             try:
-                self.image_provider.update_frame(camera_id, load_netpbm_bgr(path))
-            except (OSError, NetpbmImageError):
+                self.image_provider.update_frame(camera_id, load_raster_bgr(path))
+            except (OSError, RasterImageError):
                 continue
             camera_ids.append(camera_id)
 
@@ -113,8 +113,8 @@ class DisplayBridge:
             if not camera_id or not path:
                 continue
             try:
-                self.image_provider.update_overlay(camera_id, load_netpbm_bgr(path))
-            except (OSError, NetpbmImageError):
+                self.image_provider.update_overlay(camera_id, load_raster_bgr(path))
+            except (OSError, RasterImageError):
                 continue
             camera_ids.append(camera_id)
 

@@ -5,8 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from training_tools.collect_capture_dataset import collect_capture_dataset
+from python_detector.image_codec import write_gray_png
 from training_tools.build_patchcore_memory_bank import build_memory_bank
+from training_tools.collect_capture_dataset import collect_capture_dataset
 from training_tools.collect_shm_dataset import collect_shm_dataset
 from training_tools.collect_trace_dataset import TraceDatasetError, collect_trace_dataset, main as collect_main
 from training_tools.job_fixture import make_simulated_job
@@ -37,7 +38,7 @@ def test_collect_trace_dataset_generates_manifest_and_images(tmp_path: Path) -> 
     assert all(row["defect_classes"] == ["scratch"] for row in rows)
     assert all(row["bbox_xyxy_pixel"] == [[1, 2, 10, 12]] for row in rows)
     for row in rows:
-        assert (output / row["image_path"]).read_bytes().startswith(b"P5\n")
+        assert (output / row["image_path"]).read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 
 
 def test_collect_trace_dataset_keeps_robot_pose_images_separate(tmp_path: Path) -> None:
@@ -75,7 +76,7 @@ def test_collect_trace_dataset_fails_on_missing_images(tmp_path: Path) -> None:
     trace_dir.mkdir(parents=True)
     (trace_dir / "result.json").write_text('{"sequence_id":1,"seat_id":"SIM_1","decision":"OK"}', encoding="utf-8")
 
-    with pytest.raises(TraceDatasetError, match="缺少 ROI 图像目录"):
+    with pytest.raises(TraceDatasetError, match="trace 缺少 ROI 图像目录"):
         collect_trace_dataset([trace_dir], tmp_path / "dataset")
 
 
@@ -157,7 +158,7 @@ def test_collect_shm_dataset_reuses_detector_trace_and_manifest(tmp_path: Path) 
     raw_rows = [json.loads(line) for line in result.raw_frame_manifest_path.read_text(encoding="utf-8").splitlines()]
     assert len(raw_rows) == 6
     assert {row["camera_id"] for row in raw_rows} == {"TOP_BACK", "TOP_CUSHION"}
-    assert (output / raw_rows[0]["image_path"]).read_bytes().startswith(b"P5\n")
+    assert (output / raw_rows[0]["image_path"]).read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 
 
 def test_collect_capture_dataset_from_flat_png_dir(tmp_path: Path) -> None:
@@ -165,7 +166,7 @@ def test_collect_capture_dataset_from_flat_png_dir(tmp_path: Path) -> None:
     input_dir.mkdir()
     for camera_id in ("TOP_BACK", "TOP_CUSHION"):
         for index, light_id in enumerate(("L1", "L2", "L3"), start=1):
-            _write_png_gray(
+            _write_flat_png(
                 input_dir / f"{camera_id}_{1000 + index}_{light_id}_original.png",
                 width=64,
                 height=48,
@@ -190,7 +191,7 @@ def test_collect_capture_dataset_from_flat_png_dir(tmp_path: Path) -> None:
     assert all(row["decision"] == "OK" for row in rows)
     assert all(row["quality_pass"] is True for row in rows)
     first_image = output / rows[0]["image_path"]
-    assert first_image.read_bytes().startswith(b"P5\n16 12\n255\n")
+    assert first_image.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 
 
 def test_collect_capture_dataset_default_light_map_uses_recipe_order(tmp_path: Path) -> None:
@@ -198,7 +199,7 @@ def test_collect_capture_dataset_default_light_map_uses_recipe_order(tmp_path: P
     input_dir.mkdir()
     for camera_id in ("TOP_BACK", "TOP_CUSHION"):
         for index, light_id in enumerate(("L1", "L2", "L3"), start=1):
-            _write_png_gray(
+            _write_flat_png(
                 input_dir / f"{camera_id}_{2000 + index}_{light_id}_original.png",
                 width=64,
                 height=48,
@@ -223,7 +224,7 @@ def _write_trace(trace_dir: Path) -> Path:
     image_dir = trace_dir / "images" / "TOP_BACK" / "seat"
     image_dir.mkdir(parents=True)
     for light_id in ("DIFFUSE", "HIGH_LEFT"):
-        (image_dir / f"{light_id}.pgm").write_bytes(b"P5\n2 2\n255\n\x01\x02\x03\x04")
+        write_gray_png(image_dir / f"{light_id}.png", 2, 2, b"\x01\x02\x03\x04")
     (trace_dir / "job.json").write_text(
         json.dumps(
             {
@@ -264,27 +265,8 @@ def _write_trace(trace_dir: Path) -> Path:
     return trace_dir
 
 
-def _write_png_gray(path: Path, *, width: int, height: int, value: int) -> None:
-    import zlib
-
-    raw_rows = b"".join(bytes([0]) + bytes([value] * width) for _ in range(height))
-    payload = zlib.compress(raw_rows)
-
-    def chunk(kind: bytes, data: bytes) -> bytes:
-        import struct
-        import zlib
-
-        crc = zlib.crc32(kind + data) & 0xFFFFFFFF
-        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", crc)
-
-    import struct
-
-    path.write_bytes(
-        b"\x89PNG\r\n\x1a\n"
-        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0))
-        + chunk(b"IDAT", payload)
-        + chunk(b"IEND", b"")
-    )
+def _write_flat_png(path: Path, *, width: int, height: int, value: int) -> None:
+    write_gray_png(path, width, height, bytes([value] * width * height))
 
 
 def _write_robot_pose_trace(trace_dir: Path) -> Path:
@@ -292,7 +274,7 @@ def _write_robot_pose_trace(trace_dir: Path) -> Path:
         image_dir = trace_dir / "images" / "EYE_IN_HAND" / pose_id / "seat"
         image_dir.mkdir(parents=True)
         for light_id in ("DIFFUSE", "HIGH_LEFT"):
-            (image_dir / f"{light_id}.pgm").write_bytes(b"P5\n2 2\n255\n" + pixel)
+            write_gray_png(image_dir / f"{light_id}.png", 2, 2, pixel)
     (trace_dir / "job.json").write_text(
         json.dumps(
             {

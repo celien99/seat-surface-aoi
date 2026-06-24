@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from python_detector.image_codec import write_gray_png
 from training_tools.dataset_manifest import load_manifest_groups, read_pgm
 from training_tools.extract_embeddings import extract_embeddings
 from training_tools.training_errors import TrainingDataError
@@ -12,15 +13,14 @@ from training_tools.training_errors import TrainingDataError
 
 @pytest.fixture
 def sample_manifest(tmp_path: Path) -> Path:
-    """构造一个模拟 manifest，包含一组 OK 多光源 ROI 样本。"""
     manifest_path = tmp_path / "manifest.jsonl"
     rows = []
     for index, light_id in enumerate(("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT")):
-        image_path = Path("images/TOP_BACK/seat") / light_id / f"ok_1_{light_id}.pgm"
+        image_path = Path("images/TOP_BACK/seat") / light_id / f"ok_1_{light_id}.png"
         full_path = tmp_path / image_path
         full_path.parent.mkdir(parents=True, exist_ok=True)
         pixels = bytes(60 + index * 20 + ((x + y) % 13) for y in range(48) for x in range(64))
-        full_path.write_bytes(b"P5\n64 48\n255\n" + pixels)
+        write_gray_png(full_path, 64, 48, pixels)
         rows.append(json.dumps({
             "sample_id": f"ok_1_{light_id}",
             "source_trace_dir": "trace/SIM_1",
@@ -40,8 +40,7 @@ def sample_manifest(tmp_path: Path) -> Path:
     return manifest_path
 
 
-def test_manifest_groups_load_pgm_images(tmp_path: Path, sample_manifest: Path) -> None:
-    """manifest 数据层能聚合多光源样本并读取 PGM 图像。"""
+def test_manifest_groups_load_png_images(tmp_path: Path, sample_manifest: Path) -> None:
     groups = load_manifest_groups(sample_manifest)
     assert len(groups) == 1
     assert groups[0].lights == ("DIFFUSE", "HIGH_LEFT", "POLAR_DIFFUSE")
@@ -51,7 +50,6 @@ def test_manifest_groups_load_pgm_images(tmp_path: Path, sample_manifest: Path) 
 
 
 def test_extract_embeddings_with_statistical_fallback(tmp_path: Path, sample_manifest: Path) -> None:
-    """statistical 模式读取真实 ROI 图并输出和在线 embedding 一致的统计向量。"""
     output = tmp_path / "embeddings.jsonl"
 
     extract_embeddings(
@@ -68,13 +66,12 @@ def test_extract_embeddings_with_statistical_fallback(tmp_path: Path, sample_man
         assert entry["sample_id"] == "ok_1"
         assert "embedding" in entry
         assert len(entry["embedding"]) == 10
-        assert all(isinstance(v, float) for v in entry["embedding"])
+        assert all(isinstance(value, float) for value in entry["embedding"])
         assert entry["embedding"][0] > 0.0
         assert entry["input_shape_nchw"] == [1, 3, 48, 64]
 
 
 def test_extract_embeddings_empty_manifest(tmp_path: Path) -> None:
-    """空 manifest 抛出 TrainingDataError。"""
     empty = tmp_path / "empty.jsonl"
     empty.write_text("", encoding="utf-8")
     with pytest.raises(TrainingDataError, match="没有 OK 样本"):
@@ -82,10 +79,9 @@ def test_extract_embeddings_empty_manifest(tmp_path: Path) -> None:
 
 
 def test_extract_embeddings_no_ok_samples(tmp_path: Path) -> None:
-    """manifest 中没有 OK 样本时抛出错误。"""
     manifest = tmp_path / "manifest.jsonl"
     manifest.write_text(
-        json.dumps({"sample_id": "ng_1", "decision": "NG", "quality_pass": False, "camera_id": "TOP_BACK", "roi_name": "seat", "light_id": "DIFFUSE", "image_path": "x.pgm"}) + "\n",
+        json.dumps({"sample_id": "ng_1", "decision": "NG", "quality_pass": False, "camera_id": "TOP_BACK", "roi_name": "seat", "light_id": "DIFFUSE", "image_path": "x.png"}) + "\n",
         encoding="utf-8",
     )
     with pytest.raises(TrainingDataError, match="没有 OK 样本"):

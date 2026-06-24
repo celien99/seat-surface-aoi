@@ -294,9 +294,9 @@ uv run python -m tools.validate_model_assets --recipe seat_a_robot_flyshot_produ
 - `fusion_summary.json`
 - `timings.json`
 - `error.json`
-- `raw_images/<camera_id>/<pose_id>/<light_id>.pgm`
-- `images/<camera_id>/<pose_id>/<roi_name>/<light_id>.pgm`
-- `overlays/*.ppm`
+- `raw_images/<camera_id>/<pose_id>/<light_id>.png`
+- `images/<camera_id>/<pose_id>/<roi_name>/<light_id>.png`
+- `overlays/*.png`
 
 保存策略：
 
@@ -343,7 +343,7 @@ uv run python -m training_tools.collect_capture_dataset `
   --skip-failed
 ```
 
-该入口按文件名中的 `TOP_BACK/TOP_CUSHION`、`L1/L2/L3` 和时间戳组包，默认将三路采集光映射为 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`，调用当前配方的 `seat_roi_seg.onnx` 做 ROI 定位并输出三光源 ROI PGM。ROI 多候选冲突、低置信、越界或缺光源样本会跳过或失败，不进入 PatchCore 正常库。`unverified_ok` 只表示采集来源未被人工标注，训练正式阈值前必须人工确认正常/缺陷标签。
+该入口按文件名中的 `TOP_BACK/TOP_CUSHION`、`L1/L2/L3` 和时间戳组包，默认将三路采集光映射为 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`，调用当前配方的 `seat_roi_seg.onnx` 做 ROI 定位并输出三光源 ROI PNG。ROI 多候选冲突、低置信、越界或缺光源样本会跳过或失败，不进入 PatchCore 正常库。`unverified_ok` 只表示采集来源未被人工标注，训练正式阈值前必须人工确认正常/缺陷标签。
 
 导出 PatchCore 所需 WideResNet50 embedding ONNX：
 

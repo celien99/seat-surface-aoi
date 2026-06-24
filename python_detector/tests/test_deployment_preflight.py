@@ -13,22 +13,24 @@ def test_deployment_preflight_handoff_has_no_local_blockers() -> None:
     payload = preflight_to_dict(items)
 
     assert payload["summary"]["BLOCKED"] == 0
-    assert "生产模型资产" in payload["field_actions"]
+    assert "现场平台接口" in payload["field_actions"]
     assert any(item.category == "生产运行配置" and item.status == "OK" for item in items)
     assert any(item.category == "生产光源配方对齐" and item.status == "OK" for item in items)
+    assert any(item.category == "生产模型资产" and item.status == "OK" for item in items)
     assert any(item.category == "Windows 共享内存映射" and item.status == "OK" for item in items)
     assert any(item.category == "跨平台模拟 IPC 入口" and item.status == "OK" for item in items)
     assert any(item.category == "部署包交接入口" and item.status == "OK" for item in items)
     assert any(item.category == "Python 离线依赖包" and item.status == "OK" for item in items)
 
 
-def test_deployment_preflight_strict_blocks_field_assets_and_configs() -> None:
+def test_deployment_preflight_strict_has_no_model_asset_blocker_now() -> None:
     items = validate_deployment_preflight(strict_production=True)
     blocked = {item.category for item in items if item.status == "BLOCKED"}
 
     assert "生产运行配置" not in blocked
     assert "生产光源配方对齐" not in blocked
-    assert "生产模型资产" in blocked
+    assert "生产模型资产" not in blocked
+    assert any(item.category == "生产模型资产" and item.status == "OK" for item in items)
     assert all(not item.local_actionable for item in items if item.category in blocked)
 
 

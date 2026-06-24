@@ -8,6 +8,7 @@ from typing import Protocol
 
 from python_detector.algorithm import SeatSurfaceAoiAlgorithm
 from python_detector.config.recipe_schema import Recipe, RecipeManager, TraceConfig
+from python_detector.image_codec import write_gray_png
 from python_detector.ipc.data_types import InspectionResult, LightFrame, SeatInspectionJob
 from python_detector.ipc.shm_client import ShmClient
 from python_detector.trace.trace_writer import TraceWriter
@@ -43,7 +44,7 @@ def collect_shm_dataset(
     shm_client: _ShmClientLike | None = None,
     algorithm: SeatSurfaceAoiAlgorithm | None = None,
 ) -> ShmDatasetCollection:
-    """从共享内存消费 C++ 传来的多相机多光源图像，生成 trace 和训练 manifest。"""
+    """从共享内存消费多机位多光源图像，生成 trace 和训练 manifest。"""
     if max_jobs <= 0:
         raise TrainingDataError("max_jobs 必须大于 0")
     client = shm_client or ShmClient()
@@ -72,7 +73,7 @@ def collect_shm_dataset(
     if processed == 0:
         raise TrainingDataError(f"共享内存在 {timeout_ms} ms 内没有可用检测任务")
     if not trace_dirs:
-        raise TrainingDataError("检测任务已处理，但没有生成 trace；请检查配方 trace 策略")
+        raise TrainingDataError("检测任务已处理，但没有生成 trace，请检查配方 trace 策略")
 
     samples = collect_trace_dataset(
         trace_dirs,
@@ -126,7 +127,7 @@ def _write_raw_frames(job: SeatInspectionJob, output_dir: Path) -> None:
         for light_id, frame in sorted(bundle.light_frames.items()):
             image_path = _raw_frame_path(output_dir, job, frame)
             image_path.parent.mkdir(parents=True, exist_ok=True)
-            _write_pgm(image_path, frame)
+            _write_png(image_path, frame)
             rows.append(
                 json.dumps(
                     {
@@ -159,13 +160,13 @@ def _write_raw_frames(job: SeatInspectionJob, output_dir: Path) -> None:
 def _raw_frame_path(output_dir: Path, job: SeatInspectionJob, frame: LightFrame) -> Path:
     filename = (
         f"{_safe_name(job.seat_id)}_{job.sequence_id}_{frame.frame_index}_"
-        f"{_safe_name(frame.light_id)}.pgm"
+        f"{_safe_name(frame.light_id)}.png"
     )
     pose = frame.pose_id or frame.camera_id
     return output_dir / "raw_images" / _safe_name(frame.camera_id) / _safe_name(pose) / _safe_name(frame.light_id) / filename
 
 
-def _write_pgm(path: Path, frame: LightFrame) -> None:
+def _write_png(path: Path, frame: LightFrame) -> None:
     if frame.dtype != "UINT8" or frame.channels != 1:
         raise TrainingDataError(f"raw frame 仅支持 UINT8 单通道图像: {frame.camera_id}/{frame.light_id}")
     expected = frame.stride_bytes * frame.height
@@ -174,9 +175,8 @@ def _write_pgm(path: Path, frame: LightFrame) -> None:
     rows = bytearray()
     for row in range(frame.height):
         start = row * frame.stride_bytes
-        rows.extend(frame.image[start : start + frame.width])
-    header = f"P5\n{frame.width} {frame.height}\n255\n".encode("ascii")
-    path.write_bytes(header + bytes(rows))
+        rows.extend(frame.image[start:start + frame.width])
+    write_gray_png(path, frame.width, frame.height, bytes(rows))
 
 
 def _safe_name(value: str) -> str:
@@ -184,7 +184,7 @@ def _safe_name(value: str) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="从共享内存采集 C++ 传来的多光源图像并生成训练 manifest")
+    parser = argparse.ArgumentParser(description="从共享内存采集多光源图像并生成训练 manifest")
     parser.add_argument("--output", required=True, type=Path, help="输出数据集目录")
     parser.add_argument("--max-jobs", type=int, default=1)
     parser.add_argument("--timeout-ms", type=int, default=8000)

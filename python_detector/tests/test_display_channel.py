@@ -6,6 +6,7 @@ from pathlib import Path
 
 from python_detector.algorithm import AlgorithmRun
 from python_detector.display_channel import DISPLAY_EVENT_SCHEMA, DisplayChannelWriter, build_display_event
+from python_detector.image_codec import write_gray_png, write_rgb_png
 from python_detector.ipc.data_types import DefectResult, InspectionResult
 from training_tools.job_fixture import make_simulated_job
 
@@ -18,9 +19,9 @@ def test_build_display_event_includes_result_and_trace_assets(tmp_path: Path) ->
     raw_dir.mkdir(parents=True)
     image_dir.mkdir(parents=True)
     overlay_dir.mkdir()
-    (raw_dir / "DIFFUSE.pgm").write_bytes(b"P5\n1 1\n255\n\x08")
-    (image_dir / "DIFFUSE.pgm").write_bytes(b"P5\n1 1\n255\n\x10")
-    (overlay_dir / "D1_TOP_BACK_TOP_BACK_full.ppm").write_bytes(b"P6\n1 1\n255\n\xff\x00\x00")
+    write_gray_png(raw_dir / "DIFFUSE.png", 1, 1, b"\x08")
+    write_gray_png(image_dir / "DIFFUSE.png", 1, 1, b"\x10")
+    write_rgb_png(overlay_dir / "D1_TOP_BACK_TOP_BACK_full.png", 1, 1, b"\xff\x00\x00")
     job = make_simulated_job()
     defect = DefectResult(
         defect_id="D1",
@@ -55,8 +56,8 @@ def test_build_display_event_includes_result_and_trace_assets(tmp_path: Path) ->
     assert event["defects"][0]["class_name"] == "scratch"
     assert event["images"][0]["kind"] == "raw_image"
     assert event["images"][1]["kind"] == "roi_image"
-    assert event["images"][1]["path"].endswith("DIFFUSE.pgm")
-    assert event["overlays"][0]["path"].endswith(".ppm")
+    assert event["images"][1]["path"].endswith("DIFFUSE.png")
+    assert event["overlays"][0]["path"].endswith(".png")
 
 
 def test_display_channel_writer_updates_latest_atomically(tmp_path: Path) -> None:

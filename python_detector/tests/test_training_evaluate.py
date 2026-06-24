@@ -3,27 +3,24 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from python_detector.image_codec import write_gray_png
 from training_tools.evaluate_pipeline import compute_iou, evaluate_detections
 
 
 def test_compute_iou_full_overlap() -> None:
-    """完全重叠的 bbox IoU = 1.0。"""
     assert compute_iou((0, 0, 10, 10), (0, 0, 10, 10)) == 1.0
 
 
 def test_compute_iou_no_overlap() -> None:
-    """完全不重叠的 bbox IoU = 0.0。"""
     assert compute_iou((0, 0, 5, 5), (10, 10, 15, 15)) == 0.0
 
 
 def test_compute_iou_partial() -> None:
-    """部分重叠：两个 10x10 bbox 偏移 5px。"""
     iou = compute_iou((0, 0, 10, 10), (5, 5, 15, 15))
     assert 0.1 < iou < 0.2
 
 
 def test_evaluate_detections_all_matched() -> None:
-    """所有预测 bbox 正确匹配 ground truth。"""
     preds = [
         {"class_name": "scratch", "score": 0.9, "bbox_xyxy_pixel": (10, 10, 30, 30)},
         {"class_name": "dent", "score": 0.7, "bbox_xyxy_pixel": (50, 50, 80, 80)},
@@ -41,7 +38,6 @@ def test_evaluate_detections_all_matched() -> None:
 
 
 def test_evaluate_detections_no_predictions() -> None:
-    """没有预测但有 ground truth → recall=0。"""
     preds: list[dict] = []
     gts = [{"class_name": "scratch", "bbox_xyxy_pixel": (10, 10, 30, 30)}]
     report = evaluate_detections(preds, gts, iou_threshold=0.5)
@@ -51,7 +47,6 @@ def test_evaluate_detections_no_predictions() -> None:
 
 
 def test_evaluate_detections_false_positives() -> None:
-    """只有预测没有 ground truth → precision=0。"""
     preds = [{"class_name": "scratch", "score": 0.9, "bbox_xyxy_pixel": (10, 10, 30, 30)}]
     gts: list[dict] = []
     report = evaluate_detections(preds, gts, iou_threshold=0.5)
@@ -60,7 +55,6 @@ def test_evaluate_detections_false_positives() -> None:
 
 
 def test_evaluate_detections_score_below_threshold() -> None:
-    """低分预测不计入匹配。"""
     preds = [{"class_name": "scratch", "score": 0.1, "bbox_xyxy_pixel": (10, 10, 30, 30)}]
     gts = [{"class_name": "scratch", "bbox_xyxy_pixel": (10, 10, 30, 30)}]
     report = evaluate_detections(preds, gts, iou_threshold=0.5, score_threshold=0.5)
@@ -69,17 +63,16 @@ def test_evaluate_detections_score_below_threshold() -> None:
 
 
 def test_evaluate_end_to_end_json(tmp_path: Path) -> None:
-    """端到端：JSON manifest 图像输入 → 当前配方模型评估报告 JSON 输出。"""
     from training_tools.evaluate_pipeline import evaluate_from_manifest
 
     manifest = tmp_path / "manifest.jsonl"
     entries = []
     for index, light_id in enumerate(("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT")):
-        image_path = Path("images/TOP_BACK/seat") / light_id / f"sample_1_{light_id}.pgm"
+        image_path = Path("images/TOP_BACK/seat") / light_id / f"sample_1_{light_id}.png"
         full_path = tmp_path / image_path
         full_path.parent.mkdir(parents=True, exist_ok=True)
         pixels = bytes(80 + index * 10 + ((x + y) % 9) for y in range(48) for x in range(64))
-        full_path.write_bytes(b"P5\n64 48\n255\n" + pixels)
+        write_gray_png(full_path, 64, 48, pixels)
         entries.append({
             "sample_id": f"sample_1_{light_id}",
             "source_trace_dir": "trace/SIM_1",
@@ -97,7 +90,7 @@ def test_evaluate_end_to_end_json(tmp_path: Path) -> None:
             "ground_truth_bbox": [[10, 10, 30, 30]],
             "ground_truth_class": ["scratch"],
         })
-    manifest.write_text("\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8")
+    manifest.write_text("\n".join(json.dumps(entry) for entry in entries) + "\n", encoding="utf-8")
 
     output = tmp_path / "evaluation_report.json"
     report = evaluate_from_manifest(
@@ -115,14 +108,13 @@ def test_evaluate_end_to_end_json(tmp_path: Path) -> None:
 
 
 def test_collect_trace_dataset_filter_decision(tmp_path: Path) -> None:
-    """验证 --filter-decision 参数可筛选指定决策的样本。"""
     from training_tools.collect_trace_dataset import collect_trace_dataset
 
     for decision, seq_id in [("OK", 1), ("NG", 2)]:
         trace_dir = tmp_path / "trace" / f"SIM_{seq_id}_{seq_id}"
         images_dir = trace_dir / "images" / "TOP_BACK" / "seat"
         images_dir.mkdir(parents=True, exist_ok=True)
-        (images_dir / "DIFFUSE.pgm").write_bytes(b"P5\n1 1\n255\n\x80")
+        write_gray_png(images_dir / "DIFFUSE.png", 1, 1, b"\x80")
         (trace_dir / "result.json").write_text(json.dumps({
             "sequence_id": seq_id,
             "seat_id": f"SIM_{seq_id}",

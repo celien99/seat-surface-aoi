@@ -3,6 +3,7 @@ from pathlib import Path
 import json
 
 from python_detector.config.recipe_schema import ModelConfig, RecipeManager
+from python_detector.image_codec import load_raster_image
 from python_detector.ipc.data_types import CameraBundle, InspectionResult, SeatInspectionJob
 from python_detector.pipeline.pipeline import InspectionPipeline
 from python_detector.pipeline.quality_gate import FrameQuality, QualityReport
@@ -43,8 +44,8 @@ def test_trace_writer_generates_result_files(tmp_path: Path) -> None:
     assert (trace_dir / "fusion_summary.json").exists()
     assert (trace_dir / "timings.json").exists()
     assert (trace_dir / "error.json").exists()
-    assert (trace_dir / "raw_images" / "TOP_BACK" / "TOP_BACK" / "DIFFUSE.pgm").exists()
-    assert (trace_dir / "images" / "TOP_BACK" / "TOP_BACK" / "seat" / "DIFFUSE.pgm").exists()
+    assert (trace_dir / "raw_images" / "TOP_BACK" / "TOP_BACK" / "DIFFUSE.png").exists()
+    assert (trace_dir / "images" / "TOP_BACK" / "TOP_BACK" / "seat" / "DIFFUSE.png").exists()
 
 
 def test_trace_writer_generates_defect_overlay(tmp_path: Path) -> None:
@@ -56,9 +57,9 @@ def test_trace_writer_generates_defect_overlay(tmp_path: Path) -> None:
 
     assert result.decision == "NG"
     assert trace_dir is not None
-    overlays = list((trace_dir / "overlays").glob("*.ppm"))
+    overlays = list((trace_dir / "overlays").glob("*.png"))
     assert overlays
-    assert overlays[0].read_bytes().startswith(b"P6\n")
+    assert overlays[0].read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 
 
 def test_trace_writer_separates_robot_flyshot_pose_images(tmp_path: Path) -> None:
@@ -108,8 +109,8 @@ def test_trace_writer_separates_robot_flyshot_pose_images(tmp_path: Path) -> Non
     trace_dir = TraceWriter(recipe.trace.root_dir).write(job, recipe, result, {"prepared_bundles": prepared})
 
     assert trace_dir is not None
-    assert (trace_dir / "images" / "EYE_IN_HAND" / "T1_BACKREST" / "seat" / "DIFFUSE.pgm").exists()
-    assert (trace_dir / "images" / "EYE_IN_HAND" / "T2_CUSHION" / "seat" / "DIFFUSE.pgm").exists()
+    assert (trace_dir / "images" / "EYE_IN_HAND" / "T1_BACKREST" / "seat" / "DIFFUSE.png").exists()
+    assert (trace_dir / "images" / "EYE_IN_HAND" / "T2_CUSHION" / "seat" / "DIFFUSE.png").exists()
 
 
 def test_trace_writer_uses_deterministic_ok_sampling(tmp_path: Path) -> None:
@@ -200,8 +201,8 @@ def test_pipeline_model_error_context_is_traceable(tmp_path: Path) -> None:
     assert pipeline.last_context["error"]["roi_name"] == "seat"
     assert pipeline.last_context["error"]["tensor_shape_nchw"] == [1, 3, 48, 64]
     assert trace_dir is not None
-    assert (trace_dir / "raw_images" / "TOP_BACK" / "TOP_BACK" / "DIFFUSE.pgm").exists()
-    assert (trace_dir / "images" / "TOP_BACK" / "TOP_BACK" / "seat" / "DIFFUSE.pgm").exists()
+    assert (trace_dir / "raw_images" / "TOP_BACK" / "TOP_BACK" / "DIFFUSE.png").exists()
+    assert (trace_dir / "images" / "TOP_BACK" / "TOP_BACK" / "seat" / "DIFFUSE.png").exists()
     error = json.loads((trace_dir / "error.json").read_text(encoding="utf-8"))
     assert error["type"] == "ModelAssetUnavailableInferenceError"
     assert error["model_key"] == "fake_default"
@@ -225,8 +226,21 @@ def test_pipeline_roi_model_asset_unavailable_saves_raw_images(tmp_path: Path) -
     assert result.error_code == 13
     assert pipeline.last_context["error"]["asset"]["asset_path"] == "missing_roi.onnx"
     assert trace_dir is not None
-    assert (trace_dir / "raw_images" / "TOP_BACK" / "TOP_BACK" / "DIFFUSE.pgm").exists()
+    assert (trace_dir / "raw_images" / "TOP_BACK" / "TOP_BACK" / "DIFFUSE.png").exists()
     assert not (trace_dir / "images").exists()
+
+
+def test_trace_png_is_decodable(tmp_path: Path) -> None:
+    recipe = _recipe(tmp_path, save_ok_ratio=1.0)
+    pipeline = InspectionPipeline()
+    job = make_simulated_job()
+    result = pipeline.process(job, recipe)
+    trace_dir = TraceWriter(recipe.trace.root_dir).write(job, recipe, result, pipeline.last_context)
+    assert trace_dir is not None
+    image = load_raster_image(trace_dir / "images" / "TOP_BACK" / "TOP_BACK" / "seat" / "DIFFUSE.png")
+    assert image.width > 0
+    assert image.height > 0
+    assert image.channels == 1
 
 
 def test_replay_report_includes_quality_and_error_context() -> None:

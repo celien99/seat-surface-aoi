@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from python_detector.config.recipe_schema import Recipe
+from python_detector.image_codec import write_gray_png, write_rgb_png
 from python_detector.ipc.data_types import DefectResult, InspectionResult, LightFrame, SeatInspectionJob
 
 
@@ -75,13 +76,13 @@ class TraceWriter:
         for bundle in prepared_bundles or []:
             for roi_name, frames in getattr(bundle, "rois", {}).items():
                 for light_id, frame in frames.items():
-                    self._write_pgm(
+                    self._write_gray_image(
                         trace_dir
                         / "images"
                         / _safe_name(bundle.camera_id)
                         / _safe_name(getattr(bundle, "pose_id", "") or bundle.camera_id)
                         / _safe_name(roi_name)
-                        / f"{_safe_name(light_id)}.pgm",
+                        / f"{_safe_name(light_id)}.png",
                         frame,
                     )
 
@@ -89,12 +90,12 @@ class TraceWriter:
         for bundle in job.camera_bundles:
             pose_id = bundle.pose_id or bundle.camera_id
             for light_id, frame in bundle.light_frames.items():
-                self._write_pgm(
+                self._write_gray_image(
                     trace_dir
                     / "raw_images"
                     / _safe_name(bundle.camera_id)
                     / _safe_name(pose_id)
-                    / f"{_safe_name(light_id)}.pgm",
+                    / f"{_safe_name(light_id)}.png",
                     frame,
                 )
 
@@ -111,7 +112,7 @@ class TraceWriter:
                 overlay_dir
                 / (
                     f"{_safe_name(defect.defect_id)}_{_safe_name(defect.camera_id)}_"
-                    f"{_safe_name(defect.pose_id or defect.camera_id)}_{_safe_name(defect.roi_name)}.ppm"
+                    f"{_safe_name(defect.pose_id or defect.camera_id)}_{_safe_name(defect.roi_name)}.png"
                 ),
                 frame,
                 defect,
@@ -148,13 +149,10 @@ class TraceWriter:
             )
         )
 
-    def _write_pgm(self, path: Path, frame: LightFrame) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        header = f"P5\n{frame.width} {frame.height}\n255\n".encode("ascii")
-        path.write_bytes(header + self._frame_bytes(frame))
+    def _write_gray_image(self, path: Path, frame: LightFrame) -> None:
+        write_gray_png(path, frame.width, frame.height, self._frame_bytes(frame))
 
     def _write_overlay_ppm(self, path: Path, frame: LightFrame, defect: DefectResult) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
         gray = self._frame_bytes(frame)
         x0, y0, x1, y1 = self._bbox_in_frame(defect.bbox_xyxy_pixel, frame)
         rgb = bytearray()
@@ -165,8 +163,7 @@ class TraceWriter:
                     rgb.extend((255, 0, 0))
                 else:
                     rgb.extend((value, value, value))
-        header = f"P6\n{frame.width} {frame.height}\n255\n".encode("ascii")
-        path.write_bytes(header + bytes(rgb))
+        write_rgb_png(path, frame.width, frame.height, bytes(rgb))
 
     def _frame_bytes(self, frame: LightFrame) -> bytes:
         if frame.dtype != "UINT8" or frame.channels != 1:

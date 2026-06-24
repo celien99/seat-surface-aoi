@@ -8,31 +8,36 @@ from display_app.services.display_bridge import DisplayBridge
 from display_app.services.image_loader import load_netpbm_bgr
 from display_app.services.operator_journal import OperatorJournal
 from display_app.viewmodels.main_viewmodel import MainViewModel
+from python_detector.image_codec import write_gray_png, write_rgb_png
 
 
-def test_load_netpbm_bgr_supports_pgm_and_ppm(tmp_path: Path) -> None:
+def test_load_netpbm_bgr_supports_png_pgm_and_ppm(tmp_path: Path) -> None:
+    png = tmp_path / "sample.png"
+    write_gray_png(png, 2, 1, b"\x01\x02")
+    png_image = load_netpbm_bgr(png)
+    assert png_image.shape == (1, 2, 3)
+    assert png_image[0, 0].tolist() == [1, 1, 1]
+
     pgm = tmp_path / "sample.pgm"
     pgm.write_bytes(b"P5\n2 1\n255\n\x01\x02")
     pgm_image = load_netpbm_bgr(pgm)
-
     assert pgm_image.shape == (1, 2, 3)
     assert pgm_image[0, 0].tolist() == [1, 1, 1]
 
     ppm = tmp_path / "sample.ppm"
     ppm.write_bytes(b"P6\n1 1\n255\n\x0a\x14\x1e")
     ppm_image = load_netpbm_bgr(ppm)
-
     assert ppm_image.shape == (1, 1, 3)
     assert ppm_image[0, 0].tolist() == [30, 20, 10]
 
 
 def test_display_bridge_reads_latest_and_publishes_images(tmp_path: Path) -> None:
-    raw_path = tmp_path / "raw.pgm"
-    image_path = tmp_path / "roi.pgm"
-    overlay_path = tmp_path / "overlay.ppm"
-    raw_path.write_bytes(b"P5\n2 1\n255\n\x09\x09")
-    image_path.write_bytes(b"P5\n2 1\n255\n\x01\x02")
-    overlay_path.write_bytes(b"P6\n1 1\n255\n\xff\x00\x00")
+    raw_path = tmp_path / "raw.png"
+    image_path = tmp_path / "roi.png"
+    overlay_path = tmp_path / "overlay.png"
+    write_gray_png(raw_path, 2, 1, b"\x09\x09")
+    write_gray_png(image_path, 2, 1, b"\x01\x02")
+    write_rgb_png(overlay_path, 1, 1, b"\xff\x00\x00")
     _write_latest(
         tmp_path,
         {
@@ -82,8 +87,8 @@ def test_display_bridge_reads_latest_and_publishes_images(tmp_path: Path) -> Non
 
 
 def test_display_bridge_publishes_raw_image_when_roi_is_unavailable(tmp_path: Path) -> None:
-    raw_path = tmp_path / "raw.pgm"
-    raw_path.write_bytes(b"P5\n2 1\n255\n\x09\x0a")
+    raw_path = tmp_path / "raw.png"
+    write_gray_png(raw_path, 2, 1, b"\x09\x0a")
     _write_latest(
         tmp_path,
         {
@@ -118,10 +123,10 @@ def test_display_bridge_publishes_raw_image_when_roi_is_unavailable(tmp_path: Pa
 
 
 def test_main_view_model_updates_from_display_event(tmp_path: Path) -> None:
-    image_path = tmp_path / "roi.pgm"
-    overlay_path = tmp_path / "overlay.ppm"
-    image_path.write_bytes(b"P5\n2 1\n255\n\x01\x02")
-    overlay_path.write_bytes(b"P6\n1 1\n255\n\xff\x00\x00")
+    image_path = tmp_path / "roi.png"
+    overlay_path = tmp_path / "overlay.png"
+    write_gray_png(image_path, 2, 1, b"\x01\x02")
+    write_rgb_png(overlay_path, 1, 1, b"\xff\x00\x00")
     _write_latest(
         tmp_path,
         {
@@ -164,8 +169,8 @@ def test_main_view_model_updates_from_display_event(tmp_path: Path) -> None:
 
 
 def test_main_view_model_marks_model_unavailable_as_sampling_mode(tmp_path: Path) -> None:
-    raw_path = tmp_path / "raw.pgm"
-    raw_path.write_bytes(b"P5\n2 1\n255\n\x09\x0a")
+    raw_path = tmp_path / "raw.png"
+    write_gray_png(raw_path, 2, 1, b"\x09\x0a")
     _write_latest(
         tmp_path,
         {
@@ -223,8 +228,8 @@ def test_display_bridge_reads_cpp_controller_events(tmp_path: Path) -> None:
 
 
 def test_main_view_model_persists_review_actions(tmp_path: Path) -> None:
-    image_path = tmp_path / "roi.pgm"
-    image_path.write_bytes(b"P5\n2 1\n255\n\x01\x02")
+    image_path = tmp_path / "roi.png"
+    write_gray_png(image_path, 2, 1, b"\x01\x02")
     _write_latest(
         tmp_path,
         {

@@ -231,7 +231,7 @@ image_save.cleanup_trace_root=true
 image_save.fail_on_save_error=true
 ```
 
-每次检测前 C++ 会检查 `image_save.root_dir` 和 `trace_root` 所在磁盘水位；低于阈值时只清理 `YYYYMMDD` 日期目录下的历史业务文件。`display_latest.json`、前端操作日志、非日期目录和其它配置文件不会被扫描删除。清理后容量仍不足，或启用原图落盘时 PGM 写入失败，当前任务必须输出 `RECHECK/DeviceFault`，避免磁盘写满后继续运行。
+每次检测前 C++ 会检查 `image_save.root_dir` 和 `trace_root` 所在磁盘水位；低于阈值时只清理 `YYYYMMDD` 日期目录下的历史业务文件。`display_latest.json`、前端操作日志、非日期目录和其它配置文件不会被扫描删除。清理后容量仍不足，或启用原图落盘时 PNG 写入失败，当前任务必须输出 `RECHECK/DeviceFault`，避免磁盘写满后继续运行。
 
 ## 共享内存容量
 

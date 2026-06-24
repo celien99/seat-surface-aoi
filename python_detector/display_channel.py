@@ -115,7 +115,7 @@ def _raw_image_assets(trace_dir: Path) -> list[dict[str, Any]]:
     if not image_root.is_dir():
         return []
     assets: list[dict[str, Any]] = []
-    for path in sorted(image_root.rglob("*.pgm")):
+    for path in _iter_image_files(image_root):
         rel = path.relative_to(image_root)
         parts = rel.parts
         if len(parts) != 3:
@@ -140,7 +140,7 @@ def _roi_image_assets(trace_dir: Path) -> list[dict[str, Any]]:
     if not image_root.is_dir():
         return []
     assets: list[dict[str, Any]] = []
-    for path in sorted(image_root.rglob("*.pgm")):
+    for path in _iter_image_files(image_root):
         rel = path.relative_to(image_root)
         parts = rel.parts
         if len(parts) >= 4:
@@ -181,7 +181,7 @@ def _overlay_assets(trace_dir: Path, result: InspectionResult) -> list[dict[str,
         ): defect
         for defect in result.defects
     }
-    for path in sorted(overlay_root.glob("*.ppm")):
+    for path in _iter_image_files(overlay_root):
         defect = defects_by_name.get(path.stem)
         if defect is None and len(result.defects) == 1:
             defect = result.defects[0]
@@ -205,6 +205,10 @@ def _quality_messages(quality_report: Any) -> list[str]:
     if not messages:
         return []
     return [str(message) for message in messages if message]
+
+
+def _iter_image_files(root: Path) -> list[Path]:
+    return sorted(path for path in root.rglob("*") if path.is_file() and path.suffix.lower() in {".png", ".pgm", ".ppm"})
 
 
 def _message(quality_messages: list[str], error: Any) -> str:

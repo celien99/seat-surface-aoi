@@ -3,14 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import struct
-import zlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from python_detector.config.calibration_manager import CalibrationManager, RoiTemplate
 from python_detector.config.recipe_schema import Recipe, RecipeManager, RecipeValidationError
+from python_detector.image_codec import ImageCodecError, load_gray_image, write_gray_png
 from python_detector.ipc.data_types import CameraBundle, LightFrame, SeatInspectionJob
 from python_detector.pipeline.preprocessor import PreprocessRecheckError, Preprocessor
 from training_tools.collect_trace_dataset import DatasetSample
@@ -28,13 +27,6 @@ class CaptureImage:
     capture_light_id: str
     light_id: str
     sequence_index: int
-
-
-@dataclass(frozen=True)
-class PngGrayImage:
-    width: int
-    height: int
-    pixels: bytes
 
 
 @dataclass(frozen=True)
@@ -58,7 +50,7 @@ def collect_capture_dataset(
     roi_output_size: tuple[int, int] | None = None,
     skip_failed: bool = False,
 ) -> CaptureDatasetResult:
-    """把 C++ capture_only 平铺 PNG 目录转换为训练 manifest 和 ROI PGM 图。"""
+    """把 capture_only 平铺 PNG 目录转换成训练用 ROI manifest 和 PNG 图像。"""
     if not input_dir.is_dir():
         raise TrainingDataError(f"采图目录不存在: {input_dir}")
     recipe = RecipeManager().load(recipe_id)
@@ -94,7 +86,7 @@ def collect_capture_dataset(
                 if not skip_failed:
                     if isinstance(exc, TrainingDataError):
                         raise
-                    raise TrainingDataError(f"{camera_id}: 采集组转换失败: {exc}") from exc
+                    raise TrainingDataError(f"{camera_id}: 采图组转换失败: {exc}") from exc
                 skipped.append(
                     {
                         "camera_id": camera_id,
@@ -202,9 +194,12 @@ def _collect_capture_group(
     camera_recipe = recipe.camera(first.camera_id, first.camera_id)
     if camera_recipe is None:
         raise TrainingDataError(f"{first.camera_id}: 配方未启用该机位")
-    frames = {}
+    frames: dict[str, LightFrame] = {}
     for index, item in enumerate(capture_group):
-        image = read_png_gray(item.path)
+        try:
+            image = load_gray_image(item.path)
+        except ImageCodecError as exc:
+            raise TrainingDataError(str(exc)) from exc
         frames[item.light_id] = LightFrame(
             camera_id=item.camera_id,
             pose_id=item.camera_id,
@@ -287,9 +282,9 @@ def _collect_capture_group(
                 ]
             )
             sample_id = f"{sample_base}_{light_id}"
-            image_path = Path("images") / first.camera_id / first.camera_id / roi_name / light_id / f"{sample_id}.pgm"
+            image_path = Path("images") / first.camera_id / first.camera_id / roi_name / light_id / f"{sample_id}.png"
             destination = output_dir / image_path
-            _write_pgm(destination, frame)
+            _write_png(destination, frame)
             samples.append(
                 DatasetSample(
                     sample_id=sample_id,
@@ -314,100 +309,7 @@ def _collect_capture_group(
     return samples
 
 
-def read_png_gray(path: Path) -> PngGrayImage:
-    data = path.read_bytes()
-    if data[:8] != b"\x89PNG\r\n\x1a\n":
-        raise TrainingDataError(f"不是 PNG 文件: {path}")
-    offset = 8
-    width = 0
-    height = 0
-    bit_depth = -1
-    color_type = -1
-    interlace = -1
-    compressed = bytearray()
-    while offset < len(data):
-        if offset + 8 > len(data):
-            raise TrainingDataError(f"PNG chunk 截断: {path}")
-        length = struct.unpack(">I", data[offset:offset + 4])[0]
-        chunk_type = data[offset + 4:offset + 8]
-        chunk_data_start = offset + 8
-        chunk_data_end = chunk_data_start + length
-        if chunk_data_end + 4 > len(data):
-            raise TrainingDataError(f"PNG chunk 数据截断: {path}")
-        chunk_data = data[chunk_data_start:chunk_data_end]
-        if chunk_type == b"IHDR":
-            width, height, bit_depth, color_type, _compression, _filter, interlace = struct.unpack(">IIBBBBB", chunk_data)
-        elif chunk_type == b"IDAT":
-            compressed.extend(chunk_data)
-        elif chunk_type == b"IEND":
-            break
-        offset = chunk_data_end + 4
-
-    if width <= 0 or height <= 0:
-        raise TrainingDataError(f"PNG 缺少有效 IHDR: {path}")
-    if bit_depth != 8 or color_type != 0 or interlace != 0:
-        raise TrainingDataError(f"仅支持 8bit 非隔行灰度 PNG: {path}")
-    try:
-        raw = zlib.decompress(bytes(compressed))
-    except zlib.error as exc:
-        raise TrainingDataError(f"PNG 解压失败: {path}: {exc}") from exc
-    pixels = _unfilter_png_gray(raw, width, height, path)
-    return PngGrayImage(width=width, height=height, pixels=pixels)
-
-
-def _unfilter_png_gray(raw: bytes, width: int, height: int, path: Path) -> bytes:
-    stride = width
-    expected = (stride + 1) * height
-    if len(raw) != expected:
-        raise TrainingDataError(f"PNG 解压长度不匹配: {path}: {len(raw)} != {expected}")
-    rows: list[bytearray] = []
-    offset = 0
-    previous = bytearray(stride)
-    for _row_index in range(height):
-        filter_type = raw[offset]
-        offset += 1
-        current = bytearray(raw[offset:offset + stride])
-        offset += stride
-        if filter_type == 0:
-            pass
-        elif filter_type == 1:
-            for x in range(stride):
-                current[x] = (current[x] + (current[x - 1] if x > 0 else 0)) & 0xFF
-        elif filter_type == 2:
-            for x in range(stride):
-                current[x] = (current[x] + previous[x]) & 0xFF
-        elif filter_type == 3:
-            for x in range(stride):
-                left = current[x - 1] if x > 0 else 0
-                up = previous[x]
-                current[x] = (current[x] + ((left + up) // 2)) & 0xFF
-        elif filter_type == 4:
-            for x in range(stride):
-                left = current[x - 1] if x > 0 else 0
-                up = previous[x]
-                upper_left = previous[x - 1] if x > 0 else 0
-                current[x] = (current[x] + _paeth(left, up, upper_left)) & 0xFF
-        else:
-            raise TrainingDataError(f"PNG filter 不支持: {path}: {filter_type}")
-        rows.append(current)
-        previous = current
-    return b"".join(rows)
-
-
-def _paeth(left: int, up: int, upper_left: int) -> int:
-    estimate = left + up - upper_left
-    pa = abs(estimate - left)
-    pb = abs(estimate - up)
-    pc = abs(estimate - upper_left)
-    if pa <= pb and pa <= pc:
-        return left
-    if pb <= pc:
-        return up
-    return upper_left
-
-
-def _write_pgm(path: Path, frame: LightFrame) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+def _write_png(path: Path, frame: LightFrame) -> None:
     pixels = bytes(frame.image[:frame.stride_bytes * frame.height])
     if frame.stride_bytes != frame.width:
         compact = bytearray(frame.width * frame.height)
@@ -415,7 +317,7 @@ def _write_pgm(path: Path, frame: LightFrame) -> None:
             source_start = row * frame.stride_bytes
             compact[row * frame.width:(row + 1) * frame.width] = frame.image[source_start:source_start + frame.width]
         pixels = bytes(compact)
-    path.write_bytes(f"P5\n{frame.width} {frame.height}\n255\n".encode("ascii") + pixels)
+    write_gray_png(path, frame.width, frame.height, pixels)
 
 
 def _parse_light_map(values: list[str] | None) -> dict[str, str]:

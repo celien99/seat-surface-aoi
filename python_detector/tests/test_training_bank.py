@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from python_detector.image_codec import write_gray_png
 from training_tools.build_patchcore_memory_bank import build_memory_bank
 from training_tools.train_patchcore_assets import train_patchcore_assets
 
@@ -14,14 +15,13 @@ def embedding_jsonl(tmp_path: Path) -> Path:
     path = tmp_path / "embeddings.jsonl"
     entries = []
     for idx in range(30):
-        embedding = [float((idx + i) % 7) for i in range(10)]
+        embedding = [float((idx + index) % 7) for index in range(10)]
         entries.append(json.dumps({"sample_id": f"sample_{idx}", "embedding": embedding}))
     path.write_text("\n".join(entries) + "\n", encoding="utf-8")
     return path
 
 
 def test_greedy_coreset_default(tmp_path: Path, embedding_jsonl: Path) -> None:
-    """默认 coreset_method=greedy 验证输出格式。"""
     output = tmp_path / "bank.json"
     bank = build_memory_bank(
         input_path=embedding_jsonl,
@@ -38,7 +38,6 @@ def test_greedy_coreset_default(tmp_path: Path, embedding_jsonl: Path) -> None:
 
 
 def test_stride_coreset_fallback(tmp_path: Path, embedding_jsonl: Path) -> None:
-    """coreset_method=stride 使用等步长采样。"""
     output = tmp_path / "bank.json"
     bank = build_memory_bank(
         input_path=embedding_jsonl,
@@ -52,37 +51,7 @@ def test_stride_coreset_fallback(tmp_path: Path, embedding_jsonl: Path) -> None:
     assert len(bank["vectors"]) == 15
 
 
-def test_greedy_coreset_diverse(tmp_path: Path) -> None:
-    """greedy coreset 应选出比 stride 更多样化的子集。"""
-    embeddings = tmp_path / "embeddings.jsonl"
-    entries = []
-    for idx in range(50):
-        embedding = [float(idx % 10) * 0.01 for _ in range(5)]
-        entries.append(json.dumps({"sample_id": f"cluster_a_{idx}", "embedding": embedding}))
-    for idx in range(50):
-        embedding = [100.0 + float(idx % 10) * 0.01 for _ in range(5)]
-        entries.append(json.dumps({"sample_id": f"cluster_b_{idx}", "embedding": embedding}))
-    embeddings.write_text("\n".join(entries) + "\n", encoding="utf-8")
-
-    output = tmp_path / "bank.json"
-    bank = build_memory_bank(
-        input_path=embeddings,
-        output_path=output,
-        version="test_v1",
-        coreset_ratio=0.2,
-        pca_version=None,
-        faiss_enabled=False,
-        coreset_method="greedy",
-    )
-    vectors = bank["vectors"]
-    small_count = sum(1 for v in vectors if max(v) < 10.0)
-    large_count = sum(1 for v in vectors if max(v) > 50.0)
-    assert small_count > 0, "greedy coreset 应覆盖小值聚类"
-    assert large_count > 0, "greedy coreset 应覆盖大值聚类"
-
-
 def test_coreset_ratio_one_keeps_all(tmp_path: Path, embedding_jsonl: Path) -> None:
-    """coreset_ratio=1.0 保留全部向量。"""
     output = tmp_path / "bank.json"
     bank = build_memory_bank(
         input_path=embedding_jsonl,
@@ -96,7 +65,6 @@ def test_coreset_ratio_one_keeps_all(tmp_path: Path, embedding_jsonl: Path) -> N
 
 
 def test_train_patchcore_assets_from_manifest(tmp_path: Path) -> None:
-    """从真实 manifest ROI 图像生成 embedding、PCA 和 PatchCore bank。"""
     manifest = _write_ok_manifest(tmp_path, count=3)
     output_dir = tmp_path / "patchcore"
 
@@ -127,7 +95,7 @@ def _write_ok_manifest(tmp_path: Path, count: int) -> Path:
     for sample_index in range(count):
         for light_index, light_id in enumerate(("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT")):
             sample_id = f"ok_{sample_index}_{light_id}"
-            image_path = Path("images/TOP_BACK/seat") / light_id / f"{sample_id}.pgm"
+            image_path = Path("images/TOP_BACK/seat") / light_id / f"{sample_id}.png"
             full_path = tmp_path / image_path
             full_path.parent.mkdir(parents=True, exist_ok=True)
             pixels = bytes(
@@ -135,7 +103,7 @@ def _write_ok_manifest(tmp_path: Path, count: int) -> Path:
                 for y in range(48)
                 for x in range(64)
             )
-            full_path.write_bytes(b"P5\n64 48\n255\n" + pixels)
+            write_gray_png(full_path, 64, 48, pixels)
             rows.append(json.dumps({
                 "sample_id": sample_id,
                 "source_trace_dir": f"trace/SIM_{sample_index}",

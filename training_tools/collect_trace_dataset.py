@@ -13,6 +13,9 @@ class TraceDatasetError(RuntimeError):
     """trace 转训练样本失败。"""
 
 
+_IMAGE_SUFFIXES = {".png", ".pgm", ".ppm"}
+
+
 @dataclass(frozen=True)
 class DatasetSample:
     sample_id: str
@@ -79,7 +82,7 @@ def collect_trace_dataset(
             )
         )
     if filter_decision is not None:
-        samples = [s for s in samples if s.decision == filter_decision]
+        samples = [sample for sample in samples if sample.decision == filter_decision]
     if not samples:
         raise TraceDatasetError("trace 中没有发现 ROI 图像样本")
 
@@ -99,17 +102,11 @@ def collect_trace_dataset(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="从检测 trace 目录生成离线训练样本 manifest 和 ROI 图像副本")
-    parser.add_argument(
-        "--trace-root",
-        action="append",
-        required=True,
-        type=Path,
-        help="trace 根目录或单条 trace 记录目录，可重复传入",
-    )
+    parser.add_argument("--trace-root", action="append", required=True, type=Path, help="trace 根目录或单条 trace 目录，可重复传入")
     parser.add_argument("--output", required=True, type=Path, help="输出数据集目录")
     parser.add_argument("--split", default="unassigned", help="写入 manifest 的 split 字段")
     parser.add_argument("--label-status", default="unlabeled", help="写入 manifest 的 label_status 字段")
-    parser.add_argument("--filter-decision", default=None, help="仅收集指定决策的样本（如 OK、NG）")
+    parser.add_argument("--filter-decision", default=None, help="仅收集指定决策的样本，例如 OK、NG")
     parser.add_argument("--no-summary", action="store_true", help="不生成 dataset_summary.json")
     args = parser.parse_args(argv)
 
@@ -179,14 +176,7 @@ def _collect_trace_dir(
     for image_path, camera_id, pose_id, roi_name, light_id in _iter_trace_images(images_dir):
         defect_items = defects.get((camera_id, pose_id, roi_name), [])
         sample_id = _sample_id(trace_dir, sequence_id, camera_id, pose_id, roi_name, light_id)
-        relative_image_path = (
-            Path("images")
-            / camera_id
-            / pose_id
-            / roi_name
-            / light_id
-            / f"{sample_id}{image_path.suffix}"
-        )
+        relative_image_path = Path("images") / camera_id / pose_id / roi_name / light_id / f"{sample_id}{image_path.suffix.lower()}"
         destination = output_dir / relative_image_path
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(image_path, destination)
@@ -212,7 +202,7 @@ def _collect_trace_dir(
             )
         )
     if not samples:
-        raise TraceDatasetError(f"trace 没有 ROI PGM 图像: {trace_dir}")
+        raise TraceDatasetError(f"trace 没有 ROI 图像: {trace_dir}")
     return samples
 
 
@@ -244,13 +234,13 @@ def _int_value(value: Any, name: str, trace_dir: Path) -> int:
 
 def _iter_trace_images(images_dir: Path) -> list[tuple[Path, str, str, str, str]]:
     images: list[tuple[Path, str, str, str, str]] = []
-    for image_path in sorted(images_dir.glob("*/*/*.pgm")):
+    for image_path in sorted(path for path in images_dir.glob("*/*/*") if path.is_file() and path.suffix.lower() in _IMAGE_SUFFIXES):
         camera_id = image_path.parent.parent.name
         pose_id = camera_id
         roi_name = image_path.parent.name
         light_id = image_path.stem
         images.append((image_path, camera_id, pose_id, roi_name, light_id))
-    for image_path in sorted(images_dir.glob("*/*/*/*.pgm")):
+    for image_path in sorted(path for path in images_dir.glob("*/*/*/*") if path.is_file() and path.suffix.lower() in _IMAGE_SUFFIXES):
         camera_id = image_path.parent.parent.parent.name
         pose_id = image_path.parent.parent.name
         roi_name = image_path.parent.name
@@ -281,7 +271,7 @@ def _bbox(defect: dict[str, Any], trace_dir: Path) -> list[int]:
     if (
         not isinstance(raw_bbox, (list, tuple))
         or len(raw_bbox) != 4
-        or not all(isinstance(value, int | float) for value in raw_bbox)
+        or not all(isinstance(value, (int, float)) for value in raw_bbox)
     ):
         raise TraceDatasetError(f"defect bbox_xyxy_pixel 无效: {trace_dir}")
     return [int(value) for value in raw_bbox]

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from python_detector.config.recipe_schema import Recipe
+from python_detector.image_codec import ImageCodecError, RasterImage, load_gray_image
 from python_detector.ipc.data_types import LightFrame
 from python_detector.pipeline.feature_builder import FeatureBuilder, FeatureGroup
 from python_detector.pipeline.reflectance_cube import ReflectanceCube, RegistrationReport
@@ -71,13 +72,6 @@ class ManifestSampleGroup:
                 seen.add(key)
                 items.append(item)
         return tuple(items)
-
-
-@dataclass(frozen=True)
-class PgmImage:
-    width: int
-    height: int
-    pixels: bytes
 
 
 def load_manifest_rows(manifest_path: Path) -> list[ManifestRow]:
@@ -192,17 +186,17 @@ def build_feature_group_from_manifest_group(
 
 def light_frame_from_manifest_row(row: ManifestRow, dataset_root: Path) -> LightFrame:
     image_path = resolve_image_path(dataset_root, row.image_path)
-    pgm = read_pgm(image_path)
+    image = read_gray_image(image_path)
     return LightFrame(
         camera_id=row.camera_id,
         pose_id=row.pose_id,
         light_id=row.light_id,
         frame_index=row.line_number,
         light_seq_index=row.line_number - 1,
-        width=pgm.width,
-        height=pgm.height,
+        width=image.width,
+        height=image.height,
         channels=1,
-        stride_bytes=pgm.width,
+        stride_bytes=image.width,
         pixel_format="MONO8",
         bit_depth=8,
         color_order="MONO",
@@ -212,10 +206,10 @@ def light_frame_from_manifest_row(row: ManifestRow, dataset_root: Path) -> Light
         gain=1.0,
         calibration_id="manifest_roi",
         image_crc32=0,
-        image=memoryview(pgm.pixels),
+        image=memoryview(image.pixels),
         origin_xy=(0, 0),
-        source_width=pgm.width,
-        source_height=pgm.height,
+        source_width=image.width,
+        source_height=image.height,
     )
 
 
@@ -228,29 +222,15 @@ def resolve_image_path(dataset_root: Path, image_path: str) -> Path:
     return path
 
 
-def read_pgm(path: Path) -> PgmImage:
-    data = path.read_bytes()
-    tokens, data_offset = _read_pgm_header(data, path)
-    if len(tokens) != 4:
-        raise TrainingDataError(f"PGM header 无效: {path}")
-    magic, width_raw, height_raw, max_value_raw = tokens
-    if magic != b"P5":
-        raise TrainingDataError(f"仅支持二进制 PGM P5: {path}")
+def read_gray_image(path: Path) -> RasterImage:
     try:
-        width = int(width_raw)
-        height = int(height_raw)
-        max_value = int(max_value_raw)
-    except ValueError as exc:
-        raise TrainingDataError(f"PGM header 数字无效: {path}") from exc
-    if width <= 0 or height <= 0:
-        raise TrainingDataError(f"PGM 尺寸无效: {path}")
-    if max_value != 255:
-        raise TrainingDataError(f"仅支持 8bit PGM maxval=255: {path}")
-    expected = width * height
-    pixels = data[data_offset:]
-    if len(pixels) != expected:
-        raise TrainingDataError(f"PGM 图像长度不匹配: {path}: {len(pixels)} != {expected}")
-    return PgmImage(width=width, height=height, pixels=pixels)
+        return load_gray_image(path)
+    except ImageCodecError as exc:
+        raise TrainingDataError(str(exc)) from exc
+
+
+def read_pgm(path: Path) -> RasterImage:
+    return read_gray_image(path)
 
 
 def _row_from_dict(raw: dict[str, Any], line_number: int, manifest_path: Path) -> ManifestRow:
@@ -279,7 +259,7 @@ def _row_from_dict(raw: dict[str, Any], line_number: int, manifest_path: Path) -
         defect_classes=defect_classes,
         bbox_xyxy_pixel=bboxes,
         ground_truth=ground_truth,
-        metadata={k: v for k, v in raw.items() if k not in _KNOWN_FIELDS},
+        metadata={key: value for key, value in raw.items() if key not in _KNOWN_FIELDS},
     )
 
 
@@ -362,7 +342,7 @@ def _bbox_tuple(
 ) -> tuple[tuple[int, int, int, int], ...]:
     if raw is None or raw == "" or raw == ():
         return ()
-    if not isinstance(raw, list | tuple):
+    if not isinstance(raw, (list, tuple)):
         raise TrainingDataError(f"{manifest_path}:{line_number}: {field_name} 必须是数组")
     if not raw:
         return ()
@@ -375,31 +355,6 @@ def _bbox_tuple(
             raise TrainingDataError(f"{manifest_path}:{line_number}: {field_name} bbox 坐标反向: {values}")
         result.append(values)
     return tuple(result)
-
-
-def _read_pgm_header(data: bytes, path: Path) -> tuple[list[bytes], int]:
-    tokens: list[bytes] = []
-    index = 0
-    length = len(data)
-    while len(tokens) < 4:
-        while index < length and data[index] in b" \t\r\n":
-            index += 1
-        if index >= length:
-            raise TrainingDataError(f"PGM header 截断: {path}")
-        if data[index] == ord("#"):
-            while index < length and data[index] not in b"\r\n":
-                index += 1
-            continue
-        start = index
-        while index < length and data[index] not in b" \t\r\n":
-            index += 1
-        tokens.append(data[start:index])
-    if index >= length or data[index] not in b" \t\r\n":
-        raise TrainingDataError(f"PGM header 缺少像素数据分隔符: {path}")
-    while index < length and data[index] in b" \t\r\n":
-        index += 1
-        break
-    return tokens, index
 
 
 def _assert_group_consistent(rows: tuple[ManifestRow, ...], manifest_path: Path) -> None:
@@ -433,7 +388,7 @@ def _str_tuple(raw: Any) -> tuple[str, ...]:
         return ()
     if isinstance(raw, str):
         return (raw,)
-    if not isinstance(raw, list | tuple):
+    if not isinstance(raw, (list, tuple)):
         return ()
     return tuple(str(value) for value in raw if str(value))
 
