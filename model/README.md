@@ -28,8 +28,8 @@ model/
 - `seat_roi_seg.onnx`：生产推荐 ROI 定位产物。输入当前配方的 `DOME` 语义光源图，输出 YOLO segmentation mask；在线链路用 mask 自动生成运行时 `polygon_xy`，ROI 模板只作为安全边界和默认约束。当前项目 ROI 单类别为 `seat`，必须与 `roi_locator.class_names` 一致。
 - `seat_roi_yolo.onnx`：兼容 bbox ROI 产物。输入 Dome 语义光源图，输出 `[x1, y1, x2, y2, score, class_id]` 行表，或通过 `output_decode: ultralytics_yolo` 解析 Ultralytics ONNX 输出。
 - `seat_wrn50_embedding.onnx`：空间 PatchCore 模式下输出 layer2+layer3 中间层特征图，当前拼接后的原始 patch embedding 为 1536 维；全局模式才输出一维 embedding，维度必须与配方 `models.<key>.embedding_dim` 一致。
-- `seat_pca.json`：包含 `version`、`mean`、`components`，版本必须与配方 `pca_version` 一致；当前生产资产输入维度为 1536，输出维度为 3。
-- `seat_patchcore_bank.json`：包含 `version`、`model_family: patchcore`、`embedding_dim`、`coreset_ratio`、`pca_version`、`faiss_enabled` 和 `vectors`；当前生产 bank 使用 PCA 后 3 维向量。
+- `seat_pca.json`：包含 `version`、`mean`、`components`，版本必须与配方 `pca_version` 一致；当前生产资产（v1）输入维度为 1536，输出维度为 3；**v2 升级版**输出维度为 524（保留 95% 累积方差，`pca_seat_v2`），推荐生产使用。
+- `seat_patchcore_bank.json`：包含 `version`、`model_family: patchcore`、`embedding_dim`、`coreset_ratio`、`pca_version`、`faiss_enabled` 和 `vectors`；当前生产 bank（v2）使用 PCA 后 524 维向量（`pca_seat_v2`，累积方差 95%），共 43,008 个向量，大小约 583 MB。
 - `seat_patchcore.faiss`：可选；缺失或不可加载时在线后端回退 exact KNN，并在 trace 中记录 fallback reason。启用时维度和向量数必须与 `seat_patchcore_bank.json` 一致。
 - `embeddings.jsonl`：训练过程中的原始空间 embedding 明细，当前会随样本数和 1536 维 patch embedding 快速膨胀，仅用于离线审计或重建 PCA/memory bank；仓库通过 `.gitignore` 忽略该文件，在线部署不依赖它。
 
@@ -84,7 +84,7 @@ uv run python -m training_tools.train_patchcore_assets `
   --split train `
   --spatial-mode `
   --spatial-layers layer2,layer3 `
-  --pca-components 3 `
+  --pca-components 524 `
   --coreset-ratio 1.0 `
   --build-faiss
 ```

@@ -395,15 +395,17 @@
     "width_min": 1235
   },
   "manifest": "datasets\\seat_roi_train\\dataset_manifest.jsonl",
-  "memory_bank_dim": 3,
+  "memory_bank_dim": 524,
   "memory_bank_path": "model\\patchcore\\seat_patchcore_bank.json",
   "memory_bank_vectors": 43008,
-  "memory_bank_version": "bank_v1",
+  "memory_bank_version": "bank_v2",
   "model_key": null,
   "output_dir": "model\\patchcore",
+  "pca_cumulative_variance": 0.950078,
   "pca_embeddings_path": "model\\patchcore\\pca_embeddings.jsonl",
-  "pca_output_dim": 3,
+  "pca_output_dim": 524,
   "pca_path": "model\\patchcore\\seat_pca.json",
+  "pca_version": "pca_seat_v2",
   "recipe_id": "seat_a_black_leather_production_v1",
   "split": "train"
 }

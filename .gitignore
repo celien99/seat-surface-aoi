@@ -35,6 +35,10 @@ Thumbs.db
 *.onnx
 mlruns/
 model/patchcore/embeddings.jsonl
+model/patchcore/pca_embeddings.jsonl
+model/patchcore/seat_patchcore_bank.json
+model/patchcore/seat_patchcore.faiss
+model/patchcore/seat_pca.json
 
 checkpoints/
 

@@ -287,7 +287,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 2. **小缺陷召回率提升**：Global Average Pooling 不再淹没小面积缺陷信号。
 3. **检测热力图**：TraceWriter 自动将 ROI 空间的 anomaly_map 映射回 raw 原图坐标，渲染为 raw 原图尺寸的 JET 伪彩色热力图（40% 热力 + 60% 底图），同时绘制绿色 bbox 轮廓，替代旧的 ROI 裁剪图 overlay。
 
-空间模式要求：`embedding_backend=onnx_wideresnet50`、`spatial_layers` 非空（如 `[layer2, layer3]`），并使用 `--spatial-mode` 重新导出 ONNX 模型和重新训练记忆库。**生产配方默认启用 `spatial_mode: true`**，当前 layer2+layer3 原始 patch embedding 为 1536 维，在线先用 `seat_pca.json` 投影为 3 维，再进入 PatchCore bank/FAISS 评分并生成像素级 anomaly_map 热力图。若需回退到全局嵌入路径（整个 ROI → 1 个向量 → 标量分数），在配方中设置 `spatial_mode: false`。
+空间模式要求：`embedding_backend=onnx_wideresnet50`、`spatial_layers` 非空（如 `[layer2, layer3]`），并使用 `--spatial-mode` 重新导出 ONNX 模型和重新训练记忆库。**生产配方默认启用 `spatial_mode: true`**，当前 layer2+layer3 原始 patch embedding 为 1536 维，在线先用 `seat_pca.json`（v2, 524维, 95%累积方差）投影，再进入 PatchCore bank/FAISS 评分并生成像素级 anomaly_map 热力图。若需回退到全局嵌入路径（整个 ROI → 1 个向量 → 标量分数），在配方中设置 `spatial_mode: false`。
 
 模型资产缺失、占位文件未替换、后端依赖缺失、PCA 参数或 PatchCore memory bank 未就绪会抛出 `ModelAssetUnavailableError`，由 pipeline 转成 `RECHECK` + `CONFIGURATION_ERROR`，并写入 `sample_collection.reason=model_asset_unavailable`。模型已经加载但输出为空、bbox 越界、class id 错误或维度不匹配仍按模型运行异常处理，不能静默降级为 `OK`。
 
@@ -365,7 +365,7 @@ uv run python -m training_tools.simulate_capture_detection --input images_captur
 # --input-channels 必须显式等于所选配方 models.<key>.input_channels 数量；当前生产配方为 3。
 uv run python -m training_tools.export_wideresnet_embedding --output model/wideresnet50/seat_wrn50_embedding.onnx --input-channels 3 --spatial-mode --spatial-layers layer2,layer3
 uv run python -m training_tools.extract_embeddings --manifest datasets/seat_trace_v1/dataset_manifest.jsonl --output datasets/seat_trace_v1/embeddings.jsonl --backend statistical
-uv run python -m training_tools.train_patchcore_assets --manifest datasets/seat_trace_v1/dataset_manifest.jsonl --output-dir model/patchcore --recipe seat_a_black_leather_production_v1 --model-key patchcore_unknown_detector --embedding-backend onnx_wideresnet50 --embedding-model model/wideresnet50/seat_wrn50_embedding.onnx --spatial-mode --spatial-layers layer2,layer3 --pca-components 3 --coreset-ratio 1.0 --build-faiss
+uv run python -m training_tools.train_patchcore_assets --manifest datasets/seat_trace_v1/dataset_manifest.jsonl --output-dir model/patchcore --recipe seat_a_black_leather_production_v1 --model-key patchcore_unknown_detector --embedding-backend onnx_wideresnet50 --embedding-model model/wideresnet50/seat_wrn50_embedding.onnx --spatial-mode --spatial-layers layer2,layer3 --pca-components 524 --coreset-ratio 1.0 --build-faiss
 uv run python -m training_tools.evaluate_pipeline --manifest datasets/seat_trace_v1/dataset_manifest.jsonl --output reports/evaluation_report.json --split test
 uv run python -m training_tools.train_roi_yolo --data datasets/roi_seg/dataset.yaml --task segment --imgsz 1024 --output model/roi_yolo/seat_roi_seg.onnx
 ```
