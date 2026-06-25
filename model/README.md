@@ -18,7 +18,7 @@ model/
     ├── seat_pca.json              # PCA 参数
     ├── seat_patchcore_bank.json   # PatchCore memory bank
     ├── seat_patchcore.faiss       # 可选 FAISS 索引
-    ├── embeddings.jsonl           # 本次训练 embedding 明细
+    ├── embeddings.jsonl           # 本地训练 embedding 明细，体积大，不提交 Git
     ├── pca_embeddings.jsonl       # 本次训练 PCA 后 embedding 明细
     └── patchcore_training_summary.json
 ```
@@ -31,6 +31,7 @@ model/
 - `seat_pca.json`：包含 `version`、`mean`、`components`，版本必须与配方 `pca_version` 一致；当前生产资产输入维度为 1536，输出维度为 3。
 - `seat_patchcore_bank.json`：包含 `version`、`model_family: patchcore`、`embedding_dim`、`coreset_ratio`、`pca_version`、`faiss_enabled` 和 `vectors`；当前生产 bank 使用 PCA 后 3 维向量。
 - `seat_patchcore.faiss`：可选；缺失或不可加载时在线后端回退 exact KNN，并在 trace 中记录 fallback reason。启用时维度和向量数必须与 `seat_patchcore_bank.json` 一致。
+- `embeddings.jsonl`：训练过程中的原始空间 embedding 明细，当前会随样本数和 1536 维 patch embedding 快速膨胀，仅用于离线审计或重建 PCA/memory bank；仓库通过 `.gitignore` 忽略该文件，在线部署不依赖它。
 
 当前生产缺陷判定链路不依赖 `model/supervised_defect/seat_defect_detector.onnx`。座椅 ROI 定位由 `seat_roi_seg.onnx` 完成，表面异常判定由 WideResNet50 embedding + PCA + PatchCore memory bank/FAISS 无监督主模型完成。监督 YOLO 只能作为离线研究或对比实验资产，不是生产配方必需项。
 

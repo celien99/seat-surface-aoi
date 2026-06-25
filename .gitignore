@@ -34,6 +34,7 @@ Thumbs.db
 *.pth
 *.onnx
 mlruns/
+model/patchcore/embeddings.jsonl
 
 checkpoints/
 
