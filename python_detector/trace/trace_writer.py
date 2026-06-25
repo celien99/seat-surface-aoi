@@ -7,6 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from python_detector.config.recipe_schema import Recipe
 from python_detector.image_codec import write_gray_png, write_rgb_png
 from python_detector.ipc.data_types import DefectResult, InspectionResult, LightFrame, SeatInspectionJob
@@ -129,13 +131,11 @@ class TraceWriter:
             roi_frame = self._display_frame(frames, roi_defects)
             if roi_frame is None:
                 continue
-            # 查找匹配的 raw 帧
             raw_frame = raw_index.get((camera_id, pose_id, roi_frame.light_id))
             if raw_frame is None:
-                # fallback: 同 camera/pose 的任意光源
-                for (rc, rp, _rl), rf in raw_index.items():
-                    if rc == camera_id and rp == pose_id:
-                        raw_frame = rf
+                for (raw_camera_id, raw_pose_id, _raw_light_id), fallback_frame in raw_index.items():
+                    if raw_camera_id == camera_id and raw_pose_id == pose_id:
+                        raw_frame = fallback_frame
                         break
             if raw_frame is None:
                 continue
@@ -143,9 +143,7 @@ class TraceWriter:
             path = overlay_dir / _safe_name(camera_id) / _safe_name(pose_id) / f"{_safe_name(roi_name)}.png"
             if anomaly_entry is not None:
                 anomaly_map, _spatial_shape = anomaly_entry
-                self._write_heatmap_overlay_on_raw(
-                    path, raw_frame, roi_frame, result.decision, roi_defects, anomaly_map,
-                )
+                self._write_heatmap_overlay_on_raw(path, raw_frame, roi_frame, result.decision, roi_defects, anomaly_map)
             else:
                 self._write_overlay_png_on_raw(path, raw_frame, result.decision, roi_defects)
 
@@ -182,27 +180,18 @@ class TraceWriter:
         result_decision: str,
         defects: list[DefectResult],
     ) -> None:
-        """仅绘制 raw 底图 + 决策边框 + 缺陷 bbox（无热力图）。"""
-        raw_bytes = self._frame_bytes(raw_frame)
-        raw_w, raw_h = raw_frame.width, raw_frame.height
-        rgb = bytearray(raw_w * raw_h * 3)
-        for i in range(raw_w * raw_h):
-            gray_val = raw_bytes[i]
-            off = i * 3
-            rgb[off] = gray_val
-            rgb[off + 1] = gray_val
-            rgb[off + 2] = gray_val
+        """仅绘制 raw 底图 + 决策边框 + 缺陷 bbox。"""
+        raw_array = self._frame_array(raw_frame)
+        raw_h, raw_w = raw_array.shape
+        rgb = np.repeat(raw_array[:, :, None], 3, axis=2)
         self._draw_overlay_marks_raw(rgb, raw_w, raw_h, result_decision, defects)
-        write_rgb_png(path, raw_w, raw_h, bytes(rgb))
+        write_rgb_png(path, raw_w, raw_h, np.ascontiguousarray(rgb).tobytes())
 
     def _anomaly_map_index(
         self,
         spatial_maps: list[dict[str, object]],
     ) -> dict[tuple[str, str, str], tuple[tuple[tuple[float, ...], ...], tuple[int, int]]]:
-        """从 spatial_maps 中提取 anomaly_map 索引。
-
-        返回 {(camera_id, pose_id, roi_name): (anomaly_map, spatial_shape)}。
-        """
+        """从 spatial_maps 提取 anomaly_map 索引。"""
         index: dict[tuple[str, str, str], tuple[tuple[tuple[float, ...], ...], tuple[int, int]]] = {}
         for entry in spatial_maps or []:
             if not isinstance(entry, dict):
@@ -218,9 +207,7 @@ class TraceWriter:
             pose_id = str(entry.get("pose_id", "") or camera_id)
             roi_name = str(entry.get("roi_name", ""))
             if camera_id and roi_name:
-                anomaly_map_tuple = tuple(
-                    tuple(float(v) for v in row) for row in anomaly_map
-                )
+                anomaly_map_tuple = tuple(tuple(float(value) for value in row) for row in anomaly_map)
                 index[(camera_id, pose_id, roi_name)] = (anomaly_map_tuple, spatial_shape)
         return index
 
@@ -233,77 +220,63 @@ class TraceWriter:
         defects: list[DefectResult],
         anomaly_map: tuple[tuple[float, ...], ...],
     ) -> None:
-        """渲染 JET 热力图叠加到 raw 原图上，并绘制判定框和缺陷框。
-
-        通过 roi_to_source_matrix 将 ROI 空间的热力图前向映射到 raw 坐标；
-        defect bbox 本身就是 raw 坐标，直接绘制。
-        """
-        path.parent.mkdir(parents=True, exist_ok=True)
-        raw_bytes = self._frame_bytes(raw_frame)
-        raw_w, raw_h = raw_frame.width, raw_frame.height
+        """将 JET 热力图叠加到 raw 原图，并绘制判定框和缺陷框。"""
+        raw_array = self._frame_array(raw_frame)
+        raw_h, raw_w = raw_array.shape
         roi_w, roi_h = roi_frame.width, roi_frame.height
-        matrix = roi_frame.roi_to_source_matrix
+        rgb = np.repeat(raw_array[:, :, None], 3, axis=2)
 
-        # 上采样 anomaly_map 到 ROI 分辨率
-        map_h = len(anomaly_map)
-        map_w = len(anomaly_map[0]) if map_h > 0 else 0
-        upsampled = _resize_anomaly_map(anomaly_map, (map_h, map_w), roi_h, roi_w)
-
-        # 构建 RGB 底图 = raw 灰度三通道
-        rgb = bytearray(raw_w * raw_h * 3)
-        for i in range(raw_w * raw_h):
-            gray_val = raw_bytes[i]
-            off = i * 3
-            rgb[off] = gray_val
-            rgb[off + 1] = gray_val
-            rgb[off + 2] = gray_val
-
-        # 前向映射：ROI 像素 → raw 坐标 → 混合 JET 热力图
-        has_matrix = matrix is not None and len(matrix) == 9
-        for ry in range(roi_h):
-            for rx in range(roi_w):
-                if has_matrix:
-                    mapped = self._apply_homography(matrix, float(rx), float(ry))
-                    if mapped is None:
-                        continue
-                    sx, sy = mapped
-                else:
-                    ox, oy = roi_frame.origin_xy
-                    sx = float(rx + ox)
-                    sy = float(ry + oy)
-
-                ix = int(round(sx))
-                iy = int(round(sy))
-                if ix < 0 or ix >= raw_w or iy < 0 or iy >= raw_h:
-                    continue
-
-                anomaly_val = upsampled[ry][rx]
-                gray_val = raw_bytes[iy * raw_w + ix]
-                heat_r, heat_g, heat_b = _jet_colormap(anomaly_val)
-                blended_r = int(heat_r * 0.4 + gray_val * 0.6)
-                blended_g = int(heat_g * 0.4 + gray_val * 0.6)
-                blended_b = int(heat_b * 0.4 + gray_val * 0.6)
-
-                base = (iy * raw_w + ix) * 3
-                rgb[base] = blended_r
-                rgb[base + 1] = blended_g
-                rgb[base + 2] = blended_b
+        anomaly_array = _resize_anomaly_map_array(anomaly_map, roi_h, roi_w)
+        if anomaly_array.size > 0:
+            ix, iy, source_indices = self._roi_to_raw_indices(roi_frame, raw_w, raw_h)
+            if ix.size > 0:
+                flat_indices = (iy * raw_w) + ix
+                order = _last_occurrence_order(flat_indices)
+                target_indices = flat_indices[order]
+                anomaly_values = anomaly_array.reshape(-1)[source_indices][order]
+                gray_values = raw_array.reshape(-1)[target_indices]
+                heat_rgb = _jet_colormap_array(anomaly_values)
+                blended = (heat_rgb.astype(np.float32) * 0.4 + gray_values[:, None].astype(np.float32) * 0.6).astype(
+                    np.uint8,
+                    copy=False,
+                )
+                rgb.reshape(-1, 3)[target_indices] = blended
 
         self._draw_overlay_marks_raw(rgb, raw_w, raw_h, result_decision, defects)
-        write_rgb_png(path, raw_w, raw_h, bytes(rgb))
+        write_rgb_png(path, raw_w, raw_h, np.ascontiguousarray(rgb).tobytes())
+
+    def _roi_to_raw_indices(self, roi_frame: LightFrame, raw_w: int, raw_h: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        roi_h, roi_w = roi_frame.height, roi_frame.width
+        yy, xx = np.indices((roi_h, roi_w), dtype=np.float64)
+        matrix = roi_frame.roi_to_source_matrix
+        if matrix is not None and len(matrix) == 9:
+            denom = matrix[6] * xx + matrix[7] * yy + matrix[8]
+            valid = np.abs(denom) >= 1e-9
+            sx = np.empty_like(xx)
+            sy = np.empty_like(yy)
+            sx[valid] = (matrix[0] * xx[valid] + matrix[1] * yy[valid] + matrix[2]) / denom[valid]
+            sy[valid] = (matrix[3] * xx[valid] + matrix[4] * yy[valid] + matrix[5]) / denom[valid]
+        else:
+            origin_x, origin_y = roi_frame.origin_xy
+            sx = xx + float(origin_x)
+            sy = yy + float(origin_y)
+            valid = np.ones((roi_h, roi_w), dtype=bool)
+
+        ix = np.rint(sx[valid]).astype(np.intp)
+        iy = np.rint(sy[valid]).astype(np.intp)
+        source_indices = np.flatnonzero(valid)
+        inside = (ix >= 0) & (ix < raw_w) & (iy >= 0) & (iy < raw_h)
+        return ix[inside], iy[inside], source_indices[inside]
 
     def _draw_overlay_marks_raw(
         self,
-        rgb: bytearray,
+        rgb: np.ndarray,
         width: int,
         height: int,
         result_decision: str,
         defects: list[DefectResult],
     ) -> None:
-        """在 raw 图像上绘制决策边框和缺陷 bbox。
-
-        DefectResult.bbox_xyxy_pixel 本身就是源（raw）坐标，无需转换。
-        """
+        """在 raw 图像上绘制决策边框和缺陷 bbox。"""
         self._draw_rect(rgb, width, height, 0, 0, width - 1, height - 1, _decision_color(result_decision), thickness=4)
         for defect in defects:
             x0, y0, x1, y1 = defect.bbox_xyxy_pixel
@@ -311,7 +284,7 @@ class TraceWriter:
 
     def _draw_rect(
         self,
-        rgb: bytearray,
+        rgb: np.ndarray,
         width: int,
         height: int,
         x0: int,
@@ -328,59 +301,27 @@ class TraceWriter:
         y1 = max(0, min(height - 1, y1))
         if x1 < x0 or y1 < y0:
             return
-        for offset in range(thickness):
-            self._draw_hline(rgb, width, height, x0, x1, y0 + offset, color)
-            self._draw_hline(rgb, width, height, x0, x1, y1 - offset, color)
-            self._draw_vline(rgb, width, height, x0 + offset, y0, y1, color)
-            self._draw_vline(rgb, width, height, x1 - offset, y0, y1, color)
-
-    def _draw_hline(
-        self,
-        rgb: bytearray,
-        width: int,
-        height: int,
-        x0: int,
-        x1: int,
-        y: int,
-        color: tuple[int, int, int],
-    ) -> None:
-        if y < 0 or y >= height:
-            return
-        for x in range(max(0, x0), min(width - 1, x1) + 1):
-            self._set_pixel(rgb, width, x, y, color)
-
-    def _draw_vline(
-        self,
-        rgb: bytearray,
-        width: int,
-        height: int,
-        x: int,
-        y0: int,
-        y1: int,
-        color: tuple[int, int, int],
-    ) -> None:
-        if x < 0 or x >= width:
-            return
-        for y in range(max(0, y0), min(height - 1, y1) + 1):
-            self._set_pixel(rgb, width, x, y, color)
-
-    def _set_pixel(self, rgb: bytearray, width: int, x: int, y: int, color: tuple[int, int, int]) -> None:
-        index = (y * width + x) * 3
-        rgb[index : index + 3] = bytes(color)
+        color_array = np.asarray(color, dtype=np.uint8)
+        top_end = min(y1 + 1, y0 + thickness)
+        bottom_start = max(y0, y1 - thickness + 1)
+        left_end = min(x1 + 1, x0 + thickness)
+        right_start = max(x0, x1 - thickness + 1)
+        rgb[y0:top_end, x0 : x1 + 1] = color_array
+        rgb[bottom_start : y1 + 1, x0 : x1 + 1] = color_array
+        rgb[y0 : y1 + 1, x0:left_end] = color_array
+        rgb[y0 : y1 + 1, right_start : x1 + 1] = color_array
 
     def _frame_bytes(self, frame: LightFrame) -> bytes:
+        return np.ascontiguousarray(self._frame_array(frame)).tobytes()
+
+    def _frame_array(self, frame: LightFrame) -> np.ndarray:
         if frame.dtype != "UINT8" or frame.channels != 1:
             raise ValueError(f"trace 仅支持 UINT8 MONO ROI: {frame.camera_id}/{frame.light_id}")
         expected = frame.stride_bytes * frame.height
         if len(frame.image) < expected:
             raise ValueError(f"trace ROI 图像长度不足: {frame.camera_id}/{frame.light_id}")
-        if frame.stride_bytes == frame.width:
-            return bytes(frame.image[: frame.width * frame.height])
-        rows = bytearray()
-        for row in range(frame.height):
-            start = row * frame.stride_bytes
-            rows.extend(frame.image[start : start + frame.width])
-        return bytes(rows)
+        raw = np.frombuffer(frame.image, dtype=np.uint8, count=expected)
+        return raw.reshape(frame.height, frame.stride_bytes)[:, : frame.width]
 
     def _apply_homography(self, matrix: tuple[float, ...], x: float, y: float) -> tuple[float, float] | None:
         denom = matrix[6] * x + matrix[7] * y + matrix[8]
@@ -419,29 +360,39 @@ def _decision_color(decision: str) -> tuple[int, int, int]:
 
 
 def _jet_colormap(value: float) -> tuple[int, int, int]:
-    """JET colormap: [0, 1] → (R, G, B)。"""
+    """JET colormap: [0, 1] -> (R, G, B)。"""
+    return tuple(int(item) for item in _jet_colormap_array(np.asarray([value], dtype=np.float32))[0])
 
-    def _clamp(v: float) -> float:
-        return max(0.0, min(1.0, v))
 
-    def _lerp(a: float, b: float, t: float) -> float:
-        return a + (b - a) * t
+def _jet_colormap_array(values: np.ndarray) -> np.ndarray:
+    values = np.clip(np.asarray(values, dtype=np.float32), 0.0, 1.0)
+    result = np.zeros((values.size, 3), dtype=np.float32)
 
-    # JET 的关键控制点
-    if value < 0.125:
-        t = value / 0.125
-        return (0, 0, int(_lerp(128, 255, t)))
-    if value < 0.375:
-        t = (value - 0.125) / 0.25
-        return (0, int(_lerp(0, 255, t)), 255)
-    if value < 0.625:
-        t = (value - 0.375) / 0.25
-        return (int(_lerp(0, 255, t)), 255, int(_lerp(255, 0, t)))
-    if value < 0.875:
-        t = (value - 0.625) / 0.25
-        return (255, int(_lerp(255, 0, t)), 0)
-    t = (value - 0.875) / 0.125
-    return (int(_lerp(255, 128, t)), 0, 0)
+    mask = values < 0.125
+    t = values[mask] / 0.125
+    result[mask, 2] = 128.0 + (255.0 - 128.0) * t
+
+    mask = (values >= 0.125) & (values < 0.375)
+    t = (values[mask] - 0.125) / 0.25
+    result[mask, 1] = 255.0 * t
+    result[mask, 2] = 255.0
+
+    mask = (values >= 0.375) & (values < 0.625)
+    t = (values[mask] - 0.375) / 0.25
+    result[mask, 0] = 255.0 * t
+    result[mask, 1] = 255.0
+    result[mask, 2] = 255.0 * (1.0 - t)
+
+    mask = (values >= 0.625) & (values < 0.875)
+    t = (values[mask] - 0.625) / 0.25
+    result[mask, 0] = 255.0
+    result[mask, 1] = 255.0 * (1.0 - t)
+
+    mask = values >= 0.875
+    t = (values[mask] - 0.875) / 0.125
+    result[mask, 0] = 255.0 + (128.0 - 255.0) * t
+
+    return np.clip(result, 0.0, 255.0).astype(np.uint8)
 
 
 def _resize_anomaly_map(
@@ -450,16 +401,32 @@ def _resize_anomaly_map(
     target_h: int,
     target_w: int,
 ) -> list[list[float]]:
-    """最近邻上采样 anomaly_map 到目标尺寸 [target_h, target_w]."""
+    """最近邻上采样 anomaly_map 到目标尺寸 [target_h, target_w]。"""
     src_h, src_w = src_shape
-    if src_h == target_h and src_w == target_w:
-        return [list(row) for row in anomaly_map]
-    result: list[list[float]] = []
-    for y in range(target_h):
-        src_y = min(int(y * src_h / target_h), src_h - 1)
-        row: list[float] = []
-        for x in range(target_w):
-            src_x = min(int(x * src_w / target_w), src_w - 1)
-            row.append(anomaly_map[src_y][src_x])
-        result.append(row)
-    return result
+    if src_h <= 0 or src_w <= 0:
+        return [[0.0 for _x in range(target_w)] for _y in range(target_h)]
+    return _resize_anomaly_map_array(anomaly_map, target_h, target_w).tolist()
+
+
+def _resize_anomaly_map_array(
+    anomaly_map: tuple[tuple[float, ...], ...],
+    target_h: int,
+    target_w: int,
+) -> np.ndarray:
+    source = np.asarray(anomaly_map, dtype=np.float32)
+    if source.ndim != 2 or source.shape[0] <= 0 or source.shape[1] <= 0 or target_h <= 0 or target_w <= 0:
+        return np.zeros((max(target_h, 0), max(target_w, 0)), dtype=np.float32)
+    if source.shape == (target_h, target_w):
+        return source
+    row_indices = np.minimum((np.arange(target_h) * source.shape[0] // target_h).astype(np.intp), source.shape[0] - 1)
+    col_indices = np.minimum((np.arange(target_w) * source.shape[1] // target_w).astype(np.intp), source.shape[1] - 1)
+    return source[row_indices[:, None], col_indices[None, :]]
+
+
+def _last_occurrence_order(indices: np.ndarray) -> np.ndarray:
+    if indices.size == 0:
+        return indices.astype(np.intp, copy=False)
+    reversed_indices = indices[::-1]
+    _unique_values, first_reversed = np.unique(reversed_indices, return_index=True)
+    last_positions = indices.size - 1 - first_reversed
+    return np.sort(last_positions).astype(np.intp, copy=False)

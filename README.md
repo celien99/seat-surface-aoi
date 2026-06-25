@@ -107,7 +107,7 @@ uv run python -m training_tools.collect_capture_dataset `
 
 **生产配方默认启用空间 PatchCore 模式（`spatial_mode: true`）**，检测链路提取 layer2+layer3 中间层特征图构建 H×W patch 嵌入，当前原始 patch embedding 为 1536 维，经 `seat_pca.json` 投影到 3 维后进入 PatchCore memory bank/FAISS。KNN 评分后生成像素级 `anomaly_map` 热力图，经 BFS 连通域分析自动定位缺陷区域并输出 bbox。TraceWriter 将 anomaly_map 映射回 raw 原图坐标，渲染为 raw 原图尺寸的 JET 伪彩色 40% 混合 overlay PNG（绿色 bbox 轮廓），供前端展示通道消费。若需回退到全局嵌入路径（整个 ROI → 1 个标量分数），在配方中设置 `spatial_mode: false`。
 
-生产配方的亮度质量门禁采用比例阈值：单帧过曝像素比例 `max_saturation_ratio` 和过暗像素比例 `max_dark_ratio` 当前均为 `0.40`；Python 检测层对亮度统计、过曝/欠曝比例、Laplacian 锐度、运动梯度、ROI 裁剪/透视展开、Dome ROI 输入 letterbox、seg mask 统计/腐蚀、ECC 相关性/重采样、特征通道、NCHW tensor、空间 embedding 拼接、PCA 投影和 PatchCore KNN 评分使用 `numpy` 批量处理，避免高分辨率原图和 patch 向量在 Python 层逐像素/逐维度循环；缺帧、时序、曝光/增益一致性、锐度、运动梯度、配准失败等不确定状态仍会输出 `RECHECK` 或 `ERROR`。
+生产配方的亮度质量门禁采用比例阈值：单帧过曝像素比例 `max_saturation_ratio` 和过暗像素比例 `max_dark_ratio` 当前均为 `0.40`；Python 检测层对亮度统计、过曝/欠曝比例、Laplacian 锐度、运动梯度、ROI 裁剪/透视展开、Dome ROI 输入 letterbox、YOLO 候选/mask decode（含非有限输出保守失败校验）、seg mask 统计/腐蚀、ECC 相关性/重采样、特征通道、NCHW tensor、空间 embedding 拼接、PCA 投影、PatchCore KNN 评分、trace PNG scanline 构造和 raw overlay/heatmap 渲染使用 `numpy` 批量处理，避免高分辨率原图和 patch 向量在 Python 层逐像素/逐维度循环；32x32 anomaly map 连通域 BFS 仍作为小图控制流保留。缺帧、时序、曝光/增益一致性、锐度、运动梯度、配准失败、模型非有限输出等不确定状态仍会输出 `RECHECK` 或 `ERROR`。
 
 从 `images_capture/` 抽取一组两机位样本做完整链路模拟并生成检测图：
 

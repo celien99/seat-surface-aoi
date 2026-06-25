@@ -5,6 +5,8 @@ import zlib
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
+
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
@@ -55,8 +57,8 @@ def _load_png(data: bytes, path: Path) -> RasterImage:
     while offset < len(data):
         if offset + 8 > len(data):
             raise ImageCodecError(f"PNG chunk 截断: {path}")
-        length = struct.unpack(">I", data[offset:offset + 4])[0]
-        chunk_type = data[offset + 4:offset + 8]
+        length = struct.unpack(">I", data[offset : offset + 4])[0]
+        chunk_type = data[offset + 4 : offset + 8]
         chunk_data_start = offset + 8
         chunk_data_end = chunk_data_start + length
         if chunk_data_end + 4 > len(data):
@@ -128,7 +130,7 @@ def _unfilter_png(raw: bytes, width: int, height: int, channels: int, path: Path
     for _row_index in range(height):
         filter_type = raw[offset]
         offset += 1
-        current = bytearray(raw[offset:offset + stride])
+        current = bytearray(raw[offset : offset + stride])
         offset += stride
         if filter_type == 0:
             pass
@@ -178,13 +180,12 @@ def _write_png(path: Path, width: int, height: int, channels: int, pixels: bytes
     if len(pixels) != expected:
         raise ImageCodecError(f"PNG 像素长度不匹配: {path}: {len(pixels)} != {expected}")
     stride = width * channels
-    raw_rows = bytearray()
-    for row in range(height):
-        start = row * stride
-        raw_rows.append(0)
-        raw_rows.extend(pixels[start:start + stride])
+    pixels_array = np.frombuffer(pixels, dtype=np.uint8, count=expected).reshape(height, stride)
+    raw_rows = np.empty((height, stride + 1), dtype=np.uint8)
+    raw_rows[:, 0] = 0
+    raw_rows[:, 1:] = pixels_array
     color_type = 0 if channels == 1 else 2
-    payload = zlib.compress(bytes(raw_rows))
+    payload = zlib.compress(raw_rows.tobytes())
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(
         PNG_SIGNATURE

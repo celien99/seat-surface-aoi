@@ -3,8 +3,8 @@ from pathlib import Path
 import json
 
 from python_detector.config.recipe_schema import ModelConfig, RecipeManager
-from python_detector.image_codec import load_raster_image
-from python_detector.ipc.data_types import CameraBundle, DefectResult, InspectionResult, LightFrame, SeatInspectionJob
+from python_detector.image_codec import load_raster_image, write_gray_png, write_rgb_png
+from python_detector.ipc.data_types import CameraBundle, InspectionResult, SeatInspectionJob
 from python_detector.pipeline.pipeline import InspectionPipeline
 from python_detector.pipeline.quality_gate import FrameQuality, QualityReport
 from python_detector.trace.trace_writer import TraceWriter
@@ -49,6 +49,26 @@ def test_trace_writer_generates_result_files(tmp_path: Path) -> None:
     assert (trace_dir / "overlays" / "TOP_BACK" / "TOP_BACK" / "seat.png").exists()
 
 
+def test_png_writer_roundtrips_multirow_gray_and_rgb(tmp_path: Path) -> None:
+    gray_pixels = bytes(range(12))
+    gray_path = tmp_path / "gray.png"
+    write_gray_png(gray_path, 4, 3, gray_pixels)
+    gray = load_raster_image(gray_path)
+    assert gray.width == 4
+    assert gray.height == 3
+    assert gray.channels == 1
+    assert gray.pixels == gray_pixels
+
+    rgb_pixels = bytes((index * 7) % 256 for index in range(4 * 3 * 3))
+    rgb_path = tmp_path / "rgb.png"
+    write_rgb_png(rgb_path, 4, 3, rgb_pixels)
+    rgb = load_raster_image(rgb_path)
+    assert rgb.width == 4
+    assert rgb.height == 3
+    assert rgb.channels == 3
+    assert rgb.pixels == rgb_pixels
+
+
 def test_trace_writer_generates_defect_overlay(tmp_path: Path) -> None:
     recipe = _recipe(tmp_path, save_ok_ratio=0.0, fake_mode="ng")
     pipeline = InspectionPipeline()
@@ -79,6 +99,7 @@ def test_trace_writer_overlay_drawn_on_raw_image_resolution(tmp_path: Path) -> N
     assert overlay_img.height == 48
     # RGB 三通道
     assert overlay_img.channels == 3
+    assert overlay_img.pixels[:3] == bytes((0, 180, 90))
 
 
 def test_trace_writer_defect_bboxes_at_raw_coordinates(tmp_path: Path) -> None:
@@ -96,6 +117,43 @@ def test_trace_writer_defect_bboxes_at_raw_coordinates(tmp_path: Path) -> None:
     overlay_img = load_raster_image(overlay_path)
     assert overlay_img.width == 64
     assert overlay_img.height == 48
+    first_defect = result.defects[0]
+    x0, y0, _x1, _y1 = first_defect.bbox_xyxy_pixel
+    offset = (y0 * overlay_img.width + x0) * 3
+    assert overlay_img.pixels[offset : offset + 3] == bytes((255, 64, 64))
+
+
+def test_trace_writer_heatmap_overlay_changes_roi_pixels(tmp_path: Path) -> None:
+    recipe = _recipe(tmp_path, save_ok_ratio=1.0)
+    pipeline = InspectionPipeline()
+    job = make_simulated_job()
+    result = pipeline.process(job, recipe)
+    prepared = pipeline.last_context["prepared_bundles"][0]
+    roi_frame = prepared.rois["seat"]["DIFFUSE"]
+    context = {
+        **pipeline.last_context,
+        "spatial_maps": [
+            {
+                "camera_id": prepared.camera_id,
+                "pose_id": prepared.pose_id,
+                "roi_name": "seat",
+                "spatial_shape": [2, 2],
+                "anomaly_map": ((0.0, 1.0), (0.5, 0.25)),
+            }
+        ],
+    }
+
+    trace_dir = TraceWriter(recipe.trace.root_dir).write(job, recipe, result, context)
+
+    assert trace_dir is not None
+    overlay_img = load_raster_image(trace_dir / "overlays" / "TOP_BACK" / "TOP_BACK" / "seat.png")
+    raw_frame = job.camera_bundles[0].light_frames[roi_frame.light_id]
+    origin_x, origin_y = roi_frame.origin_xy
+    sample_x = min(raw_frame.width - 2, origin_x + max(1, roi_frame.width // 2))
+    sample_y = min(raw_frame.height - 2, origin_y + max(1, roi_frame.height // 2))
+    pixel_offset = (sample_y * raw_frame.width + sample_x) * 3
+    raw_value = bytes(raw_frame.image)[sample_y * raw_frame.stride_bytes + sample_x]
+    assert overlay_img.pixels[pixel_offset : pixel_offset + 3] != bytes((raw_value, raw_value, raw_value))
 
 
 def test_trace_writer_raw_index_matches_light_frames(tmp_path: Path) -> None:

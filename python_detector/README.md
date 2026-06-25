@@ -278,12 +278,12 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 当前后端：
 
 - `fake`：测试和模拟链路默认后端。
-- `onnx`：可选 ONNX detection rows 后端，要求 `onnxruntime` 和 `numpy`。
+- `onnx`：可选 ONNX detection rows 后端，要求 `onnxruntime` 和 `numpy`；YOLO detection/segmentation 输出解码使用数组化 class argmax、score filter、bbox 转换和分块 mask logits 计算，并在保留候选前拒绝非有限分数，保持 Python float 阈值边界语义。
 - `patchcore_knn`：PatchCore 无监督异常检测主模型或可选安全网，使用 statistical 或 ONNX embedding、可选 PCA、memory bank；配置 `faiss_index_path` 时优先尝试 FAISS，失败时回退 exact KNN，并在 `anomaly_summary` 写入实际 backend 和 fallback reason。
 
 **空间 PatchCore 模式（`spatial_mode: true`）：** 在配方模型配置中启用 `spatial_mode` 后，PatchCore 从"全局嵌入"（整个 ROI → 1 个向量 → 标量分数）切换为"空间嵌入"（ROI → 中间层特征图 → H×W 个 patch 向量 → anomaly_map 热力图）。空间 embedding 保持 ONNX 输出为 `numpy` 数组，使用最近邻索引上采样、通道拼接和 `reshape` 生成 patch 矩阵；PCA 使用批量矩阵乘法投影；PatchCore exact KNN fallback 使用分块矩阵距离和 `partition/sort` 取 top-k，FAISS 后处理直接对距离矩阵做 `sqrt/clip/reshape`。空间模式提供三项关键提升：
 
-1. **像素级缺陷定位**：从 anomaly_map 连通域自动生成缺陷 bbox，不再使用整个 ROI 边界。
+1. **像素级缺陷定位**：从 anomaly_map 连通域自动生成缺陷 bbox，不再使用整个 ROI 边界；当前 anomaly map 默认为 32x32，小图 BFS 作为控制流保留。
 2. **小缺陷召回率提升**：Global Average Pooling 不再淹没小面积缺陷信号。
 3. **检测热力图**：TraceWriter 自动将 ROI 空间的 anomaly_map 映射回 raw 原图坐标，渲染为 raw 原图尺寸的 JET 伪彩色热力图（40% 热力 + 60% 底图），同时绘制绿色 bbox 轮廓，替代旧的 ROI 裁剪图 overlay。
 
@@ -318,7 +318,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 - `fusion_summary.json`
 - `timings.json`
 - `error.json`
-- 原始采集 PNG 图、ROI PNG 图和检测 overlay PNG 图；原始图路径为 `raw_images/<camera_id>/<pose_id>/<light_id>.png`，ROI 图路径为 `images/<camera_id>/<pose_id>/<roi_name>/<light_id>.png`，overlay 路径为 `overlays/<camera_id>/<pose_id>/<roi_name>.png`。overlay 以匹配光源的 raw 原图为底图，尺寸等于 raw 原图；anomaly_map 从 ROI 坐标映射回 raw 坐标后叠加，缺陷 bbox 按 raw 坐标绘制。只要该 ROI 已完成预处理，OK、NG、RECHECK 和 ERROR trace 都会写检测 overlay；NG/RECHECK/ERROR 有缺陷候选时额外绘制候选 bbox。
+- 原始采集 PNG 图、ROI PNG 图和检测 overlay PNG 图；原始图路径为 `raw_images/<camera_id>/<pose_id>/<light_id>.png`，ROI 图路径为 `images/<camera_id>/<pose_id>/<roi_name>/<light_id>.png`，overlay 路径为 `overlays/<camera_id>/<pose_id>/<roi_name>.png`。overlay 以匹配光源的 raw 原图为底图，尺寸等于 raw 原图；anomaly_map 从 ROI 坐标映射回 raw 坐标后叠加，缺陷 bbox 按 raw 坐标绘制。PNG filter scanline 构造、raw 灰度转 RGB、heatmap 上采样/坐标映射/alpha blend 和矩形绘制均使用 `numpy` 批量处理，仍使用内置 zlib PNG writer，不新增图像编码依赖。只要该 ROI 已完成预处理，OK、NG、RECHECK 和 ERROR trace 都会写检测 overlay；NG/RECHECK/ERROR 有缺陷候选时额外绘制候选 bbox。
 
 在线 `SeatSurfaceAoiAlgorithm` 调用 `TraceWriter` 时，如果任一 JSON、原始图、ROI 图或 overlay 写入失败，会记录 `context["trace_error"]`，并把当前结果改为 `RECHECK`、`error_code=DEVICE_FAULT`、`quality_pass=false` 后再交给 `ShmClient` 写回 C++。展示通道 `display_latest.json` / `display_events.jsonl` 属于结果发布后的只读前端辅助输出，失败只打印告警，不反向修改已经发布的共享内存结果。
 

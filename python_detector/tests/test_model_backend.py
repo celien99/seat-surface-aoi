@@ -1,5 +1,6 @@
 from dataclasses import replace
 
+import numpy as np
 import pytest
 
 from python_detector.config.recipe_schema import ModelConfig, RecipeManager
@@ -11,6 +12,7 @@ from python_detector.models.inference_engine import (
     ModelRegistry,
     OnnxModel,
 )
+from python_detector.models.yolo_decode import decode_yolo_rows, decode_yolo_segmentation
 from python_detector.pipeline.feature_builder import FeatureGroup
 
 
@@ -195,6 +197,145 @@ def test_onnx_ultralytics_yolo_decode_maps_transposed_output() -> None:
     assert candidates[0].class_name == "scratch"
     assert candidates[0].bbox_xyxy_pixel == (37, 38, 47, 50)
     assert candidates[1].class_name == "dent"
+
+
+def test_decode_ultralytics_yolo_filters_and_maps_candidates() -> None:
+    output = np.asarray(
+        [
+            [
+                [32.0, 20.0, 12.0],
+                [24.0, 10.0, 10.0],
+                [10.0, 8.0, 4.0],
+                [12.0, 6.0, 4.0],
+                [0.91, 0.10, 0.20],
+                [0.05, 0.86, 0.25],
+            ]
+        ],
+        dtype=np.float32,
+    )
+
+    rows = decode_yolo_rows(output, confidence_threshold=0.3, output_decode="ultralytics_yolo")
+
+    np.testing.assert_allclose(
+        np.asarray(rows, dtype=np.float32),
+        np.asarray(
+            [
+                [27.0, 18.0, 37.0, 30.0, 0.91, 0.0],
+                [16.0, 7.0, 24.0, 13.0, 0.86, 1.0],
+            ],
+            dtype=np.float32,
+        ),
+    )
+
+
+def test_decode_ultralytics_yolo_rejects_nonfinite_scores() -> None:
+    output = np.asarray([[[32.0], [24.0], [10.0], [12.0], [np.nan]]], dtype=np.float32)
+
+    with pytest.raises(RuntimeError, match="非有限"):
+        decode_yolo_rows(output, confidence_threshold=0.3, output_decode="ultralytics_yolo")
+
+
+def test_decode_ultralytics_yolo_preserves_threshold_boundary() -> None:
+    output = np.asarray([[[32.0], [24.0], [10.0], [12.0], [0.3]]], dtype=np.float32)
+
+    rows = decode_yolo_rows(output, confidence_threshold=0.30000002, output_decode="ultralytics_yolo")
+
+    assert rows == []
+
+
+def test_decode_segmentation_rows_filters_and_thresholds_masks() -> None:
+    output = np.asarray(
+        [
+            [1.0, 2.0, 4.0, 5.0, 0.92, 1.0, 0.0, 0.7, 0.8, 0.1],
+            [2.0, 3.0, 5.0, 6.0, 0.20, 0.0, np.nan, np.nan, np.nan, np.nan],
+        ],
+        dtype=np.float32,
+    )
+
+    candidates = decode_yolo_segmentation(
+        [output],
+        confidence_threshold=0.5,
+        mask_threshold=0.5,
+        output_decode="segmentation_rows",
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].bbox_xyxy == pytest.approx((1.0, 2.0, 4.0, 5.0))
+    assert candidates[0].score == pytest.approx(0.92)
+    assert candidates[0].class_id == 1
+    assert candidates[0].mask.tolist() == [[0, 1], [1, 0]]
+
+
+def test_decode_segmentation_rows_rejects_nonfinite_scores() -> None:
+    output = np.asarray([[1.0, 2.0, 4.0, 5.0, np.nan, 1.0, 0.0, 0.7, 0.8, 0.1]], dtype=np.float32)
+
+    with pytest.raises(RuntimeError, match="非有限"):
+        decode_yolo_segmentation(
+            [output],
+            confidence_threshold=0.5,
+            mask_threshold=0.5,
+            output_decode="segmentation_rows",
+        )
+
+
+def test_decode_ultralytics_yolo_seg_filters_and_builds_masks() -> None:
+    boxes = np.asarray(
+        [
+            [
+                [4.0, 8.0],
+                [4.0, 8.0],
+                [4.0, 4.0],
+                [4.0, 4.0],
+                [0.20, 0.10],
+                [0.90, 0.25],
+                [8.0, -8.0],
+                [-8.0, 8.0],
+            ]
+        ],
+        dtype=np.float32,
+    )
+    protos = np.asarray([[[[1.0, 0.0], [0.0, 1.0]], [[0.0, 1.0], [1.0, 0.0]]]], dtype=np.float32)
+
+    candidates = decode_yolo_segmentation(
+        [boxes, protos],
+        confidence_threshold=0.5,
+        mask_threshold=0.5,
+        output_decode="ultralytics_yolo_seg",
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].bbox_xyxy == pytest.approx((2.0, 2.0, 6.0, 6.0))
+    assert candidates[0].score == pytest.approx(0.90)
+    assert candidates[0].class_id == 1
+    assert candidates[0].mask.tolist() == [[1, 0], [0, 1]]
+    assert candidates[0].mask_bbox_xyxy == pytest.approx((0.0, 0.0, 1.0, 1.0))
+
+
+def test_decode_ultralytics_yolo_seg_rejects_nonfinite_scores() -> None:
+    boxes = np.asarray([[[4.0], [4.0], [4.0], [4.0], [0.20], [np.nan], [8.0], [-8.0]]], dtype=np.float32)
+    protos = np.asarray([[[[1.0, 0.0], [0.0, 1.0]], [[0.0, 1.0], [1.0, 0.0]]]], dtype=np.float32)
+
+    with pytest.raises(RuntimeError, match="非有限"):
+        decode_yolo_segmentation(
+            [boxes, protos],
+            confidence_threshold=0.5,
+            mask_threshold=0.5,
+            output_decode="ultralytics_yolo_seg",
+        )
+
+
+def test_decode_ultralytics_yolo_seg_skips_low_confidence_before_proto_mask_decode() -> None:
+    boxes = np.asarray([[[4.0], [4.0], [4.0], [4.0], [0.10], [0.20], [8.0], [-8.0]]], dtype=np.float32)
+    protos = np.asarray([[[[np.nan, np.nan], [np.nan, np.nan]], [[np.nan, np.nan], [np.nan, np.nan]]]], dtype=np.float32)
+
+    candidates = decode_yolo_segmentation(
+        [boxes, protos],
+        confidence_threshold=0.5,
+        mask_threshold=0.5,
+        output_decode="ultralytics_yolo_seg",
+    )
+
+    assert candidates == []
 
 
 def test_onnx_detection_rows_maps_full_normalized_bbox_inside_roi() -> None:
