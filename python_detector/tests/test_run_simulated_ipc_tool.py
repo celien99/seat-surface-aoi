@@ -134,3 +134,94 @@ def test_prepare_cmake_build_dir_keeps_matching_cache(monkeypatch, tmp_path) -> 
     tool.prepare_cmake_build_dir(build_dir)
 
     assert (build_dir / "artifact.obj").read_text(encoding="utf-8") == "keep"
+
+
+def test_replay_capture_flag_passes_replay_config_to_controller_and_detector(monkeypatch, tmp_path) -> None:
+    tool = importlib.import_module("tools.run_simulated_ipc")
+
+    controller = tmp_path / "seat_aoi_controller.exe"
+    protocol_layout = tmp_path / "protocol_layout.exe"
+    ipc_checks = tmp_path / "ipc_safety_checks.exe"
+    for path in (controller, protocol_layout, ipc_checks):
+        path.write_text("", encoding="utf-8")
+    artifacts = tool.BuildArtifacts(
+        controller=controller,
+        protocol_layout=protocol_layout,
+        ipc_checks=ipc_checks,
+    )
+    popen_commands: list[list[str]] = []
+    run_commands: list[list[str]] = []
+
+    class FakeProcess:
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+        def terminate(self):
+            return None
+
+    def fake_run(command, *, cwd=None, env=None):
+        run_commands.append([str(item) for item in command])
+
+    def fake_popen(command):
+        popen_commands.append([str(item) for item in command])
+        return FakeProcess()
+
+    monkeypatch.setattr(tool, "build_cpp", lambda: artifacts)
+    monkeypatch.setattr(tool, "run", fake_run)
+    monkeypatch.setattr(tool, "python_runner", lambda: ["python"])
+    monkeypatch.setattr(tool.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(tool.subprocess, "run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tool.time, "sleep", lambda _seconds: None)
+
+    assert tool.main(["--replay-capture"]) == 0
+
+    replay_config = str(tool.REPLAY_CAPTURE_CONFIG)
+    assert popen_commands
+    assert ["--config", replay_config] == popen_commands[0][1:3]
+    assert "--wait-ms" not in popen_commands[0]
+    detector_command = run_commands[1]
+    assert detector_command[:3] == ["python", "-m", "python_detector.detector_main"]
+    assert ["--config", replay_config] == detector_command[3:5]
+    assert detector_command[-1] == "120000"
+
+
+def test_timeout_override_is_passed_to_controller_and_detector(monkeypatch, tmp_path) -> None:
+    tool = importlib.import_module("tools.run_simulated_ipc")
+
+    controller = tmp_path / "seat_aoi_controller.exe"
+    protocol_layout = tmp_path / "protocol_layout.exe"
+    ipc_checks = tmp_path / "ipc_safety_checks.exe"
+    for path in (controller, protocol_layout, ipc_checks):
+        path.write_text("", encoding="utf-8")
+    artifacts = tool.BuildArtifacts(
+        controller=controller,
+        protocol_layout=protocol_layout,
+        ipc_checks=ipc_checks,
+    )
+    popen_commands: list[list[str]] = []
+    run_commands: list[list[str]] = []
+
+    class FakeProcess:
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+        def terminate(self):
+            return None
+
+    monkeypatch.setattr(tool, "build_cpp", lambda: artifacts)
+    monkeypatch.setattr(tool, "run", lambda command, *, cwd=None, env=None: run_commands.append([str(item) for item in command]))
+    monkeypatch.setattr(tool, "python_runner", lambda: ["python"])
+    monkeypatch.setattr(tool.subprocess, "Popen", lambda command: popen_commands.append([str(item) for item in command]) or FakeProcess())
+    monkeypatch.setattr(tool.subprocess, "run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tool.time, "sleep", lambda _seconds: None)
+
+    assert tool.main(["--replay-capture", "--timeout-ms", "9000"]) == 0
+
+    assert ["--wait-ms", "9000"] == popen_commands[0][-2:]
+    assert run_commands[1][-1] == "9000"

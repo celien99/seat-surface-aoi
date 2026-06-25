@@ -339,6 +339,21 @@ bool apply_camera_value(RuntimeCameraConfig* camera,
                             value,
                             &camera->simulate_missing_frame,
                             error_message);
+  } else if (field == "replay_root") {
+    camera->replay_root = value;
+  } else if (field == "replay_sample_index") {
+    return parse_uint32_field("camera." + std::to_string(camera->camera_index) +
+                                  ".replay_sample_index",
+                              value,
+                              true,
+                              &camera->replay_sample_index,
+                              error_message);
+  } else if (field == "replay_random") {
+    return parse_bool_field("camera." + std::to_string(camera->camera_index) +
+                                ".replay_random",
+                            value,
+                            &camera->replay_random,
+                            error_message);
   } else {
     if (error_message != nullptr) {
       *error_message = "未知相机字段: camera." + std::to_string(camera->camera_index) +
@@ -964,6 +979,11 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
   const bool signal_is_tcp = config.signal.backend == HardwareBackend::TcpSignal;
   const bool camera_is_simulated = is_simulated_backend(config.camera_backend);
   const bool light_is_simulated = is_simulated_backend(config.lights[0].backend);
+  bool has_camera_replay = false;
+  for (const auto& camera : config.cameras) {
+    has_camera_replay = has_camera_replay || !camera.replay_root.empty() ||
+                        camera.replay_sample_index > 0 || camera.replay_random;
+  }
 
   if (config.hardware_mode == HardwareMode::Simulated) {
     if (!signal_is_simulated || !camera_is_simulated || !light_is_simulated) {
@@ -973,6 +993,14 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
       return false;
     }
     return true;
+  }
+
+  if (has_camera_replay) {
+    if (error_message != nullptr) {
+      *error_message =
+          "camera.<N>.replay_* 只允许在 hardware_mode=simulated 且 camera.backend=simulated 时使用";
+    }
+    return false;
   }
 
   if (config.hardware_mode == HardwareMode::Lab) {

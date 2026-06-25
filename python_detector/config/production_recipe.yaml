@@ -89,7 +89,7 @@ models:
     embedding_backend: onnx_wideresnet50
     embedding_model_path: model/wideresnet50/seat_wrn50_embedding.onnx
     embedding_version: wrn50_seat_v1
-    embedding_dim: 1024
+    embedding_dim: 1536
     embedding_layers: [layer2, layer3]
     pca_path: model/patchcore/seat_pca.json
     pca_version: pca_seat_v1

@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from python_detector.config.recipe_schema import ModelConfig, Recipe, load_recipe_file
+from python_detector.models.pca import PcaParameters
 from python_detector.models.patchcore import PatchCoreKnnIndex
+from python_detector.models.patchcore import PatchCoreBank
 from python_detector.models.pca import PcaProjector
 from python_detector.paths import DEFAULT_CONFIG_DIR
 
@@ -70,6 +72,7 @@ def _validate_model_asset(model_key: str, model: ModelConfig) -> list[AssetIssue
         issues.extend(_validate_memory_bank(model.memory_bank_path, f"{prefix}.memory_bank_path", model.pca_version))
     if model.faiss_index_path:
         issues.extend(_validate_binary_file(model.faiss_index_path, f"{prefix}.faiss_index_path", "PatchCore FAISS index"))
+    issues.extend(_validate_patchcore_chain(prefix, model))
     return issues
 
 
@@ -112,6 +115,130 @@ def _validate_memory_bank(path_value: str, location: str, expected_pca_version: 
     if expected_pca_version is not None and bank.pca_version not in (None, expected_pca_version):
         return [AssetIssue("ERROR", location, f"PatchCore memory bank PCA 版本不匹配: {bank.pca_version} != {expected_pca_version}")]
     return []
+
+
+def _validate_patchcore_chain(prefix: str, model: ModelConfig) -> list[AssetIssue]:
+    if model.backend != "patchcore_knn":
+        return []
+    issues: list[AssetIssue] = []
+    pca = _load_pca_if_valid(model.pca_path)
+    bank = _load_bank_if_valid(model.memory_bank_path)
+    if pca is not None:
+        pca_input_dim = len(pca.mean)
+        pca_output_dim = len(pca.components)
+        if model.embedding_backend != "none" and pca_input_dim != model.embedding_dim:
+            issues.append(
+                AssetIssue(
+                    "ERROR",
+                    f"{prefix}.pca_path",
+                    f"PCA 输入维度与模型 embedding_dim 不匹配: {pca_input_dim} != {model.embedding_dim}",
+                )
+            )
+        if bank is not None:
+            if bank.embedding_dim != pca_output_dim:
+                issues.append(
+                    AssetIssue(
+                        "ERROR",
+                        f"{prefix}.memory_bank_path",
+                        f"PCA 输出维度与 PatchCore memory bank 维度不匹配: {pca_output_dim} != {bank.embedding_dim}",
+                    )
+                )
+            if bank.pca_version != model.pca_version:
+                issues.append(
+                    AssetIssue(
+                        "ERROR",
+                        f"{prefix}.memory_bank_path",
+                        f"PatchCore memory bank PCA 版本必须与配方一致: {bank.pca_version} != {model.pca_version}",
+                    )
+                )
+    elif bank is not None and model.embedding_backend != "none" and bank.embedding_dim != model.embedding_dim:
+        issues.append(
+            AssetIssue(
+                "ERROR",
+                f"{prefix}.memory_bank_path",
+                f"PatchCore memory bank 维度与模型 embedding_dim 不匹配: {bank.embedding_dim} != {model.embedding_dim}",
+            )
+        )
+    if bank is not None and model.faiss_index_path:
+        issues.extend(
+            _validate_faiss_index(
+                model.faiss_index_path,
+                f"{prefix}.faiss_index_path",
+                expected_dim=bank.embedding_dim,
+                expected_vectors=len(bank.vectors),
+            )
+        )
+    return issues
+
+
+def _load_pca_if_valid(path_value: str | None) -> PcaParameters | None:
+    if not path_value:
+        return None
+    path = _resolve_repo_path(path_value)
+    if not path.exists() or _is_empty_placeholder(path):
+        return None
+    try:
+        return PcaProjector().load(str(path))
+    except Exception:
+        return None
+
+
+def _load_bank_if_valid(path_value: str | None) -> PatchCoreBank | None:
+    if not path_value:
+        return None
+    path = _resolve_repo_path(path_value)
+    if not path.exists() or _is_empty_placeholder(path):
+        return None
+    try:
+        return PatchCoreKnnIndex().load(str(path))
+    except Exception:
+        return None
+
+
+def _validate_faiss_index(
+    path_value: str,
+    location: str,
+    *,
+    expected_dim: int,
+    expected_vectors: int,
+) -> list[AssetIssue]:
+    path = _resolve_repo_path(path_value)
+    if not path.exists() or _is_empty_placeholder(path):
+        return []
+    try:
+        import faiss  # type: ignore
+    except Exception:
+        return [
+            AssetIssue(
+                "WARN",
+                location,
+                "faiss-cpu 未安装，跳过 FAISS 维度和向量数校验；在线链路会回退 exact KNN",
+            )
+        ]
+    try:
+        index = faiss.read_index(str(path))
+    except Exception as exc:
+        return [AssetIssue("ERROR", location, f"PatchCore FAISS index 无法读取: {exc}")]
+    actual_dim = int(getattr(index, "d"))
+    actual_vectors = int(getattr(index, "ntotal"))
+    issues: list[AssetIssue] = []
+    if actual_dim != expected_dim:
+        issues.append(
+            AssetIssue(
+                "ERROR",
+                location,
+                f"PatchCore FAISS index 维度与 memory bank 不匹配: {actual_dim} != {expected_dim}",
+            )
+        )
+    if actual_vectors != expected_vectors:
+        issues.append(
+            AssetIssue(
+                "ERROR",
+                location,
+                f"PatchCore FAISS index 向量数与 memory bank 不匹配: {actual_vectors} != {expected_vectors}",
+            )
+        )
+    return issues
 
 
 def _resolve_repo_path(path_value: str) -> Path:

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "control/ilight_controller.hpp"
 #include "ipc/frame_ring_buffer.hpp"
@@ -21,6 +22,10 @@ struct CameraConfig {
   std::string exposure_output_line;
   std::uint32_t buffer_count = 8;
   bool simulate_missing_frame = false;
+  std::string replay_root;
+  std::uint32_t replay_sample_index = 0;
+  bool replay_random = false;
+  std::vector<std::uint32_t> replay_required_lights;
 };
 
 struct CameraHealth {

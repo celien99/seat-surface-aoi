@@ -15,6 +15,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 CPP_DIR = ROOT_DIR / "cpp_controller"
 BUILD_ROOT = CPP_DIR / "build" / "simulated-ipc"
 EXE_SUFFIX = ".exe" if os.name == "nt" else ""
+REPLAY_CAPTURE_CONFIG = CPP_DIR / "config" / "station_runtime.replay_capture.conf"
 
 
 @dataclass(frozen=True)
@@ -219,6 +220,7 @@ def shared_memory_source() -> Path:
 
 def common_cpp_sources() -> list[Path]:
     return [
+        CPP_DIR / "src" / "common" / "png_reader.cpp",
         CPP_DIR / "src" / "ipc" / "crc32.cpp",
         shared_memory_source(),
         CPP_DIR / "src" / "ipc" / "frame_ring_buffer.cpp",
@@ -232,6 +234,7 @@ def common_cpp_sources() -> list[Path]:
         CPP_DIR / "src" / "control" / "station_health.cpp",
         CPP_DIR / "src" / "control" / "station_runtime_config.cpp",
         CPP_DIR / "src" / "camera" / "camera_device.cpp",
+        CPP_DIR / "src" / "camera" / "replay_capture.cpp",
         CPP_DIR / "src" / "camera" / "hikrobot_mvs_camera.cpp",
         CPP_DIR / "src" / "camera" / "camera_worker.cpp",
         CPP_DIR / "src" / "control" / "frame_assembler.cpp",
@@ -340,14 +343,43 @@ def python_runner() -> list[str]:
     return [sys.executable]
 
 
-def main() -> int:
+def config_int_value(config_path: str | Path, key: str, fallback: int) -> int:
+    try:
+        for raw_line in Path(config_path).read_text(encoding="utf-8").splitlines():
+            line = raw_line.split("#", 1)[0].strip()
+            if not line or "=" not in line:
+                continue
+            name, value = [part.strip() for part in line.split("=", 1)]
+            if name == key:
+                return int(value)
+    except (OSError, ValueError):
+        return fallback
+    return fallback
+
+
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="运行跨平台端到端模拟 IPC")
     parser.add_argument(
         "--config",
         default="",
         help="C++ station runtime config 路径；默认使用 C++ 内置 simulated fallback",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--replay-capture",
+        action="store_true",
+        help="使用 images_capture 真实图片共享内存回放配置",
+    )
+    parser.add_argument(
+        "--timeout-ms",
+        type=int,
+        default=0,
+        help="覆盖 C++ 等待 detector 结果和 Python 等待任务的超时时间；默认无配置时 8000ms，有配置时使用配置值",
+    )
+    args = parser.parse_args(argv)
+    config_path = str(REPLAY_CAPTURE_CONFIG) if args.replay_capture else args.config
+    timeout_ms = args.timeout_ms
+    if timeout_ms <= 0:
+        timeout_ms = config_int_value(config_path, "detector_timeout_ms", 8000) if config_path else 8000
 
     try:
         artifacts = build_cpp()
@@ -365,18 +397,20 @@ def main() -> int:
     run([str(ipc_checks)])
     subprocess.run([str(controller), "--cleanup"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    controller_args = [str(controller), "--once", "--wait-ms", "8000"]
-    if args.config:
-        controller_args[1:1] = ["--config", args.config]
+    controller_args = [str(controller), "--once"]
+    if config_path:
+        controller_args[1:1] = ["--config", config_path]
+    if args.timeout_ms > 0 or not config_path:
+        controller_args.extend(["--wait-ms", str(timeout_ms)])
     detector_args = [
         "-m",
         "python_detector.detector_main",
         "--once",
         "--timeout-ms",
-        "8000",
+        str(timeout_ms),
     ]
-    if args.config:
-        detector_args[2:2] = ["--config", args.config]
+    if config_path:
+        detector_args[2:2] = ["--config", config_path]
 
     cpp_process = subprocess.Popen(controller_args)
     time.sleep(0.2)

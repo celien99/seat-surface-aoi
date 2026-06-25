@@ -562,6 +562,285 @@ bool test_runtime_multi_light_controller_config_rejected() {
   return passed;
 }
 
+void write_replay_png_group(const std::filesystem::path& root,
+                            const std::string& camera_id,
+                            int sample_index,
+                            std::uint32_t width,
+                            std::uint32_t height) {
+  std::filesystem::create_directories(root);
+  for (std::uint32_t light = 1; light <= 3; ++light) {
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(width) * height);
+    for (std::uint32_t y = 0; y < height; ++y) {
+      for (std::uint32_t x = 0; x < width; ++x) {
+        bytes[static_cast<std::size_t>(y) * width + x] =
+            static_cast<std::uint8_t>(40 + sample_index * 10 + light * 20 + x + y);
+      }
+    }
+    const auto path = root / (camera_id + "_" +
+                              std::to_string(1000000 + sample_index * 100 + light) +
+                              "_L" + std::to_string(light) + "_original.png");
+    std::string error;
+    if (!seat_aoi::write_png(path.string(), bytes, width, height, &error)) {
+      std::cerr << "failed to write replay test png: " << error << "\n";
+    }
+  }
+}
+
+bool test_replay_capture_config_parses() {
+  seat_aoi::StationRuntimeConfig config;
+  std::string error;
+  bool ok = seat_aoi::load_station_runtime_config(
+      "cpp_controller/config/station_runtime.replay_capture.conf", &config, &error);
+  if (!ok) {
+    error.clear();
+    ok = seat_aoi::load_station_runtime_config(
+        "config/station_runtime.replay_capture.conf", &config, &error);
+  }
+  const bool passed = ok &&
+                      config.hardware_mode == seat_aoi::HardwareMode::Simulated &&
+                      config.camera_backend == seat_aoi::HardwareBackend::Simulated &&
+                      config.cameras.size() == 2 &&
+                      config.cameras[0].replay_random &&
+                      config.cameras[1].replay_random &&
+                      !config.cameras[0].replay_root.empty() &&
+                      config.frame_slot_size == 134217728U &&
+                      config.recipe_id == "seat_a_black_leather_production_v1";
+  if (!passed) {
+    std::cerr << "replay capture config did not parse: " << error << "\n";
+  }
+  return passed;
+}
+
+bool test_replay_config_rejected_outside_simulated_camera_backend() {
+  const auto root = std::filesystem::temp_directory_path() /
+                    ("seat_aoi_replay_config_reject_" + std::to_string(seat_aoi::now_us()));
+  std::filesystem::create_directories(root);
+  const auto path = root / "station_runtime.invalid_replay.conf";
+  std::ofstream config(path);
+  config
+      << "hardware_mode=lab\n"
+      << "signal.backend=manual_trigger\n"
+      << "camera.backend=hikrobot_mvs\n"
+      << "light.backend=simulated\n"
+      << "camera.0.camera_id=TOP_BACK\n"
+      << "camera.0.serial_number=REPLAY_TOP_BACK\n"
+      << "camera.0.calibration_id=calib/top_back_production_v1\n"
+      << "camera.0.width=4\n"
+      << "camera.0.height=3\n"
+      << "camera.0.channels=1\n"
+      << "camera.0.pixel_format=Mono8\n"
+      << "camera.0.replay_root=" << root.string() << "\n"
+      << "light.1.physical_channel=1\n";
+  config.close();
+
+  seat_aoi::StationRuntimeConfig runtime_config;
+  std::string error;
+  const bool loaded = seat_aoi::load_station_runtime_config(
+      path.string(), &runtime_config, &error);
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+  const bool passed = !loaded && error.find("replay_*") != std::string::npos;
+  if (!passed) {
+    std::cerr << "replay config outside simulated backend was not rejected: "
+              << error << "\n";
+  }
+  return passed;
+}
+
+bool test_replay_camera_reads_selected_png_group() {
+  const auto root = std::filesystem::temp_directory_path() /
+                    ("seat_aoi_replay_ok_" + std::to_string(seat_aoi::now_us()));
+  write_replay_png_group(root, "TOP_BACK", 1, 4, 3);
+  write_replay_png_group(root, "TOP_BACK", 2, 4, 3);
+
+  seat_aoi::CameraConfig config;
+  config.camera_index = 0;
+  config.camera_id = "TOP_BACK";
+  config.width = 4;
+  config.height = 3;
+  config.channels = 1;
+  config.pixel_format = "Mono8";
+  config.replay_root = root.string();
+  config.replay_sample_index = 2;
+  config.replay_required_lights = {1, 2, 3};
+
+  seat_aoi::CameraDevice camera;
+  const bool initialized = camera.initialize(config);
+  seat_aoi::LightChannelParam light;
+  light.light_index = 2;
+  light.exposure_us = 800;
+  light.gain = 1.0F;
+  seat_aoi::CapturedFrame frame;
+  const bool captured = initialized && camera.arm(1001, light, 1, 10) &&
+                        camera.capture(1001, light, 1, &frame, 10);
+  const bool passed = captured &&
+                      frame.bytes.size() == 12 &&
+                      frame.bytes[0] == static_cast<std::uint8_t>(40 + 2 * 10 + 2 * 20) &&
+                      frame.meta.width == 4 &&
+                      frame.meta.height == 3 &&
+                      frame.meta.light_index == 2 &&
+                      frame.meta.frame_index == 100101;
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+  if (!passed) {
+    std::cerr << "replay camera did not read selected png group health="
+              << camera.get_health().message << "\n";
+  }
+  return passed;
+}
+
+bool test_replay_camera_fails_when_light_group_missing() {
+  const auto root = std::filesystem::temp_directory_path() /
+                    ("seat_aoi_replay_missing_" + std::to_string(seat_aoi::now_us()));
+  write_replay_png_group(root, "TOP_BACK", 1, 4, 3);
+  std::filesystem::remove(root / "TOP_BACK_1000103_L3_original.png");
+
+  seat_aoi::CameraConfig config;
+  config.camera_index = 0;
+  config.camera_id = "TOP_BACK";
+  config.width = 4;
+  config.height = 3;
+  config.channels = 1;
+  config.pixel_format = "Mono8";
+  config.replay_root = root.string();
+  config.replay_sample_index = 1;
+  config.replay_required_lights = {1, 2, 3};
+
+  seat_aoi::CameraDevice camera;
+  const bool initialized = camera.initialize(config);
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+  const bool passed = !initialized &&
+                      camera.get_health().message.find("missing required light") != std::string::npos;
+  if (!passed) {
+    std::cerr << "missing replay light group did not fail: "
+              << camera.get_health().message << "\n";
+  }
+  return passed;
+}
+
+bool test_replay_camera_fails_when_selected_sample_is_incomplete() {
+  const auto root = std::filesystem::temp_directory_path() /
+                    ("seat_aoi_replay_incomplete_" + std::to_string(seat_aoi::now_us()));
+  write_replay_png_group(root, "TOP_BACK", 1, 4, 3);
+  write_replay_png_group(root, "TOP_BACK", 2, 4, 3);
+  std::filesystem::remove(root / "TOP_BACK_1000203_L3_original.png");
+
+  seat_aoi::CameraConfig config;
+  config.camera_index = 0;
+  config.camera_id = "TOP_BACK";
+  config.width = 4;
+  config.height = 3;
+  config.channels = 1;
+  config.pixel_format = "Mono8";
+  config.replay_root = root.string();
+  config.replay_sample_index = 2;
+  config.replay_required_lights = {1, 2, 3};
+
+  seat_aoi::CameraDevice camera;
+  const bool initialized = camera.initialize(config);
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+  const bool passed = !initialized &&
+                      camera.get_health().message.find("incomplete") != std::string::npos;
+  if (!passed) {
+    std::cerr << "selected incomplete replay sample did not fail: "
+              << camera.get_health().message << "\n";
+  }
+  return passed;
+}
+
+bool test_replay_camera_fails_on_shape_mismatch() {
+  const auto root = std::filesystem::temp_directory_path() /
+                    ("seat_aoi_replay_shape_" + std::to_string(seat_aoi::now_us()));
+  write_replay_png_group(root, "TOP_BACK", 1, 4, 3);
+
+  seat_aoi::CameraConfig config;
+  config.camera_index = 0;
+  config.camera_id = "TOP_BACK";
+  config.width = 5;
+  config.height = 3;
+  config.channels = 1;
+  config.pixel_format = "Mono8";
+  config.replay_root = root.string();
+  config.replay_sample_index = 1;
+  config.replay_required_lights = {1, 2, 3};
+
+  seat_aoi::CameraDevice camera;
+  const bool initialized = camera.initialize(config);
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+  const bool passed = !initialized &&
+                      camera.get_health().message.find("shape mismatch") != std::string::npos;
+  if (!passed) {
+    std::cerr << "replay shape mismatch did not fail: "
+              << camera.get_health().message << "\n";
+  }
+  return passed;
+}
+
+bool test_replay_station_random_selects_complete_sample_pool() {
+  const auto root = std::filesystem::temp_directory_path() /
+                    ("seat_aoi_replay_complete_" + std::to_string(seat_aoi::now_us()));
+  write_replay_png_group(root, "TOP_BACK", 1, 4, 3);
+  write_replay_png_group(root, "TOP_BACK", 2, 4, 3);
+  write_replay_png_group(root, "TOP_CUSHION", 1, 4, 3);
+  write_replay_png_group(root, "TOP_CUSHION", 2, 4, 3);
+  std::filesystem::remove(root / "TOP_CUSHION_1000203_L3_original.png");
+
+  seat_aoi::StationConfig config;
+  config.controller_mode = seat_aoi::ControllerMode::CaptureOnly;
+  config.reset_shared_memory = true;
+  config.slot_count = 1;
+  config.frame_slot_size = 8192;
+  config.result_slot_size = 4096;
+  config.publish_timeout_ms = 5;
+  config.detector_timeout_ms = 5;
+  config.trigger_timeout_ms = 5;
+  config.camera_timeout_ms = 20;
+  config.light_timeout_ms = 20;
+  config.arm_settle_ms = 0;
+  config.trace_root = (root / "trace").string();
+  config.light_order = {1, 2, 3};
+  config.light_channels = {
+      seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 10, 1.0F, 60.0F},
+      seat_aoi::RuntimeLightChannelConfig{0, 2, 2, 800, 800, 10, 1.0F, 60.0F},
+      seat_aoi::RuntimeLightChannelConfig{0, 3, 3, 800, 800, 10, 1.0F, 55.0F},
+  };
+  config.image_save.enabled = false;
+  config.image_save.cleanup_enabled = false;
+  config.cameras = {
+      seat_aoi::RuntimeCameraConfig{0, "TOP_BACK", "", "calib/simulated_v1", 4, 3, 1, "Mono8", "", "", 8, false},
+      seat_aoi::RuntimeCameraConfig{1, "TOP_CUSHION", "", "calib/simulated_v1", 4, 3, 1, "Mono8", "", "", 8, false},
+  };
+  for (auto& camera : config.cameras) {
+    camera.replay_root = root.string();
+    camera.replay_random = true;
+  }
+
+  seat_aoi::StationController station;
+  const bool initialized = station.initialize(config);
+  seat_aoi::ExternalTrigger trigger;
+  trigger.trigger_id = 7040;
+  trigger.seat_id = "SIM_REPLAY_COMPLETE";
+  trigger.sku = "seat_a_black_leather";
+  const auto result = initialized ? station.inspect_one_seat(trigger) : seat_aoi::InspectionResultPayload{};
+  station.cleanup_shared_memory();
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+
+  const bool passed = initialized &&
+                      static_cast<seat_aoi::InspectionDecision>(result.meta.decision) ==
+                          seat_aoi::InspectionDecision::Recheck &&
+                      static_cast<seat_aoi::ErrorCode>(result.meta.error_code) ==
+                          seat_aoi::ErrorCode::None;
+  if (!passed) {
+    std::cerr << "replay station did not select complete shared sample pool: decision="
+              << result.meta.decision << " error=" << result.meta.error_code << "\n";
+  }
+  return passed;
+}
+
 bool test_station_storage_failure_returns_recheck_before_capture() {
   const auto root = std::filesystem::temp_directory_path() /
                     ("seat_aoi_storage_fail_" + std::to_string(seat_aoi::now_us()));
@@ -1504,6 +1783,27 @@ int main() {
     return 1;
   }
   if (!test_runtime_multi_light_controller_config_rejected()) {
+    return 1;
+  }
+  if (!test_replay_capture_config_parses()) {
+    return 1;
+  }
+  if (!test_replay_config_rejected_outside_simulated_camera_backend()) {
+    return 1;
+  }
+  if (!test_replay_camera_reads_selected_png_group()) {
+    return 1;
+  }
+  if (!test_replay_camera_fails_when_light_group_missing()) {
+    return 1;
+  }
+  if (!test_replay_camera_fails_when_selected_sample_is_incomplete()) {
+    return 1;
+  }
+  if (!test_replay_camera_fails_on_shape_mismatch()) {
+    return 1;
+  }
+  if (!test_replay_station_random_selects_complete_sample_pool()) {
     return 1;
   }
   if (!test_station_storage_failure_returns_recheck_before_capture()) {

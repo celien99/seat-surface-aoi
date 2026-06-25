@@ -1,14 +1,18 @@
 #include "control/frame_assembler.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <future>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <mutex>
+#include <random>
 #include <sstream>
 #include <thread>
 
+#include "camera/replay_capture.hpp"
 #include "common/string_utils.hpp"
 #include "common/time_utils.hpp"
 #include "control/hardware_factory.hpp"
@@ -35,6 +39,53 @@ void set_acquisition_error(AcquisitionError* error,
   error->message = message;
 }
 
+std::vector<std::uint32_t> intersect_sample_indices(std::vector<std::uint32_t> lhs,
+                                                    std::vector<std::uint32_t> rhs) {
+  std::vector<std::uint32_t> out;
+  std::sort(lhs.begin(), lhs.end());
+  std::sort(rhs.begin(), rhs.end());
+  std::set_intersection(lhs.begin(),
+                        lhs.end(),
+                        rhs.begin(),
+                        rhs.end(),
+                        std::back_inserter(out));
+  return out;
+}
+
+std::map<std::string, std::uint32_t> select_replay_samples_by_root(
+    const StationRuntimeConfig& config) {
+  std::map<std::string, std::vector<std::uint32_t>> complete_indices_by_root;
+  for (const auto& camera : config.cameras) {
+    if (camera.replay_root.empty() || !camera.replay_random) {
+      continue;
+    }
+    std::string scan_error;
+    const auto groups = scan_replay_capture_groups(
+        camera.replay_root, camera.camera_id, config.light_order, &scan_error);
+    (void)scan_error;
+    auto indices = complete_replay_sample_indices(groups, config.light_order);
+    auto iter = complete_indices_by_root.find(camera.replay_root);
+    if (iter == complete_indices_by_root.end()) {
+      complete_indices_by_root[camera.replay_root] = std::move(indices);
+    } else {
+      iter->second = intersect_sample_indices(std::move(iter->second), std::move(indices));
+    }
+  }
+
+  std::map<std::string, std::uint32_t> selected_by_root;
+  std::random_device device;
+  std::mt19937 generator(device());
+  for (const auto& [root, indices] : complete_indices_by_root) {
+    if (indices.empty()) {
+      selected_by_root[root] = 1;
+      continue;
+    }
+    std::uniform_int_distribution<std::size_t> distribution(0, indices.size() - 1U);
+    selected_by_root[root] = indices[distribution(generator)];
+  }
+  return selected_by_root;
+}
+
 }  // namespace
 
 void FrameAssembler::configure(const StationRuntimeConfig& config) {
@@ -58,6 +109,7 @@ bool FrameAssembler::ensure_initialized() {
   light_controllers_.push_back(std::move(light_controller));
 
   cameras_.clear();
+  const auto selected_replay_sample_by_root = select_replay_samples_by_root(config_);
   for (const auto& runtime_camera : config_.cameras) {
     CameraConfig camera_config;
     camera_config.camera_index = runtime_camera.camera_index;
@@ -72,6 +124,17 @@ bool FrameAssembler::ensure_initialized() {
     camera_config.exposure_output_line = runtime_camera.exposure_output_line;
     camera_config.buffer_count = runtime_camera.buffer_count;
     camera_config.simulate_missing_frame = runtime_camera.simulate_missing_frame;
+    camera_config.replay_root = runtime_camera.replay_root;
+    camera_config.replay_sample_index = runtime_camera.replay_sample_index;
+    camera_config.replay_random = runtime_camera.replay_random;
+    camera_config.replay_required_lights = config_.light_order;
+    if (runtime_camera.replay_random && !runtime_camera.replay_root.empty()) {
+      const auto iter = selected_replay_sample_by_root.find(runtime_camera.replay_root);
+      if (iter != selected_replay_sample_by_root.end()) {
+        camera_config.replay_sample_index = iter->second;
+        camera_config.replay_random = false;
+      }
+    }
 
     auto camera = create_camera(config_.camera_backend);
     if (!camera->initialize(camera_config)) {

@@ -38,6 +38,8 @@ else()
 endif()
 
 add_library(seat_aoi_control
+  src/common/png_reader.cpp
+  src/camera/replay_capture.cpp
   src/control/hardware_backend.cpp
   src/control/fl_acdh_light_controller.cpp
   src/control/light_controller.cpp

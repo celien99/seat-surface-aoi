@@ -122,6 +122,7 @@ models:
     role: safety_net
     class_names: [unknown_anomaly]
     embedding_backend: statistical
+    embedding_dim: 2
     pca_path: {pca_path}
     pca_version: pca_v1
     memory_bank_path: {bank_path}
@@ -131,3 +132,51 @@ models:
     recipe = load_recipe_by_id_or_path(str(recipe_path))
 
     assert validate_recipe_model_assets(recipe) == []
+
+
+def test_validate_model_assets_rejects_patchcore_dimension_mismatch(tmp_path: Path) -> None:
+    pca_path = tmp_path / "pca.json"
+    pca_path.write_text(
+        '{"version":"pca_v1","mean":[0.0,0.0],"components":[[1.0,0.0],[0.0,1.0]]}',
+        encoding="utf-8",
+    )
+    bank_path = tmp_path / "bank.json"
+    bank_path.write_text(
+        '{"version":"bank_v1","model_family":"patchcore","embedding_dim":3,'
+        '"coreset_ratio":1.0,"pca_version":"pca_v1","vectors":[[0.0,0.0,0.0]]}',
+        encoding="utf-8",
+    )
+    recipe_path = tmp_path / "recipe.yaml"
+    recipe_path.write_text(
+        f"""
+recipe_id: asset_bad_dim
+sku: sku
+light_order: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT, HIGH_RIGHT]
+cameras:
+  TOP:
+    model_key: patchcore
+thresholds:
+  unknown_anomaly: {{ng_score: 0.55, recheck_score: 0.20, min_area_px: 1}}
+models:
+  default:
+    backend: fake
+    role: primary
+    class_names: [unknown_anomaly]
+  patchcore:
+    backend: patchcore_knn
+    model_family: patchcore
+    role: primary
+    class_names: [unknown_anomaly]
+    embedding_backend: statistical
+    embedding_dim: 2
+    pca_path: {pca_path}
+    pca_version: pca_v1
+    memory_bank_path: {bank_path}
+""",
+        encoding="utf-8",
+    )
+    recipe = load_recipe_by_id_or_path(str(recipe_path))
+
+    messages = [issue.message for issue in validate_recipe_model_assets(recipe)]
+
+    assert any("PCA 输出维度与 PatchCore memory bank 维度不匹配: 2 != 3" in message for message in messages)

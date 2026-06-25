@@ -55,7 +55,8 @@ cpp_controller/
 ├── config/
 │   ├── station_runtime.production.conf     # 生产在线模式
 │   ├── station_runtime.test.conf           # 工控机手动触发联调
-│   └── station_runtime.capture_only.conf   # 采图模式，不启用共享内存
+│   ├── station_runtime.capture_only.conf   # 采图模式，不启用共享内存
+│   └── station_runtime.replay_capture.conf # images_capture 真实图共享内存回放
 ├── include/
 │   ├── camera/                             # ICamera、模拟相机、Hikrobot MVS 适配声明
 │   ├── common/                             # 错误码、协议结构基础类型、字符串/时间工具
@@ -101,6 +102,7 @@ cpp_controller/
 | `config/station_runtime.test.conf` | `online` | 手动触发联调真实相机和频闪，仍走共享内存检测；COM1 / 9600 8N1，参数同生产配置。 |
 | `config/station_runtime.capture_only.conf` | `capture_only` | 手动触发采图，保存 PNG 原图，不启用共享内存；COM1 / 9600 8N1，参数同生产配置。 |
 | `config/station_runtime.capture_only.single_camera.conf` | `capture_only` | 单相机诊断采图，对齐外部成功程序的 `DA9184676 + COM1 + 光源1`。 |
+| `config/station_runtime.replay_capture.conf` | `online` | 本地/联调共享内存回放：`hardware_mode=simulated`，模拟信号/光源，相机像素从 `images_capture` 真实 PNG 随机完整样本读取，再由 C++ 写入 Frame SHM。 |
 
 关键字段：
 
@@ -151,6 +153,8 @@ image_save.save_original=true
 
 `hardware_mode=production` 禁止 simulated/manual backend；`hardware_mode=lab` 可用 `manual_trigger` 做手动联调；不传 `--config` 时仍保留内置 simulated fallback，用于本地 IPC 回归。
 
+`camera.<N>.replay_root`、`camera.<N>.replay_sample_index` 和 `camera.<N>.replay_random` 只允许在 `hardware_mode=simulated` 且 `camera.backend=simulated` 时使用。回放按 `<camera_id>_<timestamp>_L<light>_original.png` 扫描 8-bit 灰度 PNG，以文件名时间戳排序并按 `light_order` 聚合同一相机连续光源组；随机模式只从所有配置相机都完整的样本序号交集中选择。缺图、PNG 解码失败或尺寸与相机配置不一致都会导致采集失败并保守返回 `RECHECK/ERROR`，不会影响 `hikrobot_mvs` 真实相机路径。写入共享内存时使用本次模拟采集 metadata 时间戳，避免把历史采图文件名时间戳误当作在线采集时序。
+
 ## 构建
 
 ```powershell
@@ -189,6 +193,9 @@ cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --config cpp_co
 # 单相机诊断采图，对齐外部成功程序
 cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.capture_only.single_camera.conf --once
 
+# images_capture 真实图共享内存回放
+uv run python tools/run_simulated_ipc.py --config cpp_controller/config/station_runtime.replay_capture.conf
+
 # 清理共享内存
 cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --cleanup
 ```
@@ -209,6 +216,7 @@ cmake --build cpp_controller/build --config Release
 cpp_controller\build\ipc_safety_checks.exe
 uv run python -m tools.validate_protocol
 uv run python tools/run_simulated_ipc.py
+uv run python tools/run_simulated_ipc.py --replay-capture
 ```
 
 本次主控收敛及代码优化后，`ipc_safety_checks` 覆盖了以下关键点：

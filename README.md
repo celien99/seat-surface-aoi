@@ -54,6 +54,7 @@ cpp_controller\build\codex-check\Release\ipc_safety_checks.exe
 cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.production.conf --validate-config
 cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.test.conf --validate-config
 cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.capture_only.conf --validate-config
+cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.replay_capture.conf --validate-config
 ```
 
 ## 运行配置
@@ -64,6 +65,7 @@ cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --config cpp_co
 | `cpp_controller/config/station_runtime.test.conf` | 工控机联调模式：手动触发、Hikrobot MVS、FL-ACDH、共享内存、Python 检测，默认相机取帧超时 5s；频闪参数对齐外部成功程序。 |
 | `cpp_controller/config/station_runtime.capture_only.conf` | 采图模式：手动触发、Hikrobot MVS、FL-ACDH，只保存原图，不创建共享内存，默认相机取帧超时 5s；频闪参数对齐外部成功程序。 |
 | `cpp_controller/config/station_runtime.capture_only.single_camera.conf` | 单相机诊断采图：对齐外部成功程序的 `DA9184676 + COM1 + 光源1`，FL-ACDH 命令使用 ACK 节拍。 |
+| `cpp_controller/config/station_runtime.replay_capture.conf` | `images_capture` 真实 PNG 回放：C++ simulated camera 从采图目录随机抽完整两机位三光源样本，写入共享内存，Python detector 从共享内存检测；不控制真实相机或频闪。 |
 
 现场配置显式包含 `arm_settle_ms=50` 和 `max_camera_failures_before_reset=2`。如果程序提示未知运行配置字段，说明运行的不是当前源码重新构建出的控制器，需要先重建对应 Hikrobot MVS 版本的 `seat_aoi_controller.exe`。
 
@@ -103,7 +105,7 @@ uv run python -m training_tools.collect_capture_dataset `
 `collect_capture_dataset` 默认按所选配方的 `light_order` 生成 `L1/L2/L3...` 到算法光源 ID 的映射；当前生产配方即 `L1/L2/L3 -> DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。它调用 `model/roi_yolo/seat_roi_seg.onnx` 做 ROI segmentation 定位，先按 mask 外接矩形裁出座椅 ROI，再把 mask 外像素置黑，只保留 mask 内目标物体，最后输出 `dataset_manifest.jsonl` 和当前配方光源数量一致的 ROI PNG。默认保留 ROI 原生尺寸，避免把纹理和细小缺陷压缩失真；只有在需要和 PatchCore 固定输入尺寸对齐时，才应显式传 `--roi-output-size WIDTHxHEIGHT`，并且该缩放会采用等比例 letterbox，而不是直接拉伸。`dataset_summary.json` 会记录 `roi_size_policy` 和 ROI 尺寸分布，`patchcore_training_summary.json` 会记录实际训练输入 `input_shape_summary`，用于确认训练和在线裁剪策略一致。ROI 冲突、低置信或越界样本会被跳过，不进入训练集。PatchCore 只能用人工确认的正常样本建库；`seat_defect_detector.onnx` 仍需要按缺陷类别人工标注后的 YOLO detect 数据集训练。
 生产缺陷判定链路采用无监督 PatchCore 主模型，不依赖 `model/supervised_defect/seat_defect_detector.onnx`。真实 OK 样本用于训练 WideResNet50 embedding、PCA、PatchCore memory bank 和可选 FAISS 索引；训练 embedding 默认使用配方 `models.<key>.input_channels`，与在线检测层保持一致，当前 2 个机位、3 种光源只是生产配方事实，算法层不固定光源数或输入通道数。NG/RECHECK 与人工复核样本用于阈值曲线和放行验证。
 
-**生产配方默认启用空间 PatchCore 模式（`spatial_mode: true`）**，检测链路提取 layer2+layer3 中间层特征图构建 H×W patch 嵌入，KNN 评分后生成像素级 `anomaly_map` 热力图，经 BFS 连通域分析自动定位缺陷区域并输出 bbox。TraceWriter 将 anomaly_map 渲染为 JET 伪彩色 40% 混合 overlay PNG（绿色 bbox 轮廓），供前端展示通道消费。若需回退到全局嵌入路径（整个 ROI → 1 个标量分数），在配方中设置 `spatial_mode: false`。
+**生产配方默认启用空间 PatchCore 模式（`spatial_mode: true`）**，检测链路提取 layer2+layer3 中间层特征图构建 H×W patch 嵌入，当前原始 patch embedding 为 1536 维，经 `seat_pca.json` 投影到 3 维后进入 PatchCore memory bank/FAISS。KNN 评分后生成像素级 `anomaly_map` 热力图，经 BFS 连通域分析自动定位缺陷区域并输出 bbox。TraceWriter 将 anomaly_map 渲染为 JET 伪彩色 40% 混合 overlay PNG（绿色 bbox 轮廓），供前端展示通道消费。若需回退到全局嵌入路径（整个 ROI → 1 个标量分数），在配方中设置 `spatial_mode: false`。
 
 生产配方的亮度质量门禁采用比例阈值：单帧过曝像素比例 `max_saturation_ratio` 和过暗像素比例 `max_dark_ratio` 当前均为 `0.40`；缺帧、时序、曝光/增益一致性、锐度、运动梯度、配准失败等不确定状态仍会输出 `RECHECK` 或 `ERROR`。
 
@@ -118,6 +120,16 @@ uv run python -m training_tools.simulate_capture_detection `
 ```
 
 该命令会构造真实 `SeatInspectionJob`，调用生产配方的质量门禁、ROI YOLO segmentation、ROI 裁剪、ECC、WideResNet50 embedding、PCA、PatchCore/FAISS、融合和规则判定，并输出 trace 与 `detection_images/*.png`。
+
+从 `images_capture/` 抽取一组两机位样本做共享内存全链路回放：
+
+```powershell
+uv run python tools/run_simulated_ipc.py --config cpp_controller/config/station_runtime.replay_capture.conf
+# 等价快捷入口：
+uv run python tools/run_simulated_ipc.py --replay-capture
+```
+
+该命令会先构建/启动 C++ 主控，由 C++ simulated camera 读取 `images_capture/20260623/LINE1_AOI_CAPTURE_MANUAL_SEAT_9000` 中随机完整样本并发布 Frame SHM，再启动 Python detector 读取共享内存、运行生产配方并写回 Result SHM。文件名时间戳仅用于排序分组，写入共享内存时仍使用本次在线模拟采集 metadata；若真实 PNG 触发质量门禁或模型保守规则，结果会按规则返回 `RECHECK/ERROR`，不会输出 `OK`。`trace/replay_capture/display_latest.json` 会记录展示通道摘要，检测 trace 按生产配方的 `trace.save_ok_ratio/save_ng/save_recheck` 策略保存到配方 trace 根目录。
 
 ## 安全边界
 
