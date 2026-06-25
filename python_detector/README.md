@@ -26,7 +26,7 @@ Python 只负责检测链路，不控制 PLC、工业相机或频闪；在线图
 
 Python 层使用项目根目录的 `pyproject.toml` 和 `uv.lock` 管理依赖：
 
-- 默认运行依赖：`PyYAML`、`numpy`；`PyYAML` 用于配方、标定和 ROI YAML，`numpy` 用于在线图像质量门禁、预处理、特征构建和模型输入/输出数组处理。
+- 默认运行依赖：`PyYAML`、`numpy`；`PyYAML` 用于配方、标定和 ROI YAML，`numpy` 用于在线图像质量门禁、预处理、ROI 定位、配准、特征构建和模型输入/输出数组处理。
 - `test` dependency group：`pytest`、`numpy`，用于单元测试和 ONNX 输出解析测试。
 - `dev` dependency group：`pytest`、`numpy`、`ruff`，用于开发验证。
 - `training` dependency group：`torch`、`torchvision`、`onnx`、`onnxscript`、`onnxruntime`、`ultralytics`、`faiss-cpu`，用于 ROI YOLO、WideResNet50 embedding、PCA/PatchCore/FAISS 资产训练和导出。
@@ -257,11 +257,11 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 `ImageQualityGate` 在进入模型前拦截不可靠输入，包括缺少必需机位/检测光源、未启用的显式机器人 pose、非单调时间戳、重复帧号、曝光/增益漂移、过曝欠曝比例超限、锐度不足、光源亮度漂移，以及同一视角必需检测光源间的 `shot_id`、机器人时间戳、TCP 坐标和 RPY 姿态不一致。固定机位默认配置可接收同一机位的动态 `pose_id`，但仍要求每个动态视角自己的 `quality.required_lights` 完整、时序一致、质量通过；当前生产配方为 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 三路，`light_seq_index` 分别匹配顶层采集顺序 `0/1/2`。生产配方当前将单帧过曝像素比例 `max_saturation_ratio` 和过暗像素比例 `max_dark_ratio` 都配置为 `0.40`，同时保留缺帧、时序、曝光/增益一致性、锐度、运动梯度和配准等硬门禁。亮度统计、过曝/欠曝比例、Laplacian 锐度和运动梯度使用 `numpy` 对有效像素区向量化计算，不再用 Python 逐像素循环处理高分辨率原图。固定机位可以保留空的机器人字段，一旦任一必需检测光源携带机器人字段，其余必需检测光源必须保持一致。失败结果进入 `RuleEngine.make_quality_fail_result()`，不会输出 `OK`。
 
-`Preprocessor` 只接受当前实现支持的 `MONO8` / `UINT8` / 单通道图像，并显式检查 stride、图像长度、标定版本和图像尺寸。ROI 可以是轴对齐矩形裁剪，也可以是四点透视展开；轴对齐矩形裁剪、四点透视双线性采样和 ROI mask 应用使用 `numpy` 切片、网格采样和布尔掩码，避免在高分辨率 raw ROI 上逐像素复制。Dome ROI 定位会按 `roi_name` 聚合同名候选，优先选择置信度最高、姿态误差最低的候选；bbox 后端输出矩形 ROI，seg 后端从 mask 自动生成运行时 `polygon_xy`，当前传给后续配准和模型的是 mask 外接矩形 ROI 图，并会把 mask 外像素置黑，只保留 mask 内目标物体。同名 ROI 出现互相冲突的框或 mask 时返回 `RECHECK`，避免重复检测静默覆盖 ROI。
+`Preprocessor` 只接受当前实现支持的 `MONO8` / `UINT8` / 单通道图像，并显式检查 stride、图像长度、标定版本和图像尺寸。ROI 可以是轴对齐矩形裁剪，也可以是四点透视展开；轴对齐矩形裁剪、四点透视双线性采样和 ROI mask 应用使用 `numpy` 切片、网格采样和布尔掩码，避免在高分辨率 raw ROI 上逐像素复制。Dome ROI 定位会按 `roi_name` 聚合同名候选，优先选择置信度最高、姿态误差最低的候选；bbox 后端输出矩形 ROI，seg 后端从 mask 自动生成运行时 `polygon_xy`，当前传给后续配准和模型的是 mask 外接矩形 ROI 图，并会把 mask 外像素置黑，只保留 mask 内目标物体。ROI locator 的模型输入 letterbox、mask bbox/area 统计、mask 裁剪和输出 mask 1px 腐蚀均使用 `numpy` 数组索引、`nonzero/count_nonzero` 和布尔运算处理。同名 ROI 出现互相冲突的框或 mask 时返回 `RECHECK`，避免重复检测静默覆盖 ROI。
 
 ### 多光源特征
 
-`ReflectanceCubeBuilder` 将同一 ROI 下多个检测光源图组织成 cube，并按当前视角的 `light_order` 保留可用检测光源。固定机位生产配方当前只使用 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 三路；DOME 语义映射到 `DIFFUSE` 只影响 ROI 定位输入选择，不新增特征通道。`fixed_calibration` 模式检查标定矩阵角点误差；`ecc` 模式以 `base_light_id` ROI 为基准，对其余光源做整数像素平移搜索，记录相关系数、位移和误差，并在配准通过时把非基准光源 ROI 重采样到基准坐标后再进入特征构建。配准失败、相关性不足或位移超过阈值时仍走质量失败结果，不输出 `OK`。
+`ReflectanceCubeBuilder` 将同一 ROI 下多个检测光源图组织成 cube，并按当前视角的 `light_order` 保留可用检测光源。固定机位生产配方当前只使用 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 三路；DOME 语义映射到 `DIFFUSE` 只影响 ROI 定位输入选择，不新增特征通道。`fixed_calibration` 模式检查标定矩阵角点误差；`ecc` 模式以 `base_light_id` ROI 为基准，对其余光源做整数像素平移搜索，记录相关系数、位移和误差，并在配准通过时把非基准光源 ROI 重采样到基准坐标后再进入特征构建。ECC 在搜索外层缓存 active ROI 数组，候选位移相关性用 `numpy` 切片求和/乘积计算，平移重采样用行列索引一次完成；外层小半径候选搜索循环仅作为控制流保留。配准失败、相关性不足或位移超过阈值时仍走质量失败结果，不输出 `OK`。
 
 `FeatureBuilder` 按模型 `input_channels` 惰性构建特征，不隐式固定光源数、通道数或通道序号。未显式声明 `input_channels` 的模型会从配方 `light_order` 生成 `light:<LIGHT_ID>` 通道；生产配方当前显式声明为：
 
@@ -281,7 +281,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 - `onnx`：可选 ONNX detection rows 后端，要求 `onnxruntime` 和 `numpy`。
 - `patchcore_knn`：PatchCore 无监督异常检测主模型或可选安全网，使用 statistical 或 ONNX embedding、可选 PCA、memory bank；配置 `faiss_index_path` 时优先尝试 FAISS，失败时回退 exact KNN，并在 `anomaly_summary` 写入实际 backend 和 fallback reason。
 
-**空间 PatchCore 模式（`spatial_mode: true`）：** 在配方模型配置中启用 `spatial_mode` 后，PatchCore 从"全局嵌入"（整个 ROI → 1 个向量 → 标量分数）切换为"空间嵌入"（ROI → 中间层特征图 → H×W 个 patch 向量 → anomaly_map 热力图）。空间模式提供三项关键提升：
+**空间 PatchCore 模式（`spatial_mode: true`）：** 在配方模型配置中启用 `spatial_mode` 后，PatchCore 从"全局嵌入"（整个 ROI → 1 个向量 → 标量分数）切换为"空间嵌入"（ROI → 中间层特征图 → H×W 个 patch 向量 → anomaly_map 热力图）。空间 embedding 保持 ONNX 输出为 `numpy` 数组，使用最近邻索引上采样、通道拼接和 `reshape` 生成 patch 矩阵；PCA 使用批量矩阵乘法投影；PatchCore exact KNN fallback 使用分块矩阵距离和 `partition/sort` 取 top-k，FAISS 后处理直接对距离矩阵做 `sqrt/clip/reshape`。空间模式提供三项关键提升：
 
 1. **像素级缺陷定位**：从 anomaly_map 连通域自动生成缺陷 bbox，不再使用整个 ROI 边界。
 2. **小缺陷召回率提升**：Global Average Pooling 不再淹没小面积缺陷信号。

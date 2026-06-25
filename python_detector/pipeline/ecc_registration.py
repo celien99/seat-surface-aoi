@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 
+import numpy as np
+
 from python_detector.ipc.data_types import LightFrame
 
 
@@ -43,12 +45,15 @@ class EccRegistration:
         best_correlation = -1.0
         iterations = 0
         previous_best = -1.0
+        base_array = self._active_array(base).astype(np.float64, copy=False)
+        moving_array = self._active_array(moving).astype(np.float64, copy=False)
+
         for radius in range(search_radius_px + 1):
             for dy in range(-radius, radius + 1):
                 for dx in range(-radius, radius + 1):
                     if max(abs(dx), abs(dy)) != radius:
                         continue
-                    correlation = self._normalized_correlation(base, moving, dx, dy)
+                    correlation = self._normalized_correlation(base_array, moving_array, dx, dy)
                     iterations += 1
                     if correlation > best_correlation:
                         best_correlation = correlation
@@ -76,12 +81,10 @@ class EccRegistration:
         dx, dy = shift_xy
         if dx == 0 and dy == 0:
             return moving
-        aligned = bytearray(moving.width * moving.height)
-        for y in range(moving.height):
-            source_y = max(0, min(moving.height - 1, y + dy))
-            for x in range(moving.width):
-                source_x = max(0, min(moving.width - 1, x + dx))
-                aligned[y * moving.width + x] = moving.image[source_y * moving.stride_bytes + source_x]
+        source = self._active_array(moving)
+        row_indices = np.clip(np.arange(moving.height) + dy, 0, moving.height - 1)
+        col_indices = np.clip(np.arange(moving.width) + dx, 0, moving.width - 1)
+        aligned = source[row_indices[:, None], col_indices[None, :]]
         return LightFrame(
             camera_id=moving.camera_id,
             light_id=moving.light_id,
@@ -100,7 +103,7 @@ class EccRegistration:
             gain=moving.gain,
             calibration_id=moving.calibration_id,
             image_crc32=moving.image_crc32,
-            image=memoryview(aligned),
+            image=memoryview(bytearray(np.ascontiguousarray(aligned).tobytes())),
             origin_xy=moving.origin_xy,
             source_width=moving.source_width,
             source_height=moving.source_height,
@@ -108,33 +111,31 @@ class EccRegistration:
             source_to_roi_matrix=moving.source_to_roi_matrix,
         )
 
-    def _normalized_correlation(self, base: LightFrame, moving: LightFrame, dx: int, dy: int) -> float:
-        count = 0
-        sum_a = 0.0
-        sum_b = 0.0
-        sum_aa = 0.0
-        sum_bb = 0.0
-        sum_ab = 0.0
-        for y in range(base.height):
-            moving_y = y + dy
-            if moving_y < 0 or moving_y >= moving.height:
-                continue
-            base_row = y * base.stride_bytes
-            moving_row = moving_y * moving.stride_bytes
-            for x in range(base.width):
-                moving_x = x + dx
-                if moving_x < 0 or moving_x >= moving.width:
-                    continue
-                a = float(base.image[base_row + x])
-                b = float(moving.image[moving_row + moving_x])
-                count += 1
-                sum_a += a
-                sum_b += b
-                sum_aa += a * a
-                sum_bb += b * b
-                sum_ab += a * b
+    def _normalized_correlation(self, base_array: np.ndarray, moving_array: np.ndarray, dx: int, dy: int) -> float:
+        base_height, base_width = base_array.shape
+        moving_height, moving_width = moving_array.shape
+        if dx >= 0:
+            base_x = slice(0, base_width - dx)
+            moving_x = slice(dx, moving_width)
+        else:
+            base_x = slice(-dx, base_width)
+            moving_x = slice(0, moving_width + dx)
+        if dy >= 0:
+            base_y = slice(0, base_height - dy)
+            moving_y = slice(dy, moving_height)
+        else:
+            base_y = slice(-dy, base_height)
+            moving_y = slice(0, moving_height + dy)
+        a = base_array[base_y, base_x]
+        b = moving_array[moving_y, moving_x]
+        count = a.size
         if count < 4:
             return -1.0
+        sum_a = float(a.sum())
+        sum_b = float(b.sum())
+        sum_aa = float(np.square(a).sum())
+        sum_bb = float(np.square(b).sum())
+        sum_ab = float((a * b).sum())
         numerator = sum_ab - (sum_a * sum_b / count)
         denom_a = sum_aa - (sum_a * sum_a / count)
         denom_b = sum_bb - (sum_b * sum_b / count)
@@ -145,3 +146,7 @@ class EccRegistration:
 
     def _translation_matrix(self, dx: int, dy: int) -> tuple[float, ...]:
         return (1.0, 0.0, float(dx), 0.0, 1.0, float(dy), 0.0, 0.0, 1.0)
+
+    def _active_array(self, frame: LightFrame) -> np.ndarray:
+        raw = np.frombuffer(frame.image, dtype=np.uint8, count=frame.stride_bytes * frame.height)
+        return raw.reshape(frame.height, frame.stride_bytes)[:, : frame.width]

@@ -6,6 +6,8 @@ import math
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from python_detector.models.asset_errors import ModelAssetUnavailableError
 
 
@@ -35,13 +37,11 @@ class PatchCoreScore:
 
 @dataclass(frozen=True)
 class SpatialAnomalyScore:
-    """空间 PatchCore 异常分数：每个空间位置的异常值构成的二维热力图。"""
+    """空间 PatchCore 异常分数，包含二维 anomaly map 和最近邻距离图。"""
+
     anomaly_map: tuple[tuple[float, ...], ...]
-    """异常热力图 [H_out, W_out]，每个值是 [0, 1] 的异常分数。"""
     spatial_shape: tuple[int, int]
-    """热力图空间尺寸 (H_out, W_out)。"""
     nearest_distances: tuple[tuple[float, ...], ...]
-    """每个 patch 的最近邻距离 [H_out, W_out]。"""
     memory_bank_size: int
     embedding_dim: int
     backend: str
@@ -53,6 +53,7 @@ class SpatialAnomalyScore:
 class PatchCoreKnnIndex:
     def __init__(self) -> None:
         self._cache: dict[str, PatchCoreBank] = {}
+        self._array_cache: dict[int, np.ndarray] = {}
 
     def score(
         self,
@@ -83,13 +84,13 @@ class PatchCoreKnnIndex:
         if faiss_score is not None:
             return faiss_score
         fallback_reason = self._faiss_fallback_reason(bank, faiss_index_path)
-        distances = sorted(self._euclidean(embedding, vector) for vector in bank.vectors)[:k]
-        nearest = distances[0]
+        distances = _topk_distances(np.asarray([embedding], dtype=np.float32), self._bank_array(bank), k)[0]
+        nearest = float(distances[0])
         anomaly_score = min(max(nearest * score_scale, 0.0), 1.0)
         return PatchCoreScore(
             anomaly_score=anomaly_score,
             nearest_distance=nearest,
-            knn_distances=tuple(distances),
+            knn_distances=tuple(float(value) for value in distances.tolist()),
             memory_bank_size=len(bank.vectors),
             embedding_dim=bank.embedding_dim,
             backend="exact_knn",
@@ -108,20 +109,14 @@ class PatchCoreKnnIndex:
         expected_pca_version: str | None,
         faiss_index_path: str | None = None,
     ) -> SpatialAnomalyScore:
-        """对每个空间 patch 做 KNN 评分，返回二维异常热力图。
-
-        patch_embeddings: H_out × W_out 个 patch_dim 维向量。
-        spatial_shape: (H_out, W_out)。
-        """
+        """对每个空间 patch 做 KNN 评分，返回二维异常热力图。"""
         bank = self._load(memory_bank_path)
         if bank.model_family != "patchcore":
             raise RuntimeError(f"memory bank model_family 必须是 patchcore: {bank.model_family}")
         if not patch_embeddings:
             raise RuntimeError("patch_embeddings 为空")
         if len(patch_embeddings[0]) != bank.embedding_dim:
-            raise RuntimeError(
-                f"PatchCore patch embedding 维度不匹配: {len(patch_embeddings[0])} != {bank.embedding_dim}"
-            )
+            raise RuntimeError(f"PatchCore patch embedding 维度不匹配: {len(patch_embeddings[0])} != {bank.embedding_dim}")
         if expected_pca_version is not None and bank.pca_version not in (None, expected_pca_version):
             raise RuntimeError(f"PatchCore memory bank PCA 版本不匹配: {bank.pca_version} != {expected_pca_version}")
         k = min(knn_k, len(bank.vectors))
@@ -130,9 +125,7 @@ class PatchCoreKnnIndex:
 
         h_out, w_out = spatial_shape
         if len(patch_embeddings) != h_out * w_out:
-            raise RuntimeError(
-                f"patch_embeddings 数量 ({len(patch_embeddings)}) 与 spatial_shape {spatial_shape} 不匹配"
-            )
+            raise RuntimeError(f"patch_embeddings 数量 ({len(patch_embeddings)}) 与 spatial_shape {spatial_shape} 不匹配")
 
         faiss_result = self._score_spatial_faiss(
             patch_embeddings, spatial_shape, bank, k, score_scale, faiss_index_path
@@ -162,7 +155,6 @@ class PatchCoreKnnIndex:
             return None
         try:
             import faiss  # type: ignore
-            import numpy as np  # type: ignore
         except Exception:
             return None
         try:
@@ -172,30 +164,15 @@ class PatchCoreKnnIndex:
                 return None
             queries = np.asarray(patch_embeddings, dtype=np.float32)
             distances_raw, _indices = index.search(queries, knn_k)
+            if distances_raw.ndim != 2 or distances_raw.shape[0] != queries.shape[0]:
+                return None
+            nearest = _nearest_finite_distances(distances_raw)
+            score_array = np.clip(nearest * np.float32(score_scale), 0.0, 1.0)
             h_out, w_out = spatial_shape
-            anomaly_rows: list[tuple[float, ...]] = []
-            dist_rows: list[tuple[float, ...]] = []
-            for i in range(h_out):
-                anomaly_row_vals: list[float] = []
-                dist_row_vals: list[float] = []
-                for j in range(w_out):
-                    idx = i * w_out + j
-                    row_distances = distances_raw[idx]
-                    valid = [math.sqrt(max(float(d), 0.0)) for d in row_distances.tolist() if math.isfinite(float(d))]
-                    if not valid:
-                        anomaly_row_vals.append(0.0)
-                        dist_row_vals.append(0.0)
-                    else:
-                        nearest = valid[0]
-                        score = min(max(nearest * score_scale, 0.0), 1.0)
-                        anomaly_row_vals.append(score)
-                        dist_row_vals.append(nearest)
-                anomaly_rows.append(tuple(anomaly_row_vals))
-                dist_rows.append(tuple(dist_row_vals))
             return SpatialAnomalyScore(
-                anomaly_map=tuple(anomaly_rows),
+                anomaly_map=_rows_from_array(score_array.reshape(h_out, w_out)),
                 spatial_shape=spatial_shape,
-                nearest_distances=tuple(dist_rows),
+                nearest_distances=_rows_from_array(nearest.reshape(h_out, w_out)),
                 memory_bank_size=len(bank.vectors),
                 embedding_dim=bank.embedding_dim,
                 backend="faiss",
@@ -217,26 +194,13 @@ class PatchCoreKnnIndex:
         fallback_reason: str | None,
     ) -> SpatialAnomalyScore:
         h_out, w_out = spatial_shape
-        anomaly_rows: list[tuple[float, ...]] = []
-        dist_rows: list[tuple[float, ...]] = []
-        bank_vectors = bank.vectors
-        for i in range(h_out):
-            anomaly_row_vals: list[float] = []
-            dist_row_vals: list[float] = []
-            for j in range(w_out):
-                idx = i * w_out + j
-                embedding = patch_embeddings[idx]
-                distances = sorted(self._euclidean(embedding, vector) for vector in bank_vectors)[:knn_k]
-                nearest = distances[0]
-                score = min(max(nearest * score_scale, 0.0), 1.0)
-                anomaly_row_vals.append(score)
-                dist_row_vals.append(nearest)
-            anomaly_rows.append(tuple(anomaly_row_vals))
-            dist_rows.append(tuple(dist_row_vals))
+        queries = np.asarray(patch_embeddings, dtype=np.float32)
+        nearest = _topk_distances(queries, self._bank_array(bank), knn_k)[:, 0]
+        score_array = np.clip(nearest * np.float32(score_scale), 0.0, 1.0)
         return SpatialAnomalyScore(
-            anomaly_map=tuple(anomaly_rows),
+            anomaly_map=_rows_from_array(score_array.reshape(h_out, w_out)),
             spatial_shape=spatial_shape,
-            nearest_distances=tuple(dist_rows),
+            nearest_distances=_rows_from_array(nearest.reshape(h_out, w_out)),
             memory_bank_size=len(bank.vectors),
             embedding_dim=bank.embedding_dim,
             backend="exact_knn",
@@ -298,7 +262,7 @@ class PatchCoreKnnIndex:
         )
 
     def _euclidean(self, left: tuple[float, ...], right: tuple[float, ...]) -> float:
-        return math.sqrt(sum((a - b) ** 2 for a, b in zip(left, right)))
+        return _euclidean(left, right)
 
     def _score_with_faiss(
         self,
@@ -315,7 +279,6 @@ class PatchCoreKnnIndex:
             return None
         try:
             import faiss  # type: ignore
-            import numpy as np  # type: ignore
         except Exception:
             return None
         try:
@@ -325,16 +288,15 @@ class PatchCoreKnnIndex:
                 return None
             query = np.asarray([embedding], dtype=np.float32)
             distances_raw, _indices = index.search(query, knn_k)
-            distances = tuple(math.sqrt(max(float(value), 0.0)) for value in distances_raw[0].tolist())
-            distances = tuple(value for value in distances if math.isfinite(value))
-            if not distances:
+            distances = _finite_row_distances(distances_raw[0])
+            if distances.size == 0:
                 return None
-            nearest = distances[0]
+            nearest = float(distances[0])
             anomaly_score = min(max(nearest * score_scale, 0.0), 1.0)
             return PatchCoreScore(
                 anomaly_score=anomaly_score,
                 nearest_distance=nearest,
-                knn_distances=distances,
+                knn_distances=tuple(float(value) for value in distances.tolist()),
                 memory_bank_size=len(bank.vectors),
                 embedding_dim=bank.embedding_dim,
                 backend="faiss",
@@ -362,6 +324,14 @@ class PatchCoreKnnIndex:
             return "faiss_unavailable"
         return "faiss_load_or_search_failed"
 
+    def _bank_array(self, bank: PatchCoreBank) -> np.ndarray:
+        cache_key = id(bank)
+        array = self._array_cache.get(cache_key)
+        if array is None:
+            array = np.asarray(bank.vectors, dtype=np.float32)
+            self._array_cache[cache_key] = array
+        return array
+
     def _str(self, value: Any, name: str) -> str:
         if not isinstance(value, str) or not value:
             raise RuntimeError(f"PatchCore {name} 必须是非空字符串")
@@ -387,3 +357,59 @@ class PatchCoreKnnIndex:
         if not all(math.isfinite(item) for item in result):
             raise RuntimeError(f"PatchCore {name} 必须是有限数字")
         return result
+
+
+def _topk_distances(queries: np.ndarray, bank_vectors: np.ndarray, knn_k: int, chunk_size: int = 256) -> np.ndarray:
+    if queries.ndim != 2 or bank_vectors.ndim != 2 or queries.shape[1] != bank_vectors.shape[1]:
+        raise RuntimeError(f"PatchCore KNN 维度不匹配: {queries.shape} vs {bank_vectors.shape}")
+    k = min(knn_k, bank_vectors.shape[0])
+    if k <= 0:
+        raise RuntimeError("PatchCore memory bank 为空")
+    bank_norm = np.sum(np.square(bank_vectors, dtype=np.float32), axis=1)
+    result = np.empty((queries.shape[0], k), dtype=np.float32)
+    for start in range(0, queries.shape[0], chunk_size):
+        end = min(start + chunk_size, queries.shape[0])
+        chunk = queries[start:end]
+        query_norm = np.sum(np.square(chunk, dtype=np.float32), axis=1, keepdims=True)
+        distances_sq = query_norm + bank_norm[None, :] - (np.float32(2.0) * (chunk @ bank_vectors.T))
+        np.maximum(distances_sq, np.float32(0.0), out=distances_sq)
+        if k == bank_vectors.shape[0]:
+            nearest_sq = np.sort(distances_sq, axis=1)
+        else:
+            nearest_sq = np.partition(distances_sq, kth=k - 1, axis=1)[:, :k]
+            nearest_sq.sort(axis=1)
+        result[start:end] = np.sqrt(nearest_sq).astype(np.float32, copy=False)
+    return result
+
+
+def _nearest_finite_distances(distances_raw: np.ndarray) -> np.ndarray:
+    distances = np.sqrt(np.maximum(np.asarray(distances_raw, dtype=np.float32), np.float32(0.0))).astype(
+        np.float32,
+        copy=False,
+    )
+    finite = np.isfinite(distances)
+    valid_counts = finite.sum(axis=1)
+    nearest = np.zeros(distances.shape[0], dtype=np.float32)
+    if distances.shape[1] == 0:
+        return nearest
+    valid_rows = valid_counts > 0
+    first_indices = np.argmax(finite, axis=1)
+    nearest[valid_rows] = distances[np.arange(distances.shape[0])[valid_rows], first_indices[valid_rows]]
+    return nearest
+
+
+def _finite_row_distances(distances_raw: np.ndarray) -> np.ndarray:
+    distances = np.sqrt(np.maximum(np.asarray(distances_raw, dtype=np.float32), np.float32(0.0))).astype(
+        np.float32,
+        copy=False,
+    )
+    return distances[np.isfinite(distances)]
+
+
+def _rows_from_array(array: np.ndarray) -> tuple[tuple[float, ...], ...]:
+    return tuple(tuple(float(value) for value in row) for row in array.tolist())
+
+
+def _euclidean(left: tuple[float, ...], right: tuple[float, ...]) -> float:
+    diff = np.asarray(left, dtype=np.float32) - np.asarray(right, dtype=np.float32)
+    return float(np.sqrt(np.dot(diff, diff)))

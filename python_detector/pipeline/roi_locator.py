@@ -194,49 +194,47 @@ class RoiLocator:
                 pad_x=0.0,
                 pad_y=0.0,
             )
-            rows = [
-                [float(value) / 255.0 for value in frame.image[y * frame.stride_bytes : y * frame.stride_bytes + frame.width]]
-                for y in range(frame.height)
-            ]
+            array = self._active_frame_array(frame, np).astype(np.float32, copy=False) / np.float32(255.0)
         else:
-            rows, transform = self._letterbox_rows(frame, target_width, target_height)
-        array = np.asarray(rows, dtype=np.float32)
+            array, transform = self._letterbox_array(frame, target_width, target_height, np)
         if channels == 1:
             return array.reshape(1, 1, target_height, target_width), transform
-        stacked = np.stack([array] * channels, axis=0)
+        stacked = np.broadcast_to(array, (channels, target_height, target_width)).copy()
         return stacked.reshape(1, channels, target_height, target_width), transform
 
-    def _letterbox_rows(
+    def _letterbox_array(
         self,
         frame: LightFrame,
         target_width: int,
         target_height: int,
-    ) -> tuple[list[list[float]], RoiInputTransform]:
+        np: Any,
+    ) -> tuple[Any, RoiInputTransform]:
         scale = min(float(target_width) / float(frame.width), float(target_height) / float(frame.height))
         resized_width = max(1, int(round(float(frame.width) * scale)))
         resized_height = max(1, int(round(float(frame.height) * scale)))
         pad_x = (float(target_width - resized_width)) / 2.0
         pad_y = (float(target_height - resized_height)) / 2.0
-        rows: list[list[float]] = []
-        for y in range(target_height):
-            row: list[float] = []
-            source_y = (float(y) - pad_y) / scale
-            sy = int(round(source_y))
-            for x in range(target_width):
-                source_x = (float(x) - pad_x) / scale
-                sx = int(round(source_x))
-                if sx < 0 or sy < 0 or sx >= frame.width or sy >= frame.height:
-                    row.append(0.0)
-                else:
-                    row.append(float(frame.image[sy * frame.stride_bytes + sx]) / 255.0)
-            rows.append(row)
-        return rows, RoiInputTransform(
+        source = self._active_frame_array(frame, np)
+        y_coords = np.rint((np.arange(target_height, dtype=np.float32) - np.float32(pad_y)) / np.float32(scale)).astype(np.int32)
+        x_coords = np.rint((np.arange(target_width, dtype=np.float32) - np.float32(pad_x)) / np.float32(scale)).astype(np.int32)
+        valid_y = (y_coords >= 0) & (y_coords < frame.height)
+        valid_x = (x_coords >= 0) & (x_coords < frame.width)
+        clipped_y = np.clip(y_coords, 0, frame.height - 1)
+        clipped_x = np.clip(x_coords, 0, frame.width - 1)
+        array = source[clipped_y[:, None], clipped_x[None, :]].astype(np.float32, copy=False) / np.float32(255.0)
+        array[~valid_y, :] = 0.0
+        array[:, ~valid_x] = 0.0
+        return array, RoiInputTransform(
             width=target_width,
             height=target_height,
             scale=scale,
             pad_x=pad_x,
             pad_y=pad_y,
         )
+
+    def _active_frame_array(self, frame: LightFrame, np: Any) -> Any:
+        raw = np.frombuffer(frame.image, dtype=np.uint8, count=frame.stride_bytes * frame.height)
+        return raw.reshape(frame.height, frame.stride_bytes)[:, : frame.width]
 
     def _bbox_from_model_input(
         self,
@@ -595,34 +593,18 @@ class RoiLocator:
         )
 
     def _mask_bbox(self, mask: Any) -> tuple[int, int, int, int] | None:
-        height = int(getattr(mask, "shape", (0, 0))[0])
-        width = int(getattr(mask, "shape", (0, 0))[1]) if len(getattr(mask, "shape", ())) >= 2 else 0
-        if width <= 0 or height <= 0:
+        np = numpy_module("ROI mask bbox")
+        array = np.asarray(mask, dtype=np.float32)
+        if array.ndim < 2 or array.shape[0] <= 0 or array.shape[1] <= 0:
             return None
-        x0 = width
-        y0 = height
-        x1 = -1
-        y1 = -1
-        for y in range(height):
-            for x in range(width):
-                if float(mask[y][x]) > 0.0:
-                    x0 = min(x0, x)
-                    y0 = min(y0, y)
-                    x1 = max(x1, x)
-                    y1 = max(y1, y)
-        if x1 < x0 or y1 < y0:
+        ys, xs = np.nonzero(array > 0.0)
+        if xs.size == 0:
             return None
-        return x0, y0, x1, y1
+        return int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())
 
     def _mask_area(self, mask: Any) -> int:
-        height = int(getattr(mask, "shape", (0, 0))[0])
-        width = int(getattr(mask, "shape", (0, 0))[1]) if len(getattr(mask, "shape", ())) >= 2 else 0
-        area = 0
-        for y in range(height):
-            for x in range(width):
-                if float(mask[y][x]) > 0.0:
-                    area += 1
-        return area
+        np = numpy_module("ROI mask area")
+        return int(np.count_nonzero(np.asarray(mask, dtype=np.float32) > 0.0))
 
     def _mask_to_roi_mask(
         self,
@@ -640,14 +622,9 @@ class RoiLocator:
 
         output_width, output_height = output_size
         x0, y0, x1, y1 = mask_bbox
-        bbox_w = max(1, x1 - x0 + 1)
-        bbox_h = max(1, y1 - y0 + 1)
 
         # 提取源 mask 裁剪区域 → float32 数组
-        src = np.array(
-            [[float(mask[y][x]) for x in range(x0, x1 + 1)] for y in range(y0, y1 + 1)],
-            dtype=np.float32,
-        )
+        src = np.asarray(mask, dtype=np.float32)[y0 : y1 + 1, x0 : x1 + 1]
         src_h, src_w = src.shape  # 即 bbox_h × bbox_w
 
         # 归一化到 [0, 1]（兼容源 mask 值为 0/1 或 0/255）
@@ -682,8 +659,7 @@ class RoiLocator:
             upsampled = np.where(upsampled > 0.5, np.uint8(255), np.uint8(0))
 
         # 转为 bytearray 做 1px 4-邻域腐蚀
-        pixels = bytearray(upsampled.ravel().tolist())
-        eroded = _erode_output_mask_1px(pixels, output_width, output_height)
+        eroded = _erode_output_mask_1px(upsampled, np)
         return RoiMask(width=output_width, height=output_height, pixels=bytes(eroded))
 
     def _bbox_pose_error_px(self, template: RoiTemplate, polygon: tuple[tuple[int, int], ...]) -> float:
@@ -739,19 +715,19 @@ class RoiLocator:
         return self._onnx_sessions[model_path]
 
 
-def _erode_output_mask_1px(pixels: bytearray, width: int, height: int) -> bytearray:
+def _erode_output_mask_1px(mask: Any, np: Any) -> bytearray:
     """在输出空间对 mask 做 1 像素 4-邻域腐蚀，消除分割边界锯齿。"""
-    eroded = bytearray(pixels)
-    for y in range(height):
-        for x in range(width):
-            idx = y * width + x
-            if pixels[idx] == 0:
-                continue
-            if (
-                (x == 0 or pixels[idx - 1] == 0)
-                or (x == width - 1 or pixels[idx + 1] == 0)
-                or (y == 0 or pixels[idx - width] == 0)
-                or (y == height - 1 or pixels[idx + width] == 0)
-            ):
-                eroded[idx] = 0
-    return eroded
+    binary = np.asarray(mask, dtype=np.uint8) > 0
+    if binary.size == 0:
+        return bytearray()
+    eroded = np.zeros(binary.shape, dtype=np.uint8)
+    if binary.shape[0] > 2 and binary.shape[1] > 2:
+        interior = (
+            binary[1:-1, 1:-1]
+            & binary[1:-1, :-2]
+            & binary[1:-1, 2:]
+            & binary[:-2, 1:-1]
+            & binary[2:, 1:-1]
+        )
+        eroded[1:-1, 1:-1] = np.where(interior, np.uint8(255), np.uint8(0))
+    return bytearray(eroded.ravel().tobytes())

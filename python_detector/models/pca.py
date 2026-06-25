@@ -6,6 +6,8 @@ import math
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from python_detector.models.asset_errors import ModelAssetUnavailableError
 
 
@@ -34,17 +36,17 @@ class PcaProjector:
             raise RuntimeError(f"PCA 版本不匹配: {params.version} != {expected_version}")
         if len(embedding) != len(params.mean):
             raise RuntimeError(f"PCA 输入维度不匹配: {len(embedding)} != {len(params.mean)}")
-        centered = [value - mean for value, mean in zip(embedding, params.mean)]
-        projected: list[float] = []
-        for component in params.components:
-            if len(component) != len(centered):
-                raise RuntimeError(f"PCA component 维度不匹配: {len(component)} != {len(centered)}")
-            projected.append(sum(value * weight for value, weight in zip(centered, component)))
+        mean = np.asarray(params.mean, dtype=np.float64)
+        components = np.asarray(params.components, dtype=np.float64)
+        if components.ndim != 2 or components.shape[1] != mean.size:
+            actual_dim = int(components.shape[1]) if components.ndim == 2 else 0
+            raise RuntimeError(f"PCA component 维度不匹配: {actual_dim} != {mean.size}")
+        projected = (np.asarray(embedding, dtype=np.float64) - mean) @ components.T
         return PcaProjectionResult(
-            values=tuple(projected),
+            values=tuple(float(value) for value in projected.tolist()),
             version=params.version,
             input_dim=len(embedding),
-            output_dim=len(projected),
+            output_dim=int(components.shape[0]),
         )
 
     def project_batch(
@@ -53,11 +55,7 @@ class PcaProjector:
         pca_path: str,
         expected_version: str | None,
     ) -> PcaProjectionResult:
-        """批量 PCA 投影，用于空间 PatchCore 的多个 patch embedding 同时降维。
-
-        embeddings: N 个 D 维向量。
-        返回 PcaProjectionResult，其中 values 包含 N*K 个浮点数（展平排列）。
-        """
+        """批量 PCA 投影，用于空间 PatchCore 的多 patch embedding 同时降维。"""
         params = self.load(pca_path)
         if expected_version is not None and params.version != expected_version:
             raise RuntimeError(f"PCA 版本不匹配: {params.version} != {expected_version}")
@@ -66,19 +64,23 @@ class PcaProjector:
         input_dim = len(embeddings[0])
         if input_dim != len(params.mean):
             raise RuntimeError(f"PCA 输入维度不匹配: {input_dim} != {len(params.mean)}")
-        output_dim = len(params.components)
-        projected_all: list[float] = []
-        for embedding in embeddings:
-            if len(embedding) != input_dim:
-                raise RuntimeError(f"PCA 批量输入维度不一致: {len(embedding)} != {input_dim}")
-            centered = [value - mean for value, mean in zip(embedding, params.mean)]
-            for component in params.components:
-                projected_all.append(sum(value * weight for value, weight in zip(centered, component)))
+        try:
+            matrix = np.asarray(embeddings, dtype=np.float64)
+        except ValueError as exc:
+            raise RuntimeError("PCA 批量输入维度不一致") from exc
+        if matrix.ndim != 2 or matrix.shape[1] != input_dim:
+            actual_dim = int(matrix.shape[1]) if matrix.ndim == 2 else 0
+            raise RuntimeError(f"PCA 批量输入维度不一致: {actual_dim} != {input_dim}")
+        components = np.asarray(params.components, dtype=np.float64)
+        if components.ndim != 2 or components.shape[1] != input_dim:
+            actual_dim = int(components.shape[1]) if components.ndim == 2 else 0
+            raise RuntimeError(f"PCA component 维度不匹配: {actual_dim} != {input_dim}")
+        projected = (matrix - np.asarray(params.mean, dtype=np.float64)) @ components.T
         return PcaProjectionResult(
-            values=tuple(projected_all),
+            values=tuple(float(value) for value in projected.reshape(-1).tolist()),
             version=params.version,
             input_dim=input_dim,
-            output_dim=output_dim,
+            output_dim=int(components.shape[0]),
         )
 
     def load(self, path_value: str) -> PcaParameters:

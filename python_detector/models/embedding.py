@@ -23,18 +23,19 @@ class UnifiedEmbedding:
 @dataclass(frozen=True)
 class SpatialEmbedding:
     """空间 PatchCore 嵌入：每个空间位置拼接多层特征的 patch embedding。"""
+
     patch_embeddings: tuple[tuple[float, ...], ...]
-    """扁平化的 patch embedding 列表，长度为 H_out × W_out，每个是 patch_dim 维向量。"""
+    """扁平化的 patch embedding 列表，长度为 H_out x W_out。"""
     spatial_shape: tuple[int, int]
-    """patch 网格的空间尺寸 (H_out, W_out)。"""
+    """patch 网格空间尺寸 (H_out, W_out)。"""
     patch_dim: int
-    """每个 patch embedding 的维数（拼接所有空间层后的总通道数）。"""
+    """每个 patch embedding 的维数。"""
     backend: str
     version: str
     layer_names: tuple[str, ...]
     input_shape_nchw: tuple[int, int, int, int] | None
     layer_shapes: dict[str, tuple[int, int, int]]
-    """各层的 (C, H, W) 原始形状。"""
+    """各层原始 (C, H, W) 形状。"""
 
 
 class EmbeddingExtractor:
@@ -60,12 +61,7 @@ class EmbeddingExtractor:
         raise RuntimeError(f"不支持的 embedding_backend: {config.embedding_backend}")
 
     def extract_spatial(self, feature_group: FeatureGroup, config: ModelConfig) -> SpatialEmbedding:
-        """从空间 ONNX 模型提取多尺度 patch embedding。
-
-        要求 config.embedding_backend == "onnx_wideresnet50" 且 config.spatial_layers 非空。
-        对每个中间层特征图上采样到统一分辨率，然后在每个空间位置拼接各层特征，
-        形成 (H_out × W_out) 个 patch_dim 维的 patch embedding。
-        """
+        """从空间 ONNX 模型提取多尺度 patch embedding。"""
         if config.embedding_backend != "onnx_wideresnet50":
             raise RuntimeError("spatial embedding 必须使用 embedding_backend=onnx_wideresnet50")
         if not config.spatial_layers:
@@ -88,19 +84,16 @@ class EmbeddingExtractor:
         if feature_group.tensor_nchw is None:
             raise RuntimeError("WideResNet50 spatial embedding 输入 tensor 缺失")
 
-        np = numpy_module("WideResNet50 spatial embedding")
+        np_runtime = numpy_module("WideResNet50 spatial embedding")
         session = create_onnx_session(str(path), "WideResNet50 spatial embedding")
-        tensor = np.asarray(feature_group.tensor_nchw, dtype=np.float32)
+        tensor = np_runtime.asarray(feature_group.tensor_nchw, dtype=np_runtime.float32)
         outputs = run_first_input(session, tensor, "WideResNet50 spatial embedding")
 
-        # outputs 是多输出的列表，按 session 输出名顺序排列
         layer_names = config.spatial_layers if config.spatial_layers else config.embedding_layers
         if len(outputs) != len(layer_names):
-            raise RuntimeError(
-                f"ONNX 空间模型输出数 ({len(outputs)}) 与 spatial_layers ({len(layer_names)}) 不匹配"
-            )
+            raise RuntimeError(f"ONNX 空间模型输出数 ({len(outputs)}) 与 spatial_layers ({len(layer_names)}) 不匹配")
 
-        raw_layer_maps: dict[str, list[list[list[float]]]] = {}
+        raw_layer_maps: dict[str, np.ndarray] = {}
         layer_shapes: dict[str, tuple[int, int, int]] = {}
         for name, output in zip(layer_names, outputs):
             arr = np.asarray(output, dtype=np.float32)
@@ -108,33 +101,22 @@ class EmbeddingExtractor:
                 raise RuntimeError(f"空间层 {name} 输出必须是 4 维 [B,C,H,W]: 实际 {arr.ndim}")
             c_val, h_val, w_val = int(arr.shape[1]), int(arr.shape[2]), int(arr.shape[3])
             layer_shapes[name] = (c_val, h_val, w_val)
-            raw_layer_maps[name] = arr[0].tolist()
+            raw_layer_maps[name] = arr[0]
 
         target_h = config.spatial_upsample_height
         target_w = config.spatial_upsample_width
-        upsampled: dict[str, list[list[list[float]]]] = {}
+        upsampled: dict[str, np.ndarray] = {}
         for name in layer_names:
-            c_val, h_val, w_val = layer_shapes[name]
-            fm = raw_layer_maps[name]
-            if h_val == target_h and w_val == target_w:
-                upsampled[name] = fm
-            else:
-                upsampled[name] = _upsample_nearest(fm, c_val, h_val, w_val, target_h, target_w)
+            _c_val, h_val, w_val = layer_shapes[name]
+            upsampled[name] = _upsample_nearest_array(raw_layer_maps[name], h_val, w_val, target_h, target_w)
 
-        # 逐 patch 拼接所有层特征
         total_channels = sum(layer_shapes[name][0] for name in layer_names)
-        patches: list[tuple[float, ...]] = []
-        for row in range(target_h):
-            for col in range(target_w):
-                patch_values: list[float] = []
-                for name in layer_names:
-                    channel_data = upsampled[name]
-                    for c in range(layer_shapes[name][0]):
-                        patch_values.append(channel_data[c][row][col])
-                patches.append(tuple(patch_values))
+        stacked = np.concatenate([upsampled[name] for name in layer_names], axis=0)
+        patch_matrix = np.moveaxis(stacked, 0, -1).reshape(target_h * target_w, total_channels)
+        patches = tuple(tuple(float(value) for value in row) for row in patch_matrix.tolist())
 
         return SpatialEmbedding(
-            patch_embeddings=tuple(patches),
+            patch_embeddings=patches,
             spatial_shape=(target_h, target_w),
             patch_dim=total_channels,
             backend="onnx_wideresnet50_spatial",
@@ -175,9 +157,9 @@ class EmbeddingExtractor:
             )
         if feature_group.tensor_nchw is None:
             raise RuntimeError("WideResNet50 embedding 输入 tensor 缺失")
-        np = numpy_module("WideResNet50 embedding")
+        np_runtime = numpy_module("WideResNet50 embedding")
         session = create_onnx_session(str(path), "WideResNet50 embedding")
-        tensor = np.asarray(feature_group.tensor_nchw, dtype=np.float32)
+        tensor = np_runtime.asarray(feature_group.tensor_nchw, dtype=np_runtime.float32)
         outputs = run_first_input(session, tensor, "WideResNet50 embedding")
         vector = np.asarray(outputs[0], dtype=np.float32).reshape(-1)
         if vector.size != config.embedding_dim:
@@ -200,24 +182,16 @@ class EmbeddingExtractor:
         return (batch, channels, height, width)
 
 
-def _upsample_nearest(
-    fm: list[list[list[float]]],
-    c_val: int,
+def _upsample_nearest_array(
+    fm: np.ndarray,
     h_val: int,
     w_val: int,
     target_h: int,
     target_w: int,
-) -> list[list[list[float]]]:
-    """最近邻上采样 [C, H, W] → [C, target_h, target_w]。"""
+) -> np.ndarray:
+    """最近邻上采样 [C,H,W] -> [C,target_h,target_w]。"""
     if h_val == target_h and w_val == target_w:
         return fm
-    row_indices = [min(int(row * h_val / target_h), h_val - 1) for row in range(target_h)]
-    col_indices = [min(int(col * w_val / target_w), w_val - 1) for col in range(target_w)]
-    result: list[list[list[float]]] = []
-    for c in range(c_val):
-        channel: list[list[float]] = []
-        for src_row in row_indices:
-            src_cols = fm[c][src_row]
-            channel.append([src_cols[src_col] for src_col in col_indices])
-        result.append(channel)
-    return result
+    row_indices = np.minimum((np.arange(target_h) * h_val // target_h).astype(np.intp), h_val - 1)
+    col_indices = np.minimum((np.arange(target_w) * w_val // target_w).astype(np.intp), w_val - 1)
+    return fm[:, row_indices[:, None], col_indices[None, :]]
