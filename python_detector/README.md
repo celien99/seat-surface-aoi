@@ -261,7 +261,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 ### 多光源特征
 
-`ReflectanceCubeBuilder` 将同一 ROI 下多个检测光源图组织成 cube，并按当前视角的 `light_order` 保留可用检测光源。固定机位生产配方当前只使用 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 三路；DOME 语义映射到 `DIFFUSE` 只影响 ROI 定位输入选择，不新增特征通道。`fixed_calibration` 模式检查标定矩阵角点误差；`ecc` 模式以 `base_light_id` ROI 为基准，对其余光源做整数像素平移搜索，记录相关系数、位移和误差，并在配准通过时把非基准光源 ROI 重采样到基准坐标后再进入特征构建。ECC 在搜索外层缓存 active ROI 数组，候选位移相关性用 `numpy` 切片求和/乘积计算，平移重采样用行列索引一次完成；外层小半径候选搜索循环仅作为控制流保留。配准失败、相关性不足或位移超过阈值时仍走质量失败结果，不输出 `OK`。
+`ReflectanceCubeBuilder` 将同一 ROI 下多个检测光源图组织成 cube，并按当前视角的 `light_order` 保留可用检测光源。固定机位生产配方当前只使用 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 三路；DOME 语义映射到 `DIFFUSE` 只影响 ROI 定位输入选择，不新增特征通道。`fixed_calibration` 模式检查标定矩阵角点误差；`ecc` 模式以 `base_light_id` ROI 为基准，优先使用 OpenCV `findTransformECC` 梯度下降（MOTION_TRANSLATION 模型，~10-20 次迭代，无需穷举搜索）；cv2 不可用或不收敛时自动回退到暴力 NCC 穷举搜索。配准失败、相关性不足或位移超过阈值时仍走质量失败结果，不输出 `OK`。
 
 `FeatureBuilder` 按模型 `input_channels` 惰性构建特征，不隐式固定光源数、通道数或通道序号。未显式声明 `input_channels` 的模型会从配方 `light_order` 生成 `light:<LIGHT_ID>` 通道；生产配方当前显式声明为：
 

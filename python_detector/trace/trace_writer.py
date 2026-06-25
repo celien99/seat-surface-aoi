@@ -323,15 +323,6 @@ class TraceWriter:
         raw = np.frombuffer(frame.image, dtype=np.uint8, count=expected)
         return raw.reshape(frame.height, frame.stride_bytes)[:, : frame.width]
 
-    def _apply_homography(self, matrix: tuple[float, ...], x: float, y: float) -> tuple[float, float] | None:
-        denom = matrix[6] * x + matrix[7] * y + matrix[8]
-        if abs(denom) < 1e-9:
-            return None
-        mapped_x = (matrix[0] * x + matrix[1] * y + matrix[2]) / denom
-        mapped_y = (matrix[3] * x + matrix[4] * y + matrix[5]) / denom
-        return mapped_x, mapped_y
-
-
 def _jsonable(value: Any) -> Any:
     if is_dataclass(value):
         return {field.name: _jsonable(getattr(value, field.name)) for field in fields(value)}

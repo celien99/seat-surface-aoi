@@ -41,19 +41,92 @@ class EccRegistration:
                 mean_error_px=999.0,
                 message="ECC 输入 ROI 尺寸不一致",
             )
+        base_array = self._active_array(base).astype(np.float32, copy=False)
+        moving_array = self._active_array(moving).astype(np.float32, copy=False)
+
+        # 优先尝试 OpenCV 梯度下降 ECC，显著快于暴力搜索
+        result = self._ecc_opencv(
+            base_array, moving_array, moving.light_id,
+            max_iterations, convergence_epsilon, min_correlation,
+        )
+        if result is not None:
+            return result
+
+        # OpenCV 不可用或不收敛时回退到暴力搜索
+        return self._ecc_exhaustive(
+            base_array, moving_array, moving.light_id,
+            search_radius_px, max_iterations, convergence_epsilon, min_correlation,
+        )
+
+    def _ecc_opencv(
+        self,
+        base_array: np.ndarray,
+        moving_array: np.ndarray,
+        light_id: str,
+        max_iterations: int,
+        convergence_epsilon: float,
+        min_correlation: float,
+    ) -> EccAlignmentResult | None:
+        """OpenCV findTransformECC 梯度下降配准，平移模型仅 2 参数。"""
+        try:
+            import cv2  # type: ignore
+        except Exception:
+            return None
+        try:
+            warp_matrix = np.eye(2, 3, dtype=np.float32)
+            criteria = (
+                cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
+                max_iterations,
+                float(convergence_epsilon),
+            )
+            _warp, correlation = cv2.findTransformECC(
+                base_array, moving_array, warp_matrix,
+                cv2.MOTION_TRANSLATION, criteria,
+            )
+            if not np.isfinite(correlation):
+                return None
+            dx = int(round(float(warp_matrix[0, 2])))
+            dy = int(round(float(warp_matrix[1, 2])))
+            corr = float(correlation)
+            converged = corr >= float(min_correlation) and corr >= 0.0
+            mean_error = math.sqrt(float(dx * dx + dy * dy))
+            return EccAlignmentResult(
+                light_id=light_id,
+                matrix_3x3=self._translation_matrix(dx, dy),
+                shift_xy=(dx, dy),
+                correlation=corr,
+                iterations=max_iterations,
+                converged=converged,
+                mean_error_px=mean_error,
+                message="ECC (OpenCV) pass" if converged else "ECC (OpenCV) correlation below threshold",
+            )
+        except Exception:
+            return None
+
+    def _ecc_exhaustive(
+        self,
+        base_array: np.ndarray,
+        moving_array: np.ndarray,
+        light_id: str,
+        search_radius_px: int,
+        max_iterations: int,
+        convergence_epsilon: float,
+        min_correlation: float,
+    ) -> EccAlignmentResult:
+        """暴力搜索平移配准（OpenCV 不可用或不收敛时的回退方案）。"""
         best_shift = (0, 0)
         best_correlation = -1.0
         iterations = 0
         previous_best = -1.0
-        base_array = self._active_array(base).astype(np.float64, copy=False)
-        moving_array = self._active_array(moving).astype(np.float64, copy=False)
+        base_f64 = base_array.astype(np.float64, copy=False)
+        moving_f64 = moving_array.astype(np.float64, copy=False)
 
         for radius in range(search_radius_px + 1):
             for dy in range(-radius, radius + 1):
                 for dx in range(-radius, radius + 1):
                     if max(abs(dx), abs(dy)) != radius:
                         continue
-                    correlation = self._normalized_correlation(base_array, moving_array, dx, dy)
+                    correlation = self._normalized_correlation(base_f64, moving_f64, dx, dy)
                     iterations += 1
                     if correlation > best_correlation:
                         best_correlation = correlation
@@ -67,14 +140,14 @@ class EccRegistration:
         converged = best_correlation >= min_correlation and best_correlation >= 0.0
         mean_error = math.sqrt(float(best_shift[0] * best_shift[0] + best_shift[1] * best_shift[1]))
         return EccAlignmentResult(
-            light_id=moving.light_id,
+            light_id=light_id,
             matrix_3x3=self._translation_matrix(best_shift[0], best_shift[1]),
             shift_xy=best_shift,
             correlation=best_correlation,
             iterations=iterations,
             converged=converged,
             mean_error_px=mean_error,
-            message="ECC translation pass" if converged else "ECC correlation below threshold",
+            message="ECC (exhaustive) pass" if converged else "ECC (exhaustive) correlation below threshold",
         )
 
     def apply_translation(self, moving: LightFrame, shift_xy: tuple[int, int]) -> LightFrame:
