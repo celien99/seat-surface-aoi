@@ -59,6 +59,12 @@ private:
                           std::string* error_message);
   /// 发送 ok_response 给客户端
   void send_ok();
+  /// 发送自定义回复文本
+  void send_response(const std::string& response);
+  /// start_sn 两步协议: 等待 start 命令 → ack → 等待 sn <barcode> → ack
+  bool wait_trigger_start_sn(ExternalTrigger* out_trigger,
+                              int timeout_ms,
+                              std::string* error_message);
   /// 通过 TCP 发送结果回传行
   bool send_result_line(const std::string& seat_id, const std::string& decision_text,
                         int timeout_ms, std::string* error_message);
@@ -78,6 +84,13 @@ private:
   std::string delimiter_;
   std::string terminator_ = "\n";
   std::string ok_response_ = "ok\n";
+  // 协议模式 "single" / "start_sn"
+  std::string protocol_mode_ = "single";
+  // start_sn 两步协议配置
+  std::string start_command_ = "start";
+  std::string sn_prefix_ = "sn";
+  std::string start_ack_ = "start_ack\n";
+  std::string sn_ack_ = "sn_ack\n";
   std::string station_id_;
   std::string default_seat_id_ = "EXTERNAL_SEAT";
   std::string default_sku_ = "seat_a_black_leather";

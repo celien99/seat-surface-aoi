@@ -411,11 +411,15 @@ bool TcpSignalClient::parse_trigger_line(const std::string& line,
 // ============================================================================
 
 void TcpSignalClient::send_ok() {
+  send_response(ok_response_);
+}
+
+void TcpSignalClient::send_response(const std::string& response) {
   if (client_sock_ == kInvalidSocket) {
     return;
   }
-  ::send(static_cast<int>(client_sock_), ok_response_.data(),
-         ok_response_.size(), 0);
+  ::send(static_cast<int>(client_sock_), response.data(),
+         response.size(), 0);
 }
 
 // ============================================================================
@@ -429,6 +433,11 @@ bool TcpSignalClient::initialize(const SignalClientConfig& config) {
   delimiter_ = config.delimiter;
   terminator_ = config.terminator.empty() ? "\n" : config.terminator;
   ok_response_ = config.ok_response.empty() ? "ok\n" : config.ok_response;
+  protocol_mode_ = config.protocol_mode.empty() ? "single" : config.protocol_mode;
+  start_command_ = config.start_command.empty() ? "start" : config.start_command;
+  sn_prefix_ = config.sn_prefix.empty() ? "sn" : config.sn_prefix;
+  start_ack_ = config.start_ack.empty() ? "start_ack\n" : config.start_ack;
+  sn_ack_ = config.sn_ack.empty() ? "sn_ack\n" : config.sn_ack;
   result_host_ = config.result_host;
   result_port_ = config.result_port;
   result_prefix_ = config.result_prefix.empty() ? "result" : config.result_prefix;
@@ -484,6 +493,12 @@ bool TcpSignalClient::wait_trigger(ExternalTrigger* out_trigger,
     }
   }
 
+  // 按协议模式分派
+  if (protocol_mode_ == "start_sn") {
+    return wait_trigger_start_sn(out_trigger, timeout_ms, error_message);
+  }
+
+  // 单行协议路径 (protocol_mode=single, 向后兼容)
   // 读取一行
   std::string line;
   if (!read_line(&line, timeout_ms, error_message)) {
@@ -509,6 +524,120 @@ bool TcpSignalClient::wait_trigger(ExternalTrigger* out_trigger,
   send_ok();
 
   *out_trigger = trigger;
+  return true;
+}
+
+bool TcpSignalClient::wait_trigger_start_sn(ExternalTrigger* out_trigger,
+                                             int timeout_ms,
+                                             std::string* error_message) {
+  const auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(timeout_ms);
+
+  // 步骤 1: 等待到位信号 (start_command)
+  auto remaining_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+      deadline - std::chrono::steady_clock::now()).count();
+  if (remaining_ms <= 0) {
+    if (error_message != nullptr) {
+      *error_message = "TCP 两步协议等待到位信号 (" + start_command_ + ") 超时";
+    }
+    if (client_sock_ != kInvalidSocket) {
+      close_socket_impl(client_sock_);
+      client_sock_ = kInvalidSocket;
+    }
+    return false;
+  }
+
+  std::string start_line;
+  if (!read_line(&start_line, static_cast<int>(remaining_ms), error_message)) {
+    if (client_sock_ != kInvalidSocket) {
+      close_socket_impl(client_sock_);
+      client_sock_ = kInvalidSocket;
+    }
+    return false;
+  }
+
+  const std::string start_trimmed = trim(start_line);
+  if (start_trimmed != start_command_) {
+    if (error_message != nullptr) {
+      *error_message = "TCP 两步协议期望到位信号 '" + start_command_ +
+                       "', 实际收到: " + start_trimmed;
+    }
+    if (client_sock_ != kInvalidSocket) {
+      close_socket_impl(client_sock_);
+      client_sock_ = kInvalidSocket;
+    }
+    return false;
+  }
+
+  // 回复到位确认
+  send_response(start_ack_);
+  std::cout << "TCP 两步协议: 收到到位信号 (" << start_command_
+            << "), 已回复确认" << std::endl;
+
+  // 步骤 2: 等待 SN 条码
+  remaining_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+      deadline - std::chrono::steady_clock::now()).count();
+  if (remaining_ms <= 0) {
+    if (error_message != nullptr) {
+      *error_message = "TCP 两步协议等待 SN 条码超时";
+    }
+    if (client_sock_ != kInvalidSocket) {
+      close_socket_impl(client_sock_);
+      client_sock_ = kInvalidSocket;
+    }
+    return false;
+  }
+
+  std::string sn_line;
+  if (!read_line(&sn_line, static_cast<int>(remaining_ms), error_message)) {
+    if (client_sock_ != kInvalidSocket) {
+      close_socket_impl(client_sock_);
+      client_sock_ = kInvalidSocket;
+    }
+    return false;
+  }
+
+  // 解析 "sn_prefix <barcode>" 格式
+  const std::string sn_trimmed = trim(sn_line);
+  const std::string expected_prefix = sn_prefix_ + " ";
+  if (sn_trimmed.size() <= expected_prefix.size() ||
+      sn_trimmed.compare(0, expected_prefix.size(), expected_prefix) != 0) {
+    if (error_message != nullptr) {
+      *error_message = "TCP 两步协议期望 '" + expected_prefix +
+                       "<barcode>', 实际收到: " + sn_trimmed;
+    }
+    if (client_sock_ != kInvalidSocket) {
+      close_socket_impl(client_sock_);
+      client_sock_ = kInvalidSocket;
+    }
+    return false;
+  }
+
+  std::string barcode = trim(sn_trimmed.substr(expected_prefix.size()));
+  if (barcode.empty()) {
+    if (error_message != nullptr) {
+      *error_message = "TCP 两步协议: SN 条码为空";
+    }
+    if (client_sock_ != kInvalidSocket) {
+      close_socket_impl(client_sock_);
+      client_sock_ = kInvalidSocket;
+    }
+    return false;
+  }
+
+  // 回复 SN 确认
+  send_response(sn_ack_);
+
+  // 构造 ExternalTrigger
+  ExternalTrigger trigger{};
+  trigger.trigger_id = next_trigger_id_++;
+  trigger.seat_id = station_id_ + "_" + barcode;
+  trigger.sku = default_sku_;
+  *out_trigger = trigger;
+
+  std::cout << "TCP 两步协议: 收到 SN=" << barcode
+            << " seat_id=" << trigger.seat_id
+            << " trigger_id=" << trigger.trigger_id << std::endl;
   return true;
 }
 

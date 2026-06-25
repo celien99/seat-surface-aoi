@@ -18,6 +18,12 @@ struct SignalClientConfig {
   std::string delimiter;
   std::string terminator = "\n";
   std::string ok_response = "ok\n";
+  // 两步协议模式配置 (protocol_mode="start_sn")
+  std::string protocol_mode = "single";   // "single" 或 "start_sn"
+  std::string start_command = "start";     // 到位信号命令文本
+  std::string sn_prefix = "sn";            // SN 条码前缀
+  std::string start_ack = "start_ack\n";   // 到位信号回复
+  std::string sn_ack = "sn_ack\n";         // SN 接收回复
   // TCP 结果回传 (result_notify)
   std::string result_host;
   std::uint32_t result_port = 0;

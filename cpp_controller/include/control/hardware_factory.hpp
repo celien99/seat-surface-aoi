@@ -142,6 +142,11 @@ inline SignalClientConfig make_signal_client_config(const RuntimeSignalConfig& c
   client_config.delimiter = config.delimiter;
   client_config.terminator = config.terminator;
   client_config.ok_response = config.ok_response;
+  client_config.protocol_mode = config.protocol_mode;
+  client_config.start_command = config.start_command;
+  client_config.sn_prefix = config.sn_prefix;
+  client_config.start_ack = config.start_ack;
+  client_config.sn_ack = config.sn_ack;
   client_config.result_host = config.result_host;
   client_config.result_port = config.result_port;
   client_config.result_prefix = config.result_prefix;

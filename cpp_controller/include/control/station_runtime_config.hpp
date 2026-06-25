@@ -85,6 +85,12 @@ struct RuntimeSignalConfig {
   std::string delimiter;
   std::string terminator = "\n";
   std::string ok_response = "ok\n";
+  // 两步协议模式配置 (protocol_mode="start_sn")
+  std::string protocol_mode = "single";
+  std::string start_command = "start";
+  std::string sn_prefix = "sn";
+  std::string start_ack = "start_ack\n";
+  std::string sn_ack = "sn_ack\n";
   // TCP 结果回传 (result_notify)
   std::string result_host;
   std::uint32_t result_port = 0;

@@ -227,6 +227,36 @@ uv run python tools/run_simulated_ipc.py --replay-capture
 - detector 返回语义非法时不能输出 `OK`。
 - 并行相机等待失败会透传单台相机的 `camera_message`，避免只看到泛化的 `camera timeout`。
 
+### TCP 信号协议模式
+
+`signal.backend=tcp_signal` 支持两种协议模式，由 `signal.protocol_mode` 控制：
+
+| 模式 | 说明 | 适用场景 |
+| --- | --- | --- |
+| `single`（默认） | 单行协议：每行 TCP 数据为一个触发信号 | 简单 PLC 直连，向后兼容 |
+| `start_sn` | 两步协议：先收到位信号，再收 SN 条码 | 外部上位机两步握手 |
+
+#### 两步协议 (`protocol_mode=start_sn`)
+
+外部工控机通过 TCP 连接到 C++ 监听端口，分两步发送：
+
+1. **到位信号**: 发送 `start_command`（默认 `start\n`）→ C++ 回复 `start_ack`（默认 `start_ack\n`）
+2. **SN 条码**: 发送 `sn_prefix <barcode>`（默认 `sn ABC123456\n`）→ C++ 回复 `sn_ack`（默认 `sn_ack\n`）
+
+两步均在 `trigger_timeout_ms` 内完成。收到条码后构造 `seat_id = station_id + "_" + barcode`，沿共享内存进入 Python 检测链路，结果中的 `seat_id` 与触发时比对一致才会放行。
+
+配置字段：
+
+```ini
+signal.protocol_mode=start_sn    # single（默认）或 start_sn
+signal.start_command=start       # 到位信号命令文本
+signal.sn_prefix=sn              # SN 条码前缀（实际格式: "sn <barcode>"）
+signal.start_ack=start_ack\n     # 到位信号回复
+signal.sn_ack=sn_ack\n           # SN 接收回复
+```
+
+错误处理：两步中任意一步超时、命令不匹配或条码为空时，C++ 关闭客户端连接并在下一轮重新等待接入。
+
 ## 安全规则
 
 - 任意超时、缺帧、协议错误、CRC 错误、质量失败、配置错误都不能输出 `OK`。

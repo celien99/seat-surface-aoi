@@ -622,6 +622,16 @@ bool load_station_runtime_config(const std::string& path,
       config.signal.terminator = value;
     } else if (key == "signal.ok_response") {
       config.signal.ok_response = value;
+    } else if (key == "signal.protocol_mode") {
+      config.signal.protocol_mode = value;
+    } else if (key == "signal.start_command") {
+      config.signal.start_command = value;
+    } else if (key == "signal.sn_prefix") {
+      config.signal.sn_prefix = value;
+    } else if (key == "signal.start_ack") {
+      config.signal.start_ack = value;
+    } else if (key == "signal.sn_ack") {
+      config.signal.sn_ack = value;
     } else if (key == "signal.result_host") {
       config.signal.result_host = value;
     } else if (key == "signal.result_port") {
@@ -1047,6 +1057,14 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
     if (config.signal.station_id.empty()) {
       if (error_message != nullptr) {
         *error_message = "signal.backend=tcp_signal 时 signal.station_id 不能为空";
+      }
+      return false;
+    }
+    if (config.signal.protocol_mode != "single" &&
+        config.signal.protocol_mode != "start_sn") {
+      if (error_message != nullptr) {
+        *error_message = "signal.protocol_mode 只能是 single 或 start_sn: " +
+                         config.signal.protocol_mode;
       }
       return false;
     }
