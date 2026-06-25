@@ -2,9 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import numpy as np
+
 from python_detector.config.recipe_schema import ModelConfig, Recipe
 from python_detector.ipc.data_types import LightFrame
 from python_detector.pipeline.reflectance_cube import ReflectanceCube
+
+FeatureValues = list[int] | np.ndarray
+TensorNchw = list[list[list[list[float]]]] | np.ndarray
+
+
+class _TensorArray(np.ndarray):
+    def __bool__(self) -> bool:
+        return self.size > 0
 
 
 @dataclass
@@ -13,11 +23,11 @@ class FeatureGroup:
     camera_id: str
     roi_name: str
     model_key: str
-    features: dict[str, list[int]]
+    features: dict[str, FeatureValues]
     pose_id: str = ""
     roi_bbox_xyxy_pixel: tuple[int, int, int, int] = (0, 0, 0, 0)
     feature_shape_hw: tuple[int, int] = (0, 0)
-    tensor_nchw: list[list[list[list[float]]]] | None = None
+    tensor_nchw: TensorNchw | None = None
     tensor_channel_names: tuple[str, ...] = ()
     evidence_lights_by_channel: dict[str, tuple[str, ...]] = field(default_factory=dict)
     roi_to_source_matrix: tuple[float, ...] | None = None
@@ -66,10 +76,10 @@ class FeatureBuilder:
                     channels.append(channel_name)
         return tuple(channels)
 
-    def _build_feature_dict(self, cube: ReflectanceCube, channel_names: tuple[str, ...]) -> dict[str, list[int]]:
+    def _build_feature_dict(self, cube: ReflectanceCube, channel_names: tuple[str, ...]) -> dict[str, FeatureValues]:
         return {channel_name: self._build_channel(cube, channel_name) for channel_name in channel_names}
 
-    def _build_channel(self, cube: ReflectanceCube, channel_name: str) -> list[int]:
+    def _build_channel(self, cube: ReflectanceCube, channel_name: str) -> FeatureValues:
         spec = self._parse_channel_spec(channel_name)
         if spec.operation == "light":
             return self._required(cube.get(spec.light_ids[0]), channel_name, spec.light_ids[0])
@@ -94,7 +104,7 @@ class FeatureBuilder:
         cube: ReflectanceCube,
         model_key: str,
         model_config: ModelConfig,
-        features: dict[str, list[int]],
+        features: dict[str, FeatureValues],
     ) -> FeatureGroup:
         first_frame = next(iter(cube.frames.values()), None)
         feature_shape = (first_frame.height, first_frame.width) if first_frame is not None else (0, 0)
@@ -116,7 +126,7 @@ class FeatureBuilder:
             source_to_roi_matrix=cube.source_to_roi_matrix,
         )
 
-    def _required(self, image: LightFrame | None, name: str, light_id: str) -> list[int]:
+    def _required(self, image: LightFrame | None, name: str, light_id: str) -> FeatureValues:
         return self._sample(self._required_frame(image, name, light_id))
 
     def _required_frame(self, image: LightFrame | None, name: str, light_id: str) -> LightFrame:
@@ -124,77 +134,76 @@ class FeatureBuilder:
             raise ValueError(f"required feature source missing: {name} needs {light_id}")
         return image
 
-    def _optional(self, image: LightFrame | None) -> list[int]:
+    def _optional(self, image: LightFrame | None) -> FeatureValues:
         if image is None:
-            return [0] * 64
+            return np.zeros(64, dtype=np.uint8)
         return self._sample(image)
 
-    def _abs_diff(self, image_a: LightFrame | None, image_b: LightFrame | None) -> list[int]:
+    def _abs_diff(self, image_a: LightFrame | None, image_b: LightFrame | None) -> FeatureValues:
         if image_a is None or image_b is None:
-            return [0] * 64
+            return np.zeros(64, dtype=np.uint8)
         a = self._sample(image_a)
         b = self._sample(image_b)
-        self._assert_same_length("abs_diff", (len(a), len(b)))
-        return [abs(x - y) for x, y in zip(a, b)]
+        self._assert_same_length("abs_diff", (a.size, b.size))
+        return np.abs(a.astype(np.int16, copy=False) - b.astype(np.int16, copy=False)).astype(np.uint8, copy=False)
 
-    def _max_min(self, images: list[LightFrame | None]) -> list[int]:
+    def _max_min(self, images: list[LightFrame | None]) -> FeatureValues:
         samples = [self._sample(image) for image in images if image is not None]
         if not samples:
-            return [0] * 64
-        self._assert_same_length("max_min", tuple(len(sample) for sample in samples))
-        return [max(values) - min(values) for values in zip(*samples)]
+            return np.zeros(64, dtype=np.uint8)
+        self._assert_same_length("max_min", tuple(sample.size for sample in samples))
+        stacked = np.stack(samples).astype(np.int16, copy=False)
+        return (stacked.max(axis=0) - stacked.min(axis=0)).astype(np.uint8, copy=False)
 
-    def _local_contrast(self, image: LightFrame | None) -> list[int]:
+    def _local_contrast(self, image: LightFrame | None) -> FeatureValues:
         if image is None:
-            return [0] * 64
+            return np.zeros(64, dtype=np.uint8)
         sample = self._sample(image)
-        mean = sum(sample) // max(len(sample), 1)
-        return [abs(value - mean) for value in sample]
+        mean = int(sample.astype(np.uint64, copy=False).sum() // max(sample.size, 1))
+        return np.abs(sample.astype(np.int16, copy=False) - mean).astype(np.uint8, copy=False)
 
-    def _sample(self, image: LightFrame) -> list[int]:
+    def _sample(self, image: LightFrame) -> np.ndarray:
         expected = image.stride_bytes * image.height
-        data = image.image[:expected]
-        if len(data) == 0:
-            return []
-        pixels: list[int] = []
-        for row in range(image.height):
-            start = row * image.stride_bytes
-            end = start + image.width
-            pixels.extend(int(value) for value in data[start:end])
-        return pixels
+        if expected <= 0:
+            return np.asarray([], dtype=np.uint8)
+        raw = np.frombuffer(image.image, dtype=np.uint8, count=expected)
+        if image.stride_bytes == image.width:
+            return raw[: image.width * image.height].reshape(-1)
+        return raw.reshape(image.height, image.stride_bytes)[:, : image.width].reshape(-1)
 
     def _build_tensor(
         self,
-        features: dict[str, list[int]],
+        features: dict[str, FeatureValues],
         channel_names: tuple[str, ...],
         shape_hw: tuple[int, int],
         input_scale: float,
-    ) -> list[list[list[list[float]]]]:
+    ) -> np.ndarray:
         height, width = shape_hw
         if height <= 0 or width <= 0:
             raise ValueError("feature tensor shape is invalid")
-        channels: list[list[list[float]]] = []
+        channels: list[np.ndarray] = []
+        if not channel_names:
+            return np.empty((1, 0, height, width), dtype=np.float32).view(_TensorArray)
         for channel_name in channel_names:
             values = features.get(channel_name)
             if values is None:
                 raise ValueError(f"model input channel missing: {channel_name}")
             channels.append(self._normalize_feature(values, height, width, input_scale))
-        return [channels]
+        return np.stack(channels, axis=0)[None, :, :, :].view(_TensorArray)
 
-    def _normalize_feature(self, values: list[int], height: int, width: int, input_scale: float) -> list[list[float]]:
-        if not values:
+    def _normalize_feature(self, values: FeatureValues, height: int, width: int, input_scale: float) -> np.ndarray:
+        array = np.asarray(values)
+        if array.size == 0:
             raise ValueError("feature channel is empty")
         total = height * width
-        if len(values) != total:
-            raise ValueError(f"feature channel length mismatch: {len(values)} != {total}")
-        return [
-            [max(0.0, min(float(values[row * width + col]) / input_scale, 1.0)) for col in range(width)]
-            for row in range(height)
-        ]
+        if array.size != total:
+            raise ValueError(f"feature channel length mismatch: {array.size} != {total}")
+        normalized = array.reshape(height, width).astype(np.float32, copy=False) / np.float32(input_scale)
+        return np.clip(normalized, 0.0, 1.0)
 
     def _assert_feature_shapes(
         self,
-        features: dict[str, list[int]],
+        features: dict[str, FeatureValues],
         shape_hw: tuple[int, int],
         camera_id: str,
         roi_name: str,
@@ -204,9 +213,9 @@ class FeatureBuilder:
         if expected <= 0:
             raise ValueError(f"{camera_id}/{roi_name}: feature shape is invalid: {shape_hw}")
         mismatched = {
-            name: len(values)
+            name: np.asarray(values).size
             for name, values in features.items()
-            if len(values) != expected
+            if np.asarray(values).size != expected
         }
         if mismatched:
             raise ValueError(f"{camera_id}/{roi_name}: feature channel length mismatch: {mismatched}, expected={expected}")

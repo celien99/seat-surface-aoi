@@ -1975,6 +1975,7 @@ name = "seat-surface-aoi-python-detector"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "numpy" },
     { name = "pyyaml" },
 ]
 
@@ -2019,6 +2020,7 @@ training = [
 [package.metadata]
 requires-dist = [
     { name = "faiss-cpu", marker = "extra == 'faiss'", specifier = ">=1.8" },
+    { name = "numpy", specifier = ">=1.24" },
     { name = "numpy", marker = "extra == 'display'", specifier = ">=1.24" },
     { name = "numpy", marker = "extra == 'faiss'", specifier = ">=1.24" },
     { name = "numpy", marker = "extra == 'onnx'", specifier = ">=1.24" },

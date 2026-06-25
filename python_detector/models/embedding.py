@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 from pathlib import Path
+
+import numpy as np
 
 from python_detector.config.recipe_schema import ModelConfig
 from python_detector.models.asset_errors import ModelAssetUnavailableError
@@ -146,15 +147,12 @@ class EmbeddingExtractor:
     def _statistical_embedding(self, feature_group: FeatureGroup, embedding_dim: int) -> tuple[float, ...]:
         if feature_group.tensor_nchw is None:
             raise RuntimeError("embedding 输入 tensor 缺失")
-        channels = feature_group.tensor_nchw[0]
+        channels = np.asarray(feature_group.tensor_nchw, dtype=np.float32)[0]
         values: list[float] = []
         for channel in channels:
-            flat = [float(value) for row in channel for value in row]
-            if not flat:
+            if channel.size == 0:
                 raise RuntimeError("embedding 输入通道为空")
-            mean = sum(flat) / len(flat)
-            variance = sum((value - mean) ** 2 for value in flat) / len(flat)
-            values.extend((mean, math.sqrt(max(variance, 0.0))))
+            values.extend((float(channel.mean()), float(channel.std())))
         if len(values) < embedding_dim:
             values.extend([0.0] * (embedding_dim - len(values)))
         return tuple(values[:embedding_dim])
@@ -190,6 +188,11 @@ class EmbeddingExtractor:
         tensor = feature_group.tensor_nchw
         if tensor is None:
             return None
+        if isinstance(tensor, np.ndarray):
+            shape = tensor.shape
+            if len(shape) != 4:
+                return None
+            return (int(shape[0]), int(shape[1]), int(shape[2]), int(shape[3]))
         batch = len(tensor)
         channels = len(tensor[0]) if batch else 0
         height = len(tensor[0][0]) if channels else 0

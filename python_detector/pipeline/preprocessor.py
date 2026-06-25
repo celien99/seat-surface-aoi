@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
+
 from python_detector.config.calibration_manager import Calibration, CalibrationManager, RoiMask, RoiTemplate
 from python_detector.config.recipe_schema import Recipe
 from python_detector.ipc.data_types import CameraBundle, LightFrame, SeatInspectionJob
@@ -187,13 +189,10 @@ class Preprocessor:
         )
 
     def _crop_bbox(self, frame: LightFrame, x0: int, y0: int, width: int, height: int) -> bytearray:
-        cropped = bytearray(width * height)
-        for row in range(height):
-            source_start = (y0 + row) * frame.stride_bytes + x0
-            source_end = source_start + width
-            target_start = row * width
-            cropped[target_start : target_start + width] = frame.image[source_start:source_end]
-        return cropped
+        expected = frame.stride_bytes * frame.height
+        raw = np.frombuffer(frame.image, dtype=np.uint8, count=expected)
+        image = raw.reshape(frame.height, frame.stride_bytes)
+        return bytearray(np.ascontiguousarray(image[y0 : y0 + height, x0 : x0 + width]).tobytes())
 
     def _apply_roi_mask(
         self,
@@ -211,11 +210,10 @@ class Preprocessor:
             )
         if len(mask.pixels) != width * height:
             raise ValueError(f"{frame.camera_id}/{frame.light_id}/{roi_name}: ROI mask 像素长度不匹配")
-        masked = bytearray(pixels)
-        for index, value in enumerate(mask.pixels):
-            if value == 0:
-                masked[index] = 0
-        return masked
+        image = np.frombuffer(pixels, dtype=np.uint8).reshape(height, width).copy()
+        mask_array = np.frombuffer(mask.pixels, dtype=np.uint8).reshape(height, width)
+        image[mask_array == 0] = 0
+        return bytearray(image.tobytes())
 
     def _warp_quad(
         self,
@@ -236,14 +234,7 @@ class Preprocessor:
         source_points_global = tuple((x + origin_x, y + origin_y) for x, y in source_points)
         roi_to_source_matrix = self._translate_homography(transform, float(origin_x), float(origin_y))
         source_to_roi_matrix = self._homography(source_points_global, destination_points)
-        warped = bytearray(output_width * output_height)
-        for y in range(output_height):
-            for x in range(output_width):
-                source = self._apply_homography(transform, float(x), float(y))
-                if source is None:
-                    raise ValueError(f"{frame.camera_id}/{frame.light_id}/{roi.roi_name}: ROI 透视变换无效")
-                sx, sy = source
-                warped[y * output_width + x] = self._sample_bilinear(frame, sx, sy)
+        warped = self._warp_image(frame, transform, output_width, output_height, roi.roi_name)
         return warped, roi_to_source_matrix, source_to_roi_matrix
 
     def _is_axis_aligned_rectangle(self, roi: RoiTemplate) -> bool:
@@ -318,26 +309,34 @@ class Preprocessor:
                     augmented[row][item] -= factor * augmented[col][item]
         return [augmented[row][size] for row in range(size)]
 
-    def _apply_homography(self, transform: tuple[float, ...], x: float, y: float) -> tuple[float, float] | None:
-        denom = transform[6] * x + transform[7] * y + transform[8]
-        if abs(denom) < 1e-9:
-            return None
-        source_x = (transform[0] * x + transform[1] * y + transform[2]) / denom
-        source_y = (transform[3] * x + transform[4] * y + transform[5]) / denom
-        return source_x, source_y
+    def _warp_image(
+        self,
+        frame: LightFrame,
+        transform: tuple[float, ...],
+        output_width: int,
+        output_height: int,
+        roi_name: str,
+    ) -> bytearray:
+        grid_y, grid_x = np.indices((output_height, output_width), dtype=np.float64)
+        denom = transform[6] * grid_x + transform[7] * grid_y + transform[8]
+        if np.any(np.abs(denom) < 1e-9):
+            raise ValueError(f"{frame.camera_id}/{frame.light_id}/{roi_name}: ROI 透视变换无效")
+        source_x = (transform[0] * grid_x + transform[1] * grid_y + transform[2]) / denom
+        source_y = (transform[3] * grid_x + transform[4] * grid_y + transform[5]) / denom
+        warped = self._sample_bilinear_grid(frame, source_x, source_y)
+        return bytearray(warped.tobytes())
 
-    def _sample_bilinear(self, frame: LightFrame, x: float, y: float) -> int:
-        x = max(0.0, min(float(frame.width - 1), x))
-        y = max(0.0, min(float(frame.height - 1), y))
-        x0 = int(x)
-        y0 = int(y)
-        x1 = min(x0 + 1, frame.width - 1)
-        y1 = min(y0 + 1, frame.height - 1)
-        dx = x - x0
-        dy = y - y0
-        top = self._pixel(frame, x0, y0) * (1.0 - dx) + self._pixel(frame, x1, y0) * dx
-        bottom = self._pixel(frame, x0, y1) * (1.0 - dx) + self._pixel(frame, x1, y1) * dx
-        return int(round(top * (1.0 - dy) + bottom * dy))
-
-    def _pixel(self, frame: LightFrame, x: int, y: int) -> int:
-        return int(frame.image[y * frame.stride_bytes + x])
+    def _sample_bilinear_grid(self, frame: LightFrame, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        source = np.frombuffer(frame.image, dtype=np.uint8, count=frame.stride_bytes * frame.height)
+        source = source.reshape(frame.height, frame.stride_bytes)[:, : frame.width].astype(np.float64, copy=False)
+        clipped_x = np.clip(x, 0.0, float(frame.width - 1))
+        clipped_y = np.clip(y, 0.0, float(frame.height - 1))
+        x0 = clipped_x.astype(np.int64)
+        y0 = clipped_y.astype(np.int64)
+        x1 = np.minimum(x0 + 1, frame.width - 1)
+        y1 = np.minimum(y0 + 1, frame.height - 1)
+        dx = clipped_x - x0
+        dy = clipped_y - y0
+        top = source[y0, x0] * (1.0 - dx) + source[y0, x1] * dx
+        bottom = source[y1, x0] * (1.0 - dx) + source[y1, x1] * dx
+        return np.rint(top * (1.0 - dy) + bottom * dy).astype(np.uint8)

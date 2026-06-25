@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import math
 from typing import Any, Protocol
 
+import numpy as np
+
 from python_detector.config.recipe_schema import ModelConfig, Recipe
 from python_detector.models.asset_errors import ModelAssetUnavailableError
 from python_detector.models.embedding import EmbeddingExtractor
@@ -136,10 +138,17 @@ class FakeModel:
         return list(dict.fromkeys(evidence))
 
     def _max_tensor_feature_value(self, feature_group: FeatureGroup) -> int:
-        values: list[int] = []
+        max_value: int | None = None
         for channel_name in feature_group.tensor_channel_names:
-            values.extend(feature_group.features.get(channel_name, ()))
-        return max(values, default=0)
+            values = feature_group.features.get(channel_name)
+            if values is None:
+                continue
+            array = np.asarray(values)
+            if array.size == 0:
+                continue
+            channel_max = int(array.max())
+            max_value = channel_max if max_value is None else max(max_value, channel_max)
+        return max_value if max_value is not None else 0
 
 
 class OnnxModel:
@@ -535,6 +544,11 @@ def _tensor_shape_nchw(feature_group: FeatureGroup) -> tuple[int, int, int, int]
     tensor = feature_group.tensor_nchw
     if tensor is None:
         return None
+    if isinstance(tensor, np.ndarray):
+        shape = tensor.shape
+        if len(shape) != 4:
+            return None
+        return (int(shape[0]), int(shape[1]), int(shape[2]), int(shape[3]))
     batch = len(tensor)
     channels = len(tensor[0]) if batch > 0 else 0
     height = len(tensor[0][0]) if channels > 0 else 0

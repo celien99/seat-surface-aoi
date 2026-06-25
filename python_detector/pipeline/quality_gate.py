@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import numpy as np
+
 from python_detector.config.recipe_schema import Recipe
 from python_detector.ipc.data_types import CameraBundle, LightFrame, SeatInspectionJob
 
@@ -207,12 +209,13 @@ class ImageQualityGate:
         if len(values) < expected_min:
             return FrameQuality(frame.camera_id, frame.light_id, 0.0, 0.0, 0.0, 0.0, 0.0, False, ["image shorter than stride"])
 
-        sample = self._active_pixel_bytes(frame)
-        mean_gray = sum(sample) / len(sample)
-        saturation_ratio = sum(1 for value in sample if value >= 250) / len(sample)
-        dark_ratio = sum(1 for value in sample if value <= 5) / len(sample)
-        sharpness = self._sharpness(sample, frame.width, frame.height)
-        motion_gradient = self._motion_gradient(sample, frame.width, frame.height)
+        sample = self._active_pixel_array(frame)
+        mean_gray = float(sample.mean())
+        total_pixels = sample.size
+        saturation_ratio = float(np.count_nonzero(sample >= 250) / total_pixels)
+        dark_ratio = float(np.count_nonzero(sample <= 5) / total_pixels)
+        sharpness = self._sharpness(sample)
+        motion_gradient = self._motion_gradient(sample)
         messages: list[str] = []
         if saturation_ratio > recipe.quality.max_saturation_ratio:
             messages.append("overexposure saturation ratio exceeded")
@@ -278,56 +281,33 @@ class ImageQualityGate:
             messages.append(f"stride smaller than active row width: {frame.stride_bytes} < {row_width}")
         return messages
 
-    def _active_pixel_bytes(self, frame: LightFrame) -> bytes:
+    def _active_pixel_array(self, frame: LightFrame) -> np.ndarray:
+        expected = frame.stride_bytes * frame.height
+        raw = np.frombuffer(frame.image, dtype=np.uint8, count=expected)
         if frame.stride_bytes == frame.width * frame.channels:
-            return bytes(frame.image[: frame.width * frame.height * frame.channels])
-        rows = bytearray()
+            return raw[: frame.width * frame.height * frame.channels].reshape(frame.height, frame.width)
         row_width = frame.width * frame.channels
-        for row in range(frame.height):
-            start = row * frame.stride_bytes
-            rows.extend(frame.image[start : start + row_width])
-        return bytes(rows)
+        return raw.reshape(frame.height, frame.stride_bytes)[:, :row_width].reshape(frame.height, frame.width)
 
-    def _sharpness(self, data: bytes, width: int, height: int) -> float:
+    def _sharpness(self, data: np.ndarray) -> float:
+        height, width = data.shape
         if width < 3 or height < 3:
             return 0.0
-        total = 0
-        count = 0
-        for y in range(1, height - 1):
-            row = y * width
-            for x in range(1, width - 1):
-                center = data[row + x]
-                lap = (
-                    int(data[row - width + x])
-                    + int(data[row + width + x])
-                    + int(data[row + x - 1])
-                    + int(data[row + x + 1])
-                    - 4 * int(center)
-                )
-                total += abs(lap)
-                count += 1
-        return total / max(count, 1)
+        center = data[1:-1, 1:-1].astype(np.int16, copy=False)
+        laplacian = (
+            data[:-2, 1:-1].astype(np.int16, copy=False)
+            + data[2:, 1:-1].astype(np.int16, copy=False)
+            + data[1:-1, :-2].astype(np.int16, copy=False)
+            + data[1:-1, 2:].astype(np.int16, copy=False)
+            - 4 * center
+        )
+        return float(np.abs(laplacian).mean())
 
-    def _motion_gradient(self, data: bytes, width: int, height: int) -> float:
+    def _motion_gradient(self, data: np.ndarray) -> float:
+        height, width = data.shape
         if width < 2 or height < 2:
             return 0.0
-        horizontal_total = 0
-        horizontal_count = 0
-        for y in range(height):
-            row = y * width
-            for x in range(width - 1):
-                horizontal_total += abs(int(data[row + x + 1]) - int(data[row + x]))
-                horizontal_count += 1
-
-        vertical_total = 0
-        vertical_count = 0
-        for y in range(height - 1):
-            row = y * width
-            next_row = row + width
-            for x in range(width):
-                vertical_total += abs(int(data[next_row + x]) - int(data[row + x]))
-                vertical_count += 1
-
-        horizontal_mean = horizontal_total / max(horizontal_count, 1)
-        vertical_mean = vertical_total / max(vertical_count, 1)
+        signed = data.astype(np.int16, copy=False)
+        horizontal_mean = float(np.abs(np.diff(signed, axis=1)).mean())
+        vertical_mean = float(np.abs(np.diff(signed, axis=0)).mean())
         return min(horizontal_mean, vertical_mean)

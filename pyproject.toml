@@ -9,6 +9,7 @@ description = "汽车座椅表面 AOI Python 检测算法模块"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+  "numpy>=1.24",
   "PyYAML>=6.0",
 ]
 

@@ -26,7 +26,7 @@ Python 只负责检测链路，不控制 PLC、工业相机或频闪；在线图
 
 Python 层使用项目根目录的 `pyproject.toml` 和 `uv.lock` 管理依赖：
 
-- 默认运行依赖：`PyYAML`，用于配方、标定和 ROI YAML。
+- 默认运行依赖：`PyYAML`、`numpy`；`PyYAML` 用于配方、标定和 ROI YAML，`numpy` 用于在线图像质量门禁、预处理、特征构建和模型输入/输出数组处理。
 - `test` dependency group：`pytest`、`numpy`，用于单元测试和 ONNX 输出解析测试。
 - `dev` dependency group：`pytest`、`numpy`、`ruff`，用于开发验证。
 - `training` dependency group：`torch`、`torchvision`、`onnx`、`onnxscript`、`onnxruntime`、`ultralytics`、`faiss-cpu`，用于 ROI YOLO、WideResNet50 embedding、PCA/PatchCore/FAISS 资产训练和导出。
@@ -255,9 +255,9 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 ### 质量门禁与预处理
 
-`ImageQualityGate` 在进入模型前拦截不可靠输入，包括缺少必需机位/检测光源、未启用的显式机器人 pose、非单调时间戳、重复帧号、曝光/增益漂移、过曝欠曝比例超限、锐度不足、光源亮度漂移，以及同一视角必需检测光源间的 `shot_id`、机器人时间戳、TCP 坐标和 RPY 姿态不一致。固定机位默认配置可接收同一机位的动态 `pose_id`，但仍要求每个动态视角自己的 `quality.required_lights` 完整、时序一致、质量通过；当前生产配方为 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 三路，`light_seq_index` 分别匹配顶层采集顺序 `0/1/2`。生产配方当前将单帧过曝像素比例 `max_saturation_ratio` 和过暗像素比例 `max_dark_ratio` 都配置为 `0.40`，同时保留缺帧、时序、曝光/增益一致性、锐度、运动梯度和配准等硬门禁。固定机位可以保留空的机器人字段，一旦任一必需检测光源携带机器人字段，其余必需检测光源必须保持一致。失败结果进入 `RuleEngine.make_quality_fail_result()`，不会输出 `OK`。
+`ImageQualityGate` 在进入模型前拦截不可靠输入，包括缺少必需机位/检测光源、未启用的显式机器人 pose、非单调时间戳、重复帧号、曝光/增益漂移、过曝欠曝比例超限、锐度不足、光源亮度漂移，以及同一视角必需检测光源间的 `shot_id`、机器人时间戳、TCP 坐标和 RPY 姿态不一致。固定机位默认配置可接收同一机位的动态 `pose_id`，但仍要求每个动态视角自己的 `quality.required_lights` 完整、时序一致、质量通过；当前生产配方为 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT` 三路，`light_seq_index` 分别匹配顶层采集顺序 `0/1/2`。生产配方当前将单帧过曝像素比例 `max_saturation_ratio` 和过暗像素比例 `max_dark_ratio` 都配置为 `0.40`，同时保留缺帧、时序、曝光/增益一致性、锐度、运动梯度和配准等硬门禁。亮度统计、过曝/欠曝比例、Laplacian 锐度和运动梯度使用 `numpy` 对有效像素区向量化计算，不再用 Python 逐像素循环处理高分辨率原图。固定机位可以保留空的机器人字段，一旦任一必需检测光源携带机器人字段，其余必需检测光源必须保持一致。失败结果进入 `RuleEngine.make_quality_fail_result()`，不会输出 `OK`。
 
-`Preprocessor` 只接受当前实现支持的 `MONO8` / `UINT8` / 单通道图像，并显式检查 stride、图像长度、标定版本和图像尺寸。ROI 可以是轴对齐矩形裁剪，也可以是四点透视展开。Dome ROI 定位会按 `roi_name` 聚合同名候选，优先选择置信度最高、姿态误差最低的候选；bbox 后端输出矩形 ROI，seg 后端从 mask 自动生成运行时 `polygon_xy`，当前传给后续配准和模型的是 mask 外接矩形 ROI 图，并会把 mask 外像素置黑，只保留 mask 内目标物体。同名 ROI 出现互相冲突的框或 mask 时返回 `RECHECK`，避免重复检测静默覆盖 ROI。
+`Preprocessor` 只接受当前实现支持的 `MONO8` / `UINT8` / 单通道图像，并显式检查 stride、图像长度、标定版本和图像尺寸。ROI 可以是轴对齐矩形裁剪，也可以是四点透视展开；轴对齐矩形裁剪、四点透视双线性采样和 ROI mask 应用使用 `numpy` 切片、网格采样和布尔掩码，避免在高分辨率 raw ROI 上逐像素复制。Dome ROI 定位会按 `roi_name` 聚合同名候选，优先选择置信度最高、姿态误差最低的候选；bbox 后端输出矩形 ROI，seg 后端从 mask 自动生成运行时 `polygon_xy`，当前传给后续配准和模型的是 mask 外接矩形 ROI 图，并会把 mask 外像素置黑，只保留 mask 内目标物体。同名 ROI 出现互相冲突的框或 mask 时返回 `RECHECK`，避免重复检测静默覆盖 ROI。
 
 ### 多光源特征
 
@@ -269,7 +269,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 - `light:POLAR_DIFFUSE`
 - `light:HIGH_LEFT`
 
-模型可声明表达式通道，例如 `light:HIGH_RIGHT`、`max_min:HIGH_LEFT:HIGH_RIGHT`、`abs_diff:LOW_LEFT:LOW_RIGHT`、`local_contrast:DIFFUSE`；旧配方中的 `ch0_diffuse`、`ch1_polar_diffuse`、`ch2_high_left`、`ch3_high_right`、`ch4_high_max_min` 仍作为兼容别名解析。缺少未声明光源不会影响当前生产链路。模型输入 tensor 使用 `NCHW`，并保留 `evidence_lights_by_channel` 供结果回写和 trace 使用。
+模型可声明表达式通道，例如 `light:HIGH_RIGHT`、`max_min:HIGH_LEFT:HIGH_RIGHT`、`abs_diff:LOW_LEFT:LOW_RIGHT`、`local_contrast:DIFFUSE`；旧配方中的 `ch0_diffuse`、`ch1_polar_diffuse`、`ch2_high_left`、`ch3_high_right`、`ch4_high_max_min` 仍作为兼容别名解析。缺少未声明光源不会影响当前生产链路。`FeatureBuilder` 使用 `numpy` 数组构建 light、abs_diff、max_min、local_contrast 特征通道，并直接堆叠归一化后的 `NCHW` tensor；模型输入 tensor 保留 `evidence_lights_by_channel` 供结果回写和 trace 使用。
 
 ### 模型后端
 
