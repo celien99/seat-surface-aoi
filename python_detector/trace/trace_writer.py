@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 from dataclasses import fields, is_dataclass
 from datetime import datetime
 from pathlib import Path
@@ -44,7 +43,7 @@ class TraceWriter:
         self._write_json(trace_dir / "error.json", context.get("error", {}))
         self._write_raw_images(trace_dir, job)
         self._write_roi_images(trace_dir, context.get("prepared_bundles", []))
-        self._write_detection_overlays(trace_dir, result, context.get("prepared_bundles", []), context.get("spatial_maps", []))
+        self._write_detection_overlays(trace_dir, result, context.get("prepared_bundles", []), context.get("spatial_maps", []), job)
         return trace_dir
 
     def _should_write(self, job: SeatInspectionJob, recipe: Recipe, result: InspectionResult) -> bool:
@@ -99,16 +98,27 @@ class TraceWriter:
                     frame,
                 )
 
+    def _raw_frame_index(self, job: SeatInspectionJob) -> dict[tuple[str, str, str], LightFrame]:
+        """构建 raw 帧索引: (camera_id, pose_id, light_id) -> LightFrame。"""
+        index: dict[tuple[str, str, str], LightFrame] = {}
+        for bundle in job.camera_bundles:
+            pose_id = bundle.pose_id or bundle.camera_id
+            for light_id, frame in bundle.light_frames.items():
+                index[(bundle.camera_id, pose_id, light_id)] = frame
+        return index
+
     def _write_detection_overlays(
         self,
         trace_dir: Path,
         result: InspectionResult,
         prepared_bundles: Any,
         spatial_maps: list[dict[str, object]],
+        job: SeatInspectionJob,
     ) -> None:
         frame_groups = self._roi_frame_groups(prepared_bundles)
         if not frame_groups:
             return
+        raw_index = self._raw_frame_index(job)
         defects_by_roi = self._defects_by_roi(result.defects)
         anomaly_maps = self._anomaly_map_index(spatial_maps)
         overlay_dir = trace_dir / "overlays"
@@ -116,22 +126,28 @@ class TraceWriter:
             camera_id, pose_id, roi_name = key
             frames = frame_groups[key]
             roi_defects = defects_by_roi.get(key, [])
-            frame = self._display_frame(frames, roi_defects)
-            if frame is None:
+            roi_frame = self._display_frame(frames, roi_defects)
+            if roi_frame is None:
+                continue
+            # 查找匹配的 raw 帧
+            raw_frame = raw_index.get((camera_id, pose_id, roi_frame.light_id))
+            if raw_frame is None:
+                # fallback: 同 camera/pose 的任意光源
+                for (rc, rp, _rl), rf in raw_index.items():
+                    if rc == camera_id and rp == pose_id:
+                        raw_frame = rf
+                        break
+            if raw_frame is None:
                 continue
             anomaly_entry = anomaly_maps.get(key)
             path = overlay_dir / _safe_name(camera_id) / _safe_name(pose_id) / f"{_safe_name(roi_name)}.png"
             if anomaly_entry is not None:
                 anomaly_map, _spatial_shape = anomaly_entry
-                self._write_heatmap_overlay(
-                    path,
-                    frame,
-                    result.decision,
-                    roi_defects,
-                    anomaly_map,
+                self._write_heatmap_overlay_on_raw(
+                    path, raw_frame, roi_frame, result.decision, roi_defects, anomaly_map,
                 )
             else:
-                self._write_overlay_png(path, frame, result.decision, roi_defects)
+                self._write_overlay_png_on_raw(path, raw_frame, result.decision, roi_defects)
 
     def _roi_frame_groups(self, prepared_bundles: Any) -> dict[tuple[str, str, str], dict[str, LightFrame]]:
         groups: dict[tuple[str, str, str], dict[str, LightFrame]] = {}
@@ -159,21 +175,25 @@ class TraceWriter:
     def _write_gray_image(self, path: Path, frame: LightFrame) -> None:
         write_gray_png(path, frame.width, frame.height, self._frame_bytes(frame))
 
-    def _write_overlay_png(
+    def _write_overlay_png_on_raw(
         self,
         path: Path,
-        frame: LightFrame,
+        raw_frame: LightFrame,
         result_decision: str,
         defects: list[DefectResult],
     ) -> None:
-        gray = self._frame_bytes(frame)
-        rgb = bytearray()
-        for y in range(frame.height):
-            for x in range(frame.width):
-                value = gray[y * frame.width + x]
-                rgb.extend((value, value, value))
-        self._draw_overlay_marks(rgb, frame.width, frame.height, frame, result_decision, defects)
-        write_rgb_png(path, frame.width, frame.height, bytes(rgb))
+        """仅绘制 raw 底图 + 决策边框 + 缺陷 bbox（无热力图）。"""
+        raw_bytes = self._frame_bytes(raw_frame)
+        raw_w, raw_h = raw_frame.width, raw_frame.height
+        rgb = bytearray(raw_w * raw_h * 3)
+        for i in range(raw_w * raw_h):
+            gray_val = raw_bytes[i]
+            off = i * 3
+            rgb[off] = gray_val
+            rgb[off + 1] = gray_val
+            rgb[off + 2] = gray_val
+        self._draw_overlay_marks_raw(rgb, raw_w, raw_h, result_decision, defects)
+        write_rgb_png(path, raw_w, raw_h, bytes(rgb))
 
     def _anomaly_map_index(
         self,
@@ -204,55 +224,89 @@ class TraceWriter:
                 index[(camera_id, pose_id, roi_name)] = (anomaly_map_tuple, spatial_shape)
         return index
 
-    def _write_heatmap_overlay(
+    def _write_heatmap_overlay_on_raw(
         self,
         path: Path,
-        frame: LightFrame,
+        raw_frame: LightFrame,
+        roi_frame: LightFrame,
         result_decision: str,
         defects: list[DefectResult],
         anomaly_map: tuple[tuple[float, ...], ...],
     ) -> None:
-        """渲染 JET 热力图叠加到灰度 ROI 上，并绘制判定框和缺陷框。
+        """渲染 JET 热力图叠加到 raw 原图上，并绘制判定框和缺陷框。
 
-        生成 RGB PNG，包含：灰度底图 + JET colormap 异常热力 + 判定边框；
-        NG/RECHECK/ERROR 有缺陷候选时，额外绘制候选 bbox。
+        通过 roi_to_source_matrix 将 ROI 空间的热力图前向映射到 raw 坐标；
+        defect bbox 本身就是 raw 坐标，直接绘制。
         """
         path.parent.mkdir(parents=True, exist_ok=True)
-        gray = self._frame_bytes(frame)
-        h, w = frame.height, frame.width
+        raw_bytes = self._frame_bytes(raw_frame)
+        raw_w, raw_h = raw_frame.width, raw_frame.height
+        roi_w, roi_h = roi_frame.width, roi_frame.height
+        matrix = roi_frame.roi_to_source_matrix
 
-        # 将 anomaly_map 上采样到 ROI 尺寸
+        # 上采样 anomaly_map 到 ROI 分辨率
         map_h = len(anomaly_map)
         map_w = len(anomaly_map[0]) if map_h > 0 else 0
-        upsampled = _resize_anomaly_map(anomaly_map, (map_h, map_w), h, w)
+        upsampled = _resize_anomaly_map(anomaly_map, (map_h, map_w), roi_h, roi_w)
 
-        # 构建 RGB 叠加图
-        rgb = bytearray()
-        for y in range(h):
-            for x in range(w):
-                gray_val = gray[y * w + x]
-                anomaly_val = upsampled[y][x]
+        # 构建 RGB 底图 = raw 灰度三通道
+        rgb = bytearray(raw_w * raw_h * 3)
+        for i in range(raw_w * raw_h):
+            gray_val = raw_bytes[i]
+            off = i * 3
+            rgb[off] = gray_val
+            rgb[off + 1] = gray_val
+            rgb[off + 2] = gray_val
+
+        # 前向映射：ROI 像素 → raw 坐标 → 混合 JET 热力图
+        has_matrix = matrix is not None and len(matrix) == 9
+        for ry in range(roi_h):
+            for rx in range(roi_w):
+                if has_matrix:
+                    mapped = self._apply_homography(matrix, float(rx), float(ry))
+                    if mapped is None:
+                        continue
+                    sx, sy = mapped
+                else:
+                    ox, oy = roi_frame.origin_xy
+                    sx = float(rx + ox)
+                    sy = float(ry + oy)
+
+                ix = int(round(sx))
+                iy = int(round(sy))
+                if ix < 0 or ix >= raw_w or iy < 0 or iy >= raw_h:
+                    continue
+
+                anomaly_val = upsampled[ry][rx]
+                gray_val = raw_bytes[iy * raw_w + ix]
                 heat_r, heat_g, heat_b = _jet_colormap(anomaly_val)
-                # alpha blend: 热力图 40% + 灰度图 60%
                 blended_r = int(heat_r * 0.4 + gray_val * 0.6)
                 blended_g = int(heat_g * 0.4 + gray_val * 0.6)
                 blended_b = int(heat_b * 0.4 + gray_val * 0.6)
-                rgb.extend((blended_r, blended_g, blended_b))
-        self._draw_overlay_marks(rgb, w, h, frame, result_decision, defects)
-        write_rgb_png(path, w, h, bytes(rgb))
 
-    def _draw_overlay_marks(
+                base = (iy * raw_w + ix) * 3
+                rgb[base] = blended_r
+                rgb[base + 1] = blended_g
+                rgb[base + 2] = blended_b
+
+        self._draw_overlay_marks_raw(rgb, raw_w, raw_h, result_decision, defects)
+        write_rgb_png(path, raw_w, raw_h, bytes(rgb))
+
+    def _draw_overlay_marks_raw(
         self,
         rgb: bytearray,
         width: int,
         height: int,
-        frame: LightFrame,
         result_decision: str,
         defects: list[DefectResult],
     ) -> None:
+        """在 raw 图像上绘制决策边框和缺陷 bbox。
+
+        DefectResult.bbox_xyxy_pixel 本身就是源（raw）坐标，无需转换。
+        """
         self._draw_rect(rgb, width, height, 0, 0, width - 1, height - 1, _decision_color(result_decision), thickness=4)
         for defect in defects:
-            x0, y0, x1, y1 = self._bbox_in_frame(defect.bbox_xyxy_pixel, frame)
+            x0, y0, x1, y1 = defect.bbox_xyxy_pixel
             self._draw_rect(rgb, width, height, x0, y0, x1, y1, _decision_color(defect.decision), thickness=3)
 
     def _draw_rect(
@@ -327,40 +381,6 @@ class TraceWriter:
             start = row * frame.stride_bytes
             rows.extend(frame.image[start : start + frame.width])
         return bytes(rows)
-
-    def _bbox_in_frame(self, bbox_xyxy_pixel: tuple[int, int, int, int], frame: LightFrame) -> tuple[int, int, int, int]:
-        if frame.source_to_roi_matrix is not None:
-            x0, y0, x1, y1 = bbox_xyxy_pixel
-            points = (
-                self._apply_homography(frame.source_to_roi_matrix, float(x0), float(y0)),
-                self._apply_homography(frame.source_to_roi_matrix, float(x1), float(y0)),
-                self._apply_homography(frame.source_to_roi_matrix, float(x1), float(y1)),
-                self._apply_homography(frame.source_to_roi_matrix, float(x0), float(y1)),
-            )
-            if any(point is None for point in points):
-                raise ValueError(f"defect bbox 无法映射到 ROI: {bbox_xyxy_pixel}")
-            xs = [point[0] for point in points if point is not None]
-            ys = [point[1] for point in points if point is not None]
-            local = (
-                max(0, min(frame.width - 1, math.floor(min(xs)))),
-                max(0, min(frame.height - 1, math.floor(min(ys)))),
-                max(0, min(frame.width - 1, math.ceil(max(xs)))),
-                max(0, min(frame.height - 1, math.ceil(max(ys)))),
-            )
-            if local[2] < local[0] or local[3] < local[1]:
-                raise ValueError(f"defect bbox 不在 ROI 内: {bbox_xyxy_pixel}")
-            return local
-        origin_x, origin_y = frame.origin_xy
-        x0, y0, x1, y1 = bbox_xyxy_pixel
-        local = (
-            max(0, min(frame.width - 1, x0 - origin_x)),
-            max(0, min(frame.height - 1, y0 - origin_y)),
-            max(0, min(frame.width - 1, x1 - origin_x)),
-            max(0, min(frame.height - 1, y1 - origin_y)),
-        )
-        if local[2] < local[0] or local[3] < local[1]:
-            raise ValueError(f"defect bbox 不在 ROI 内: {bbox_xyxy_pixel}")
-        return local
 
     def _apply_homography(self, matrix: tuple[float, ...], x: float, y: float) -> tuple[float, float] | None:
         denom = matrix[6] * x + matrix[7] * y + matrix[8]

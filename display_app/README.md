@@ -74,6 +74,6 @@ display_app/
 - `trace/<date>/<seat>_<sequence>/images/**/*.png`：ROI 原图。
 - `trace/<date>/<seat>_<sequence>/overlays/<camera>/<pose>/<roi>.png`：检测叠加图；OK 件也会有绿色判定边框，NG/RECHECK/ERROR 有缺陷候选时额外显示候选框。
 
-展示桥会优先选择 ROI 图，缺少 ROI 图时回退到 raw 原始采集图；同一相机/视角下优先展示 `DIFFUSE`，再回退到其它光源。如果某次检测没有保存 trace 图像，前端仍会展示 OK/NG/RECHECK/ERROR、统计和日志；图像区域会等待下一次带图像的事件。
+展示桥会优先选择 raw 原始采集图，缺少 raw 图时回退到 ROI 图；同一相机/视角下优先展示 `DIFFUSE`，再回退到其它光源。检测 overlay 也以 raw 原图尺寸输出，便于前端保持原始视野。如果某次检测没有保存 trace 图像，前端仍会展示 OK/NG/RECHECK/ERROR、统计和日志；图像区域会等待下一次带图像的事件。
 
 当模型资产未替换、ROI YOLO 缺失或 PatchCore/PCA 资产不可用时，Python detector 会返回 `RECHECK + CONFIGURATION_ERROR` 并在事件中标记 `sample_collection.enabled=true`。前端状态栏会显示“采样模式”，同时继续展示 raw 图，便于产线操作员确认拍摄效果并积累训练样本。

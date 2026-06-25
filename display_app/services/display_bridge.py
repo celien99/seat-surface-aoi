@@ -242,7 +242,7 @@ def _select_display_images(images: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 
 def _image_priority(image: dict[str, Any]) -> tuple[int, int, str]:
-    kind_rank = 0 if image.get("kind") == "roi_image" else 1
+    kind_rank = 0 if image.get("kind") == "raw_image" else 1
     light_rank = {
         "DIFFUSE": 0,
         "POLAR_DIFFUSE": 1,

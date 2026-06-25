@@ -143,7 +143,7 @@ python_detector/
 │   ├── pca.py                  # PCA JSON 参数加载、版本校验和投影
 │   └── patchcore.py            # PatchCore memory bank exact KNN 参考实现
 ├── trace/
-│   └── trace_writer.py         # trace JSON、ROI PNG 图、OK/NG 检测 overlay PNG 写入
+│   └── trace_writer.py         # trace JSON、raw/ROI PNG 图、raw 原图尺寸检测 overlay PNG 写入
 └── tests/                      # 协议、配方、质量门禁、ROI、模型、融合、trace、IPC 安全和架构就绪度测试
 ```
 
@@ -285,7 +285,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 1. **像素级缺陷定位**：从 anomaly_map 连通域自动生成缺陷 bbox，不再使用整个 ROI 边界。
 2. **小缺陷召回率提升**：Global Average Pooling 不再淹没小面积缺陷信号。
-3. **检测热力图**：TraceWriter 自动将 anomaly_map 渲染为 JET 伪彩色热力图叠加到灰度 ROI（40% 热力 + 60% 底图），同时绘制绿色 bbox 轮廓，替代旧的红色 ROI 边框。
+3. **检测热力图**：TraceWriter 自动将 ROI 空间的 anomaly_map 映射回 raw 原图坐标，渲染为 raw 原图尺寸的 JET 伪彩色热力图（40% 热力 + 60% 底图），同时绘制绿色 bbox 轮廓，替代旧的 ROI 裁剪图 overlay。
 
 空间模式要求：`embedding_backend=onnx_wideresnet50`、`spatial_layers` 非空（如 `[layer2, layer3]`），并使用 `--spatial-mode` 重新导出 ONNX 模型和重新训练记忆库。**生产配方默认启用 `spatial_mode: true`**，当前 layer2+layer3 原始 patch embedding 为 1536 维，在线先用 `seat_pca.json` 投影为 3 维，再进入 PatchCore bank/FAISS 评分并生成像素级 anomaly_map 热力图。若需回退到全局嵌入路径（整个 ROI → 1 个向量 → 标量分数），在配方中设置 `spatial_mode: false`。
 
@@ -318,7 +318,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 - `fusion_summary.json`
 - `timings.json`
 - `error.json`
-- 原始采集 PNG 图、ROI PNG 图和检测 overlay PNG 图；原始图路径为 `raw_images/<camera_id>/<pose_id>/<light_id>.png`，ROI 图路径为 `images/<camera_id>/<pose_id>/<roi_name>/<light_id>.png`，overlay 路径为 `overlays/<camera_id>/<pose_id>/<roi_name>.png`。只要该 ROI 已完成预处理，OK、NG、RECHECK 和 ERROR trace 都会写检测 overlay；NG/RECHECK/ERROR 有缺陷候选时额外绘制候选 bbox。
+- 原始采集 PNG 图、ROI PNG 图和检测 overlay PNG 图；原始图路径为 `raw_images/<camera_id>/<pose_id>/<light_id>.png`，ROI 图路径为 `images/<camera_id>/<pose_id>/<roi_name>/<light_id>.png`，overlay 路径为 `overlays/<camera_id>/<pose_id>/<roi_name>.png`。overlay 以匹配光源的 raw 原图为底图，尺寸等于 raw 原图；anomaly_map 从 ROI 坐标映射回 raw 坐标后叠加，缺陷 bbox 按 raw 坐标绘制。只要该 ROI 已完成预处理，OK、NG、RECHECK 和 ERROR trace 都会写检测 overlay；NG/RECHECK/ERROR 有缺陷候选时额外绘制候选 bbox。
 
 在线 `SeatSurfaceAoiAlgorithm` 调用 `TraceWriter` 时，如果任一 JSON、原始图、ROI 图或 overlay 写入失败，会记录 `context["trace_error"]`，并把当前结果改为 `RECHECK`、`error_code=DEVICE_FAULT`、`quality_pass=false` 后再交给 `ShmClient` 写回 C++。展示通道 `display_latest.json` / `display_events.jsonl` 属于结果发布后的只读前端辅助输出，失败只打印告警，不反向修改已经发布的共享内存结果。
 

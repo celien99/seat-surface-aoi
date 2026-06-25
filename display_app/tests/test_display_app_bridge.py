@@ -83,7 +83,7 @@ def test_display_bridge_reads_latest_and_publishes_images(tmp_path: Path) -> Non
     assert event.decision == "NG"
     assert event.defects[0].class_name == "scratch"
     assert bridge.publish_images(event) == ["CAM_FRONT/POSE_A"]
-    assert provider._frames["CAM_FRONT/POSE_A"][0, 0].tolist() == [1, 1, 1]
+    assert provider._frames["CAM_FRONT/POSE_A"][0, 0].tolist() == [9, 9, 9]
 
 
 def test_display_bridge_publishes_raw_image_when_roi_is_unavailable(tmp_path: Path) -> None:

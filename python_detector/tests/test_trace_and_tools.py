@@ -4,7 +4,7 @@ import json
 
 from python_detector.config.recipe_schema import ModelConfig, RecipeManager
 from python_detector.image_codec import load_raster_image
-from python_detector.ipc.data_types import CameraBundle, InspectionResult, SeatInspectionJob
+from python_detector.ipc.data_types import CameraBundle, DefectResult, InspectionResult, LightFrame, SeatInspectionJob
 from python_detector.pipeline.pipeline import InspectionPipeline
 from python_detector.pipeline.quality_gate import FrameQuality, QualityReport
 from python_detector.trace.trace_writer import TraceWriter
@@ -61,6 +61,54 @@ def test_trace_writer_generates_defect_overlay(tmp_path: Path) -> None:
     overlays = list((trace_dir / "overlays").glob("*/*/*.png"))
     assert overlays
     assert overlays[0].read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_trace_writer_overlay_drawn_on_raw_image_resolution(tmp_path: Path) -> None:
+    """验证 overlay PNG 尺寸等于 raw 原图尺寸，而非 ROI 裁剪尺寸。"""
+    recipe = _recipe(tmp_path, save_ok_ratio=1.0)
+    pipeline = InspectionPipeline()
+    job = make_simulated_job()
+    result = pipeline.process(job, recipe)
+    trace_dir = TraceWriter(recipe.trace.root_dir).write(job, recipe, result, pipeline.last_context)
+    assert trace_dir is not None
+    overlay_path = trace_dir / "overlays" / "TOP_BACK" / "TOP_BACK" / "seat.png"
+    assert overlay_path.exists()
+    overlay_img = load_raster_image(overlay_path)
+    # raw 帧尺寸 = 64x48（来自 make_simulated_job）
+    assert overlay_img.width == 64
+    assert overlay_img.height == 48
+    # RGB 三通道
+    assert overlay_img.channels == 3
+
+
+def test_trace_writer_defect_bboxes_at_raw_coordinates(tmp_path: Path) -> None:
+    """验证缺陷 bbox 直接按 raw 坐标绘制，无需转换。"""
+    recipe = _recipe(tmp_path, save_ok_ratio=1.0, fake_mode="ng")
+    pipeline = InspectionPipeline()
+    job = make_simulated_job()
+    result = pipeline.process(job, recipe)
+    trace_dir = TraceWriter(recipe.trace.root_dir).write(job, recipe, result, pipeline.last_context)
+    assert trace_dir is not None
+    assert result.decision == "NG"
+    # NG 结果应该产生 overlay PNG
+    overlay_path = trace_dir / "overlays" / "TOP_BACK" / "TOP_BACK" / "seat.png"
+    assert overlay_path.exists()
+    overlay_img = load_raster_image(overlay_path)
+    assert overlay_img.width == 64
+    assert overlay_img.height == 48
+
+
+def test_trace_writer_raw_index_matches_light_frames(tmp_path: Path) -> None:
+    """验证 _raw_frame_index 正确索引 job.camera_bundles 中的 raw 帧。"""
+    writer = TraceWriter(str(tmp_path))
+    job = make_simulated_job()
+    index = writer._raw_frame_index(job)
+    assert len(index) == 6  # 2 cameras × 3 lights
+    top_back_diffuse = index.get(("TOP_BACK", "TOP_BACK", "DIFFUSE"))
+    assert top_back_diffuse is not None
+    assert top_back_diffuse.width == 64
+    assert top_back_diffuse.height == 48
+    assert top_back_diffuse.light_id == "DIFFUSE"
 
 
 def test_trace_writer_separates_robot_flyshot_pose_images(tmp_path: Path) -> None:
