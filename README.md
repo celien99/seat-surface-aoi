@@ -119,7 +119,7 @@ uv run python -m training_tools.simulate_capture_detection `
   --sample-index 1
 ```
 
-该命令会构造真实 `SeatInspectionJob`，调用生产配方的质量门禁、ROI YOLO segmentation、ROI 裁剪、ECC、WideResNet50 embedding、PCA、PatchCore/FAISS、融合和规则判定，并输出 trace 与 `detection_images/*.png`。
+该命令会构造真实 `SeatInspectionJob`，调用生产配方的质量门禁、ROI YOLO segmentation、ROI 裁剪、ECC、WideResNet50 embedding、PCA、PatchCore/FAISS、融合和规则判定。默认只输出最终检测报告 `detection_summary.json`、原图 `original_images/` 和检测图 `detection_images/`；OK、NG、RECHECK 和 ERROR 都会生成检测图。需要排障时再追加 `--write-trace` 输出完整 trace 明细。
 
 从 `images_capture/` 抽取一组两机位样本做共享内存全链路回放：
 

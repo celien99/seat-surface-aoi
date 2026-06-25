@@ -297,7 +297,7 @@ uv run python -m tools.validate_model_assets --recipe seat_a_robot_flyshot_produ
 - `error.json`
 - `raw_images/<camera_id>/<pose_id>/<light_id>.png`
 - `images/<camera_id>/<pose_id>/<roi_name>/<light_id>.png`
-- `overlays/*.png`
+- `overlays/<camera_id>/<pose_id>/<roi_name>.png`
 
 保存策略：
 
@@ -355,7 +355,7 @@ uv run python -m training_tools.simulate_capture_detection `
   --sample-index 1
 ```
 
-该入口会写出 `detection_summary.json`、trace 和 `detection_images/*.png`，用于检查当前 ROI 定位、PatchCore 判定和检测图是否一致。
+该入口默认只写出最终检测报告 `detection_summary.json`、原图 `original_images/` 和检测图 `detection_images/`，用于检查当前 ROI 定位、PatchCore 判定和检测图是否一致；OK、NG、RECHECK 和 ERROR 都会生成检测图。需要完整 JSON、ROI 图、raw 图和 overlay trace 排障时，再显式追加 `--write-trace`。
 导出 PatchCore 所需 WideResNet50 embedding ONNX：
 
 ```powershell

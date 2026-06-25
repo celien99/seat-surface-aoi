@@ -72,7 +72,7 @@ display_app/
 - `trace/display_review_queue.json`：前端持久化的复核队列。
 - `trace/<date>/<seat>_<sequence>/raw_images/**/*.png`：原始采集图；模型资产未就绪或 ROI 未产出时用于直接展示。
 - `trace/<date>/<seat>_<sequence>/images/**/*.png`：ROI 原图。
-- `trace/<date>/<seat>_<sequence>/overlays/*.png`：缺陷叠加图。
+- `trace/<date>/<seat>_<sequence>/overlays/<camera>/<pose>/<roi>.png`：检测叠加图；OK 件也会有绿色判定边框，NG/RECHECK/ERROR 有缺陷候选时额外显示候选框。
 
 展示桥会优先选择 ROI 图，缺少 ROI 图时回退到 raw 原始采集图；同一相机/视角下优先展示 `DIFFUSE`，再回退到其它光源。如果某次检测没有保存 trace 图像，前端仍会展示 OK/NG/RECHECK/ERROR、统计和日志；图像区域会等待下一次带图像的事件。
 

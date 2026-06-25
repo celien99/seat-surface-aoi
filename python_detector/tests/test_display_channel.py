@@ -15,13 +15,13 @@ def test_build_display_event_includes_result_and_trace_assets(tmp_path: Path) ->
     trace_dir = tmp_path / "trace" / "20260618" / "SIM_1_1"
     raw_dir = trace_dir / "raw_images" / "TOP_BACK" / "TOP_BACK"
     image_dir = trace_dir / "images" / "TOP_BACK" / "TOP_BACK" / "seat"
-    overlay_dir = trace_dir / "overlays"
+    overlay_dir = trace_dir / "overlays" / "TOP_BACK" / "TOP_BACK"
     raw_dir.mkdir(parents=True)
     image_dir.mkdir(parents=True)
-    overlay_dir.mkdir()
+    overlay_dir.mkdir(parents=True)
     write_gray_png(raw_dir / "DIFFUSE.png", 1, 1, b"\x08")
     write_gray_png(image_dir / "DIFFUSE.png", 1, 1, b"\x10")
-    write_rgb_png(overlay_dir / "D1_TOP_BACK_TOP_BACK_full.png", 1, 1, b"\xff\x00\x00")
+    write_rgb_png(overlay_dir / "seat.png", 1, 1, b"\xff\x00\x00")
     job = make_simulated_job()
     defect = DefectResult(
         defect_id="D1",
@@ -58,6 +58,39 @@ def test_build_display_event_includes_result_and_trace_assets(tmp_path: Path) ->
     assert event["images"][1]["kind"] == "roi_image"
     assert event["images"][1]["path"].endswith("DIFFUSE.png")
     assert event["overlays"][0]["path"].endswith(".png")
+    assert event["overlays"][0]["camera_id"] == "TOP_BACK"
+    assert event["overlays"][0]["pose_id"] == "TOP_BACK"
+    assert event["overlays"][0]["roi_name"] == "seat"
+
+
+def test_build_display_event_includes_ok_overlay_without_defects(tmp_path: Path) -> None:
+    trace_dir = tmp_path / "trace" / "20260618" / "SIM_OK_1"
+    overlay_dir = trace_dir / "overlays" / "TOP_BACK" / "TOP_BACK"
+    overlay_dir.mkdir(parents=True)
+    write_rgb_png(overlay_dir / "seat.png", 1, 1, b"\x00\xb4\x5a")
+    job = make_simulated_job()
+    result = InspectionResult(
+        sequence_id=job.sequence_id,
+        trigger_id=job.trigger_id,
+        seat_id=job.seat_id,
+        decision="OK",
+        defects=[],
+        quality_pass=True,
+    )
+
+    event = build_display_event(job, AlgorithmRun(result=result, context={}, trace_dir=trace_dir))
+
+    assert event["decision"] == "OK"
+    assert event["overlays"] == [
+        {
+            "kind": "overlay",
+            "defect_id": "",
+            "camera_id": "TOP_BACK",
+            "pose_id": "TOP_BACK",
+            "roi_name": "seat",
+            "path": str((overlay_dir / "seat.png").resolve()),
+        }
+    ]
 
 
 def test_display_channel_writer_updates_latest_atomically(tmp_path: Path) -> None:

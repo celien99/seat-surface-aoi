@@ -44,7 +44,7 @@ class TraceWriter:
         self._write_json(trace_dir / "error.json", context.get("error", {}))
         self._write_raw_images(trace_dir, job)
         self._write_roi_images(trace_dir, context.get("prepared_bundles", []))
-        self._write_defect_overlays(trace_dir, result, context.get("prepared_bundles", []), context.get("spatial_maps", []))
+        self._write_detection_overlays(trace_dir, result, context.get("prepared_bundles", []), context.get("spatial_maps", []))
         return trace_dir
 
     def _should_write(self, job: SeatInspectionJob, recipe: Recipe, result: InspectionResult) -> bool:
@@ -99,92 +99,80 @@ class TraceWriter:
                     frame,
                 )
 
-    def _write_defect_overlays(
+    def _write_detection_overlays(
         self,
         trace_dir: Path,
         result: InspectionResult,
         prepared_bundles: Any,
         spatial_maps: list[dict[str, object]],
     ) -> None:
-        if not result.defects:
+        frame_groups = self._roi_frame_groups(prepared_bundles)
+        if not frame_groups:
             return
-        frame_index = self._frame_index(prepared_bundles)
+        defects_by_roi = self._defects_by_roi(result.defects)
         anomaly_maps = self._anomaly_map_index(spatial_maps)
         overlay_dir = trace_dir / "overlays"
-        for defect in result.defects:
-            frame = self._frame_for_defect(defect, frame_index)
+        for key in sorted(frame_groups):
+            camera_id, pose_id, roi_name = key
+            frames = frame_groups[key]
+            roi_defects = defects_by_roi.get(key, [])
+            frame = self._display_frame(frames, roi_defects)
             if frame is None:
                 continue
-            anomaly_map = anomaly_maps.get(
-                (defect.camera_id, defect.pose_id or defect.camera_id, defect.roi_name)
-            )
-            if anomaly_map is not None:
+            anomaly_entry = anomaly_maps.get(key)
+            path = overlay_dir / _safe_name(camera_id) / _safe_name(pose_id) / f"{_safe_name(roi_name)}.png"
+            if anomaly_entry is not None:
+                anomaly_map, _spatial_shape = anomaly_entry
                 self._write_heatmap_overlay(
-                    overlay_dir
-                    / (
-                        f"{_safe_name(defect.defect_id)}_{_safe_name(defect.camera_id)}_"
-                        f"{_safe_name(defect.pose_id or defect.camera_id)}_{_safe_name(defect.roi_name)}.png"
-                    ),
+                    path,
                     frame,
-                    defect,
+                    result.decision,
+                    roi_defects,
                     anomaly_map,
                 )
             else:
-                self._write_overlay_ppm(
-                    overlay_dir
-                    / (
-                        f"{_safe_name(defect.defect_id)}_{_safe_name(defect.camera_id)}_"
-                        f"{_safe_name(defect.pose_id or defect.camera_id)}_{_safe_name(defect.roi_name)}.png"
-                    ),
-                    frame,
-                    defect,
-                )
+                self._write_overlay_png(path, frame, result.decision, roi_defects)
 
-    def _frame_index(self, prepared_bundles: Any) -> dict[tuple[str, str, str, str], LightFrame]:
-        index: dict[tuple[str, str, str, str], LightFrame] = {}
+    def _roi_frame_groups(self, prepared_bundles: Any) -> dict[tuple[str, str, str], dict[str, LightFrame]]:
+        groups: dict[tuple[str, str, str], dict[str, LightFrame]] = {}
         for bundle in prepared_bundles or []:
+            pose_id = getattr(bundle, "pose_id", "") or bundle.camera_id
             for roi_name, frames in getattr(bundle, "rois", {}).items():
-                for light_id, frame in frames.items():
-                    pose_id = getattr(bundle, "pose_id", "") or bundle.camera_id
-                    index[(bundle.camera_id, pose_id, roi_name, light_id)] = frame
-        return index
+                groups[(bundle.camera_id, pose_id, roi_name)] = dict(frames)
+        return groups
 
-    def _frame_for_defect(
-        self,
-        defect: DefectResult,
-        frame_index: dict[tuple[str, str, str, str], LightFrame],
-    ) -> LightFrame | None:
-        pose_id = defect.pose_id or defect.camera_id
-        for light_id in defect.evidence_lights:
-            frame = frame_index.get((defect.camera_id, pose_id, defect.roi_name, light_id))
-            if frame is not None:
-                return frame
-        return (
-            frame_index.get((defect.camera_id, pose_id, defect.roi_name, "DIFFUSE"))
-            or next(
-                (
-                    frame
-                    for (camera_id, frame_pose_id, roi_name, _light_id), frame in frame_index.items()
-                    if camera_id == defect.camera_id and frame_pose_id == pose_id and roi_name == defect.roi_name
-                ),
-                None,
-            )
-        )
+    def _defects_by_roi(self, defects: list[DefectResult]) -> dict[tuple[str, str, str], list[DefectResult]]:
+        grouped: dict[tuple[str, str, str], list[DefectResult]] = {}
+        for defect in defects:
+            key = (defect.camera_id, defect.pose_id or defect.camera_id, defect.roi_name)
+            grouped.setdefault(key, []).append(defect)
+        return grouped
+
+    def _display_frame(self, frames: dict[str, LightFrame], defects: list[DefectResult]) -> LightFrame | None:
+        for defect in defects:
+            for light_id in defect.evidence_lights:
+                frame = frames.get(light_id)
+                if frame is not None:
+                    return frame
+        return frames.get("DIFFUSE") or next(iter(frames.values()), None)
 
     def _write_gray_image(self, path: Path, frame: LightFrame) -> None:
         write_gray_png(path, frame.width, frame.height, self._frame_bytes(frame))
 
-    def _write_overlay_ppm(self, path: Path, frame: LightFrame, defect: DefectResult) -> None:
+    def _write_overlay_png(
+        self,
+        path: Path,
+        frame: LightFrame,
+        result_decision: str,
+        defects: list[DefectResult],
+    ) -> None:
         gray = self._frame_bytes(frame)
-        x0, y0, x1, y1 = self._bbox_in_frame(defect.bbox_xyxy_pixel, frame)
         rgb = bytearray()
         for y in range(frame.height):
             for x in range(frame.width):
                 value = gray[y * frame.width + x]
-                if x0 <= x <= x1 and y0 <= y <= y1 and (x in {x0, x1} or y in {y0, y1}):
-                    rgb.extend((255, 0, 0))
-                else:
-                    rgb.extend((value, value, value))
+                rgb.extend((value, value, value))
+        self._draw_overlay_marks(rgb, frame.width, frame.height, frame, result_decision, defects)
         write_rgb_png(path, frame.width, frame.height, bytes(rgb))
 
     def _anomaly_map_index(
@@ -203,7 +191,7 @@ class TraceWriter:
             spatial_shape_raw = entry.get("spatial_shape")
             if anomaly_map is None or spatial_shape_raw is None:
                 continue
-            if not isinstance(spatial_shape_raw, list) or len(spatial_shape_raw) != 2:
+            if not isinstance(spatial_shape_raw, (list, tuple)) or len(spatial_shape_raw) != 2:
                 continue
             spatial_shape = (int(spatial_shape_raw[0]), int(spatial_shape_raw[1]))
             camera_id = str(entry.get("camera_id", ""))
@@ -220,12 +208,14 @@ class TraceWriter:
         self,
         path: Path,
         frame: LightFrame,
-        defect: DefectResult,
+        result_decision: str,
+        defects: list[DefectResult],
         anomaly_map: tuple[tuple[float, ...], ...],
     ) -> None:
-        """渲染 JET 热力图叠加到灰度 ROI 上，并绘制绿色 bbox 轮廓。
+        """渲染 JET 热力图叠加到灰度 ROI 上，并绘制判定框和缺陷框。
 
-        生成 RGB PNG，包含：灰度底图 + JET colormap 异常热力 + 绿色缺陷 bbox。
+        生成 RGB PNG，包含：灰度底图 + JET colormap 异常热力 + 判定边框；
+        NG/RECHECK/ERROR 有缺陷候选时，额外绘制候选 bbox。
         """
         path.parent.mkdir(parents=True, exist_ok=True)
         gray = self._frame_bytes(frame)
@@ -237,7 +227,6 @@ class TraceWriter:
         upsampled = _resize_anomaly_map(anomaly_map, (map_h, map_w), h, w)
 
         # 构建 RGB 叠加图
-        x0, y0, x1, y1 = self._bbox_in_frame(defect.bbox_xyxy_pixel, frame)
         rgb = bytearray()
         for y in range(h):
             for x in range(w):
@@ -248,12 +237,82 @@ class TraceWriter:
                 blended_r = int(heat_r * 0.4 + gray_val * 0.6)
                 blended_g = int(heat_g * 0.4 + gray_val * 0.6)
                 blended_b = int(heat_b * 0.4 + gray_val * 0.6)
-                # 在 bbox 轮廓上绘制绿色边框
-                if x0 <= x <= x1 and y0 <= y <= y1 and (x in {x0, x1} or y in {y0, y1}):
-                    rgb.extend((0, 255, 0))
-                else:
-                    rgb.extend((blended_r, blended_g, blended_b))
+                rgb.extend((blended_r, blended_g, blended_b))
+        self._draw_overlay_marks(rgb, w, h, frame, result_decision, defects)
         write_rgb_png(path, w, h, bytes(rgb))
+
+    def _draw_overlay_marks(
+        self,
+        rgb: bytearray,
+        width: int,
+        height: int,
+        frame: LightFrame,
+        result_decision: str,
+        defects: list[DefectResult],
+    ) -> None:
+        self._draw_rect(rgb, width, height, 0, 0, width - 1, height - 1, _decision_color(result_decision), thickness=4)
+        for defect in defects:
+            x0, y0, x1, y1 = self._bbox_in_frame(defect.bbox_xyxy_pixel, frame)
+            self._draw_rect(rgb, width, height, x0, y0, x1, y1, _decision_color(defect.decision), thickness=3)
+
+    def _draw_rect(
+        self,
+        rgb: bytearray,
+        width: int,
+        height: int,
+        x0: int,
+        y0: int,
+        x1: int,
+        y1: int,
+        color: tuple[int, int, int],
+        *,
+        thickness: int,
+    ) -> None:
+        x0 = max(0, min(width - 1, x0))
+        x1 = max(0, min(width - 1, x1))
+        y0 = max(0, min(height - 1, y0))
+        y1 = max(0, min(height - 1, y1))
+        if x1 < x0 or y1 < y0:
+            return
+        for offset in range(thickness):
+            self._draw_hline(rgb, width, height, x0, x1, y0 + offset, color)
+            self._draw_hline(rgb, width, height, x0, x1, y1 - offset, color)
+            self._draw_vline(rgb, width, height, x0 + offset, y0, y1, color)
+            self._draw_vline(rgb, width, height, x1 - offset, y0, y1, color)
+
+    def _draw_hline(
+        self,
+        rgb: bytearray,
+        width: int,
+        height: int,
+        x0: int,
+        x1: int,
+        y: int,
+        color: tuple[int, int, int],
+    ) -> None:
+        if y < 0 or y >= height:
+            return
+        for x in range(max(0, x0), min(width - 1, x1) + 1):
+            self._set_pixel(rgb, width, x, y, color)
+
+    def _draw_vline(
+        self,
+        rgb: bytearray,
+        width: int,
+        height: int,
+        x: int,
+        y0: int,
+        y1: int,
+        color: tuple[int, int, int],
+    ) -> None:
+        if x < 0 or x >= width:
+            return
+        for y in range(max(0, y0), min(height - 1, y1) + 1):
+            self._set_pixel(rgb, width, x, y, color)
+
+    def _set_pixel(self, rgb: bytearray, width: int, x: int, y: int, color: tuple[int, int, int]) -> None:
+        index = (y * width + x) * 3
+        rgb[index : index + 3] = bytes(color)
 
     def _frame_bytes(self, frame: LightFrame) -> bytes:
         if frame.dtype != "UINT8" or frame.channels != 1:
@@ -328,6 +387,15 @@ def _jsonable(value: Any) -> Any:
 
 def _safe_name(value: str) -> str:
     return "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in str(value))
+
+
+def _decision_color(decision: str) -> tuple[int, int, int]:
+    return {
+        "OK": (0, 180, 90),
+        "RECHECK": (255, 190, 40),
+        "NG": (255, 64, 64),
+        "ERROR": (180, 80, 255),
+    }.get(decision, (255, 255, 255))
 
 
 def _jet_colormap(value: float) -> tuple[int, int, int]:

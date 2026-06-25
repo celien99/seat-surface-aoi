@@ -46,6 +46,7 @@ def test_trace_writer_generates_result_files(tmp_path: Path) -> None:
     assert (trace_dir / "error.json").exists()
     assert (trace_dir / "raw_images" / "TOP_BACK" / "TOP_BACK" / "DIFFUSE.png").exists()
     assert (trace_dir / "images" / "TOP_BACK" / "TOP_BACK" / "seat" / "DIFFUSE.png").exists()
+    assert (trace_dir / "overlays" / "TOP_BACK" / "TOP_BACK" / "seat.png").exists()
 
 
 def test_trace_writer_generates_defect_overlay(tmp_path: Path) -> None:
@@ -57,7 +58,7 @@ def test_trace_writer_generates_defect_overlay(tmp_path: Path) -> None:
 
     assert result.decision == "NG"
     assert trace_dir is not None
-    overlays = list((trace_dir / "overlays").glob("*.png"))
+    overlays = list((trace_dir / "overlays").glob("*/*/*.png"))
     assert overlays
     assert overlays[0].read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 

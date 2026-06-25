@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from python_detector.config.recipe_schema import Recipe, RecipeManager
-from python_detector.image_codec import ImageCodecError, load_gray_image, load_raster_image, write_rgb_png
+from python_detector.image_codec import ImageCodecError, load_gray_image, load_raster_image, write_gray_png, write_rgb_png
 from python_detector.ipc.data_types import CameraBundle, DefectResult, LightFrame, SeatInspectionJob
 from python_detector.pipeline.pipeline import InspectionPipeline
 from python_detector.trace.trace_writer import TraceWriter
@@ -22,6 +22,7 @@ def simulate_capture_detection(
     *,
     recipe_id: str = "seat_a_black_leather_production_v1",
     sample_index: int = 1,
+    write_trace: bool = False,
 ) -> dict[str, Any]:
     if sample_index <= 0:
         raise TrainingDataError("--sample-index 必须大于 0")
@@ -33,6 +34,7 @@ def simulate_capture_detection(
     job = _job_from_capture_groups(selected_groups, recipe, input_dir.name, sample_index)
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    original_paths = _write_original_images(output_dir / "original_images", selected_groups)
     trace_root = output_dir / "trace"
     trace_recipe = replace(
         recipe,
@@ -47,7 +49,11 @@ def simulate_capture_detection(
     )
     pipeline = InspectionPipeline()
     result = pipeline.process(job, trace_recipe)
-    trace_dir = TraceWriter(trace_recipe.trace.root_dir).write(job, trace_recipe, result, pipeline.last_context)
+    trace_dir = (
+        TraceWriter(trace_recipe.trace.root_dir).write(job, trace_recipe, result, pipeline.last_context)
+        if write_trace
+        else None
+    )
     image_result = result
     image_context = pipeline.last_context
     model_check_trace_dir = None
@@ -56,12 +62,13 @@ def simulate_capture_detection(
         model_check_pipeline = InspectionPipeline()
         image_result = model_check_pipeline.process(job, model_check_recipe)
         image_context = model_check_pipeline.last_context
-        model_check_trace_dir = TraceWriter(model_check_recipe.trace.root_dir).write(
-            job,
-            model_check_recipe,
-            image_result,
-            image_context,
-        )
+        if write_trace:
+            model_check_trace_dir = TraceWriter(model_check_recipe.trace.root_dir).write(
+                job,
+                model_check_recipe,
+                image_result,
+                image_context,
+            )
     image_paths = _write_detection_images(
         output_dir / "detection_images",
         image_result.decision,
@@ -76,12 +83,14 @@ def simulate_capture_detection(
         "quality_pass": result.quality_pass,
         "error_code": result.error_code,
         "defect_count": len(result.defects),
+        "trace_enabled": write_trace,
         "trace_dir": str(trace_dir) if trace_dir is not None else None,
         "model_check_decision": image_result.decision,
         "model_check_quality_pass": image_result.quality_pass,
         "model_check_error_code": image_result.error_code,
         "model_check_defect_count": len(image_result.defects),
         "model_check_trace_dir": str(model_check_trace_dir) if model_check_trace_dir is not None else None,
+        "original_images": [str(path) for path in original_paths],
         "detection_images": [str(path) for path in image_paths],
         "feature_summary": image_context.get("feature_summary", []),
     }
@@ -90,6 +99,24 @@ def simulate_capture_detection(
         encoding="utf-8",
     )
     return summary
+
+
+def _write_original_images(
+    output_dir: Path,
+    capture_groups: list[tuple[CaptureImage, ...]],
+) -> list[Path]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    paths: list[Path] = []
+    for capture_group in capture_groups:
+        if not capture_group:
+            continue
+        first = capture_group[0]
+        for item in capture_group:
+            image = load_gray_image(item.path)
+            path = output_dir / _safe_name(item.camera_id) / _safe_name(first.camera_id) / item.path.name
+            write_gray_png(path, image.width, image.height, image.pixels)
+            paths.append(path)
+    return paths
 
 
 def _model_check_recipe(recipe: Recipe, trace_root: Path) -> Recipe:
@@ -515,6 +542,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", required=True, type=Path, help="检测报告和检测图输出目录")
     parser.add_argument("--recipe", default="seat_a_black_leather_production_v1")
     parser.add_argument("--sample-index", type=int, default=1, help="选择每个机位的第 N 组 L1/L2/L3 样本")
+    parser.add_argument("--write-trace", action="store_true", help="同时写出完整 trace 便于排障")
     args = parser.parse_args(argv)
     try:
         summary = simulate_capture_detection(
@@ -522,6 +550,7 @@ def main(argv: list[str] | None = None) -> int:
             output_dir=args.output,
             recipe_id=args.recipe,
             sample_index=args.sample_index,
+            write_trace=args.write_trace,
         )
     except (TrainingDataError, ValueError, OSError) as exc:
         print(f"simulate_capture_detection_failed={exc}")
@@ -529,7 +558,8 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"decision={summary['decision']} defects={summary['defect_count']} "
         f"model_check={summary['model_check_decision']} model_defects={summary['model_check_defect_count']} "
-        f"trace={summary['trace_dir']} images={len(summary['detection_images'])}"
+        f"trace_enabled={summary['trace_enabled']} trace={summary['trace_dir']} "
+        f"originals={len(summary['original_images'])} images={len(summary['detection_images'])}"
     )
     return 0
 

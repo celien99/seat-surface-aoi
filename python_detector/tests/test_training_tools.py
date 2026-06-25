@@ -13,6 +13,7 @@ from training_tools.collect_capture_dataset import CaptureImage, _resize_frame_l
 from training_tools.collect_shm_dataset import collect_shm_dataset
 from training_tools.collect_trace_dataset import TraceDatasetError, collect_trace_dataset, main as collect_main
 from training_tools.job_fixture import make_simulated_job
+from training_tools import simulate_capture_detection as simulate_capture_module
 from training_tools.simulate_capture_detection import _select_capture_groups, _write_detection_images
 from training_tools.training_errors import TrainingDataError
 
@@ -361,6 +362,36 @@ def test_simulate_capture_detection_writes_png_detection_images(tmp_path: Path) 
     assert all(path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n") for path in paths)
 
 
+def test_simulate_capture_detection_defaults_to_lightweight_outputs(tmp_path: Path) -> None:
+    input_dir = tmp_path / "capture"
+    input_dir.mkdir()
+    for camera_id in ("TOP_BACK", "TOP_CUSHION"):
+        for index, light_id in enumerate(("L1", "L2", "L3"), start=1):
+            _write_textured_png(
+                input_dir / f"{camera_id}_{1000 + index}_{light_id}_original.png",
+                width=64,
+                height=48,
+                value=80 + index,
+            )
+    output = tmp_path / "report"
+
+    summary = simulate_capture_module.simulate_capture_detection(
+        input_dir,
+        output,
+        recipe_id="seat_a_black_leather_v1",
+        sample_index=1,
+    )
+
+    assert (output / "detection_summary.json").exists()
+    assert len(summary["original_images"]) == 6
+    assert len(summary["detection_images"]) == 3
+    assert summary["trace_enabled"] is False
+    assert summary["trace_dir"] is None
+    assert not (output / "trace").exists()
+    assert all(Path(path).read_bytes().startswith(b"\x89PNG\r\n\x1a\n") for path in summary["original_images"])
+    assert all(Path(path).read_bytes().startswith(b"\x89PNG\r\n\x1a\n") for path in summary["detection_images"])
+
+
 def _write_trace(trace_dir: Path) -> Path:
     image_dir = trace_dir / "images" / "TOP_BACK" / "seat"
     image_dir.mkdir(parents=True)
@@ -408,6 +439,15 @@ def _write_trace(trace_dir: Path) -> Path:
 
 def _write_flat_png(path: Path, *, width: int, height: int, value: int) -> None:
     write_gray_png(path, width, height, bytes([value] * width * height))
+
+
+def _write_textured_png(path: Path, *, width: int, height: int, value: int) -> None:
+    pixels = bytes(
+        max(0, min(255, value + (((x // 4 + y // 4) % 2) * 20) + ((x + 3 * y) % 32)))
+        for y in range(height)
+        for x in range(width)
+    )
+    write_gray_png(path, width, height, pixels)
 
 
 def _capture_image(camera_id: str, capture_light_id: str, timestamp_us: int) -> CaptureImage:

@@ -182,6 +182,22 @@ def _overlay_assets(trace_dir: Path, result: InspectionResult) -> list[dict[str,
         for defect in result.defects
     }
     for path in _iter_image_files(overlay_root):
+        rel = path.relative_to(overlay_root)
+        parts = rel.parts
+        if len(parts) == 3:
+            camera_id, pose_id = parts[0], parts[1]
+            roi_name = Path(parts[-1]).stem
+            assets.append(
+                {
+                    "kind": "overlay",
+                    "defect_id": "",
+                    "camera_id": camera_id,
+                    "pose_id": pose_id,
+                    "roi_name": roi_name,
+                    "path": str(path.resolve()),
+                }
+            )
+            continue
         defect = defects_by_name.get(path.stem)
         if defect is None and len(result.defects) == 1:
             defect = result.defects[0]

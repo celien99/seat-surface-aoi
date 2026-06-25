@@ -143,7 +143,7 @@ python_detector/
 │   ├── pca.py                  # PCA JSON 参数加载、版本校验和投影
 │   └── patchcore.py            # PatchCore memory bank exact KNN 参考实现
 ├── trace/
-│   └── trace_writer.py         # trace JSON、ROI PNG 图、缺陷 overlay PNG 写入
+│   └── trace_writer.py         # trace JSON、ROI PNG 图、OK/NG 检测 overlay PNG 写入
 └── tests/                      # 协议、配方、质量门禁、ROI、模型、融合、trace、IPC 安全和架构就绪度测试
 ```
 
@@ -296,7 +296,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 - `training_tools.dataset_manifest` 读取 `dataset_manifest.jsonl` 和 ROI PNG 图，将同一 trace/camera/pose/ROI 下的多光源样本聚合；旧 manifest 没有 `pose_id` 时默认回退到 `camera_id`。底层解码仍保留历史 PGM 兼容，但当前训练集和新 trace 均生成 PNG。
 - `training_tools.extract_embeddings` 调用在线 `FeatureBuilder` 和 `EmbeddingExtractor`，默认使用配方 `models.<key>.input_channels`，确保训练出的 PCA/PatchCore 资产与在线 `NCHW` 输入通道一致；只有显式传 `--channel-order` 时才覆盖通道顺序。
 - `training_tools.evaluate_pipeline` 调用在线 `InferenceEngine`，按 manifest 中的人工标注或弱标签计算整体、类别、ROI、camera 和 split 指标。
-- `training_tools.simulate_capture_detection` 从 `images_capture/` 平铺 PNG 选择同一序号的两机位三光源样本，构造 `SeatInspectionJob`，调用生产配方完整检测链路，写 trace、检测摘要和可查看 PNG 检测图；它只做 Python-only 离线算法模拟，不控制 PLC、相机或频闪，也不经过共享内存。需要验证 C++ 写 SHM + Python 读 SHM 时，使用 `uv run python tools/run_simulated_ipc.py --replay-capture`。
+- `training_tools.simulate_capture_detection` 从 `images_capture/` 平铺 PNG 选择同一序号的两机位三光源样本，构造 `SeatInspectionJob`，调用生产配方完整检测链路；默认只写最终检测报告 `detection_summary.json`、原图 `original_images/` 和可查看检测图 `detection_images/`，OK/NG/RECHECK/ERROR 都会生成检测图。只有显式传 `--write-trace` 时才额外输出完整 trace；它只做 Python-only 离线算法模拟，不控制 PLC、相机或频闪，也不经过共享内存。需要验证 C++ 写 SHM + Python 读 SHM 时，使用 `uv run python tools/run_simulated_ipc.py --replay-capture`。
 - `training_tools.collect_trace_dataset` 同时兼容旧 trace 目录 `images/<camera>/<roi>/<light>.png` 和新目录 `images/<camera>/<pose>/<roi>/<light>.png`，生成的样本路径与 manifest 都包含 `pose_id`，避免机器人飞拍同一末端相机下的不同 pose 互相覆盖。
 - `training_tools.collect_shm_dataset` 调用在线 `ShmClient`、`SeatSurfaceAoiAlgorithm` 和 `TraceWriter`，从 C++ 共享内存任务获取多相机多光源图像，保存按 `camera_id/pose_id` 分目录的 `raw_images/`、`raw_frame_manifest.jsonl`，并生成 trace/训练 manifest；它不控制 PLC、相机或频闪。
 - `training_tools.collect_capture_dataset` 用于现场 `capture_only` 平铺 PNG，例如 `TOP_BACK_<timestamp>_L1_original.png`。它按相机和光源序号组包，默认按当前配方 `light_order` 生成 `L1/L2/L3...` 映射；当前生产配方即 `L1/L2/L3 -> DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。工具会调用当前配方的 `onnx_yolo_seg` ROI 模型先按 mask 外接矩形裁出真实座椅 ROI，再把 mask 外像素置黑，只保留 mask 内目标物体，最后生成 ROI PNG 和 manifest。默认保留 ROI 原生尺寸，避免把纹理和细小缺陷压缩失真；只有在需要与 PatchCore 固定输入尺寸对齐时，才应显式传 `--roi-output-size WIDTHxHEIGHT`，并采用等比例 letterbox 缩放。`dataset_summary.json` 记录 `roi_size_policy` 和 ROI 尺寸分布，`patchcore_training_summary.json` 记录实际训练输入 `input_shape_summary`。ROI 多候选冲突、低置信、越界或缺光源样本会跳过或失败，不进入训练集。
@@ -318,7 +318,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 - `fusion_summary.json`
 - `timings.json`
 - `error.json`
-- 原始采集 PNG 图、ROI PNG 图和缺陷 overlay PNG 图；原始图路径为 `raw_images/<camera_id>/<pose_id>/<light_id>.png`，ROI 图路径为 `images/<camera_id>/<pose_id>/<roi_name>/<light_id>.png`，overlay 文件名也包含 `pose_id`。
+- 原始采集 PNG 图、ROI PNG 图和检测 overlay PNG 图；原始图路径为 `raw_images/<camera_id>/<pose_id>/<light_id>.png`，ROI 图路径为 `images/<camera_id>/<pose_id>/<roi_name>/<light_id>.png`，overlay 路径为 `overlays/<camera_id>/<pose_id>/<roi_name>.png`。只要该 ROI 已完成预处理，OK、NG、RECHECK 和 ERROR trace 都会写检测 overlay；NG/RECHECK/ERROR 有缺陷候选时额外绘制候选 bbox。
 
 在线 `SeatSurfaceAoiAlgorithm` 调用 `TraceWriter` 时，如果任一 JSON、原始图、ROI 图或 overlay 写入失败，会记录 `context["trace_error"]`，并把当前结果改为 `RECHECK`、`error_code=DEVICE_FAULT`、`quality_pass=false` 后再交给 `ShmClient` 写回 C++。展示通道 `display_latest.json` / `display_events.jsonl` 属于结果发布后的只读前端辅助输出，失败只打印告警，不反向修改已经发布的共享内存结果。
 

@@ -183,7 +183,7 @@
 - 已实现候选融合/NMS。
 - 已将缺陷过滤抽为 `DefectFilter`，便于后续接入二阶段分类器或工艺过滤规则。
 - 已实现类别阈值、面积阈值、`OK`、`NG`、`RECHECK`、`ERROR` 判定。
-- 已支持 trace、ROI 图和缺陷 overlay。
+- 已支持 trace、ROI 图和检测 overlay；只要 ROI 已完成预处理，OK 与 NG/RECHECK/ERROR 都会生成 overlay，缺陷候选存在时额外绘制候选框。
 
 差距：
 
