@@ -10,6 +10,7 @@ from python_detector.config.recipe_schema import ModelConfig, Recipe
 from python_detector.models.asset_errors import ModelAssetUnavailableError
 from python_detector.models.embedding import EmbeddingExtractor
 from python_detector.models.onnx_runtime import create_onnx_session, numpy_module, run_first_input
+from python_detector.ipc.data_types import apply_homography
 from python_detector.models.patchcore import PatchCoreKnnIndex
 from python_detector.models.pca import PcaProjector
 from python_detector.models.yolo_decode import decode_yolo_rows
@@ -128,14 +129,8 @@ class FakeModel:
             score=score,
             bbox_xyxy_pixel=bbox,
             area_px=(bbox[2] - bbox[0] + 1) * (bbox[3] - bbox[1] + 1),
-            evidence_lights=self._evidence_lights(feature_group),
+            evidence_lights=feature_group.evidence_lights(),
         )
-
-    def _evidence_lights(self, feature_group: FeatureGroup) -> list[str]:
-        evidence: list[str] = []
-        for channel_name in feature_group.tensor_channel_names:
-            evidence.extend(feature_group.evidence_lights_by_channel.get(channel_name, ()))
-        return list(dict.fromkeys(evidence))
 
     def _max_tensor_feature_value(self, feature_group: FeatureGroup) -> int:
         max_value: int | None = None
@@ -213,16 +208,10 @@ class OnnxModel:
                     score=score,
                     bbox_xyxy_pixel=bbox,
                     area_px=area_px,
-                    evidence_lights=self._evidence_lights(feature_group),
+                    evidence_lights=feature_group.evidence_lights(),
                 )
             )
         return candidates
-
-    def _evidence_lights(self, feature_group: FeatureGroup) -> list[str]:
-        evidence: list[str] = []
-        for channel_name in feature_group.tensor_channel_names:
-            evidence.extend(feature_group.evidence_lights_by_channel.get(channel_name, ()))
-        return list(dict.fromkeys(evidence))
 
     def _map_bbox_xyxy(self, raw_bbox: Any, feature_group: FeatureGroup) -> tuple[int, int, int, int]:
         x0, y0, x1, y1 = (float(value) for value in raw_bbox)
@@ -338,7 +327,7 @@ class PatchCoreModel:
                 score=score.anomaly_score,
                 bbox_xyxy_pixel=bbox,
                 area_px=area_px,
-                evidence_lights=self._evidence_lights(feature_group),
+                evidence_lights=feature_group.evidence_lights(),
             )
         ]
 
@@ -357,18 +346,13 @@ class PatchCoreModel:
         patch_embeddings = spatial.patch_embeddings
 
         if self.config.pca_path:
-            pca_result = self.pca_projector.project_batch(patch_embeddings, self.config.pca_path, self.config.pca_version)
-            # 批量 PCA 返回展平的 N*K 个值，需要还原为 N 个 K 维向量
-            output_dim = pca_result.output_dim
-            all_values = pca_result.values
-            patch_embeddings = tuple(
-                all_values[i * output_dim : (i + 1) * output_dim]
-                for i in range(len(all_values) // output_dim)
+            patch_embeddings, pca_version, pca_input_dim, pca_output_dim = self.pca_projector.project_batch(
+                patch_embeddings, self.config.pca_path, self.config.pca_version
             )
             feature_group.pca_summary = {
-                "version": pca_result.version,
-                "input_dim": pca_result.input_dim,
-                "output_dim": pca_result.output_dim,
+                "version": pca_version,
+                "input_dim": pca_input_dim,
+                "output_dim": pca_output_dim,
             }
 
         score = self.knn_index.score_spatial(
@@ -395,7 +379,7 @@ class PatchCoreModel:
             "max_anomaly": max(max(row) for row in score.anomaly_map),
         }
 
-        max_anomaly = max(max(row) for row in score.anomaly_map)
+        max_anomaly = float(score.anomaly_map.max())
         if max_anomaly < self.config.score_threshold:
             return []
 
@@ -405,6 +389,8 @@ class PatchCoreModel:
             score.spatial_shape,
             self.config.score_threshold,
             feature_group,
+            binarize_min_ratio=self.config.anomaly_binarize_min_ratio,
+            binarize_relative=self.config.anomaly_binarize_relative,
         )
         if not bboxes:
             return []
@@ -423,16 +409,10 @@ class PatchCoreModel:
                     score=bbox_score,
                     bbox_xyxy_pixel=bbox_xyxy,
                     area_px=area_px,
-                    evidence_lights=self._evidence_lights(feature_group),
+                    evidence_lights=feature_group.evidence_lights(),
                 )
             )
         return candidates
-
-    def _evidence_lights(self, feature_group: FeatureGroup) -> list[str]:
-        evidence: list[str] = []
-        for channel_name in feature_group.tensor_channel_names:
-            evidence.extend(feature_group.evidence_lights_by_channel.get(channel_name, ()))
-        return list(dict.fromkeys(evidence))
 
 
 class ModelRegistry:
@@ -522,7 +502,7 @@ class InferenceEngine:
                     backend=backend,
                     camera_id=group.camera_id,
                     roi_name=group.roi_name,
-                    tensor_shape_nchw=_tensor_shape_nchw(group),
+                    tensor_shape_nchw=group.tensor_shape_nchw(),
                     asset_error=exc,
                 ) from exc
             except ModelInferenceError:
@@ -534,26 +514,10 @@ class InferenceEngine:
                     backend=backend,
                     camera_id=group.camera_id,
                     roi_name=group.roi_name,
-                    tensor_shape_nchw=_tensor_shape_nchw(group),
+                    tensor_shape_nchw=group.tensor_shape_nchw(),
                     cause_type=exc.__class__.__name__,
                 ) from exc
         return candidates
-
-
-def _tensor_shape_nchw(feature_group: FeatureGroup) -> tuple[int, int, int, int] | None:
-    tensor = feature_group.tensor_nchw
-    if tensor is None:
-        return None
-    if isinstance(tensor, np.ndarray):
-        shape = tensor.shape
-        if len(shape) != 4:
-            return None
-        return (int(shape[0]), int(shape[1]), int(shape[2]), int(shape[3]))
-    batch = len(tensor)
-    channels = len(tensor[0]) if batch > 0 else 0
-    height = len(tensor[0][0]) if channels > 0 else 0
-    width = len(tensor[0][0][0]) if height > 0 else 0
-    return (batch, channels, height, width)
 
 
 def _map_roi_bbox_to_source(
@@ -577,7 +541,7 @@ def _map_roi_bbox_to_source(
         (x1, y1),
         (x0, y1),
     )
-    mapped_points = [_apply_homography(matrix, x, y) for x, y in corners]
+    mapped_points = [apply_homography(matrix, x, y) for x, y in corners]
     if any(point is None for point in mapped_points):
         raise RuntimeError("ROI 到原图 bbox 映射矩阵无效")
     xs = [point[0] for point in mapped_points if point is not None]
@@ -591,76 +555,60 @@ def _map_roi_bbox_to_source(
     )
 
 
-def _apply_homography(matrix: tuple[float, ...], x: float, y: float) -> tuple[float, float] | None:
-    denom = matrix[6] * x + matrix[7] * y + matrix[8]
-    if abs(denom) < 1e-9:
-        return None
-    mapped_x = (matrix[0] * x + matrix[1] * y + matrix[2]) / denom
-    mapped_y = (matrix[3] * x + matrix[4] * y + matrix[5]) / denom
-    return mapped_x, mapped_y
-
-
 def _anomaly_map_bboxes(
-    anomaly_map: tuple[tuple[float, ...], ...],
+    anomaly_map: "np.ndarray",
     spatial_shape: tuple[int, int],
     score_threshold: float,
     feature_group: FeatureGroup,
+    *,
+    binarize_min_ratio: float = 0.5,
+    binarize_relative: float = 0.3,
 ) -> list[tuple[tuple[int, int, int, int], float]]:
     """从 anomaly_map 提取连通域 bbox 列表，按分数降序排列。
 
     返回 [(bbox_xyxy_source, max_score), ...]，坐标已映射到原图空间。
+    使用 scipy.ndimage 进行向量化连通域分析，避免原生 Python BFS。
+
+    binarize_min_ratio: 二值化阈值 = max(score_threshold * min_ratio, max_anomaly * relative)
+    binarize_relative: 相对峰值系数，控制异常区域检测的敏感度
     """
-    h_out, w_out = spatial_shape
+    from scipy import ndimage
+
+    h_out, w_out = anomaly_map.shape
     roi_h, roi_w = feature_group.feature_shape_hw
     if roi_h <= 0 or roi_w <= 0 or h_out <= 0 or w_out <= 0:
         return []
 
-    max_anomaly = max(max(row) for row in anomaly_map)
-    threshold = max(score_threshold * 0.5, max_anomaly * 0.3)
+    max_anomaly = float(anomaly_map.max())
+    threshold = max(score_threshold * binarize_min_ratio, max_anomaly * binarize_relative)
 
-    # 构建二值掩码
-    mask = [[False] * w_out for _ in range(h_out)]
-    for i in range(h_out):
-        for j in range(w_out):
-            if anomaly_map[i][j] >= threshold:
-                mask[i][j] = True
+    # 向量化二值掩码
+    binary = anomaly_map >= threshold
 
-    # 连通域分析 (BFS)
-    visited = [[False] * w_out for _ in range(h_out)]
-    components: list[list[tuple[int, int]]] = []
-    for i in range(h_out):
-        for j in range(w_out):
-            if mask[i][j] and not visited[i][j]:
-                comp: list[tuple[int, int]] = []
-                queue = [(i, j)]
-                visited[i][j] = True
-                while queue:
-                    ci, cj = queue.pop(0)
-                    comp.append((ci, cj))
-                    for ni, nj in ((ci - 1, cj), (ci + 1, cj), (ci, cj - 1), (ci, cj + 1)):
-                        if 0 <= ni < h_out and 0 <= nj < w_out and mask[ni][nj] and not visited[ni][nj]:
-                            visited[ni][nj] = True
-                            queue.append((ni, nj))
-                if comp:
-                    components.append(comp)
-
-    if not components:
+    # scipy 连通域标记（C 级别实现）
+    labeled, num_features = ndimage.label(binary)
+    if num_features == 0:
         return []
 
-    # 每个连通域 → ROI 空间 bbox → 源图空间 bbox
+    # 获取每个连通域的 bbox slice
+    slices = ndimage.find_objects(labeled)
+
     x_scale = roi_w / w_out
     y_scale = roi_h / h_out
     results: list[tuple[tuple[int, int, int, int], float]] = []
-    for comp in components:
-        rows = [p[0] for p in comp]
-        cols = [p[1] for p in comp]
-        comp_score = max(anomaly_map[r][c] for r, c in comp)
 
-        # 映射到 ROI 特征空间
-        roi_x0 = min(cols) * x_scale
-        roi_y0 = min(rows) * y_scale
-        roi_x1 = (max(cols) + 1) * x_scale
-        roi_y1 = (max(rows) + 1) * y_scale
+    for i, sl in enumerate(slices):
+        if sl is None:
+            continue
+        # 仅取当前连通域内的像素计算分数
+        comp_mask = labeled[sl] == (i + 1)
+        comp_score = float(anomaly_map[sl][comp_mask].max())
+
+        # 映射到 ROI 特征空间（sl[0]=row_slice, sl[1]=col_slice）
+        roi_x0 = sl[1].start * x_scale
+        roi_y0 = sl[0].start * y_scale
+        roi_x1 = sl[1].stop * x_scale
+        roi_y1 = sl[0].stop * y_scale
 
         # 映射到原图空间
         bbox_source = _map_roi_bbox_to_source(

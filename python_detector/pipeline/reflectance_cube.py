@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from python_detector.config.recipe_schema import Recipe
-from python_detector.ipc.data_types import LightFrame, SeatInspectionJob
+from python_detector.ipc.data_types import LightFrame, SeatInspectionJob, apply_homography
 from python_detector.pipeline.ecc_registration import EccAlignmentResult, EccRegistration
 from python_detector.pipeline.preprocessor import PreparedBundle
 
@@ -293,7 +293,7 @@ class ReflectanceCubeBuilder:
         corners = ((x0, y0), (x1, y0), (x1, y1), (x0, y1))
         errors: list[float] = []
         for x, y in corners:
-            mapped = self._apply_homography(matrix, x, y)
+            mapped = apply_homography(matrix, float(x), float(y))
             if mapped is None:
                 errors.append(999.0)
                 continue
@@ -303,10 +303,3 @@ class ReflectanceCubeBuilder:
             errors.append((dx * dx + dy * dy) ** 0.5)
         return errors
 
-    def _apply_homography(self, matrix: tuple[float, ...], x: int, y: int) -> tuple[float, float] | None:
-        denom = matrix[6] * x + matrix[7] * y + matrix[8]
-        if abs(denom) < 1e-6:
-            return None
-        mapped_x = (matrix[0] * x + matrix[1] * y + matrix[2]) / denom
-        mapped_y = (matrix[3] * x + matrix[4] * y + matrix[5]) / denom
-        return mapped_x, mapped_y

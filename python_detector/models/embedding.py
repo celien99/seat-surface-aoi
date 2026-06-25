@@ -24,8 +24,8 @@ class UnifiedEmbedding:
 class SpatialEmbedding:
     """空间 PatchCore 嵌入：每个空间位置拼接多层特征的 patch embedding。"""
 
-    patch_embeddings: tuple[tuple[float, ...], ...]
-    """扁平化的 patch embedding 列表，长度为 H_out x W_out。"""
+    patch_embeddings: "np.ndarray"
+    """扁平化的 patch embedding 矩阵，形状 (H_out × W_out, patch_dim)。"""
     spatial_shape: tuple[int, int]
     """patch 网格空间尺寸 (H_out, W_out)。"""
     patch_dim: int
@@ -37,6 +37,8 @@ class SpatialEmbedding:
     layer_shapes: dict[str, tuple[int, int, int]]
     """各层原始 (C, H, W) 形状。"""
 
+    __hash__ = None  # np.ndarray 不可哈希，显式禁用 hash
+
 
 class EmbeddingExtractor:
     def extract(self, feature_group: FeatureGroup, config: ModelConfig) -> UnifiedEmbedding:
@@ -47,7 +49,7 @@ class EmbeddingExtractor:
                 backend="statistical",
                 version=config.embedding_version,
                 layer_names=config.embedding_layers,
-                input_shape_nchw=self._tensor_shape_nchw(feature_group),
+                input_shape_nchw=feature_group.tensor_shape_nchw(),
             )
         if config.embedding_backend == "onnx_wideresnet50":
             values = self._onnx_embedding(feature_group, config)
@@ -56,7 +58,7 @@ class EmbeddingExtractor:
                 backend="onnx_wideresnet50",
                 version=config.embedding_version,
                 layer_names=config.embedding_layers,
-                input_shape_nchw=self._tensor_shape_nchw(feature_group),
+                input_shape_nchw=feature_group.tensor_shape_nchw(),
             )
         raise RuntimeError(f"不支持的 embedding_backend: {config.embedding_backend}")
 
@@ -113,16 +115,15 @@ class EmbeddingExtractor:
         total_channels = sum(layer_shapes[name][0] for name in layer_names)
         stacked = np.concatenate([upsampled[name] for name in layer_names], axis=0)
         patch_matrix = np.moveaxis(stacked, 0, -1).reshape(target_h * target_w, total_channels)
-        patches = tuple(tuple(float(value) for value in row) for row in patch_matrix.tolist())
 
         return SpatialEmbedding(
-            patch_embeddings=patches,
+            patch_embeddings=patch_matrix,
             spatial_shape=(target_h, target_w),
             patch_dim=total_channels,
             backend="onnx_wideresnet50_spatial",
             version=config.embedding_version,
             layer_names=layer_names,
-            input_shape_nchw=self._tensor_shape_nchw(feature_group),
+            input_shape_nchw=feature_group.tensor_shape_nchw(),
             layer_shapes=layer_shapes,
         )
 
@@ -165,22 +166,6 @@ class EmbeddingExtractor:
         if vector.size != config.embedding_dim:
             raise RuntimeError(f"embedding 维度不匹配: {vector.size} != {config.embedding_dim}")
         return tuple(float(value) for value in vector.tolist())
-
-    def _tensor_shape_nchw(self, feature_group: FeatureGroup) -> tuple[int, int, int, int] | None:
-        tensor = feature_group.tensor_nchw
-        if tensor is None:
-            return None
-        if isinstance(tensor, np.ndarray):
-            shape = tensor.shape
-            if len(shape) != 4:
-                return None
-            return (int(shape[0]), int(shape[1]), int(shape[2]), int(shape[3]))
-        batch = len(tensor)
-        channels = len(tensor[0]) if batch else 0
-        height = len(tensor[0][0]) if channels else 0
-        width = len(tensor[0][0][0]) if height else 0
-        return (batch, channels, height, width)
-
 
 def _upsample_nearest_array(
     fm: np.ndarray,

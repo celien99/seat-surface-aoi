@@ -51,37 +51,35 @@ class PcaProjector:
 
     def project_batch(
         self,
-        embeddings: tuple[tuple[float, ...], ...],
+        embeddings: "np.ndarray | tuple[tuple[float, ...], ...]",
         pca_path: str,
         expected_version: str | None,
-    ) -> PcaProjectionResult:
-        """批量 PCA 投影，用于空间 PatchCore 的多 patch embedding 同时降维。"""
+    ) -> "tuple[np.ndarray, str, int, int]":
+        """批量 PCA 投影，用于空间 PatchCore 的多 patch embedding 同时降维。
+
+        返回 (projected_matrix, version, input_dim, output_dim)。
+        projected_matrix 形状为 (N, output_dim)，保持在 numpy 数组避免往返转换。
+        """
         params = self.load(pca_path)
         if expected_version is not None and params.version != expected_version:
             raise RuntimeError(f"PCA 版本不匹配: {params.version} != {expected_version}")
         if not embeddings:
             raise RuntimeError("批量 PCA 输入为空")
-        input_dim = len(embeddings[0])
-        if input_dim != len(params.mean):
-            raise RuntimeError(f"PCA 输入维度不匹配: {input_dim} != {len(params.mean)}")
         try:
             matrix = np.asarray(embeddings, dtype=np.float64)
         except ValueError as exc:
             raise RuntimeError("PCA 批量输入维度不一致") from exc
-        if matrix.ndim != 2 or matrix.shape[1] != input_dim:
-            actual_dim = int(matrix.shape[1]) if matrix.ndim == 2 else 0
-            raise RuntimeError(f"PCA 批量输入维度不一致: {actual_dim} != {input_dim}")
+        input_dim = matrix.shape[1] if matrix.ndim == 2 else 0
+        if input_dim != len(params.mean):
+            raise RuntimeError(f"PCA 输入维度不匹配: {input_dim} != {len(params.mean)}")
+        if matrix.ndim != 2:
+            raise RuntimeError(f"PCA 批量输入必须是 2 维矩阵，实际: {matrix.ndim}")
         components = np.asarray(params.components, dtype=np.float64)
         if components.ndim != 2 or components.shape[1] != input_dim:
             actual_dim = int(components.shape[1]) if components.ndim == 2 else 0
             raise RuntimeError(f"PCA component 维度不匹配: {actual_dim} != {input_dim}")
         projected = (matrix - np.asarray(params.mean, dtype=np.float64)) @ components.T
-        return PcaProjectionResult(
-            values=tuple(float(value) for value in projected.reshape(-1).tolist()),
-            version=params.version,
-            input_dim=input_dim,
-            output_dim=int(components.shape[0]),
-        )
+        return projected, params.version, input_dim, int(components.shape[0])
 
     def load(self, path_value: str) -> PcaParameters:
         return self._load(path_value)

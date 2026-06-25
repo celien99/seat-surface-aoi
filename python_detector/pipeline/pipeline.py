@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import time
 
+import numpy as np
+
 from python_detector.config.recipe_schema import Recipe
 from python_detector.ipc.data_types import InspectionResult, SeatInspectionJob
 from python_detector.ipc.shm_protocol import ErrorCode
@@ -29,12 +31,12 @@ def _sanitize_anomaly_summary(anomaly_summary: dict[str, object] | None) -> dict
     anomaly_map = anomaly_summary.get("anomaly_map")
     sanitized = {k: v for k, v in anomaly_summary.items() if k not in ("anomaly_map", "nearest_distances")}
     if anomaly_map is not None:
-        flat = [float(v) for row in anomaly_map for v in row]
-        if flat:
-            sanitized["anomaly_map_min"] = min(flat)
-            sanitized["anomaly_map_max"] = max(flat)
-            sanitized["anomaly_map_mean"] = sum(flat) / len(flat)
-            sanitized["anomaly_map_pixels"] = len(flat)
+        flat = np.asarray(anomaly_map, dtype=np.float64).ravel()
+        if flat.size:
+            sanitized["anomaly_map_min"] = float(flat.min())
+            sanitized["anomaly_map_max"] = float(flat.max())
+            sanitized["anomaly_map_mean"] = float(flat.mean())
+            sanitized["anomaly_map_pixels"] = int(flat.size)
     return sanitized
 
 

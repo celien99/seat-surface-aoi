@@ -101,6 +101,10 @@ class ThresholdConfig:
     ng_score: float = 0.35
     recheck_score: float = 0.20
     min_area_px: int = 1
+    min_aspect_ratio: float = 0.0
+    """bbox 允许的最小长宽比 (w/h)，0 表示不限制。用于过滤长条形噪声。"""
+    max_aspect_ratio: float = 0.0
+    """bbox 允许的最大长宽比 (w/h)，0 表示不限制。用于过滤长条形噪声。"""
 
 
 @dataclass(frozen=True)
@@ -139,6 +143,10 @@ class ModelConfig:
     spatial_layers: tuple[str, ...] = ()
     spatial_upsample_height: int = 32
     spatial_upsample_width: int = 32
+    anomaly_binarize_min_ratio: float = 0.5
+    """anomaly_map 二值化阈值下限：max(score_threshold * min_ratio, max_anomaly * relative)，控制最低灵敏度。"""
+    anomaly_binarize_relative: float = 0.3
+    """anomaly_map 二值化相对阈值系数：max(score_threshold * min_ratio, max_anomaly * relative)，控制与峰值的相对灵敏度。"""
 
 
 @dataclass(frozen=True)

@@ -36,6 +36,33 @@ class FeatureGroup:
     pca_summary: dict[str, object] | None = None
     anomaly_summary: dict[str, object] | None = None
 
+    def evidence_lights(self) -> list[str]:
+        """返回与本 feature group 关联的所有 evidence 光源 ID（去重保持顺序）。"""
+        evidence: list[str] = []
+        for channel_name in self.tensor_channel_names:
+            evidence.extend(self.evidence_lights_by_channel.get(channel_name, ()))
+        return list(dict.fromkeys(evidence))
+
+    def tensor_shape_nchw(self) -> tuple[int, int, int, int] | None:
+        """返回 tensor 的 (N, C, H, W) 形状，tensor 为空时返回 None。"""
+        tensor = self.tensor_nchw
+        if tensor is None:
+            return None
+        try:
+            import numpy as np
+            if isinstance(tensor, np.ndarray):
+                shape = tensor.shape
+                if len(shape) != 4:
+                    return None
+                return (int(shape[0]), int(shape[1]), int(shape[2]), int(shape[3]))
+        except Exception:
+            pass
+        batch = len(tensor)
+        channels = len(tensor[0]) if batch > 0 else 0
+        height = len(tensor[0][0]) if channels > 0 else 0
+        width = len(tensor[0][0][0]) if height > 0 else 0
+        return (batch, channels, height, width)
+
 
 @dataclass(frozen=True)
 class FeatureChannelSpec:

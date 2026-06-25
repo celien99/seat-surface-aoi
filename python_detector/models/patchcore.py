@@ -39,15 +39,17 @@ class PatchCoreScore:
 class SpatialAnomalyScore:
     """空间 PatchCore 异常分数，包含二维 anomaly map 和最近邻距离图。"""
 
-    anomaly_map: tuple[tuple[float, ...], ...]
+    anomaly_map: "np.ndarray"
     spatial_shape: tuple[int, int]
-    nearest_distances: tuple[tuple[float, ...], ...]
+    nearest_distances: "np.ndarray"
     memory_bank_size: int
     embedding_dim: int
     backend: str
     version: str
     faiss_index_path: str | None = None
     fallback_reason: str | None = None
+
+    __hash__ = None  # np.ndarray 不可哈希，显式禁用 hash
 
 
 class PatchCoreKnnIndex:
@@ -101,7 +103,7 @@ class PatchCoreKnnIndex:
 
     def score_spatial(
         self,
-        patch_embeddings: tuple[tuple[float, ...], ...],
+        patch_embeddings: "np.ndarray",
         spatial_shape: tuple[int, int],
         memory_bank_path: str,
         knn_k: int,
@@ -113,10 +115,12 @@ class PatchCoreKnnIndex:
         bank = self._load(memory_bank_path)
         if bank.model_family != "patchcore":
             raise RuntimeError(f"memory bank model_family 必须是 patchcore: {bank.model_family}")
-        if not patch_embeddings:
+        if patch_embeddings.size == 0:
             raise RuntimeError("patch_embeddings 为空")
-        if len(patch_embeddings[0]) != bank.embedding_dim:
-            raise RuntimeError(f"PatchCore patch embedding 维度不匹配: {len(patch_embeddings[0])} != {bank.embedding_dim}")
+        if patch_embeddings.ndim != 2:
+            raise RuntimeError(f"patch_embeddings 必须是 2 维矩阵，实际: {patch_embeddings.ndim}")
+        if patch_embeddings.shape[1] != bank.embedding_dim:
+            raise RuntimeError(f"PatchCore patch embedding 维度不匹配: {patch_embeddings.shape[1]} != {bank.embedding_dim}")
         if expected_pca_version is not None and bank.pca_version not in (None, expected_pca_version):
             raise RuntimeError(f"PatchCore memory bank PCA 版本不匹配: {bank.pca_version} != {expected_pca_version}")
         k = min(knn_k, len(bank.vectors))
@@ -124,8 +128,8 @@ class PatchCoreKnnIndex:
             raise RuntimeError("PatchCore memory bank 为空")
 
         h_out, w_out = spatial_shape
-        if len(patch_embeddings) != h_out * w_out:
-            raise RuntimeError(f"patch_embeddings 数量 ({len(patch_embeddings)}) 与 spatial_shape {spatial_shape} 不匹配")
+        if patch_embeddings.shape[0] != h_out * w_out:
+            raise RuntimeError(f"patch_embeddings 数量 ({patch_embeddings.shape[0]}) 与 spatial_shape {spatial_shape} 不匹配")
 
         faiss_result = self._score_spatial_faiss(
             patch_embeddings, spatial_shape, bank, k, score_scale, faiss_index_path
@@ -141,7 +145,7 @@ class PatchCoreKnnIndex:
 
     def _score_spatial_faiss(
         self,
-        patch_embeddings: tuple[tuple[float, ...], ...],
+        patch_embeddings: "np.ndarray",
         spatial_shape: tuple[int, int],
         bank: PatchCoreBank,
         knn_k: int,
@@ -170,9 +174,9 @@ class PatchCoreKnnIndex:
             score_array = np.clip(nearest * np.float32(score_scale), 0.0, 1.0)
             h_out, w_out = spatial_shape
             return SpatialAnomalyScore(
-                anomaly_map=_rows_from_array(score_array.reshape(h_out, w_out)),
+                anomaly_map=score_array.reshape(h_out, w_out),
                 spatial_shape=spatial_shape,
-                nearest_distances=_rows_from_array(nearest.reshape(h_out, w_out)),
+                nearest_distances=nearest.reshape(h_out, w_out),
                 memory_bank_size=len(bank.vectors),
                 embedding_dim=bank.embedding_dim,
                 backend="faiss",
@@ -185,7 +189,7 @@ class PatchCoreKnnIndex:
 
     def _score_spatial_exact(
         self,
-        patch_embeddings: tuple[tuple[float, ...], ...],
+        patch_embeddings: "np.ndarray",
         spatial_shape: tuple[int, int],
         bank: PatchCoreBank,
         knn_k: int,
@@ -198,9 +202,9 @@ class PatchCoreKnnIndex:
         nearest = _topk_distances(queries, self._bank_array(bank), knn_k)[:, 0]
         score_array = np.clip(nearest * np.float32(score_scale), 0.0, 1.0)
         return SpatialAnomalyScore(
-            anomaly_map=_rows_from_array(score_array.reshape(h_out, w_out)),
+            anomaly_map=score_array.reshape(h_out, w_out),
             spatial_shape=spatial_shape,
-            nearest_distances=_rows_from_array(nearest.reshape(h_out, w_out)),
+            nearest_distances=nearest.reshape(h_out, w_out),
             memory_bank_size=len(bank.vectors),
             embedding_dim=bank.embedding_dim,
             backend="exact_knn",
@@ -404,10 +408,6 @@ def _finite_row_distances(distances_raw: np.ndarray) -> np.ndarray:
         copy=False,
     )
     return distances[np.isfinite(distances)]
-
-
-def _rows_from_array(array: np.ndarray) -> tuple[tuple[float, ...], ...]:
-    return tuple(tuple(float(value) for value in row) for row in array.tolist())
 
 
 def _euclidean(left: tuple[float, ...], right: tuple[float, ...]) -> float:

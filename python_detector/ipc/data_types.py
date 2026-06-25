@@ -44,7 +44,7 @@ class LightFrame:
                 (float(self.width - 1), float(self.height - 1)),
                 (0.0, float(self.height - 1)),
             )
-            mapped = [_apply_homography(self.roi_to_source_matrix, x, y) for x, y in corners]
+            mapped = [apply_homography(self.roi_to_source_matrix, x, y) for x, y in corners]
             if any(point is None for point in mapped):
                 raise ValueError(f"{self.camera_id}/{self.light_id}: ROI 坐标矩阵无效")
             xs = [point[0] for point in mapped if point is not None]
@@ -109,7 +109,8 @@ class InspectionResult:
     elapsed_ms: float = 0.0
 
 
-def _apply_homography(matrix: tuple[float, ...], x: float, y: float) -> tuple[float, float] | None:
+def apply_homography(matrix: tuple[float, ...], x: float, y: float) -> tuple[float, float] | None:
+    """对单一坐标 (x, y) 应用 3x3 单应性矩阵，返回映射后的 (x', y') 或 None（矩阵奇异时）。"""
     denom = matrix[6] * x + matrix[7] * y + matrix[8]
     if abs(denom) < 1e-9:
         return None
