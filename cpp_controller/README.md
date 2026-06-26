@@ -98,7 +98,7 @@ cpp_controller/
 
 | 文件 | 模式 | 说明 |
 | --- | --- | --- |
-| `config/station_runtime.production.conf` | `online` | 生产 TCP 外部信号 + Hikrobot MVS + FL-ACDH + 共享内存检测；COM1 / 9600 8N1，30ms 曝光，300/500/700us 频闪，gain=1.0。 |
+| `config/station_runtime.production.conf` | `online` | 正式生产 TCP 外部信号 + Hikrobot MVS + FL-ACDH + 共享内存检测；COM1 / 9600 8N1，30ms 曝光，300/500/700us 频闪，gain=1.0，`trace_root=trace`。 |
 | `config/station_runtime.test.conf` | `online` | 手动触发联调真实相机和频闪，仍走共享内存检测；COM1 / 9600 8N1，参数同生产配置。 |
 | `config/station_runtime.capture_only.conf` | `capture_only` | 手动触发采图，保存 PNG 原图，不启用共享内存；COM1 / 9600 8N1，参数同生产配置。 |
 | `config/station_runtime.capture_only.single_camera.conf` | `capture_only` | 单相机诊断采图，对齐外部成功程序的 `DA9184676 + COM1 + 光源1`。 |
@@ -148,6 +148,8 @@ image_save.enabled=true
 image_save.save_original=true
 ```
 
+正式生产配置默认 `image_save.enabled=false`，避免 C++ 额外保存原图副本占满磁盘；原始图、ROI 图和检测 overlay 由 Python trace 策略写入 `trace`，供 display_app 只读展示。临时排障需要 C++ 原图副本时，先确认磁盘容量，再启用 `image_save.enabled=true`。
+
 > **FL-ACDH 已知协议命令**（来自手册）：C(联动模式)、B(触发电平)、8(触发模式)、9(频闪时间)、A(相机触发延时)、7(远程通信触发)、D(序列数)、E(同步信号 ID)。
 > 当前串口远程触发链路只发送 `8→9→A→7`。现场控制器会拒绝当前链路不需要的 `C/B` 设置命令，因此不再在每次触发时发送；`9` 命令频闪时间按三位十六进制数据发送，例如配置 `strobe_width_us=500` 时帧为 `$921F46C`。如果 `8/9/A/7` 返回 `&` 或超时，会按光源故障保守输出 `RECHECK/ERROR`。
 
@@ -185,7 +187,7 @@ cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --config cpp_co
 cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.test.conf --once
 
 # 循环生产运行
-cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.production.conf --loop
+.\bin\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.production.conf --loop
 
 # 采图模式，只保存原图
 cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.capture_only.conf --once
@@ -277,15 +279,35 @@ uv run seat-aoi-display --trace-root trace --enable-manual-trigger --manual-trig
 
 ## 长期运行与进程守护
 
-C++ 主控在触发等待失败或 Python 返回 ERROR 时不会退出（已内置自动恢复）。
-生产环境建议额外部署进程守护，确保极端情况下自动重启：
+C++ 主控在触发等待失败或 Python 返回 ERROR 时不会退出（已内置自动恢复）。生产环境建议同时守护 Python detector 和 C++ 主控，确保极端情况下自动重启；display_app 可按现场 HMI 自启动策略运行。
+
+正式启动顺序：
+
+```powershell
+# 1. Python detector，必须使用同一份 production.conf 读取 128 MB frame slot 配置
+uv run python -m python_detector.detector_main --config cpp_controller\config\station_runtime.production.conf
+
+# 2. C++ 主控
+.\bin\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.production.conf --loop
+
+# 3. 展示前端，只读 trace
+uv run seat-aoi-display --trace-root trace --line-id LINE1_AOI_01 --grid-layout 2x1
+```
 
 ### Windows Service (推荐)
 
 ```powershell
-# 使用 NSSM (Non-Sucking Service Manager) 注册服务
-nssm install SeatAoiController "C:\seat-surface-aoi\run_controller.bat"
+# 使用 NSSM (Non-Sucking Service Manager) 注册服务；路径按实际部署目录调整。
+nssm install SeatAoiDetector "C:\seat-surface-aoi\.venv\Scripts\python.exe"
+nssm set SeatAoiDetector AppDirectory "C:\seat-surface-aoi"
+nssm set SeatAoiDetector AppParameters "-m python_detector.detector_main --config cpp_controller\config\station_runtime.production.conf"
+nssm set SeatAoiDetector Start SERVICE_AUTO_START
+nssm set SeatAoiDetector AppRestartDelay 5000
+nssm start SeatAoiDetector
+
+nssm install SeatAoiController "C:\seat-surface-aoi\bin\seat_aoi_controller.exe"
 nssm set SeatAoiController AppDirectory "C:\seat-surface-aoi"
+nssm set SeatAoiController AppParameters "--config cpp_controller\config\station_runtime.production.conf --loop"
 nssm set SeatAoiController Start SERVICE_AUTO_START
 nssm set SeatAoiController AppRestartDelay 5000
 nssm start SeatAoiController
@@ -294,9 +316,19 @@ nssm start SeatAoiController
 ### PowerShell Watchdog (简易备选)
 
 ```powershell
+# run_detector_watchdog.ps1
+while ($true) {
+    $proc = Start-Process -FilePath ".\.venv\Scripts\python.exe" `
+        -ArgumentList "-m","python_detector.detector_main","--config","cpp_controller\config\station_runtime.production.conf" `
+        -PassThru -NoNewWindow
+    $proc.WaitForExit()
+    Write-Host "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') detector exited code=$($proc.ExitCode), restarting in 5s..."
+    Start-Sleep -Seconds 5
+}
+
 # run_controller_watchdog.ps1
 while ($true) {
-    $proc = Start-Process -FilePath "cpp_controller\build\Release\seat_aoi_controller.exe" `
+    $proc = Start-Process -FilePath ".\bin\seat_aoi_controller.exe" `
         -ArgumentList "--config","cpp_controller\config\station_runtime.production.conf","--loop" `
         -PassThru -NoNewWindow
     $proc.WaitForExit()

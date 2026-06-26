@@ -63,7 +63,7 @@ cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --config cpp_co
 
 | 配置 | 用途 |
 | --- | --- |
-| `cpp_controller/config/station_runtime.production.conf` | 生产在线模式：TCP 外部信号、Hikrobot MVS、FL-ACDH、共享内存、Python 检测；默认 30ms 曝光和 300/500/700us 频闪脉宽。 |
+| `cpp_controller/config/station_runtime.production.conf` | 正式生产在线模式：TCP 外部信号、Hikrobot MVS、FL-ACDH、共享内存、Python 检测；默认 30ms 曝光、300/500/700us 频闪脉宽，`trace_root=trace`，C++ 原图副本默认关闭。 |
 | `cpp_controller/config/station_runtime.test.conf` | 工控机联调模式：手动触发、Hikrobot MVS、FL-ACDH、共享内存、Python 检测，默认相机取帧超时 5s；频闪参数对齐外部成功程序。 |
 | `cpp_controller/config/station_runtime.capture_only.conf` | 采图模式：手动触发、Hikrobot MVS、FL-ACDH，只保存原图，不创建共享内存，默认相机取帧超时 5s；频闪参数对齐外部成功程序。 |
 | `cpp_controller/config/station_runtime.capture_only.single_camera.conf` | 单相机诊断采图：对齐外部成功程序的 `DA9184676 + COM1 + 光源1`，FL-ACDH 命令使用 ACK 节拍。 |
@@ -75,6 +75,52 @@ cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --config cpp_co
 
 - `online`：初始化 Frame/Result 共享内存，采图后发布给 Python detector，等待检测结果并回传外部信号。
 - `capture_only`：不初始化共享内存，不等待 Python detector；采图保存到 `image_save.root_dir/YYYYMMDD/<seat_id>/`，完成后回传 `RECHECK`。
+
+## 正式部署流程
+
+当前正式部署按“三进程 + 同一份生产配置”执行：Python detector 先启动并打开共享内存，C++ 主控随后进入 `--loop` 生产循环，`display_app` 最后启动并只读消费 `trace` 展示通道。生产现场不要启用 display_app 手动触发按钮，除非已经确认不会抢占真实 PLC/上位机的 `tcp_signal` 连接。
+
+1. 工控机准备：安装 Hikrobot MVS SDK、VC++ Runtime、Python 运行环境，并放置已交付的生产版 `bin\seat_aoi_controller.exe`；无公网工控机先在同平台机器生成离线依赖包：
+
+```powershell
+uv run python -m tools.package_python_offline_deps --extra onnx --extra faiss --extra display
+```
+
+2. 生产包与模型：把真实 `model/roi_yolo/seat_roi_seg.onnx`、`model/wideresnet50/seat_wrn50_embedding.onnx`、`model/patchcore/seat_pca.json`、`seat_patchcore_bank.json` 和可选 `seat_patchcore.faiss` 放入部署包，并在工控机执行：
+
+```powershell
+uv run python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1
+uv run python -m tools.validate_deployment_preflight --strict-production
+```
+
+3. 生产配置确认：复核 `cpp_controller/config/station_runtime.production.conf` 中的相机序列号、COM 口、`signal.port`、结果回传 `signal.result_host/result_port`、`trace_root=trace`、`light_order=1,2,3` 和 128 MB `frame_slot_size`，然后用已交付的生产版控制器校验：
+
+```powershell
+.\bin\seat_aoi_controller.exe `
+  --config cpp_controller\config\station_runtime.production.conf `
+  --validate-config
+```
+
+4. 正式启动顺序：
+
+```powershell
+# 终端/服务 1：Python detector，必须传入同一份 production.conf
+uv run python -m python_detector.detector_main `
+  --config cpp_controller\config\station_runtime.production.conf
+
+# 终端/服务 2：C++ 主控，持续生产循环
+.\bin\seat_aoi_controller.exe `
+  --config cpp_controller\config\station_runtime.production.conf `
+  --loop
+
+# 终端/自启动 3：展示前端，只读展示
+uv run seat-aoi-display `
+  --trace-root trace `
+  --line-id LINE1_AOI_01 `
+  --grid-layout 2x1
+```
+
+5. 守护与验收：生产环境建议用 NSSM 或现场进程守护分别守护 Python detector 和 C++ 主控；放行前完成 `--validate-config`、`validate_model_assets`、`validate_deployment_preflight --strict-production`、低速真实件联调、故障注入、连续 8h/24h 稳定性验证。任一超时、缺帧、质量门禁失败、模型异常或 trace 写入失败都必须输出 `RECHECK` 或 `ERROR`。
 
 ## 工程地图
 
