@@ -123,7 +123,7 @@ struct StationRuntimeConfig {
   std::uint32_t result_slot_size = kDefaultResultSlotSize;
   int publish_timeout_ms = 1000;
   int detector_timeout_ms = 5000;
-  int trigger_timeout_ms = 1000;
+  int trigger_timeout_ms = 0;  // 0 = 无限等待，有信号才执行
   int camera_timeout_ms = 200;
   int light_timeout_ms = 200;
   int arm_settle_ms = 50;

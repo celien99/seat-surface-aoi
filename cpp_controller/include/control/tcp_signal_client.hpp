@@ -43,7 +43,6 @@ public:
                       std::string* error_message) override;
 
   SignalHealth get_health() const override;
-  bool is_idle_wait_timeout(const std::string& error_message) const override;
 
 private:
   void close();

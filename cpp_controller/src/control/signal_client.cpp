@@ -97,14 +97,15 @@ bool SimSignalClient::initialize(const SignalClientConfig& config) {
 bool SimSignalClient::wait_trigger(ExternalTrigger* out_trigger,
                              int timeout_ms,
                              std::string* error_message) {
-  if (!initialized_ || out_trigger == nullptr || timeout_ms <= 0) {
+  if (!initialized_ || out_trigger == nullptr || timeout_ms < 0) {
     if (error_message != nullptr) {
       *error_message = "外部信号客户端未初始化、输出指针为空或 timeout_ms 非法";
     }
     return false;
   }
   if (simulate_trigger_timeout_) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+    const int wait_ms = timeout_ms > 0 ? timeout_ms : 1000;
+    std::this_thread::sleep_for(std::chrono::milliseconds(wait_ms));
     if (error_message != nullptr) {
       *error_message = "模拟外部信号触发超时";
     }
@@ -161,14 +162,15 @@ bool ManualSignalClient::initialize(const SignalClientConfig& config) {
 bool ManualSignalClient::wait_trigger(ExternalTrigger* out_trigger,
                                           int timeout_ms,
                                           std::string* error_message) {
-  if (!initialized_ || out_trigger == nullptr || timeout_ms <= 0) {
+  if (!initialized_ || out_trigger == nullptr || timeout_ms < 0) {
     if (error_message != nullptr) {
       *error_message = "手动外部信号未初始化、输出指针为空或 timeout_ms 非法";
     }
     return false;
   }
   if (simulate_trigger_timeout_) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+    const int wait_ms = timeout_ms > 0 ? timeout_ms : 1000;
+    std::this_thread::sleep_for(std::chrono::milliseconds(wait_ms));
     if (error_message != nullptr) {
       *error_message = "手动触发超时";
     }
@@ -229,14 +231,21 @@ bool ExternalSignalClient::initialize(const SignalClientConfig& config) {
 bool ExternalSignalClient::wait_trigger(ExternalTrigger* out_trigger,
                                         int timeout_ms,
                                         std::string* error_message) {
-  if (!initialized_ || out_trigger == nullptr || timeout_ms <= 0) {
+  if (!initialized_ || out_trigger == nullptr) {
     if (error_message != nullptr) {
-      *error_message = "外部信号客户端未初始化、输出指针为空或 timeout_ms 非法";
+      *error_message = "外部信号客户端未初始化或输出指针为空";
+    }
+    return false;
+  }
+  if (timeout_ms < 0) {
+    if (error_message != nullptr) {
+      *error_message = "外部信号客户端 timeout_ms 非法";
     }
     return false;
   }
   if (simulate_trigger_timeout_) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+    const int wait_ms = timeout_ms > 0 ? timeout_ms : 1000;
+    std::this_thread::sleep_for(std::chrono::milliseconds(wait_ms));
     if (error_message != nullptr) {
       *error_message = "外部信号触发超时";
     }
@@ -253,8 +262,11 @@ bool ExternalSignalClient::wait_trigger(ExternalTrigger* out_trigger,
     return true;
   }
 
-  const auto deadline = std::chrono::steady_clock::now() +
-                        std::chrono::milliseconds(timeout_ms);
+  // timeout_ms <= 0 → 无限等待，每 5ms 检查一次文件
+  const bool infinite = (timeout_ms <= 0);
+  const auto deadline = infinite
+      ? std::chrono::steady_clock::time_point::max()
+      : std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
   std::string parse_error;
   while (std::chrono::steady_clock::now() < deadline) {
     std::ifstream input(trigger_queue_path_);
@@ -333,13 +345,6 @@ SignalHealth ExternalSignalClient::get_health() const {
       simulate_output_fault_     ? "外部信号结果发布失败"
       : simulate_trigger_timeout_ ? "外部信号触发超时"
                                   : "external_signal"};
-}
-
-bool ExternalSignalClient::is_idle_wait_timeout(const std::string& error_message) const {
-  if (simulate_trigger_timeout_ || trigger_queue_path_.empty()) {
-    return false;
-  }
-  return error_message.find("外部信号触发超时，未收到新的规范化触发行") == 0;
 }
 
 }  // namespace seat_aoi

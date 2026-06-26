@@ -1,7 +1,9 @@
 #include "control/station_controller.hpp"
 
+#include <algorithm>
 #include <iostream>
 #include <sstream>
+#include <thread>
 
 #include "common/string_utils.hpp"
 #include "control/hardware_factory.hpp"
@@ -183,30 +185,31 @@ bool StationController::initialize(const StationConfig& config) {
 bool StationController::wait_for_trigger(ExternalTrigger* out_trigger, std::string* error_message) {
   const auto snapshot = health_.snapshot();
   if (snapshot.state == StationState::Fault) {
-    // 自动尝试从 Fault 恢复（trigger timeout 等可恢复故障），
+    // 自动从 Fault 恢复（如连接断开后重连），
     // 避免一次 PLC 通信抖动导致进程永久阻塞。
     health_.transition_to(StationState::Ready,
                           "auto-recovery from fault: " + snapshot.alarm_message);
     record_system_event("trigger_wait_fault_recovery_attempt",
                         ErrorCode::None,
                         "recovering from fault: " + snapshot.alarm_message);
-    // 继续执行，尝试等待触发信号
   }
+  // 无限等待模式 (trigger_timeout_ms=0)：仅真实错误时返回 false
   if (!signal_client_->wait_trigger(out_trigger, config_.trigger_timeout_ms, error_message)) {
     const std::string message =
         error_message != nullptr ? *error_message : "external signal trigger wait failed";
-    if (signal_client_->is_idle_wait_timeout(message)) {
-      if (error_message != nullptr) {
-        error_message->clear();
-      }
-      health_.transition_to(StationState::Ready, "waiting for external trigger");
-      return false;
-    }
+    ++consecutive_trigger_faults_;
     health_.record_fault(ErrorCode::DeviceFault, message);
     health_.transition_to(StationState::Fault, message);
     record_system_event("trigger_wait_failed", ErrorCode::DeviceFault, message);
+    // 连续故障递增退避，避免 Fault ↔ Ready 振荡 + 给网络恢复留出时间
+    if (consecutive_trigger_faults_ > 3) {
+      const int backoff_ms =
+          std::min((consecutive_trigger_faults_ - 3) * 200, 5000);
+      std::this_thread::sleep_for(std::chrono::milliseconds(backoff_ms));
+    }
     return false;
   }
+  consecutive_trigger_faults_ = 0;
   health_.transition_to(StationState::Running, "trigger accepted");
   return true;
 }

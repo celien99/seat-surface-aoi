@@ -76,7 +76,7 @@ cpp_controller/
 
 在线模式 `controller_mode=online`：
 
-1. 等待外部信号，生成 `ExternalTrigger`。
+1. 等待外部信号，生成 `ExternalTrigger`。`trigger_timeout_ms=0`（默认）表示无限等待，TCP 客户端未连接/无数据时阻塞监听，不浪费 CPU 也不产生超时日志。
 2. `FrameAssembler` 初始化 1 台 FL-ACDH 和 2 台相机。
 3. 按光源顺序 1、2、3 逐路执行：先 arm 两台相机（更新曝光/增益），再并行 drain 所有相机 SDK 缓冲区中的残留帧（arm() 改曝光参数可能在 Continuous 模式下即时产生一帧），然后按 `8/9/A/7` 触发 FL-ACDH 且每条命令等待 `$` ACK，最后调用 `GetImageBuffer` 读取两台相机已缓存的硬触发帧；相机启动或故障重启时 `start()/cancel_wait()` 也会排空旧帧。
 4. 组包为 6 帧，发布到 `/seat_aoi_cpp_to_py_frames_v1`。
@@ -276,6 +276,7 @@ uv run seat-aoi-display --trace-root trace --enable-manual-trigger --manual-trig
 
 - 完整触发进入采集/检测后，任意超时、缺帧、协议错误、CRC 错误、质量失败、配置错误都不能输出 `OK`。
 - 采图模式不做检测，因此固定回传 `RECHECK`。
+- C++ 连续非空闲触发故障（如 TCP 连接反复断开）内置递增退避：前 3 次无额外延迟，之后每多一次增加 200ms，上限 5000ms。故障恢复后计数器自动清零。
 - Python 不控制 PLC、相机或频闪。
 - C++ 不实现深度学习推理。
 - 在线图像和结果交换只使用共享内存。

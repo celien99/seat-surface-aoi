@@ -26,7 +26,7 @@ struct StationConfig {
   std::uint32_t result_slot_size = kDefaultResultSlotSize;
   int publish_timeout_ms = 1000;
   int detector_timeout_ms = 5000;
-  int trigger_timeout_ms = 1000;
+  int trigger_timeout_ms = 0;  // 0 = 无限等待，有信号才执行
   int camera_timeout_ms = 200;
   int light_timeout_ms = 200;
   int arm_settle_ms = 50;
@@ -105,6 +105,7 @@ private:
   StationHealthMonitor health_;
   std::uint64_t next_sequence_id_ = 1;
   bool shared_memory_initialized_ = false;
+  int consecutive_trigger_faults_ = 0;
 };
 
 }  // namespace seat_aoi

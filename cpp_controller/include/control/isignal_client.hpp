@@ -55,10 +55,6 @@ public:
                              int timeout_ms,
                              std::string* error_message) = 0;
   virtual SignalHealth get_health() const = 0;
-  virtual bool is_idle_wait_timeout(const std::string& error_message) const {
-    (void)error_message;
-    return false;
-  }
 };
 
 }  // namespace seat_aoi

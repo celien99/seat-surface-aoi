@@ -236,34 +236,40 @@ bool TcpSignalClient::accept_client(int timeout_ms,
     return false;
   }
 
+  // timeout_ms <= 0 → 无限等待，用固定短周期轮询以避免空转
+  const bool infinite = (timeout_ms <= 0);
+  constexpr int kAcceptPollMs = 200;
+
   // 使用 poll/select 等待客户端连接
-  const auto deadline = std::chrono::steady_clock::now() +
-                        std::chrono::milliseconds(timeout_ms);
+  const auto deadline = infinite
+      ? std::chrono::steady_clock::time_point::max()
+      : std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
   while (std::chrono::steady_clock::now() < deadline) {
+    int poll_ms;
+    if (infinite) {
+      poll_ms = kAcceptPollMs;
+    } else {
+      const auto remaining =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              deadline - std::chrono::steady_clock::now()).count();
+      if (remaining <= 0) break;
+      poll_ms = static_cast<int>(remaining);
+    }
+
 #ifdef _WIN32
     fd_set readfds;
     FD_ZERO(&readfds);
     FD_SET(static_cast<SOCKET>(listen_sock_), &readfds);
     struct timeval tv{};
-    const auto remaining_ms =
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            deadline - std::chrono::steady_clock::now())
-            .count();
-    tv.tv_sec = static_cast<long>(remaining_ms / 1000);
-    tv.tv_usec = static_cast<long>((remaining_ms % 1000) * 1000);
-    if (tv.tv_sec < 0) tv.tv_sec = 0;
-    if (tv.tv_usec < 0) tv.tv_usec = 0;
+    tv.tv_sec = poll_ms / 1000;
+    tv.tv_usec = (poll_ms % 1000) * 1000;
+    if (tv.tv_sec < 0) { tv.tv_sec = 0; tv.tv_usec = 0; }
     const int poll_ret = ::select(0, &readfds, nullptr, nullptr, &tv);
 #else
     struct pollfd pfd{};
     pfd.fd = listen_sock_;
     pfd.events = POLLIN;
-    const auto remaining_ms =
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            deadline - std::chrono::steady_clock::now())
-            .count();
-    const int poll_ret = ::poll(&pfd, 1,
-                                remaining_ms < 0 ? 0 : static_cast<int>(remaining_ms));
+    const int poll_ret = ::poll(&pfd, 1, poll_ms);
 #endif
     if (poll_ret < 0) {
       break;
@@ -324,27 +330,39 @@ bool TcpSignalClient::read_line(std::string* line, int timeout_ms,
     return false;
   }
 
-  set_socket_timeout(timeout_ms);
+  constexpr int kInternalPollMs = 200;
+  const bool infinite = (timeout_ms <= 0);
+  const int socket_timeout = infinite ? kInternalPollMs : timeout_ms;
+  set_socket_timeout(socket_timeout);
 
   line->clear();
   char ch = 0;
   bool timed_out = false;
   bool disconnected = false;
-  const auto deadline = std::chrono::steady_clock::now() +
-                        std::chrono::milliseconds(timeout_ms);
+
+  // 无限模式不设截止时间，仅通过连接断开 / 错误退出
+  const auto deadline = infinite
+      ? std::chrono::steady_clock::time_point::max()
+      : std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
 
   while (std::chrono::steady_clock::now() < deadline) {
-    const auto remaining_ms =
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            deadline - std::chrono::steady_clock::now())
-            .count();
-    if (remaining_ms <= 0) {
-      break;
+    int read_timeout;
+    if (infinite) {
+      read_timeout = kInternalPollMs;
+    } else {
+      const auto remaining =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              deadline - std::chrono::steady_clock::now()).count();
+      if (remaining <= 0) break;
+      read_timeout = static_cast<int>(remaining);
     }
-    const int n = read_socket(&ch, 1, static_cast<int>(remaining_ms));
+    const int n = read_socket(&ch, 1, read_timeout);
     if (n == kReadTimeout) {
-      timed_out = true;
-      break;
+      if (!infinite) {
+        timed_out = true;
+        break;
+      }
+      continue;  // 无限模式：超时无数据 → 继续等
     }
     if (n == 0) {
       disconnected = true;
@@ -491,19 +509,29 @@ bool TcpSignalClient::initialize(const SignalClientConfig& config) {
 bool TcpSignalClient::wait_trigger(ExternalTrigger* out_trigger,
                                     int timeout_ms,
                                     std::string* error_message) {
-  if (!initialized_ || out_trigger == nullptr || timeout_ms <= 0) {
+  if (!initialized_ || out_trigger == nullptr) {
     if (error_message != nullptr) {
-      *error_message = "TCP 信号客户端未初始化、输出指针为空或 timeout_ms 非法";
+      *error_message = "TCP 信号客户端未初始化或输出指针为空";
+    }
+    return false;
+  }
+  if (timeout_ms < 0) {
+    if (error_message != nullptr) {
+      *error_message = "TCP 信号客户端 timeout_ms 非法";
     }
     return false;
   }
   if (simulate_trigger_timeout_) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(timeout_ms));
+    const int wait_ms = timeout_ms > 0 ? timeout_ms : 1000;
+    std::this_thread::sleep_for(std::chrono::milliseconds(wait_ms));
     if (error_message != nullptr) {
       *error_message = "TCP 模拟触发超时";
     }
     return false;
   }
+
+  // timeout_ms == 0 → 无限等待，不设截止时间
+  const bool infinite = (timeout_ms <= 0);
 
   // 如果没有客户端连接，等待连接
   if (client_sock_ == kInvalidSocket) {
@@ -521,74 +549,71 @@ bool TcpSignalClient::wait_trigger(ExternalTrigger* out_trigger,
     return wait_trigger_start_sn(out_trigger, timeout_ms, error_message);
   }
 
-  // 单行协议路径 (protocol_mode=single, 向后兼容)
-  // 读取一行
-  std::string line;
-  if (!read_line(&line, timeout_ms, error_message)) {
-    if (error_message == nullptr || *error_message != "TCP 等待触发行超时") {
+  // 单行协议路径 — 循环读取直到收到有效触发行
+  while (true) {
+    std::string line;
+    if (!read_line(&line, timeout_ms, error_message)) {
+      // read_line 超时在无限模式下不会发生；连接断开则关闭 socket 并重试
+      if (infinite && (error_message == nullptr ||
+                       *error_message == "TCP 客户端连接断开" ||
+                       *error_message == "TCP 客户端未连接")) {
+        close_socket_impl(client_sock_);
+        client_sock_ = kInvalidSocket;
+        std::string accept_error;
+        if (!accept_client(timeout_ms, &accept_error)) {
+          if (error_message != nullptr) {
+            *error_message = accept_error;
+          }
+          return false;
+        }
+        continue;
+      }
+      // 有限超时模式下保留 socket 供下次复用
+      if (!infinite && error_message != nullptr && *error_message == "TCP 等待触发行超时") {
+        return false;
+      }
       close_socket_impl(client_sock_);
       client_sock_ = kInvalidSocket;
+      return false;
     }
-    return false;
-  }
 
-  // 解析触发行
-  ExternalTrigger trigger{};
-  std::string parse_error;
-  if (!parse_trigger_line(line, &trigger, &parse_error)) {
-    if (error_message != nullptr) {
-      *error_message = parse_error;
+    // 解析触发行
+    ExternalTrigger trigger{};
+    std::string parse_error;
+    if (parse_trigger_line(line, &trigger, &parse_error)) {
+      send_ok();
+      *out_trigger = trigger;
+      return true;
     }
-    return false;
+    // 解析失败 → 忽略非法行，继续等待下一条
+    std::cerr << "TCP 忽略非法触发行: " << parse_error << std::endl;
   }
-
-  // 回复 ok
-  send_ok();
-
-  *out_trigger = trigger;
-  return true;
 }
 
 bool TcpSignalClient::wait_trigger_start_sn(ExternalTrigger* out_trigger,
                                              int timeout_ms,
                                              std::string* error_message) {
-  const auto deadline = std::chrono::steady_clock::now() +
-                        std::chrono::milliseconds(timeout_ms);
+  const bool infinite = (timeout_ms <= 0);
 
   // 步骤 1: 等待到位信号 (start_command)
-  auto remaining_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-      deadline - std::chrono::steady_clock::now()).count();
-  if (remaining_ms <= 0) {
-    if (error_message != nullptr) {
-      *error_message = "TCP 两步协议等待到位信号 (" + start_command_ + ") 超时";
+  // 循环忽略不匹配的行，直到收到 start_command 或连接断开
+  while (true) {
+    std::string line;
+    if (!read_line(&line, timeout_ms, error_message)) {
+      // 无限模式：read_line 只在连接断开/错误时返回 false
+      if (client_sock_ != kInvalidSocket) {
+        close_socket_impl(client_sock_);
+        client_sock_ = kInvalidSocket;
+      }
+      return false;
     }
-    if (client_sock_ != kInvalidSocket) {
-      close_socket_impl(client_sock_);
-      client_sock_ = kInvalidSocket;
-    }
-    return false;
-  }
 
-  std::string start_line;
-  if (!read_line(&start_line, static_cast<int>(remaining_ms), error_message)) {
-    if (error_message == nullptr || *error_message != "TCP 等待触发行超时") {
-      close_socket_impl(client_sock_);
-      client_sock_ = kInvalidSocket;
+    const std::string trimmed = trim(line);
+    if (trimmed == start_command_) {
+      break;  // 收到到位信号
     }
-    return false;
-  }
-
-  const std::string start_trimmed = trim(start_line);
-  if (start_trimmed != start_command_) {
-    if (error_message != nullptr) {
-      *error_message = "TCP 两步协议期望到位信号 '" + start_command_ +
-                       "', 实际收到: " + start_trimmed;
-    }
-    if (client_sock_ != kInvalidSocket) {
-      close_socket_impl(client_sock_);
-      client_sock_ = kInvalidSocket;
-    }
-    return false;
+    // 非到位信号的行 → 忽略，继续等待
+    std::cerr << "TCP 两步协议: 忽略非到位信号行 \"" << trimmed << "\"" << std::endl;
   }
 
   // 回复到位确认
@@ -597,70 +622,48 @@ bool TcpSignalClient::wait_trigger_start_sn(ExternalTrigger* out_trigger,
             << "), 已回复确认" << std::endl;
 
   // 步骤 2: 等待 SN 条码
-  remaining_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-      deadline - std::chrono::steady_clock::now()).count();
-  if (remaining_ms <= 0) {
-    if (error_message != nullptr) {
-      *error_message = "TCP 两步协议等待 SN 条码超时";
+  // 循环忽略非法格式，直到收到合法 SN 或连接断开
+  while (true) {
+    std::string sn_line;
+    if (!read_line(&sn_line, timeout_ms, error_message)) {
+      if (client_sock_ != kInvalidSocket) {
+        close_socket_impl(client_sock_);
+        client_sock_ = kInvalidSocket;
+      }
+      if (error_message != nullptr && *error_message == "TCP 等待触发行超时") {
+        *error_message = "TCP 两步协议等待 SN 条码超时";
+      }
+      return false;
     }
-    if (client_sock_ != kInvalidSocket) {
-      close_socket_impl(client_sock_);
-      client_sock_ = kInvalidSocket;
+
+    const std::string sn_trimmed = trim(sn_line);
+    const std::string expected_prefix = sn_prefix_ + " ";
+    if (sn_trimmed.size() <= expected_prefix.size() ||
+        sn_trimmed.compare(0, expected_prefix.size(), expected_prefix) != 0) {
+      std::cerr << "TCP 两步协议: 忽略非法 SN 行 \"" << sn_trimmed << "\"" << std::endl;
+      continue;
     }
-    return false;
+
+    std::string barcode = trim(sn_trimmed.substr(expected_prefix.size()));
+    if (barcode.empty()) {
+      std::cerr << "TCP 两步协议: 忽略空 SN" << std::endl;
+      continue;
+    }
+
+    // 回复 SN 确认
+    send_response(sn_ack_);
+
+    ExternalTrigger trigger{};
+    trigger.trigger_id = next_trigger_id_++;
+    trigger.seat_id = station_id_ + "_" + barcode;
+    trigger.sku = default_sku_;
+    *out_trigger = trigger;
+
+    std::cout << "TCP 两步协议: 收到 SN=" << barcode
+              << " seat_id=" << trigger.seat_id
+              << " trigger_id=" << trigger.trigger_id << std::endl;
+    return true;
   }
-
-  std::string sn_line;
-  if (!read_line(&sn_line, static_cast<int>(remaining_ms), error_message)) {
-    if (client_sock_ != kInvalidSocket) {
-      close_socket_impl(client_sock_);
-      client_sock_ = kInvalidSocket;
-    }
-    return false;
-  }
-
-  // 解析 "sn_prefix <barcode>" 格式
-  const std::string sn_trimmed = trim(sn_line);
-  const std::string expected_prefix = sn_prefix_ + " ";
-  if (sn_trimmed.size() <= expected_prefix.size() ||
-      sn_trimmed.compare(0, expected_prefix.size(), expected_prefix) != 0) {
-    if (error_message != nullptr) {
-      *error_message = "TCP 两步协议期望 '" + expected_prefix +
-                       "<barcode>', 实际收到: " + sn_trimmed;
-    }
-    if (client_sock_ != kInvalidSocket) {
-      close_socket_impl(client_sock_);
-      client_sock_ = kInvalidSocket;
-    }
-    return false;
-  }
-
-  std::string barcode = trim(sn_trimmed.substr(expected_prefix.size()));
-  if (barcode.empty()) {
-    if (error_message != nullptr) {
-      *error_message = "TCP 两步协议: SN 条码为空";
-    }
-    if (client_sock_ != kInvalidSocket) {
-      close_socket_impl(client_sock_);
-      client_sock_ = kInvalidSocket;
-    }
-    return false;
-  }
-
-  // 回复 SN 确认
-  send_response(sn_ack_);
-
-  // 构造 ExternalTrigger
-  ExternalTrigger trigger{};
-  trigger.trigger_id = next_trigger_id_++;
-  trigger.seat_id = station_id_ + "_" + barcode;
-  trigger.sku = default_sku_;
-  *out_trigger = trigger;
-
-  std::cout << "TCP 两步协议: 收到 SN=" << barcode
-            << " seat_id=" << trigger.seat_id
-            << " trigger_id=" << trigger.trigger_id << std::endl;
-  return true;
 }
 
 bool TcpSignalClient::publish_result(const ExternalTrigger& trigger,
@@ -807,18 +810,6 @@ SignalHealth TcpSignalClient::get_health() const {
     health.message = oss.str();
   }
   return health;
-}
-
-bool TcpSignalClient::is_idle_wait_timeout(const std::string& error_message) const {
-  if (simulate_trigger_timeout_) {
-    return false;
-  }
-  return error_message == "TCP 等待客户端连接超时" ||
-         error_message == "TCP 等待触发行超时" ||
-         error_message == "TCP 客户端连接断开" ||
-         error_message == "TCP 客户端未连接" ||
-         error_message.find("TCP 两步协议等待到位信号") == 0 ||
-         error_message == "TCP 两步协议等待 SN 条码超时";
 }
 
 void TcpSignalClient::close() {

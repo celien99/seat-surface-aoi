@@ -752,7 +752,7 @@ bool load_station_runtime_config(const std::string& path,
     } else if (key == "trigger_timeout_ms") {
       if (!parse_int_field("trigger_timeout_ms",
                            value,
-                           false,
+                           true,  // 0 = 无限等待
                            &config.trigger_timeout_ms,
                            error_message)) {
         return false;
@@ -933,10 +933,15 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
     }
     return false;
   }
-  if (config.detector_timeout_ms <= 0 || config.trigger_timeout_ms <= 0 ||
+  if (config.detector_timeout_ms <= 0 ||
       config.publish_timeout_ms <= 0 || config.camera_timeout_ms <= 0 ||
       config.light_timeout_ms <= 0) {
-    if (error_message != nullptr) *error_message = "所有 timeout_ms 配置都必须大于 0";
+    if (error_message != nullptr) *error_message = "detector/publish/camera/light timeout_ms 必须大于 0";
+    return false;
+  }
+  // trigger_timeout_ms=0 表示无限等待（生产常态），负数为非法
+  if (config.trigger_timeout_ms < 0) {
+    if (error_message != nullptr) *error_message = "trigger_timeout_ms 不能为负数";
     return false;
   }
   if (config.max_camera_failures_before_reset <= 0) {
