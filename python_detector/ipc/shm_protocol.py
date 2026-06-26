@@ -174,7 +174,14 @@ def result_slot_defects_offset() -> int:
 
 
 class AtomicU32:
-    """用于在 mmap 共享内存中读写 slot 状态的小型辅助类。"""
+    """用于在 mmap 共享内存中读写 slot 状态的小型辅助类。
+
+    跨平台内存排序警告：当前 store 使用 struct.pack_into 实现，不提供
+    CPU 级写屏障（memory_order_release）。在 x86/x86_64 TSO 架构上，硬件保证
+    store-store 不重排，因此 C++ 侧的 memory_order_acquire 读取能正确观察到
+    先写入的数据。如果将来部署到 ARM 等弱序架构，必须替换为 C 扩展或调用
+    ``ctypes.CDLL('libc.so.6').sync_synchronize()`` 等系统屏障原语。
+    """
 
     _ctype: ClassVar[type[ctypes.c_uint32]] = ctypes.c_uint32
 
@@ -185,3 +192,9 @@ class AtomicU32:
     @staticmethod
     def store(buf: memoryview, offset: int, value: int) -> None:
         struct.pack_into("<I", buf, offset, int(value))
+
+    @staticmethod
+    def fence() -> None:
+        """写屏障桩：在 x86/x86_64 上为 no-op（硬件 TSO 保证顺序）。
+        ARM/弱序架构部署前需替换为真实 CPU 屏障指令。"""
+        pass

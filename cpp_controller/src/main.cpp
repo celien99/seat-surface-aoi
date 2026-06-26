@@ -125,17 +125,24 @@ int main(int argc, char** argv) {
     }
     const auto result = station.inspect_one_seat(trigger);
     const auto decision = static_cast<seat_aoi::InspectionDecision>(result.meta.decision);
-    // Python 内部异常返回 ERROR，映射为 RECHECK 避免进程退出，
-    // 与 station_controller 中 published_decision 的映射策略一致。
-    const auto effective_decision =
-        decision == seat_aoi::InspectionDecision::Error
-            ? seat_aoi::InspectionDecision::Recheck
-            : decision;
-    if (effective_decision != seat_aoi::InspectionDecision::OK &&
-        effective_decision != seat_aoi::InspectionDecision::NG &&
-        effective_decision != seat_aoi::InspectionDecision::Recheck) {
-      return 1;
+    // 防御性检查原始 decision 值的合法性（validate_detector_result 正常已拦截非法值，
+    // 此处作为最后一道防线，防止校验被绕过时静默放行）。
+    if (decision != seat_aoi::InspectionDecision::OK &&
+        decision != seat_aoi::InspectionDecision::NG &&
+        decision != seat_aoi::InspectionDecision::Recheck &&
+        decision != seat_aoi::InspectionDecision::Error) {
+      std::cerr << "[sequence_id=" << result.meta.sequence_id
+                << "] unknown detector decision="
+                << static_cast<std::uint32_t>(decision)
+                << ", treating as RECHECK" << std::endl;
     }
+    // Python 内部异常返回 ERROR 或未知值时映射为 RECHECK 避免进程退出，
+    // 与 station_controller 中 published_decision 的映射策略一致。
+    const bool known_ok = (decision == seat_aoi::InspectionDecision::OK ||
+                           decision == seat_aoi::InspectionDecision::NG ||
+                           decision == seat_aoi::InspectionDecision::Recheck);
+    const auto effective_decision =
+        known_ok ? decision : seat_aoi::InspectionDecision::Recheck;
     ++processed_jobs;
   }
   const auto health = station.health_snapshot();

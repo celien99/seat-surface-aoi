@@ -63,6 +63,11 @@ class InspectionPipeline:
     def process(self, job: SeatInspectionJob, recipe: Recipe) -> InspectionResult:
         started = time.perf_counter()
         timings: dict[str, float] = {}
+        # 在 try 块外显式初始化中间变量，避免异常处理中用 locals() 的脆弱隐式依赖
+        quality_report = None
+        prepared: list = []
+        cubes: list = []
+        features: list = []
         try:
             step_started = time.perf_counter()
             quality_report = self.quality_gate.check(job, recipe)
@@ -124,7 +129,10 @@ class InspectionPipeline:
         except ModelAssetUnavailableInferenceError as exc:
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             timings["total_ms"] = elapsed_ms
-            return self._make_model_asset_unavailable_result(job, elapsed_ms, timings, exc.context(), locals())
+            return self._make_model_asset_unavailable_result(
+                job, elapsed_ms, timings, exc.context(),
+                {"quality_report": quality_report, "prepared": prepared, "cubes": cubes, "features": features},
+            )
         except ModelInferenceError as exc:
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             timings["total_ms"] = elapsed_ms
@@ -136,7 +144,6 @@ class InspectionPipeline:
         except PreprocessRecheckError as exc:
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             timings["total_ms"] = elapsed_ms
-            quality_report = locals().get("quality_report")
             if quality_report is not None:
                 quality_report.is_pass = False
                 quality_report.messages.append(str(exc))
@@ -158,7 +165,10 @@ class InspectionPipeline:
                 "asset_unavailable": True,
                 "asset": exc.context(),
             }
-            return self._make_model_asset_unavailable_result(job, elapsed_ms, timings, error_context, locals())
+            return self._make_model_asset_unavailable_result(
+                job, elapsed_ms, timings, error_context,
+                {"quality_report": quality_report, "prepared": prepared, "cubes": cubes, "features": features},
+            )
         except Exception as exc:
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             timings["total_ms"] = elapsed_ms

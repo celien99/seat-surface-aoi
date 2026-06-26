@@ -75,6 +75,9 @@ class DetectorProcess:
         while True:
             job = self.shm_client.wait_next_job(timeout_ms=100)
             if job is None:
+                # 空闲时短暂休眠，避免在 C++ 无触发期间持续 500Hz 轮询消耗 CPU；
+                # 最坏情况增加 ~10ms 响应延迟，对秒级触发节拍无影响。
+                time.sleep(0.01)
                 continue
             self._process_and_publish(job)
 

@@ -124,7 +124,23 @@ class ShmClient:
 
     def publish_result(self, result: InspectionResult) -> None:
         defects = result.defects[:MAX_DEFECTS_PER_RESULT]
-        payload_size = RESULT_SLOT_HEADER_SIZE + len(defects) * struct.calcsize("<64s64s64sI64s64s64s4ifII8iqII")
+        defect_entry_size = struct.calcsize("<64s64s64sI64s64s64s4ifII8iqII")
+        payload_size = RESULT_SLOT_HEADER_SIZE + len(defects) * defect_entry_size
+        # 防御性裁剪：如果 payload 超过 slot 容量，按可用空间缩减缺陷数量，
+        # 避免写穿 mmap 损毁相邻 slot 或共享内存头部。
+        if payload_size > self.result_slot_size:
+            max_defects = (self.result_slot_size - RESULT_SLOT_HEADER_SIZE) // defect_entry_size
+            truncated = max(max_defects, 0)
+            if truncated < len(defects):
+                import sys
+                print(
+                    f"result payload {payload_size} exceeds slot {self.result_slot_size}, "
+                    f"truncating defects {len(defects)} -> {truncated}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            defects = defects[:truncated]
+            payload_size = RESULT_SLOT_HEADER_SIZE + len(defects) * defect_entry_size
 
         deadline = time.monotonic() + 1.0
         while time.monotonic() < deadline:
@@ -139,6 +155,8 @@ class ShmClient:
                     AtomicU32.store(self.results.mm, base, SlotState.CORRUPTED)
                     self._release_frame_slot(result.sequence_id)
                     raise
+                # 写屏障：确保 payload + header_crc 写入在 READY 状态之前对所有 CPU 可见
+                AtomicU32.fence()
                 AtomicU32.store(self.results.mm, base, SlotState.READY)
                 self._release_frame_slot(result.sequence_id)
                 return
@@ -461,6 +479,10 @@ class ShmClient:
         view_key = (defect.camera_id, pose_id)
         if view_key in camera_index_by_view:
             return camera_index_by_view[view_key]
+        # 回退到静态 camera_id → index 表：固定机位模式（pose_id == camera_id）正确，
+        # 机器人飞拍模式（同一 camera_id 对应多个 pose_id）可能丢失 pose 区分度。
+        # 当前生产链路仅使用固定机位，飞拍模式部署前需确认缺陷携带的 pose_id 已在
+        # _remember_camera_index 中完成注册。
         return self._camera_index(defect.camera_id)
 
     def _remember_camera_index(self, camera_id: str, pose_id: str, camera_index: int) -> None:

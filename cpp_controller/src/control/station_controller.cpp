@@ -487,6 +487,24 @@ bool StationController::validate_detector_result(const ExternalTrigger& trigger,
     set_error("detector result ERROR with empty error_code");
     return false;
   }
+  // RECHECK 语义校验：Python 侧 RECHECK 与 error_code/quality_pass/defects 的关系
+  // 不像 OK/NG 那样严格，但需要拦截明显矛盾的状态组合。
+  if (decision == InspectionDecision::Recheck) {
+    if (result.meta.error_code == static_cast<std::uint32_t>(ErrorCode::None)) {
+      if (result.meta.quality_pass == 0) {
+        set_error("detector result RECHECK with quality_pass=false but no error_code");
+        return false;
+      }
+      if (result.meta.defect_count == 0) {
+        // 无错误码、无缺陷、质量通过但判定为 RECHECK 属于"无理由复检"，
+        // 可能是 Python 侧 pipeline 逻辑异常导致。保守降级为可接受但记录。
+        std::cerr << "[sequence_id=" << result.meta.sequence_id
+                  << " trigger_id=" << result.meta.trigger_id
+                  << "] RECHECK with NONE error_code, quality_ok, and zero defects"
+                  << " — suspicious empty RECHECK" << std::endl;
+      }
+    }
+  }
   return true;
 }
 

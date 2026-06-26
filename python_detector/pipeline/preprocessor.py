@@ -113,6 +113,9 @@ class Preprocessor:
         y0 = min(y_values)
         x1 = max(x_values)
         y1 = max(y_values)
+        # 像素坐标范围 [0, width-1]/[0, height-1]；x1 >= width 意味着多边形最大 x
+        # 超出图像右边界（而非在最后一个像素上，后者的 x1 = width-1 应通过检查）。
+        # 闭区间 bbox = [x0, x1] 与 numpy 左闭右开切片 [x0 : x1+1) 一致。
         if x0 < 0 or y0 < 0 or x1 >= frame.width or y1 >= frame.height:
             raise ValueError(
                 f"{frame.camera_id}/{frame.light_id}/{roi.roi_name}: ROI 坐标越界 "
