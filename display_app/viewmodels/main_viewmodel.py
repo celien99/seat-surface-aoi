@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import time
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
 from display_app.services.display_bridge import ControllerEvent, DisplayBridge, DisplayDefect, DisplayEvent
+from display_app.services.manual_trigger_client import ManualTriggerClient, ManualTriggerError
 from display_app.services.operator_journal import OperatorJournal
 
 
@@ -42,6 +44,9 @@ class MainViewModel(QObject):
     triggerErrorChanged = Signal()
     triggerErrorDisplayChanged = Signal()
     triggerEnabledChanged = Signal()
+    manualSnChanged = Signal()
+    manualTriggerPendingChanged = Signal()
+    manualTriggerFinished = Signal(bool, str, object)
     gridLayoutChanged = Signal()
     logsChanged = Signal()
     statsChanged = Signal()
@@ -61,10 +66,12 @@ class MainViewModel(QObject):
         grid_layout: str = "2x2",
         ng_popup_seconds: int = 30,
         journal: OperatorJournal | None = None,
+        manual_trigger_client: ManualTriggerClient | None = None,
     ) -> None:
         super().__init__()
         self._bridge = bridge
         self._journal = journal
+        self._manual_trigger_client = manual_trigger_client
         self._line_id = line_id
         self._system_status = "paused"
         self._ok_count = 0
@@ -82,7 +89,8 @@ class MainViewModel(QObject):
         self._last_trigger_result = ""
         self._trigger_error = ""
         self._grid_layout = grid_layout
-        self._trigger_enabled = False
+        self._trigger_enabled = manual_trigger_client is not None
+        self._manual_sn = ""
         self._operation_mode = "等待数据"
         self._status_message = "等待检测结果"
         self._station_alarm = ""
@@ -112,6 +120,8 @@ class MainViewModel(QObject):
         self._camera_filter = ""
         self._ng_popup_seconds = max(1, int(ng_popup_seconds))
         self._ng_started_at = 0.0
+        self._manual_trigger_pending = False
+        self.manualTriggerFinished.connect(self._finishManualTrigger)
 
     def _get_line_id(self) -> str:
         return self._line_id
@@ -168,7 +178,13 @@ class MainViewModel(QObject):
         return self._trigger_error
 
     def _get_trigger_enabled(self) -> bool:
-        return self._trigger_enabled
+        return self._trigger_enabled and not self._manual_trigger_pending
+
+    def _get_manual_sn(self) -> str:
+        return self._manual_sn
+
+    def _get_manual_trigger_pending(self) -> bool:
+        return self._manual_trigger_pending
 
     def _get_operation_mode(self) -> str:
         return self._operation_mode
@@ -235,6 +251,8 @@ class MainViewModel(QObject):
     triggerError = Property(str, _get_trigger_error, notify=triggerErrorChanged)
     triggerErrorDisplay = Property(str, _get_trigger_error_display, notify=triggerErrorDisplayChanged)
     triggerEnabled = Property(bool, _get_trigger_enabled, notify=triggerEnabledChanged)
+    manualSn = Property(str, _get_manual_sn, notify=manualSnChanged)
+    manualTriggerPending = Property(bool, _get_manual_trigger_pending, notify=manualTriggerPendingChanged)
     operationMode = Property(str, _get_operation_mode, notify=operationModeChanged)
     statusMessage = Property(str, _get_status_message, notify=statusMessageChanged)
     stationAlarm = Property(str, _get_station_alarm, notify=stationAlarmChanged)
@@ -295,7 +313,73 @@ class MainViewModel(QObject):
 
     @Slot()
     def manualTrigger(self) -> None:
-        self._set_trigger_error("当前展示程序只读检测结果，手动触发由 C++ 主控/PLC 负责")
+        if self._manual_trigger_client is None:
+            self._set_trigger_error("当前展示程序只读检测结果，手动触发未启用")
+            return
+        self.submitManualTrigger(self._manual_sn)
+
+    @Slot(str)
+    def setManualSn(self, value: str) -> None:
+        if self._manual_sn == value:
+            return
+        self._manual_sn = value
+        self.manualSnChanged.emit()
+
+    @Slot(str)
+    def submitManualTrigger(self, sn: str) -> None:
+        self.setManualSn(sn)
+        if self._manual_trigger_client is None:
+            self._set_trigger_error("当前展示程序只读检测结果，手动触发未启用")
+            return
+        if self._manual_trigger_pending:
+            self._set_trigger_error("上一条手动触发仍在提交")
+            return
+        self._manual_trigger_pending = True
+        self._line_busy = True
+        self.lineBusyChanged.emit()
+        self.manualTriggerPendingChanged.emit()
+        self.triggerEnabledChanged.emit()
+        self._set_trigger_error("")
+        self._set_status_message("正在提交手动触发")
+
+        client = self._manual_trigger_client
+
+        def worker() -> None:
+            try:
+                result = client.trigger(sn)
+            except ManualTriggerError as exc:
+                self.manualTriggerFinished.emit(False, str(exc), {})
+            else:
+                self.manualTriggerFinished.emit(
+                    True,
+                    f"手动触发已提交 SN={result.sn} ({result.elapsed_ms:.0f} ms)",
+                    {
+                        "source": "display_app",
+                        "seat_id": result.sn,
+                        "sn": result.sn,
+                        "host": result.host,
+                        "port": result.port,
+                        "elapsed_ms": result.elapsed_ms,
+                    },
+                )
+
+        thread = threading.Thread(target=worker, name="display-manual-trigger", daemon=True)
+        thread.start()
+
+    @Slot(bool, str, object)
+    def _finishManualTrigger(self, success: bool, message: str, payload: object) -> None:
+        if success:
+            self._set_status_message(message)
+            if isinstance(payload, dict):
+                self._persist_action("manual_trigger", payload)
+        else:
+            self._set_trigger_error(message)
+            self._set_status_message("手动触发提交失败")
+        self._manual_trigger_pending = False
+        self._line_busy = False
+        self.lineBusyChanged.emit()
+        self.manualTriggerPendingChanged.emit()
+        self.triggerEnabledChanged.emit()
 
     @Slot()
     def refresh(self) -> None:

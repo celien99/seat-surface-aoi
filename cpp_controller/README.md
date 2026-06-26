@@ -255,6 +255,16 @@ signal.start_ack=start_ack\n     # 到位信号回复
 signal.sn_ack=sn_ack\n           # SN 接收回复
 ```
 
+`signal.terminator`、`signal.ok_response`、`signal.start_ack` 和 `signal.sn_ack` 支持 `\n`、`\r`、`\t`、`\0` 和 `\\` 转义，配置文件中的 `start_ack\n` 会按真实换行发送。
+
+`display_app` 可在联调时作为该协议的人工触发客户端：
+
+```powershell
+uv run seat-aoi-display --trace-root trace --enable-manual-trigger --manual-trigger-port 9000
+```
+
+该按钮只模拟外部到位信号和 SN 条码，不直接控制相机、频闪或共享内存。生产现场如果真实 PLC/外部工控机已连接同一个 TCP 端口，需要先确认不会被手动触发客户端抢占。
+
 错误处理：两步中任意一步超时、命令不匹配或条码为空时，C++ 关闭客户端连接并在下一轮重新等待接入。
 
 ## 安全规则

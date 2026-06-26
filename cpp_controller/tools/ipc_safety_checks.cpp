@@ -365,6 +365,14 @@ bool test_station_fault_returns_recheck(const std::string& name,
   config.light_channels = {
       seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 10, 1.0F, 60.0F},
   };
+  const auto storage_root =
+      std::filesystem::temp_directory_path() /
+      ("seat_aoi_fault_check_" + std::to_string(seat_aoi::now_us()));
+  config.trace_root = (storage_root / "trace").string();
+  config.image_save.enabled = false;
+  config.image_save.root_dir = (storage_root / "images").string();
+  config.image_save.cleanup_enabled = false;
+  config.image_save.cleanup_min_free_ratio = 0.0F;
 
   seat_aoi::StationController station;
   if (!station.initialize(config)) {
@@ -411,18 +419,8 @@ bool test_missing_frame_returns_recheck() {
 }
 
 bool test_frame_slot_unavailable_returns_recheck() {
-  seat_aoi::FrameRingBuffer blocked_ring;
-  if (!blocked_ring.initialize(seat_aoi::kFrameShmName, 1, 65536, true)) {
-    std::cerr << "blocked frame ring initialize failed\n";
-    return false;
-  }
-  auto* blocked_slot = reinterpret_cast<seat_aoi::FrameSlotHeader*>(
-      slot_base(blocked_ring.header(), 0, 65536));
-  blocked_slot->state.store(static_cast<std::uint32_t>(seat_aoi::SlotState::Reading),
-                            std::memory_order_release);
-
   seat_aoi::StationConfig config;
-  config.reset_shared_memory = false;
+  config.reset_shared_memory = true;
   config.slot_count = 1;
   config.frame_slot_size = 65536;
   config.result_slot_size = 4096;
@@ -432,22 +430,44 @@ bool test_frame_slot_unavailable_returns_recheck() {
   config.camera_timeout_ms = 5;
   config.light_timeout_ms = 5;
   config.light_order = {1, 2, 3};
+  const auto storage_root =
+      std::filesystem::temp_directory_path() /
+      ("seat_aoi_slot_check_" + std::to_string(seat_aoi::now_us()));
+  config.trace_root = (storage_root / "trace").string();
+  config.image_save.enabled = false;
+  config.image_save.root_dir = (storage_root / "images").string();
+  config.image_save.cleanup_enabled = false;
+  config.image_save.cleanup_min_free_ratio = 0.0F;
 
   seat_aoi::StationController station;
   if (!station.initialize(config)) {
-    blocked_ring.unlink_name();
-    std::cerr << "slot unavailable station initialize failed\n";
+    const auto health = station.health_snapshot();
+    std::cerr << "slot unavailable station initialize failed state="
+              << seat_aoi::station_state_name(health.state)
+              << " alarm=" << health.alarm_message << "\n";
     return false;
   }
+
+  seat_aoi::SharedMemory frame_shm;
+  if (!frame_shm.open_existing(
+          seat_aoi::kFrameShmName,
+          seat_aoi::shared_memory_total_size(config.slot_count, config.frame_slot_size))) {
+    station.cleanup_shared_memory();
+    std::cerr << "slot unavailable frame shm open failed\n";
+    return false;
+  }
+  auto* blocked_slot = reinterpret_cast<seat_aoi::FrameSlotHeader*>(
+      slot_base(frame_shm.data(), 0, config.frame_slot_size));
+  blocked_slot->state.store(static_cast<std::uint32_t>(seat_aoi::SlotState::Reading),
+                            std::memory_order_release);
 
   seat_aoi::ExternalTrigger trigger;
   trigger.trigger_id = 7002;
   trigger.seat_id = "SIM_SLOT_FULL";
   trigger.sku = "seat_a_black_leather";
   const auto result = station.inspect_one_seat(trigger);
+  frame_shm.close();
   station.cleanup_shared_memory();
-  blocked_ring.unlink_name();
-  blocked_ring.close();
 
   const auto decision = static_cast<seat_aoi::InspectionDecision>(result.meta.decision);
   const auto error_code = static_cast<seat_aoi::ErrorCode>(result.meta.error_code);
@@ -504,6 +524,10 @@ bool test_runtime_light_channel_config_parses() {
                       config.max_camera_failures_before_reset == 2 &&
                       config.lights[0].response_mode ==
                           seat_aoi::LightSerialResponseMode::Ack &&
+                      config.signal.terminator == "\n" &&
+                      config.signal.ok_response == "ok\n" &&
+                      config.signal.start_ack == "start_ack\n" &&
+                      config.signal.sn_ack == "sn_ack\n" &&
                       config.image_save.enabled &&
                       config.image_save.cleanup_enabled &&
                       config.image_save.cleanup_min_free_ratio == 0.20F;
@@ -920,6 +944,7 @@ bool test_capture_only_bypasses_shared_memory_and_saves_images() {
   config.image_save.save_original = true;
   config.image_save.cleanup_enabled = true;
   config.image_save.cleanup_trace_root = true;
+  config.image_save.cleanup_min_free_ratio = 0.0F;
   config.light_order = {1, 2, 3};
 
   seat_aoi::StationController station;
@@ -1485,6 +1510,14 @@ bool test_detector_timeout_fault_recovers_on_next_trigger() {
   config.light_channels = {
       seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 10, 1.0F, 60.0F},
   };
+  const auto storage_root =
+      std::filesystem::temp_directory_path() /
+      ("seat_aoi_detector_timeout_" + std::to_string(seat_aoi::now_us()));
+  config.trace_root = (storage_root / "trace").string();
+  config.image_save.enabled = false;
+  config.image_save.root_dir = (storage_root / "images").string();
+  config.image_save.cleanup_enabled = false;
+  config.image_save.cleanup_min_free_ratio = 0.0F;
 
   seat_aoi::StationController station;
   if (!station.initialize(config)) {
@@ -1593,6 +1626,14 @@ bool test_detector_ng_with_quality_failure_is_rechecked() {
   config.trigger_timeout_ms = 5;
   config.camera_timeout_ms = 5;
   config.light_timeout_ms = 5;
+  const auto storage_root =
+      std::filesystem::temp_directory_path() /
+      ("seat_aoi_invalid_ng_" + std::to_string(seat_aoi::now_us()));
+  config.trace_root = (storage_root / "trace").string();
+  config.image_save.enabled = false;
+  config.image_save.root_dir = (storage_root / "images").string();
+  config.image_save.cleanup_enabled = false;
+  config.image_save.cleanup_min_free_ratio = 0.0F;
 
   seat_aoi::StationController station;
   if (!station.initialize(config)) {
@@ -1655,6 +1696,10 @@ bool test_station_writes_detector_timeout_event_log() {
       seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 10, 1.0F, 60.0F},
   };
   config.trace_root = trace_root.string();
+  config.image_save.enabled = false;
+  config.image_save.root_dir = (trace_root / "images").string();
+  config.image_save.cleanup_enabled = false;
+  config.image_save.cleanup_min_free_ratio = 0.0F;
 
   seat_aoi::StationController station;
   if (!station.initialize(config)) {

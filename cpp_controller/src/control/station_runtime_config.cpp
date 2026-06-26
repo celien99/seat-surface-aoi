@@ -86,6 +86,40 @@ bool parse_float_field(const std::string& field_name,
   }
 }
 
+std::string decode_control_text(const std::string& value) {
+  std::string out;
+  out.reserve(value.size());
+  for (std::size_t i = 0; i < value.size(); ++i) {
+    if (value[i] != '\\' || i + 1 >= value.size()) {
+      out.push_back(value[i]);
+      continue;
+    }
+    const char escaped = value[++i];
+    switch (escaped) {
+      case 'n':
+        out.push_back('\n');
+        break;
+      case 'r':
+        out.push_back('\r');
+        break;
+      case 't':
+        out.push_back('\t');
+        break;
+      case '0':
+        out.push_back('\0');
+        break;
+      case '\\':
+        out.push_back('\\');
+        break;
+      default:
+        out.push_back('\\');
+        out.push_back(escaped);
+        break;
+    }
+  }
+  return out;
+}
+
 bool parse_light_order(const std::string& value,
                        std::vector<std::uint32_t>* out_light_order,
                        std::string* error_message) {
@@ -619,9 +653,9 @@ bool load_station_runtime_config(const std::string& path,
     } else if (key == "signal.delimiter" || key == "plc.delimiter") {
       config.signal.delimiter = value;
     } else if (key == "signal.terminator") {
-      config.signal.terminator = value;
+      config.signal.terminator = decode_control_text(value);
     } else if (key == "signal.ok_response") {
-      config.signal.ok_response = value;
+      config.signal.ok_response = decode_control_text(value);
     } else if (key == "signal.protocol_mode") {
       config.signal.protocol_mode = value;
     } else if (key == "signal.start_command") {
@@ -629,9 +663,9 @@ bool load_station_runtime_config(const std::string& path,
     } else if (key == "signal.sn_prefix") {
       config.signal.sn_prefix = value;
     } else if (key == "signal.start_ack") {
-      config.signal.start_ack = value;
+      config.signal.start_ack = decode_control_text(value);
     } else if (key == "signal.sn_ack") {
-      config.signal.sn_ack = value;
+      config.signal.sn_ack = decode_control_text(value);
     } else if (key == "signal.result_host") {
       config.signal.result_host = value;
     } else if (key == "signal.result_port") {

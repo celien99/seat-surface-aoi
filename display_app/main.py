@@ -11,6 +11,11 @@ from PySide6.QtQml import QQmlApplicationEngine
 
 from display_app.infrastructure.image_provider import CameraImageProvider
 from display_app.services.display_bridge import DisplayBridge
+from display_app.services.manual_trigger_client import (
+    ManualTriggerClient,
+    ManualTriggerConfig,
+    decode_control_text,
+)
 from display_app.services.operator_journal import OperatorJournal
 from display_app.viewmodels.main_viewmodel import MainViewModel
 
@@ -22,6 +27,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--grid-layout", default="2x2", help="相机网格布局，例如 2x2、3x2。")
     parser.add_argument("--poll-ms", type=int, default=300, help="轮询 display_latest.json 的周期。")
     parser.add_argument("--ng-popup-seconds", type=int, default=30, help="NG 弹窗自动确认倒计时。")
+    parser.add_argument("--enable-manual-trigger", action="store_true", help="启用首页手动触发按钮。")
+    parser.add_argument("--manual-trigger-host", default="127.0.0.1", help="C++ tcp_signal 监听地址。")
+    parser.add_argument("--manual-trigger-port", type=int, default=9000, help="C++ tcp_signal 监听端口。")
+    parser.add_argument("--manual-trigger-timeout-ms", type=int, default=1000, help="手动触发 TCP 超时。")
+    parser.add_argument("--manual-trigger-terminator", default="\\n", help="手动触发命令结尾，支持 \\\\n。")
+    parser.add_argument("--manual-trigger-start-command", default="start", help="两步协议到位信号命令。")
+    parser.add_argument("--manual-trigger-sn-prefix", default="sn", help="两步协议 SN 前缀。")
+    parser.add_argument("--manual-trigger-start-ack", default="start_ack\\n", help="到位信号确认文本。")
+    parser.add_argument("--manual-trigger-sn-ack", default="sn_ack\\n", help="SN 确认文本。")
     args, qt_args = parser.parse_known_args(argv)
     args.qt_args = qt_args
     return args
@@ -35,12 +49,29 @@ def main(argv: list[str] | None = None) -> int:
     image_provider = CameraImageProvider()
     bridge = DisplayBridge(args.trace_root, image_provider)
     journal = OperatorJournal(args.trace_root)
+    manual_trigger_client = (
+        ManualTriggerClient(
+            ManualTriggerConfig(
+                host=args.manual_trigger_host,
+                port=args.manual_trigger_port,
+                timeout_ms=args.manual_trigger_timeout_ms,
+                terminator=decode_control_text(args.manual_trigger_terminator),
+                start_command=args.manual_trigger_start_command,
+                sn_prefix=args.manual_trigger_sn_prefix,
+                start_ack=decode_control_text(args.manual_trigger_start_ack),
+                sn_ack=decode_control_text(args.manual_trigger_sn_ack),
+            )
+        )
+        if args.enable_manual_trigger
+        else None
+    )
     view_model = MainViewModel(
         bridge,
         line_id=args.line_id,
         grid_layout=args.grid_layout,
         ng_popup_seconds=args.ng_popup_seconds,
         journal=journal,
+        manual_trigger_client=manual_trigger_client,
     )
 
     engine = QQmlApplicationEngine()
