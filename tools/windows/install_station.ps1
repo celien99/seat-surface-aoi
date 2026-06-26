@@ -42,7 +42,7 @@ function Invoke-Native {
   param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Command)
   & $Command[0] @($Command | Select-Object -Skip 1)
   if ($LASTEXITCODE -ne 0) {
-    throw "命令执行失败，exit=${LASTEXITCODE}: $($Command -join ' ')"
+    throw "Command failed, exit=${LASTEXITCODE}: $($Command -join ' ')"
   }
 }
 
@@ -66,14 +66,14 @@ function Resolve-Nssm {
     }
   }
 
-  throw "未找到 nssm.exe。请把 nssm.exe 放到 bin\nssm.exe、tools\nssm\nssm.exe，或通过 -NssmPath 指定。"
+  throw "nssm.exe not found. Put it in bin\nssm.exe or tools\nssm\nssm.exe, or pass -NssmPath."
 }
 
 function Get-VenvPython {
   param([string]$Root)
   $venvPython = Join-Path $Root ".venv\Scripts\python.exe"
   if (-not (Test-Path -LiteralPath $venvPython)) {
-    throw "未找到 Python 虚拟环境: $venvPython。请先安装依赖，或不要使用 -SkipPythonSync。"
+    throw "Python venv not found: $venvPython. Install dependencies first, or do not use -SkipPythonSync."
   }
   return $venvPython
 }
@@ -119,7 +119,7 @@ function Build-Controller {
   )
 
   if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) {
-    throw "未找到 cmake。请安装 CMake，或先手工构建并放置 bin\seat_aoi_controller.exe。"
+    throw "cmake not found. Install CMake, or build manually and place bin\seat_aoi_controller.exe."
   }
 
   $buildDir = Join-Path $Root "cpp_controller\build\station-release"
@@ -131,10 +131,10 @@ function Build-Controller {
 
   if ($UseHikrobot) {
     if (-not (Test-Path -LiteralPath $IncludeDir)) {
-      throw "启用 Hikrobot MVS 构建但未找到 include 目录: $IncludeDir"
+      throw "Hikrobot MVS build is enabled, but include dir was not found: $IncludeDir"
     }
     if (-not (Test-Path -LiteralPath $LibraryPath)) {
-      throw "启用 Hikrobot MVS 构建但未找到库文件: $LibraryPath"
+      throw "Hikrobot MVS build is enabled, but library was not found: $LibraryPath"
     }
     $args += "-DSEAT_AOI_ENABLE_HIKROBOT_MVS=ON"
     $args += "-DSEAT_AOI_HIKROBOT_MVS_INCLUDE_DIR=$IncludeDir"
@@ -148,7 +148,7 @@ function Build-Controller {
     Sort-Object FullName |
     Select-Object -First 1
   if ($null -eq $exe) {
-    throw "C++ 构建完成但未找到 seat_aoi_controller.exe: $buildDir"
+    throw "C++ build finished, but seat_aoi_controller.exe was not found: $buildDir"
   }
 
   $binDir = Join-Path $Root "bin"
@@ -253,7 +253,7 @@ function New-DisplayShortcut {
   $shortcut.TargetPath = $TargetPath
   $shortcut.Arguments = ($argumentParts -join " ")
   $shortcut.WorkingDirectory = $Root
-  $shortcut.Description = "Seat Surface AOI 展示前端"
+  $shortcut.Description = "Seat Surface AOI display app"
   $shortcut.IconLocation = "$TargetPath,0"
   $shortcut.Save()
 
@@ -267,7 +267,7 @@ function New-DisplayShortcut {
 }
 
 if (-not (Test-IsAdministrator)) {
-  throw "安装后台服务需要管理员权限。请用管理员身份运行 PowerShell。"
+  throw "Administrator PowerShell is required to install Windows services."
 }
 
 $ProjectRoot = Resolve-ProjectRoot -Value $ProjectRoot
@@ -286,10 +286,10 @@ try {
     Build-Controller -Root $ProjectRoot -UseHikrobot ([bool]$EnableHikrobotMvs) -IncludeDir $HikrobotIncludeDir -LibraryPath $HikrobotLibrary
   }
   if (-not (Test-Path -LiteralPath $ControllerExe)) {
-    throw "未找到 C++ 主控: $ControllerExe。请先构建，或重新运行并传入 -BuildController。"
+    throw "C++ controller not found: $ControllerExe. Build it first, or rerun with -BuildController."
   }
   if (-not (Test-Path -LiteralPath $ConfigFullPath)) {
-    throw "未找到生产配置: $ConfigFullPath"
+    throw "Production config not found: $ConfigFullPath"
   }
 
   if (-not $SkipValidation) {
@@ -304,7 +304,7 @@ try {
     -Nssm $Nssm `
     -Name $DetectorServiceName `
     -DisplayName "Seat AOI Python Detector" `
-    -Description "Seat Surface AOI Python 检测进程，读取共享内存任务并写回检测结果。" `
+    -Description "Seat Surface AOI Python detector process." `
     -Application $VenvPython `
     -Arguments "-m python_detector.detector_main --config $(Quote-ServiceArgument $ConfigPath)" `
     -Root $ProjectRoot `
@@ -314,7 +314,7 @@ try {
     -Nssm $Nssm `
     -Name $ControllerServiceName `
     -DisplayName "Seat AOI C++ Controller" `
-    -Description "Seat Surface AOI C++ 主控进程，负责外部信号、相机、频闪、共享内存和结果回传。" `
+    -Description "Seat Surface AOI C++ controller process." `
     -Application $ControllerExe `
     -Arguments "--config $(Quote-ServiceArgument $ConfigPath) --loop" `
     -Root $ProjectRoot `
@@ -337,7 +337,7 @@ try {
     Invoke-Native $Nssm start $ControllerServiceName
   }
 
-  Write-Host "Seat Surface AOI 工控机交付安装完成。"
+  Write-Host "Seat Surface AOI station installation completed."
   Write-Host "ProjectRoot: $ProjectRoot"
   Write-Host "Detector service: $DetectorServiceName"
   Write-Host "Controller service: $ControllerServiceName"

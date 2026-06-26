@@ -134,6 +134,8 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 -Li
 - 注册 `SeatAoiDetector` 和 `SeatAoiController` 两个自启动后台服务。
 - 创建 `Seat AOI Display.lnk` 桌面快捷方式，目标为 `.venv\Scripts\pythonw.exe -m display_app.main --trace-root trace --line-id LINE1_AOI_01 --grid-layout 2x1`。
 
+`tools\windows\*.ps1` 交付脚本保持 ASCII 文本，兼容工控机常见的 Windows PowerShell 5.1，避免 UTF-8 无 BOM 脚本中的中文字符串被系统 ANSI 代码页误读后触发解析错误。
+
 服务和快捷方式安装后，日常运行只需要：
 
 ```powershell

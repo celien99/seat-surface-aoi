@@ -28,7 +28,7 @@ function Invoke-Native {
   param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Command)
   & $Command[0] @($Command | Select-Object -Skip 1)
   if ($LASTEXITCODE -ne 0) {
-    throw "命令执行失败，exit=${LASTEXITCODE}: $($Command -join ' ')"
+    throw "Command failed, exit=${LASTEXITCODE}: $($Command -join ' ')"
   }
 }
 
@@ -52,7 +52,7 @@ function Resolve-Nssm {
     }
   }
 
-  throw "未找到 nssm.exe。请把 nssm.exe 放到 bin\nssm.exe、tools\nssm\nssm.exe，或通过 -NssmPath 指定。"
+  throw "nssm.exe not found. Put it in bin\nssm.exe or tools\nssm\nssm.exe, or pass -NssmPath."
 }
 
 function Remove-ServiceIfExists {
@@ -61,9 +61,9 @@ function Remove-ServiceIfExists {
   if ($null -ne $service) {
     Invoke-NativeOptional $Nssm stop $Name
     Invoke-Native $Nssm remove $Name confirm
-    Write-Host "已移除服务: $Name"
+    Write-Host "Removed service: $Name"
   } else {
-    Write-Host "服务不存在，跳过: $Name"
+    Write-Host "Service not found, skipped: $Name"
   }
 }
 
@@ -71,12 +71,12 @@ function Remove-ShortcutIfExists {
   param([string]$Path)
   if (Test-Path -LiteralPath $Path) {
     Remove-Item -LiteralPath $Path -Force
-    Write-Host "已删除快捷方式: $Path"
+    Write-Host "Removed shortcut: $Path"
   }
 }
 
 if (-not (Test-IsAdministrator)) {
-  throw "卸载后台服务需要管理员权限。请用管理员身份运行 PowerShell。"
+  throw "Administrator PowerShell is required to uninstall Windows services."
 }
 
 $ProjectRoot = Resolve-ProjectRoot -Value $ProjectRoot
@@ -97,4 +97,4 @@ if ($RemoveStartupShortcut) {
   Remove-ShortcutIfExists -Path (Join-Path $startup "$ShortcutName.lnk")
 }
 
-Write-Host "Seat Surface AOI 服务和快捷方式已卸载。项目目录、模型、trace 和日志未删除: $ProjectRoot"
+Write-Host "Seat Surface AOI services and shortcuts were uninstalled. Project, model, trace, and logs were not deleted: $ProjectRoot"
