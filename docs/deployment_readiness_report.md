@@ -138,9 +138,9 @@ uv run python -m tools.validate_deployment_preflight --strict-production
 | Visual Studio 2019+ Build Tools | C++17 MSVC 编译器 | VS Installer |
 | CMake ≥ 3.16 | 构建系统 | cmake.org |
 | 海康 MVS SDK | 相机驱动 + 开发库 | 海康官网下载 |
-| Python 3.10+ | 检测进程 | python.org；无网现场需提前准备离线安装包 |
-| uv | 有网开发机依赖锁定和打包工具 | 工控机无网时可不现场联网安装，随离线工具包或安装介质交付 |
-| Python 离线依赖包 | detector/display/ONNX/FAISS wheelhouse | 有网同平台机器执行 `uv run python -m tools.package_python_offline_deps --extra display --extra onnx --extra faiss` |
+| Python 3.10+ | 检测进程 | python.org |
+| uv | Python 依赖锁定和安装工具 | 工控机交付安装阶段可联网执行 `uv sync` |
+| NSSM | Windows 后台服务守护 | 将 `nssm.exe` 放入 `bin/`、`tools/nssm/` 或系统 `PATH` |
 
 ### C++ 构建（启用海康 MVS）
 
@@ -155,53 +155,74 @@ cmake --build build --config Release
 
 ### Python 环境初始化
 
-有网环境可以直接按锁文件恢复：
+交付安装阶段在工控机按锁文件恢复：
 
 ```powershell
-uv sync
+uv sync --extra onnx --extra faiss --extra display
 ```
 
-工控机无公网时，先解压项目部署包和 Python 离线依赖包，再在项目目录执行：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\offline_python_deps\install_offline.ps1 -ProjectRoot .
-.\.venv\Scripts\python.exe -m tools.validate_deployment_preflight
-```
-
-不要把开发机当前 `.venv/` 直接复制到工控机；依赖应通过离线 `wheelhouse/` 在目标机重建。
+正式交付完成后，长期运行阶段不要求工控机继续联网；后台服务使用本地 `.venv`、本地 `bin\seat_aoi_controller.exe` 和本地模型资产运行。
 
 ---
 
-## 七、工控机启动流程
+## 七、后台服务 + display_app 快捷方式交付流程
 
-### 上线前最后检查
-
-```powershell
-# 1. 校验 C++ 生产配置（应全部通过，无 TODO）
-.\bin\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.production.conf --validate-config
-
-# 2. 校验 Python 侧架构就绪度
-uv run python -m tools.validate_architecture_readiness --scope production
-
-# 3. 校验模型资产
-uv run python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1
-
-# 4. 校验部署预检
-uv run python -m tools.validate_deployment_preflight --strict-production
-```
-
-### 生产启动（三个终端）
+以下命令在工控机管理员 PowerShell 中按顺序执行。项目代码、依赖安装和 C++ 构建都可以在工控机交付阶段完成；模型大文件由现场交付提供。
 
 ```powershell
-# ====== 终端 1：Python 检测进程 ======
-uv run python -m python_detector.detector_main --config cpp_controller/config/station_runtime.production.conf
+# 0. 首次部署前确认：已安装 Git、Python 3.10+、uv、CMake、Hikrobot MVS SDK、VC++ Runtime。
+#    nssm.exe 放到 bin\nssm.exe、tools\nssm\nssm.exe 或系统 PATH。
+$ProjectRoot = "C:\seat-surface-aoi"
+$RepoUrl = "<REPO_URL>"
+$ModelRoot = "D:\seat-aoi-model"
 
-# ====== 终端 2：C++ 主控（持续循环模式）=======
-.\bin\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.production.conf --loop
+# 1. 首次部署：拉取项目代码
+git clone $RepoUrl $ProjectRoot
+Set-Location $ProjectRoot
 
-# ====== 终端 3：展示前端 ======
-uv run seat-aoi-display --trace-root trace --line-id LINE1_AOI_01 --grid-layout 2x1
+# 2. 后续更新：只拉代码，不覆盖现场 trace/images
+git fetch --all --prune
+git checkout main
+git pull --ff-only
+
+# 3. 复制真实模型资产
+New-Item -ItemType Directory -Force model\roi_yolo, model\wideresnet50, model\patchcore | Out-Null
+Copy-Item "$ModelRoot\roi_yolo\seat_roi_seg.onnx" ".\model\roi_yolo\seat_roi_seg.onnx" -Force
+Copy-Item "$ModelRoot\wideresnet50\seat_wrn50_embedding.onnx" ".\model\wideresnet50\seat_wrn50_embedding.onnx" -Force
+Copy-Item "$ModelRoot\patchcore\seat_pca.json" ".\model\patchcore\seat_pca.json" -Force
+Copy-Item "$ModelRoot\patchcore\seat_patchcore_bank.json" ".\model\patchcore\seat_patchcore_bank.json" -Force
+Copy-Item "$ModelRoot\patchcore\seat_patchcore.faiss" ".\model\patchcore\seat_patchcore.faiss" -Force
+
+# 4. 按现场确认 COM 口、相机 SN、结果回传 IP/端口
+notepad .\cpp_controller\config\station_runtime.production.conf
+
+# 5. 一键交付安装：安装依赖、构建 C++、校验、注册后台服务、创建桌面快捷方式
+powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
+  -BuildController `
+  -EnableHikrobotMvs `
+  -LineId LINE1_AOI_01 `
+  -GridLayout 2x1
 ```
+
+如果 `bin\seat_aoi_controller.exe` 已经提前放好，安装命令可省略 `-BuildController -EnableHikrobotMvs`。
+
+### 安装脚本动作
+
+- 安装 Python 依赖：`uv sync --extra onnx --extra faiss --extra display`。
+- 可选构建 C++ 主控，并复制到 `bin\seat_aoi_controller.exe`。
+- 执行 C++ 配置校验、共享内存协议校验、模型资产校验和严格部署预检。
+- 用 NSSM 注册 `SeatAoiDetector` 和 `SeatAoiController` 两个自启动后台服务；`SeatAoiController` 依赖 `SeatAoiDetector`。
+- 创建公共桌面 `Seat AOI Display.lnk`，用 `pythonw.exe -m display_app.main --trace-root trace --line-id LINE1_AOI_01 --grid-layout 2x1` 启动展示前端。
+
+### 日常启动和卸载
+
+```powershell
+Start-Service SeatAoiDetector
+Start-Service SeatAoiController
+powershell -ExecutionPolicy Bypass -File .\tools\windows\uninstall_station.ps1
+```
+
+操作员通过桌面快捷方式启动 `display_app`。展示前端不注册为服务；如需 Windows 登录后自动打开，执行安装脚本时追加 `-CreateStartupShortcut`。
 
 ### 实验室联调启动（无外部信号，手动触发）
 

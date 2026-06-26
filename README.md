@@ -76,51 +76,95 @@ cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --config cpp_co
 - `online`：初始化 Frame/Result 共享内存，采图后发布给 Python detector，等待检测结果并回传外部信号。
 - `capture_only`：不初始化共享内存，不等待 Python detector；采图保存到 `image_save.root_dir/YYYYMMDD/<seat_id>/`，完成后回传 `RECHECK`。
 
-## 正式部署流程
+## 工控机部署顺序
 
-当前正式部署按“三进程 + 同一份生产配置”执行：Python detector 先启动并打开共享内存，C++ 主控随后进入 `--loop` 生产循环，`display_app` 最后启动并只读消费 `trace` 展示通道。生产现场不要启用 display_app 手动触发按钮，除非已经确认不会抢占真实 PLC/上位机的 `tcp_signal` 连接。
+当前正式交付按“两个后台服务 + 一个展示快捷方式”执行：`SeatAoiDetector` 后台服务先启动并打开共享内存，`SeatAoiController` 后台服务随后进入 `--loop` 生产循环，桌面快捷方式启动 `display_app` 并只读消费 `trace` 展示通道。生产现场不要启用 display_app 手动触发按钮，除非已经确认不会抢占真实 PLC/上位机的 `tcp_signal` 连接。
 
-1. 工控机准备：安装 Hikrobot MVS SDK、VC++ Runtime、Python 运行环境，并放置已交付的生产版 `bin\seat_aoi_controller.exe`；无公网工控机先在同平台机器生成离线依赖包：
-
-```powershell
-uv run python -m tools.package_python_offline_deps --extra onnx --extra faiss --extra display
-```
-
-2. 生产包与模型：把真实 `model/roi_yolo/seat_roi_seg.onnx`、`model/wideresnet50/seat_wrn50_embedding.onnx`、`model/patchcore/seat_pca.json`、`seat_patchcore_bank.json` 和可选 `seat_patchcore.faiss` 放入部署包，并在工控机执行：
+构建、依赖安装和模型拷贝都可以在工控机交付安装阶段完成；交付成功后的长期运行阶段不要求网络连接。以下命令在工控机管理员 PowerShell 中按顺序执行。
 
 ```powershell
-uv run python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1
-uv run python -m tools.validate_deployment_preflight --strict-production
+# 0. 首次确认：已安装 Git、Python 3.10+、uv、CMake、VC++ Runtime、Hikrobot MVS SDK。
+#    nssm.exe 放到 bin\nssm.exe 或 tools\nssm\nssm.exe；真实模型文件由现场交付提供。
+$ProjectRoot = "C:\seat-surface-aoi"
+$RepoUrl = "<REPO_URL>"
+$ModelRoot = "D:\seat-aoi-model"
+
+# 1. 首次部署：拉取项目代码
+git clone $RepoUrl $ProjectRoot
+Set-Location $ProjectRoot
+
+# 2. 后续更新：只拉代码，不覆盖现场 trace/images
+git fetch --all --prune
+git checkout main
+git pull --ff-only
+
+# 3. 复制真实模型资产
+New-Item -ItemType Directory -Force model\roi_yolo, model\wideresnet50, model\patchcore | Out-Null
+Copy-Item "$ModelRoot\roi_yolo\seat_roi_seg.onnx" ".\model\roi_yolo\seat_roi_seg.onnx" -Force
+Copy-Item "$ModelRoot\wideresnet50\seat_wrn50_embedding.onnx" ".\model\wideresnet50\seat_wrn50_embedding.onnx" -Force
+Copy-Item "$ModelRoot\patchcore\seat_pca.json" ".\model\patchcore\seat_pca.json" -Force
+Copy-Item "$ModelRoot\patchcore\seat_patchcore_bank.json" ".\model\patchcore\seat_patchcore_bank.json" -Force
+Copy-Item "$ModelRoot\patchcore\seat_patchcore.faiss" ".\model\patchcore\seat_patchcore.faiss" -Force
+
+# 4. 配置生产环境参数：按现场确认 COM 口、相机 SN、结果回传 IP/端口
+notepad .\cpp_controller\config\station_runtime.production.conf
+
+# 5. 一键安装：同步 Python 依赖、构建 C++ 主控、注册后台服务、创建展示快捷方式
+powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
+  -BuildController `
+  -EnableHikrobotMvs `
+  -LineId LINE1_AOI_01 `
+  -GridLayout 2x1
 ```
 
-3. 生产配置确认：复核 `cpp_controller/config/station_runtime.production.conf` 中的相机序列号、COM 口、`signal.port`、结果回传 `signal.result_host/result_port`、`trace_root=trace`、`light_order=1,2,3` 和 128 MB `frame_slot_size`，然后用已交付的生产版控制器校验：
+如果 `bin\seat_aoi_controller.exe` 已经由现场手工构建好，可以省略 `-BuildController -EnableHikrobotMvs`：
 
 ```powershell
-.\bin\seat_aoi_controller.exe `
-  --config cpp_controller\config\station_runtime.production.conf `
-  --validate-config
+Set-Location C:\seat-surface-aoi
+powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 -LineId LINE1_AOI_01 -GridLayout 2x1
 ```
 
-4. 正式启动顺序：
+安装脚本默认会执行：
+
+- `uv sync --extra onnx --extra faiss --extra display`
+- `seat_aoi_controller.exe --validate-config`
+- `python -m tools.validate_protocol`
+- `python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1`
+- `python -m tools.validate_deployment_preflight --strict-production`
+- 注册 `SeatAoiDetector` 和 `SeatAoiController` 两个自启动后台服务。
+- 创建 `Seat AOI Display.lnk` 桌面快捷方式，目标为 `.venv\Scripts\pythonw.exe -m display_app.main --trace-root trace --line-id LINE1_AOI_01 --grid-layout 2x1`。
+
+服务和快捷方式安装后，日常运行只需要：
 
 ```powershell
-# 终端/服务 1：Python detector，必须传入同一份 production.conf
-uv run python -m python_detector.detector_main `
-  --config cpp_controller\config\station_runtime.production.conf
-
-# 终端/服务 2：C++ 主控，持续生产循环
-.\bin\seat_aoi_controller.exe `
-  --config cpp_controller\config\station_runtime.production.conf `
-  --loop
-
-# 终端/自启动 3：展示前端，只读展示
-uv run seat-aoi-display `
-  --trace-root trace `
-  --line-id LINE1_AOI_01 `
-  --grid-layout 2x1
+Start-Service SeatAoiDetector
+Start-Service SeatAoiController
 ```
 
-5. 守护与验收：生产环境建议用 NSSM 或现场进程守护分别守护 Python detector 和 C++ 主控；放行前完成 `--validate-config`、`validate_model_assets`、`validate_deployment_preflight --strict-production`、低速真实件联调、故障注入、连续 8h/24h 稳定性验证。任一超时、缺帧、质量门禁失败、模型异常或 trace 写入失败都必须输出 `RECHECK` 或 `ERROR`。
+操作员从桌面双击 `Seat AOI Display` 打开展示前端。展示前端是 GUI 程序，不注册为 Windows Service；如需登录后自动打开，可安装时追加 `-CreateStartupShortcut`。后台服务日志写入 `logs\services\`，检测和展示事件仍写入 `trace\`。
+
+卸载服务和快捷方式时执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\windows\uninstall_station.ps1
+```
+
+卸载脚本只移除 `SeatAoiDetector`、`SeatAoiController` 和快捷方式，不删除项目代码、模型、`trace` 或日志。
+
+仍可手动启动三进程做排障：
+
+```powershell
+# 终端 1：Python detector，必须传入同一份 production.conf
+.\.venv\Scripts\python.exe -m python_detector.detector_main --config cpp_controller\config\station_runtime.production.conf
+
+# 终端 2：C++ 主控，持续生产循环
+.\bin\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.production.conf --loop
+
+# 终端 3：展示前端，只读展示
+.\.venv\Scripts\python.exe -m display_app.main --trace-root trace --line-id LINE1_AOI_01 --grid-layout 2x1
+```
+
+任一超时、缺帧、质量门禁失败、模型异常或 trace 写入失败都必须输出 `RECHECK` 或 `ERROR`。
 
 ## 工程地图
 
@@ -132,7 +176,7 @@ seat-surface-aoi/
 ├── training_tools/      # 离线样本、embedding、PCA/PatchCore/FAISS、benchmark
 ├── model/               # 模型产物目录
 ├── docs/                # 架构、协议和运维文档
-└── tools/               # 协议校验、模拟 IPC、打包和预检工具
+└── tools/               # 协议校验、模拟 IPC、打包、预检和 Windows 交付安装脚本
 ```
 
 ROI 定位模型当前使用单类别 `seat`。训练数据应采用 YOLO segmentation 格式，导出的产物放入 `model/roi_yolo/seat_roi_seg.onnx`，并与 `python_detector/config/*recipe*.yaml` 中的 `roi_locator.class_names: [seat]`、ROI 模板和标定文件保持一致。

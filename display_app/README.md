@@ -32,6 +32,24 @@ uv run python -m display_app.main --trace-root trace --poll-ms 300
 
 `--trace-root` 必须指向 detector 输出 `display_latest.json` 的目录。默认使用根目录 `trace/`。
 
+## 工控机交付方式
+
+生产交付时，`display_app` 不注册为 Windows Service。它是需要桌面会话的 GUI 程序，由 `tools/windows/install_station.ps1` 创建桌面快捷方式启动；后台只注册 Python detector 和 C++ 主控两个服务。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
+  -LineId LINE1_AOI_01 `
+  -GridLayout 2x1
+```
+
+快捷方式默认创建到公共桌面，目标为：
+
+```powershell
+.\.venv\Scripts\pythonw.exe -m display_app.main --trace-root trace --line-id LINE1_AOI_01 --grid-layout 2x1
+```
+
+如只希望当前用户可见，安装时追加 `-CurrentUserShortcut`；如需要登录 Windows 后自动打开展示前端，追加 `-CreateStartupShortcut`。生产快捷方式默认不启用 `--enable-manual-trigger`，避免抢占真实 PLC/上位机连接。
+
 联调时可显式启用首页手动触发按钮：
 
 ```powershell

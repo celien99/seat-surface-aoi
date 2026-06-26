@@ -73,28 +73,30 @@ display_app
 
 推荐部署顺序：
 
-1. 在工控机安装 Hikrobot MVS SDK、VC++ Runtime、Python 3.10+，放置项目发布包、生产版 `bin\seat_aoi_controller.exe` 和 Python 离线依赖包。
-2. 替换并校验真实模型资产：`uv run python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1`。
-3. 复核生产配置中的 `COM1`、相机 SN、`signal.port`、`signal.result_host/result_port`、`trace_root=trace` 和 `light_order=1,2,3`。
-4. 执行 `.\bin\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.production.conf --validate-config`。
-5. 执行 `uv run python -m tools.validate_deployment_preflight --strict-production`，确认没有 `BLOCKED`。
-6. 先启动 Python detector，再启动 C++ 主控 `--loop`，最后启动 display_app。
-7. 用服务守护或现场看门狗分别守护 Python detector 与 C++ 主控；display_app 按 HMI 自启动策略运行。
+1. 工控机安装 Git、Python 3.10+、Hikrobot MVS SDK 和 VC++ Runtime。
+2. `git clone <REPO_URL> C:\seat-surface-aoi`；后续更新用 `git fetch --all --prune`、`git checkout main`、`git pull --ff-only`。
+3. 复制现场提供的真实 `model/` 资产；如未预置 `bin\seat_aoi_controller.exe`，安装脚本可在工控机本机构建。
+4. 复核生产配置中的 `COM1`、相机 SN、`signal.port`、`signal.result_host/result_port`、`trace_root=trace` 和 `light_order=1,2,3`。
+5. 确认 `nssm.exe` 位于 `bin\nssm.exe`、`tools\nssm\nssm.exe` 或系统 `PATH`。
+6. 用管理员 PowerShell 执行 `tools\windows\install_station.ps1`；脚本会安装 Python 依赖、可选构建 C++、执行上线校验、注册 `SeatAoiDetector`/`SeatAoiController` 两个后台服务，并创建 `Seat AOI Display` 桌面快捷方式。
+7. display_app 不作为服务运行；操作员通过桌面快捷方式打开，也可以用 `-CreateStartupShortcut` 设置登录后自动打开。
 
-正式生产启动命令：
+正式交付安装命令：
 
 ```powershell
-uv run python -m python_detector.detector_main `
-  --config cpp_controller\config\station_runtime.production.conf
+powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
+  -BuildController `
+  -EnableHikrobotMvs `
+  -LineId LINE1_AOI_01 `
+  -GridLayout 2x1
+```
 
-.\bin\seat_aoi_controller.exe `
-  --config cpp_controller\config\station_runtime.production.conf `
-  --loop
+如果 C++ 主控已经构建到 `bin\seat_aoi_controller.exe`：
 
-uv run seat-aoi-display `
-  --trace-root trace `
-  --line-id LINE1_AOI_01 `
-  --grid-layout 2x1
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
+  -LineId LINE1_AOI_01 `
+  -GridLayout 2x1
 ```
 
 生产现场默认不要给 display_app 加 `--enable-manual-trigger`；该按钮只用于联调模拟外部到位信号和 SN 条码。如果真实 PLC/上位机已经连接 `signal.port=9000`，前端手动触发客户端会形成连接仲裁问题。

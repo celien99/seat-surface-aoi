@@ -279,39 +279,39 @@ uv run seat-aoi-display --trace-root trace --enable-manual-trigger --manual-trig
 
 ## 长期运行与进程守护
 
-C++ 主控在触发等待失败或 Python 返回 ERROR 时不会退出（已内置自动恢复）。生产环境建议同时守护 Python detector 和 C++ 主控，确保极端情况下自动重启；display_app 可按现场 HMI 自启动策略运行。
+C++ 主控在触发等待失败或 Python 返回 ERROR 时不会退出（已内置自动恢复）。生产交付推荐使用 `tools\windows\install_station.ps1` 注册 Python detector 和 C++ 主控两个后台服务；display_app 是 GUI 程序，通过桌面快捷方式或登录自启动运行，不注册为 Windows Service。
 
-正式启动顺序：
+手动排障启动顺序：
 
 ```powershell
 # 1. Python detector，必须使用同一份 production.conf 读取 128 MB frame slot 配置
-uv run python -m python_detector.detector_main --config cpp_controller\config\station_runtime.production.conf
+.\.venv\Scripts\python.exe -m python_detector.detector_main --config cpp_controller\config\station_runtime.production.conf
 
 # 2. C++ 主控
 .\bin\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.production.conf --loop
 
 # 3. 展示前端，只读 trace
-uv run seat-aoi-display --trace-root trace --line-id LINE1_AOI_01 --grid-layout 2x1
+.\.venv\Scripts\python.exe -m display_app.main --trace-root trace --line-id LINE1_AOI_01 --grid-layout 2x1
 ```
 
-### Windows Service (推荐)
+### Windows 交付安装
 
 ```powershell
-# 使用 NSSM (Non-Sucking Service Manager) 注册服务；路径按实际部署目录调整。
-nssm install SeatAoiDetector "C:\seat-surface-aoi\.venv\Scripts\python.exe"
-nssm set SeatAoiDetector AppDirectory "C:\seat-surface-aoi"
-nssm set SeatAoiDetector AppParameters "-m python_detector.detector_main --config cpp_controller\config\station_runtime.production.conf"
-nssm set SeatAoiDetector Start SERVICE_AUTO_START
-nssm set SeatAoiDetector AppRestartDelay 5000
-nssm start SeatAoiDetector
+# 管理员 PowerShell；依赖安装和 C++ 构建允许在工控机交付阶段完成。
+# nssm.exe 需位于 bin\nssm.exe、tools\nssm\nssm.exe 或 PATH。
+powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
+  -BuildController `
+  -EnableHikrobotMvs `
+  -LineId LINE1_AOI_01 `
+  -GridLayout 2x1
 
-nssm install SeatAoiController "C:\seat-surface-aoi\bin\seat_aoi_controller.exe"
-nssm set SeatAoiController AppDirectory "C:\seat-surface-aoi"
-nssm set SeatAoiController AppParameters "--config cpp_controller\config\station_runtime.production.conf --loop"
-nssm set SeatAoiController Start SERVICE_AUTO_START
-nssm set SeatAoiController AppRestartDelay 5000
-nssm start SeatAoiController
+# 如果 bin\seat_aoi_controller.exe 已存在，可不传 -BuildController。
+powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
+  -LineId LINE1_AOI_01 `
+  -GridLayout 2x1
 ```
+
+安装脚本会执行 `uv sync --extra onnx --extra faiss --extra display`、C++ 配置校验、协议校验、模型资产校验和严格部署预检，然后注册 `SeatAoiDetector` 与 `SeatAoiController` 自启动服务。服务 stdout/stderr 写入 `logs\services\`。桌面快捷方式 `Seat AOI Display` 使用 `pythonw.exe -m display_app.main` 启动，只读 `trace` 展示通道。
 
 ### PowerShell Watchdog (简易备选)
 
