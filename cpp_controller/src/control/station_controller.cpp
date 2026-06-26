@@ -195,6 +195,13 @@ bool StationController::wait_for_trigger(ExternalTrigger* out_trigger, std::stri
   if (!signal_client_->wait_trigger(out_trigger, config_.trigger_timeout_ms, error_message)) {
     const std::string message =
         error_message != nullptr ? *error_message : "external signal trigger wait failed";
+    if (signal_client_->is_idle_wait_timeout(message)) {
+      if (error_message != nullptr) {
+        error_message->clear();
+      }
+      health_.transition_to(StationState::Ready, "waiting for external trigger");
+      return false;
+    }
     health_.record_fault(ErrorCode::DeviceFault, message);
     health_.transition_to(StationState::Fault, message);
     record_system_event("trigger_wait_failed", ErrorCode::DeviceFault, message);

@@ -24,6 +24,7 @@ flowchart LR
 保留的 C++ 主控能力：
 
 - 接收外部信号：`manual_trigger`、`external_signal`、`tcp_signal`（支持 `single` 单行协议和 `start_sn` 两步握手协议），以及本地回归用 `simulated`。
+- `tcp_signal` 和文件队列外部信号在未收到完整触发时只保持监听/等待，不生成 `RECHECK` 业务记录，不发布共享内存任务，也不会阻塞下一次有效触发。
 - 连接当前型号频闪控制器：`light.backend=serial_ascii`，适配 FL-ACDH。
 - 相机链路：本地回归 `simulated`，现场 `hikrobot_mvs`；真实采集对齐现场可工作的参考程序，每轮频闪前先并行 drain 所有相机 SDK 缓冲区的残留帧（arm() 改曝光参数可能在 Continuous 模式下即时产生一帧），再触发 FL-ACDH 并用 `GetImageBuffer` 读取硬触发帧；启动和相机故障重启时也会排空旧帧。当前生产、联调和采图配置统一使用 `COM1 / 9600 8N1`、30ms 相机曝光和 300/500/700us 三路频闪脉宽，FL-ACDH 触发路径只发送已在现场验证稳定的 `8/9/A/7` 命令，其中 `9` 命令按手册 `000~3E7` 范围编码为三位十六进制数据。单台相机连续失败后自动 stop+start 重启恢复。
 - 固定采集方式：2 个机位共享 3 路光源，`capture_mode=fixed_camera`、`capture_schedule=shared_light_parallel`、`light_order=1,2,3`。
@@ -137,6 +138,8 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
   -GridLayout 2x1
 ```
 
+如果 C++ 主控正在监听但没有 PLC/上位机/display_app 客户端连接，或客户端已连接但尚未发送完整 `start` + `sn <SN>`，这属于空闲等待，不会触发采图、不会写入共享内存、不会等待 Python detector，也不会在展示端形成复检记录。只有完整触发已进入采集/检测后发生缺帧、设备故障、共享内存错误、检测超时、质量门禁失败或协议/CRC 错误，才会按 fail-closed 规则输出 `RECHECK` 或 `ERROR`。
+
 安装脚本默认会执行：
 
 - `uv export --no-emit-project ...` 生成运行依赖清单，并安装到 `.venv`；不会构建或安装当前项目 wheel，因此不会因为缺少文档文件阻断生产安装。
@@ -178,7 +181,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\uninstall_station.ps1
 .\.venv\Scripts\python.exe -m display_app.main --trace-root trace --line-id LINE1_AOI_01 --grid-layout 2x1
 ```
 
-任一超时、缺帧、质量门禁失败、模型异常或 trace 写入失败都必须输出 `RECHECK` 或 `ERROR`。
+完整触发进入采集/检测后，任一超时、缺帧、质量门禁失败、模型异常或 trace 写入失败都必须输出 `RECHECK` 或 `ERROR`；外部触发尚未完整到达时仅继续等待，不输出检测结果。
 
 ## 工程地图
 

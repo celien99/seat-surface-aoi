@@ -84,6 +84,8 @@ cpp_controller/
 6. 校验 `sequence_id`、`trigger_id`、`seat_id`、CRC 和结果语义。
 7. 通过外部信号回传 `OK`、`NG` 或 `RECHECK`。`ERROR` 会映射为外部 `RECHECK`。
 
+外部触发尚未完整到达时不进入一次检测任务：`tcp_signal` 没有客户端、客户端已连接但还没发送触发行、`start_sn` 只收到 `start` 但未收到 `sn <SN>`、或文件队列暂无新触发行，都只保持 Ready 状态并继续等待；这类空闲等待不会写 `inspection_recheck`，不会发布 Frame SHM，也不会等待 Python detector。只有完整触发进入采集/检测后，缺帧、设备故障、共享内存错误、检测超时、质量门禁失败或协议/CRC 错误才按 fail-closed 输出 `RECHECK/ERROR`。
+
 采图模式 `controller_mode=capture_only`：
 
 1. 仍然等待外部信号并完成相同的多机位多光源采集。
@@ -225,6 +227,7 @@ uv run python tools/run_simulated_ipc.py --replay-capture
 
 - CRC/slot 状态错误必须 fail closed。
 - 光源故障、缺帧、槽不可用、检测超时必须返回 `RECHECK`。
+- 外部触发空闲等待不能污染主控健康状态、业务统计或 `cpp_controller_events.jsonl` 复检记录。
 - `capture_only` 必须保存 6 张原图，且不能创建 Frame/Result 共享内存。
 - detector 返回语义非法时不能输出 `OK`。
 - 并行相机等待失败会透传单台相机的 `camera_message`，避免只看到泛化的 `camera timeout`。
@@ -267,11 +270,11 @@ uv run seat-aoi-display --trace-root trace --enable-manual-trigger --manual-trig
 
 该按钮只模拟外部到位信号和 SN 条码，不直接控制相机、频闪或共享内存。生产现场如果真实 PLC/外部工控机已连接同一个 TCP 端口，需要先确认不会被手动触发客户端抢占。
 
-错误处理：两步中任意一步超时、命令不匹配或条码为空时，C++ 关闭客户端连接并在下一轮重新等待接入。
+错误处理：未收到完整到位/SN 触发时仅继续等待，不进入采集检测，也不输出复检结果；命令不匹配或条码为空会关闭当前客户端连接并在下一轮重新等待接入。
 
 ## 安全规则
 
-- 任意超时、缺帧、协议错误、CRC 错误、质量失败、配置错误都不能输出 `OK`。
+- 完整触发进入采集/检测后，任意超时、缺帧、协议错误、CRC 错误、质量失败、配置错误都不能输出 `OK`。
 - 采图模式不做检测，因此固定回传 `RECHECK`。
 - Python 不控制 PLC、相机或频闪。
 - C++ 不实现深度学习推理。

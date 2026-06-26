@@ -98,14 +98,16 @@ class MainViewModel(QObject):
         self._camera_index: dict[str, dict[str, Any]] = {}
         self._last_event_key: tuple[int, int, int] | None = None
         self._last_controller_event_key: tuple[int, int, int] | None = None
+        self._session_started_ms = int(time.time() * 1000)
+        self._seen_detection_events: set[tuple[str, int, int, str, int]] = set()
         self._seen_controller_events: set[tuple[int, int, int]] = set()
         self._event_timestamps: list[float] = []
         persisted_logs = journal.load_logs() if journal is not None else []
         persisted_reviews = journal.load_reviews() if journal is not None else []
-        self._logs: list[dict[str, Any]] = list(reversed(persisted_logs[-500:]))
+        self._logs: list[dict[str, Any]] = []
         self._reviews: list[dict[str, Any]] = list(persisted_reviews)
-        self._stats = _stats_from_logs(self._logs)
-        for item in self._logs:
+        self._stats = DisplayStats()
+        for item in persisted_logs:
             if item.get("source") == "cpp_controller":
                 try:
                     key = (
@@ -116,6 +118,8 @@ class MainViewModel(QObject):
                     self._seen_controller_events.add(key)
                 except (TypeError, ValueError):
                     continue
+            else:
+                self._seen_detection_events.add(_detection_identity_from_log(item))
         self._status_filter = ""
         self._camera_filter = ""
         self._ng_popup_seconds = max(1, int(ng_popup_seconds))
@@ -283,8 +287,14 @@ class MainViewModel(QObject):
         if event.event_key == self._last_event_key:
             return
         self._last_event_key = event.event_key
+        event_identity = _display_event_identity(event)
+        should_record = (
+            event_identity not in self._seen_detection_events
+            and _display_event_is_current_session(event, self._session_started_ms)
+        )
+        self._seen_detection_events.add(event_identity)
         camera_ids = self._bridge.publish_images(event)
-        self._apply_event(event, camera_ids)
+        self._apply_event(event, camera_ids, should_record=should_record)
 
     @Slot()
     def refreshTriggerState(self) -> None:
@@ -416,7 +426,7 @@ class MainViewModel(QObject):
             self._persist_action("review_dismiss_as_ok", review)
         self._remove_review(record_id)
 
-    def _apply_event(self, event: DisplayEvent, image_camera_ids: list[str]) -> None:
+    def _apply_event(self, event: DisplayEvent, image_camera_ids: list[str], *, should_record: bool = True) -> None:
         status = _normal_status(event.decision)
         defect = _primary_defect(event.defects)
         defect_camera_id = _display_camera_id(defect) if defect else ""
@@ -443,9 +453,10 @@ class MainViewModel(QObject):
                 entry["defectLabel"] = ""
         self.cameraListChanged.emit()
 
-        self._record_stats(status, defect)
-        self._append_detection_log(event, status, defect)
-        self._update_tact_rate()
+        if should_record:
+            self._record_stats(status, defect)
+            self._append_detection_log(event, status, defect)
+            self._update_tact_rate()
         self._last_trigger_result = status
         self.lastTriggerResultChanged.emit()
         self._set_operation_mode(_operation_mode(event, status))
@@ -556,7 +567,7 @@ class MainViewModel(QObject):
                 continue
             self._last_controller_event_key = event.event_key
             self._seen_controller_events.add(event.event_key)
-            if event.error_code != 0 or event.decision in {"RECHECK", "ERROR"}:
+            if _controller_event_is_current_session(event, self._session_started_ms) and _is_controller_alert(event):
                 self._append_controller_log(event)
                 self._set_station_alarm(event.message or event.error)
                 self._set_status_message(event.message or event.error or event.event)
@@ -732,6 +743,62 @@ def _event_status_message(event: DisplayEvent, status: str) -> str:
     if status == "ERROR":
         return "检测链路异常"
     return ""
+
+
+def _display_event_identity(event: DisplayEvent) -> tuple[str, int, int, str, int]:
+    return (
+        event.source,
+        int(event.sequence_id),
+        int(event.trigger_id),
+        event.seat_id,
+        int(event.timestamp_ms),
+    )
+
+
+def _detection_identity_from_log(item: dict[str, Any]) -> tuple[str, int, int, str, int]:
+    timestamp_ms = 0
+    try:
+        timestamp_ms = int(float(item.get("timestamp", 0.0) or 0.0) * 1000)
+    except (TypeError, ValueError):
+        timestamp_ms = 0
+    try:
+        sequence_id = int(item.get("sequence_id", 0) or 0)
+    except (TypeError, ValueError):
+        sequence_id = 0
+    try:
+        trigger_id = int(item.get("trigger_id", 0) or 0)
+    except (TypeError, ValueError):
+        trigger_id = 0
+    return (
+        str(item.get("source", "python_detector") or "python_detector"),
+        sequence_id,
+        trigger_id,
+        str(item.get("seat_id", "") or ""),
+        timestamp_ms,
+    )
+
+
+def _display_event_is_current_session(event: DisplayEvent, session_started_ms: int) -> bool:
+    if event.timestamp_ms <= 0:
+        return True
+    return event.timestamp_ms >= session_started_ms - 2000
+
+
+def _controller_event_is_current_session(event: ControllerEvent, session_started_ms: int) -> bool:
+    if event.timestamp_us <= 0:
+        return True
+    return event.timestamp_us >= (session_started_ms - 2000) * 1000
+
+
+def _is_controller_alert(event: ControllerEvent) -> bool:
+    if event.error_code != 0:
+        return True
+    return event.event in {
+        "inspection_recheck",
+        "recheck_output_failed",
+        "signal_result_publish_failed",
+        "capture_only_result_publish_failed",
+    }
 
 
 def _stats_from_logs(logs: list[dict[str, Any]]) -> DisplayStats:

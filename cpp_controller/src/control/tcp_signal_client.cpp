@@ -27,6 +27,8 @@ namespace seat_aoi {
 
 namespace {
 
+constexpr int kReadTimeout = -2;
+
 #ifdef _WIN32
 int close_socket_impl(TcpSignalClient::socket_t sock) {
   return ::closesocket(static_cast<SOCKET>(sock));
@@ -102,8 +104,11 @@ int TcpSignalClient::read_socket(void* buffer, std::size_t size,
   tv.tv_sec = timeout_ms / 1000;
   tv.tv_usec = (timeout_ms % 1000) * 1000;
   const int select_ret = ::select(0, &readfds, nullptr, nullptr, &tv);
-  if (select_ret <= 0) {
-    return 0;
+  if (select_ret == 0) {
+    return kReadTimeout;
+  }
+  if (select_ret < 0) {
+    return -1;
   }
   const int n = ::recv(static_cast<SOCKET>(client_sock_),
                        static_cast<char*>(buffer),
@@ -145,8 +150,11 @@ int TcpSignalClient::read_socket(void* buffer, std::size_t size,
   pfd.fd = client_sock_;
   pfd.events = POLLIN;
   const int poll_ret = ::poll(&pfd, 1, timeout_ms);
-  if (poll_ret <= 0) {
-    return 0;  // 超时
+  if (poll_ret == 0) {
+    return kReadTimeout;
+  }
+  if (poll_ret < 0) {
+    return -1;
   }
   const ssize_t n = ::recv(client_sock_, buffer, size, 0);
   if (n < 0) {
@@ -320,6 +328,8 @@ bool TcpSignalClient::read_line(std::string* line, int timeout_ms,
 
   line->clear();
   char ch = 0;
+  bool timed_out = false;
+  bool disconnected = false;
   const auto deadline = std::chrono::steady_clock::now() +
                         std::chrono::milliseconds(timeout_ms);
 
@@ -332,8 +342,15 @@ bool TcpSignalClient::read_line(std::string* line, int timeout_ms,
       break;
     }
     const int n = read_socket(&ch, 1, static_cast<int>(remaining_ms));
-    if (n <= 0) {
-      // 超时或断连
+    if (n == kReadTimeout) {
+      timed_out = true;
+      break;
+    }
+    if (n == 0) {
+      disconnected = true;
+      break;
+    }
+    if (n < 0) {
       break;
     }
     line->push_back(ch);
@@ -347,7 +364,13 @@ bool TcpSignalClient::read_line(std::string* line, int timeout_ms,
 
   if (line->empty()) {
     if (error_message != nullptr) {
-      *error_message = "TCP 读取超时或连接断开";
+      if (timed_out) {
+        *error_message = "TCP 等待触发行超时";
+      } else if (disconnected) {
+        *error_message = "TCP 客户端连接断开";
+      } else {
+        *error_message = "TCP 读取失败";
+      }
     }
     return false;
   }
@@ -502,8 +525,7 @@ bool TcpSignalClient::wait_trigger(ExternalTrigger* out_trigger,
   // 读取一行
   std::string line;
   if (!read_line(&line, timeout_ms, error_message)) {
-    // 读取失败时关闭客户端，下次重试
-    if (client_sock_ != kInvalidSocket) {
+    if (error_message == nullptr || *error_message != "TCP 等待触发行超时") {
       close_socket_impl(client_sock_);
       client_sock_ = kInvalidSocket;
     }
@@ -549,7 +571,7 @@ bool TcpSignalClient::wait_trigger_start_sn(ExternalTrigger* out_trigger,
 
   std::string start_line;
   if (!read_line(&start_line, static_cast<int>(remaining_ms), error_message)) {
-    if (client_sock_ != kInvalidSocket) {
+    if (error_message == nullptr || *error_message != "TCP 等待触发行超时") {
       close_socket_impl(client_sock_);
       client_sock_ = kInvalidSocket;
     }
@@ -785,6 +807,18 @@ SignalHealth TcpSignalClient::get_health() const {
     health.message = oss.str();
   }
   return health;
+}
+
+bool TcpSignalClient::is_idle_wait_timeout(const std::string& error_message) const {
+  if (simulate_trigger_timeout_) {
+    return false;
+  }
+  return error_message == "TCP 等待客户端连接超时" ||
+         error_message == "TCP 等待触发行超时" ||
+         error_message == "TCP 客户端连接断开" ||
+         error_message == "TCP 客户端未连接" ||
+         error_message.find("TCP 两步协议等待到位信号") == 0 ||
+         error_message == "TCP 两步协议等待 SN 条码超时";
 }
 
 void TcpSignalClient::close() {

@@ -335,4 +335,11 @@ SignalHealth ExternalSignalClient::get_health() const {
                                   : "external_signal"};
 }
 
+bool ExternalSignalClient::is_idle_wait_timeout(const std::string& error_message) const {
+  if (simulate_trigger_timeout_ || trigger_queue_path_.empty()) {
+    return false;
+  }
+  return error_message.find("外部信号触发超时，未收到新的规范化触发行") == 0;
+}
+
 }  // namespace seat_aoi

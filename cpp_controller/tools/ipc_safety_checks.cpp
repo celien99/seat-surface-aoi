@@ -1552,6 +1552,62 @@ bool test_detector_timeout_fault_recovers_on_next_trigger() {
   return passed;
 }
 
+bool test_idle_trigger_wait_does_not_fault_station() {
+  seat_aoi::StationConfig config;
+  config.reset_shared_memory = true;
+  config.slot_count = 1;
+  config.frame_slot_size = 8192;
+  config.result_slot_size = 4096;
+  config.publish_timeout_ms = 5;
+  config.detector_timeout_ms = 5;
+  config.trigger_timeout_ms = 5;
+  config.camera_timeout_ms = 5;
+  config.light_timeout_ms = 5;
+  config.recipe_id = "seat_a_black_leather_v1";
+  config.light_order = {1};
+  config.signal.backend = seat_aoi::HardwareBackend::ExternalSignal;
+  config.light_channels = {
+      seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 10, 1.0F, 60.0F},
+  };
+  const auto storage_root =
+      std::filesystem::temp_directory_path() /
+      ("seat_aoi_idle_trigger_" + std::to_string(seat_aoi::now_us()));
+  config.trace_root = (storage_root / "trace").string();
+  config.signal.trigger_queue_path = (storage_root / "external_triggers.csv").string();
+  config.image_save.enabled = false;
+  config.image_save.root_dir = (storage_root / "images").string();
+  config.image_save.cleanup_enabled = false;
+  config.image_save.cleanup_min_free_ratio = 0.0F;
+
+  seat_aoi::StationController station;
+  if (!station.initialize(config)) {
+    std::cerr << "idle trigger station initialize failed\n";
+    return false;
+  }
+
+  seat_aoi::ExternalTrigger trigger;
+  std::string error;
+  const bool accepted = station.wait_for_trigger(&trigger, &error);
+  const auto snapshot = station.health_snapshot();
+  station.cleanup_shared_memory();
+
+  const bool passed = !accepted && error.empty() &&
+                      snapshot.state == seat_aoi::StationState::Ready &&
+                      snapshot.alarm_level == seat_aoi::AlarmLevel::None &&
+                      snapshot.total_jobs == 0 &&
+                      snapshot.recheck_count == 0 &&
+                      snapshot.device_fault_count == 0;
+  if (!passed) {
+    std::cerr << "idle trigger wait polluted station health: error=" << error
+              << " state=" << seat_aoi::station_state_name(snapshot.state)
+              << " alarm=" << seat_aoi::alarm_level_name(snapshot.alarm_level)
+              << " total_jobs=" << snapshot.total_jobs
+              << " recheck_count=" << snapshot.recheck_count
+              << " device_fault_count=" << snapshot.device_fault_count << "\n";
+  }
+  return passed;
+}
+
 bool write_detector_result_slot(std::uint64_t sequence_id,
                                 std::uint64_t trigger_id,
                                 const std::string& seat_id,
@@ -1912,6 +1968,9 @@ int main() {
     return 1;
   }
   if (!test_detector_timeout_fault_recovers_on_next_trigger()) {
+    return 1;
+  }
+  if (!test_idle_trigger_wait_does_not_fault_station()) {
     return 1;
   }
   if (!test_detector_ng_with_quality_failure_is_rechecked()) {

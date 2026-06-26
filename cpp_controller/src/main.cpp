@@ -118,7 +118,9 @@ int main(int argc, char** argv) {
     seat_aoi::ExternalTrigger trigger;
     std::string error;
     if (!station.wait_for_trigger(&trigger, &error)) {
-      std::cerr << "external signal trigger wait failed: " << error << std::endl;
+      if (!error.empty()) {
+        std::cerr << "external signal trigger wait failed: " << error << std::endl;
+      }
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
       continue;
     }

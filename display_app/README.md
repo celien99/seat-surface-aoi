@@ -76,11 +76,13 @@ uv run seat-aoi-display `
 
 手动触发客户端会向 C++ 发送 `start`，收到 `start_ack` 后发送 `sn <SN>`，收到 `sn_ack` 后在界面显示“已提交”。SN 只允许字母、数字、横线、下划线和点，最大 48 个字符，避免写入共享内存 `seat_id` 时被截断。默认未加 `--enable-manual-trigger` 时按钮保持“只读展示”，不会连接 C++ 触发端口。
 
+如果 C++ `tcp_signal` 正在监听但没有客户端连接，或客户端尚未提交完整 `start` + `sn <SN>`，这属于外部触发空闲等待；前端不会把它显示为复检，也不会增加复检统计。只有 C++ 已收到完整触发并进入采集/检测后返回的 `RECHECK/ERROR`，才会作为业务结果展示。
+
 ## 当前页面
 
 - 监控：复用迁移的 `MainScreen.qml`、`CameraGrid.qml`、`CameraTile.qml`、`NGOverlay.qml` 和 `StatusBar.qml`，展示相机/视角图像、OK/NG/复检/异常计数、当前运行模式、状态原因和 NG 弹窗；启用手动触发时额外显示 SN 输入框和触发按钮。
-- 统计：展示前端持久化日志恢复后的 OK、NG、复检、异常、总数和缺陷分布。
-- 日志：展示 Python detector 检测事件和 C++ 主控采集/超时/设备故障事件。
+- 统计：展示当前前端会话收到的 OK、NG、复检、异常、总数和缺陷分布；历史 `display_operator_events.jsonl` 保留在磁盘中，但不会在重启后污染当前班次统计。
+- 日志：展示当前会话的 Python detector 检测事件和 C++ 主控告警事件；`station_ready`、`inspection_start` 等主控状态事件不会作为复检日志显示。
 - 复核：操作员在 NG 弹窗中选择“标记待复核”后进入队列，确认/忽略动作会写入操作员事件日志。
 
 前端会在 `trace_root` 下维护只读展示侧持久化文件：
@@ -121,10 +123,12 @@ display_app/
 
 展示桥会优先选择 raw 原始采集图，缺少 raw 图时回退到 ROI 图；同一相机/视角下优先展示 `DIFFUSE`，再回退到其它光源。检测 overlay 也以 raw 原图尺寸输出，便于前端保持原始视野。如果某次检测没有保存 trace 图像，前端仍会展示 OK/NG/RECHECK/ERROR、统计和日志；图像区域会等待下一次带图像的事件。
 
+前端启动时如果 `display_latest.json` 仍是上一次运行留下的旧结果，只更新图像和状态，不计入当前会话统计、不追加新的操作员日志；收到当前会话的新 detector 事件后才开始计数。
+
 当模型资产未替换、ROI YOLO 缺失或 PatchCore/PCA 资产不可用时，Python detector 会返回 `RECHECK + CONFIGURATION_ERROR` 并在事件中标记 `sample_collection.enabled=true`。前端状态栏会显示“采样模式”，同时继续展示 raw 图，便于产线操作员确认拍摄效果并积累训练样本。
 
 ## 手动触发边界
 
 - 手动触发只提交控制面信号，不传输图像，也不绕过 C++ 的采集、检测等待和结果保守校验。
 - 生产配置当前 `tcp_signal` 只维护一个客户端连接；如果 PLC/外部工控机已占用同一端口，不应在同一时间直接启用展示前端手动触发，除非现场已确认连接仲裁方案。
-- C++ 触发超时、缺帧、设备故障、共享内存错误、Python detector 超时或质量门禁失败仍只能返回 `RECHECK` 或 `ERROR`，前端按钮不会改变判定规则。
+- 完整触发进入采集/检测后，C++ 缺帧、设备故障、共享内存错误、Python detector 超时或质量门禁失败仍只能返回 `RECHECK` 或 `ERROR`，前端按钮不会改变判定规则。

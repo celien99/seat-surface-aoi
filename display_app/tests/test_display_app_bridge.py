@@ -227,6 +227,59 @@ def test_display_bridge_reads_cpp_controller_events(tmp_path: Path) -> None:
     assert bridge.read_controller_events() == []
 
 
+def test_main_view_model_ignores_non_alert_controller_status_events(tmp_path: Path) -> None:
+    event_path = tmp_path / "cpp_controller_events.jsonl"
+    event_path.write_text(
+        json.dumps(
+            {
+                "timestamp_us": _now_ms() * 1000,
+                "event": "station_ready",
+                "sequence_id": 0,
+                "trigger_id": 0,
+                "seat_id": "",
+                "sku": "",
+                "decision": "RECHECK",
+                "error": "None",
+                "error_code": 0,
+                "station_state": "Ready",
+                "alarm_level": "None",
+                "message": "station ready",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    view_model = MainViewModel(DisplayBridge(tmp_path, CameraImageProvider()), journal=OperatorJournal(tmp_path))
+
+    view_model.pollLatest()
+
+    assert view_model.logs == []
+    assert view_model.recheck == 0
+    assert not (tmp_path / "display_operator_events.jsonl").exists()
+
+
+def test_main_view_model_stale_display_latest_updates_image_without_counting(tmp_path: Path) -> None:
+    raw_path = tmp_path / "raw.png"
+    write_gray_png(raw_path, 2, 1, b"\x09\x0a")
+    _write_latest(
+        tmp_path,
+        {
+            "timestamp_ms": 1,
+            "decision": "RECHECK",
+            "images": [{"camera_id": "CAM_FRONT", "pose_id": "CAM_FRONT", "path": str(raw_path)}],
+        },
+    )
+    view_model = MainViewModel(DisplayBridge(tmp_path, CameraImageProvider()), journal=OperatorJournal(tmp_path))
+
+    view_model.pollLatest()
+
+    assert view_model.cameraList[0]["cameraId"] == "CAM_FRONT"
+    assert view_model.lastTriggerResult == "RECHECK"
+    assert view_model.recheck == 0
+    assert view_model.logs == []
+
+
 def test_main_view_model_persists_review_actions(tmp_path: Path) -> None:
     image_path = tmp_path / "roi.png"
     write_gray_png(image_path, 2, 1, b"\x01\x02")
@@ -266,7 +319,7 @@ def test_main_view_model_persists_review_actions(tmp_path: Path) -> None:
 def _write_latest(root: Path, overrides: dict) -> None:
     payload = {
         "schema": "seat_surface_aoi.display_event.v1",
-        "timestamp_ms": 1781758399933,
+        "timestamp_ms": _now_ms(),
         "source": "python_detector",
         "sequence_id": 1,
         "trigger_id": 1000,
@@ -289,3 +342,9 @@ def _write_latest(root: Path, overrides: dict) -> None:
     }
     payload.update(overrides)
     (root / "display_latest.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _now_ms() -> int:
+    import time
+
+    return int(time.time() * 1000)
