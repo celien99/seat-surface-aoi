@@ -46,6 +46,7 @@ class MainViewModel(QObject):
     triggerEnabledChanged = Signal()
     manualSnChanged = Signal()
     manualTriggerPendingChanged = Signal()
+    manualTriggerStageChanged = Signal()
     manualTriggerFinished = Signal(bool, str, object)
     gridLayoutChanged = Signal()
     logsChanged = Signal()
@@ -65,6 +66,7 @@ class MainViewModel(QObject):
         line_id: str = "AOI-1",
         grid_layout: str = "2x2",
         ng_popup_seconds: int = 30,
+        manual_trigger_result_timeout_ms: int = 30000,
         journal: OperatorJournal | None = None,
         manual_trigger_client: ManualTriggerClient | None = None,
     ) -> None:
@@ -125,6 +127,11 @@ class MainViewModel(QObject):
         self._ng_popup_seconds = max(1, int(ng_popup_seconds))
         self._ng_started_at = 0.0
         self._manual_trigger_pending = False
+        self._manual_trigger_stage = "idle"
+        self._pending_manual_sn = ""
+        self._manual_trigger_wait_started_at = 0.0
+        self._manual_trigger_wait_started_ms = 0
+        self._manual_trigger_result_timeout_s = max(1.0, float(manual_trigger_result_timeout_ms) / 1000.0)
         self.manualTriggerFinished.connect(self._finishManualTrigger)
 
     def _get_line_id(self) -> str:
@@ -189,6 +196,9 @@ class MainViewModel(QObject):
 
     def _get_manual_trigger_pending(self) -> bool:
         return self._manual_trigger_pending
+
+    def _get_manual_trigger_stage(self) -> str:
+        return self._manual_trigger_stage
 
     def _get_operation_mode(self) -> str:
         return self._operation_mode
@@ -257,6 +267,7 @@ class MainViewModel(QObject):
     triggerEnabled = Property(bool, _get_trigger_enabled, notify=triggerEnabledChanged)
     manualSn = Property(str, _get_manual_sn, notify=manualSnChanged)
     manualTriggerPending = Property(bool, _get_manual_trigger_pending, notify=manualTriggerPendingChanged)
+    manualTriggerStage = Property(str, _get_manual_trigger_stage, notify=manualTriggerStageChanged)
     operationMode = Property(str, _get_operation_mode, notify=operationModeChanged)
     statusMessage = Property(str, _get_status_message, notify=statusMessageChanged)
     stationAlarm = Property(str, _get_station_alarm, notify=stationAlarmChanged)
@@ -276,6 +287,15 @@ class MainViewModel(QObject):
         self._poll_controller_events()
         event = self._bridge.read_latest()
         if event is None:
+            if self._manual_trigger_pending:
+                self._set_runtime_state(
+                    system_status="running",
+                    line_status="waiting_result",
+                    line_connected=False,
+                    trigger_error="",
+                )
+                self._set_status_message(self._manual_trigger_status_message())
+                return
             self._set_runtime_state(
                 system_status="paused",
                 line_status="waiting",
@@ -299,6 +319,7 @@ class MainViewModel(QObject):
     @Slot()
     def refreshTriggerState(self) -> None:
         self.pollLatest()
+        self._tick_manual_trigger_wait()
         self._tick_ng_countdown()
 
     @Slot()
@@ -342,15 +363,14 @@ class MainViewModel(QObject):
             self._set_trigger_error("当前展示程序只读检测结果，手动触发未启用")
             return
         if self._manual_trigger_pending:
-            self._set_trigger_error("上一条手动触发仍在提交")
+            self._set_trigger_error("上一条手动触发仍在处理中")
             return
-        self._manual_trigger_pending = True
-        self._line_busy = True
-        self.lineBusyChanged.emit()
-        self.manualTriggerPendingChanged.emit()
-        self.triggerEnabledChanged.emit()
+        self._set_manual_trigger_state(pending=True, stage="submitting")
         self._set_trigger_error("")
         self._set_status_message("正在提交手动触发")
+        if self._last_trigger_result:
+            self._last_trigger_result = ""
+            self.lastTriggerResultChanged.emit()
 
         client = self._manual_trigger_client
 
@@ -379,22 +399,26 @@ class MainViewModel(QObject):
     @Slot(bool, str, object)
     def _finishManualTrigger(self, success: bool, message: str, payload: object) -> None:
         if success:
-            self._set_status_message(message)
             self._set_trigger_error("")
             if isinstance(payload, dict):
                 self._persist_action("manual_trigger", payload)
-            # 成功后清空输入框，便于连续触发
-            if self._manual_sn:
-                self._manual_sn = ""
+                self._pending_manual_sn = str(payload.get("sn", "") or payload.get("seat_id", "") or self._manual_sn).strip()
+            else:
+                self._pending_manual_sn = self._manual_sn.strip()
+            if self._pending_manual_sn and self._manual_sn != self._pending_manual_sn:
+                self._manual_sn = self._pending_manual_sn
                 self.manualSnChanged.emit()
+            self._manual_trigger_wait_started_at = time.monotonic()
+            self._manual_trigger_wait_started_ms = int(time.time() * 1000)
+            self._set_manual_trigger_state(pending=True, stage="waiting_result")
+            self._set_status_message(f"{message}，等待检测结果")
         else:
             self._set_trigger_error(message)
             self._set_status_message("手动触发提交失败")
-        self._manual_trigger_pending = False
-        self._line_busy = False
-        self.lineBusyChanged.emit()
-        self.manualTriggerPendingChanged.emit()
-        self.triggerEnabledChanged.emit()
+            self._pending_manual_sn = ""
+            self._manual_trigger_wait_started_at = 0.0
+            self._manual_trigger_wait_started_ms = 0
+            self._set_manual_trigger_state(pending=False, stage="idle")
 
     @Slot()
     def refresh(self) -> None:
@@ -484,6 +508,7 @@ class MainViewModel(QObject):
 
         if status == "NG" and defect is not None:
             self._show_ng_overlay(defect)
+        self._complete_manual_trigger_wait(event)
 
     def _ensure_cameras(self, camera_ids: list[str]) -> None:
         changed = False
@@ -637,6 +662,67 @@ class MainViewModel(QObject):
             self.remainingSecondsChanged.emit()
         if remaining <= 0:
             self._hide_ng_overlay("auto_confirm_defect")
+
+    def _set_manual_trigger_state(self, *, pending: bool, stage: str) -> None:
+        line_busy_changed = self._line_busy != pending
+        pending_changed = self._manual_trigger_pending != pending
+        stage_changed = self._manual_trigger_stage != stage
+        self._line_busy = pending
+        self._manual_trigger_pending = pending
+        self._manual_trigger_stage = stage
+        if line_busy_changed:
+            self.lineBusyChanged.emit()
+        if pending_changed:
+            self.manualTriggerPendingChanged.emit()
+            self.triggerEnabledChanged.emit()
+        if stage_changed:
+            self.manualTriggerStageChanged.emit()
+
+    def _manual_trigger_status_message(self) -> str:
+        if self._manual_trigger_stage == "waiting_result":
+            if self._pending_manual_sn:
+                return f"手动触发已提交 SN={self._pending_manual_sn}，等待检测结果"
+            return "手动触发已提交，等待检测结果"
+        if self._manual_trigger_stage == "submitting":
+            return "正在提交手动触发"
+        return self._status_message
+
+    def _tick_manual_trigger_wait(self) -> None:
+        if not self._manual_trigger_pending or self._manual_trigger_stage != "waiting_result":
+            return
+        if self._manual_trigger_wait_started_at <= 0:
+            self._manual_trigger_wait_started_at = time.monotonic()
+        elapsed_s = time.monotonic() - self._manual_trigger_wait_started_at
+        if elapsed_s < self._manual_trigger_result_timeout_s:
+            return
+        self._set_trigger_error("手动触发已提交，但等待检测结果超时")
+        self._set_status_message("手动触发等待检测结果超时，可确认链路状态后重新触发")
+        self._pending_manual_sn = ""
+        self._manual_trigger_wait_started_at = 0.0
+        self._manual_trigger_wait_started_ms = 0
+        self._set_manual_trigger_state(pending=False, stage="idle")
+
+    def _complete_manual_trigger_wait(self, event: DisplayEvent) -> None:
+        if not self._manual_trigger_pending or self._manual_trigger_stage != "waiting_result":
+            return
+        event_after_submit = (
+            self._manual_trigger_wait_started_ms <= 0
+            or event.timestamp_ms <= 0
+            or event.timestamp_ms >= self._manual_trigger_wait_started_ms
+        )
+        event_matches_sn = not self._pending_manual_sn or event.seat_id == self._pending_manual_sn
+        if not event_after_submit or not event_matches_sn:
+            return
+        status = _normal_status(event.decision)
+        self._pending_manual_sn = ""
+        self._manual_trigger_wait_started_at = 0.0
+        self._manual_trigger_wait_started_ms = 0
+        self._set_manual_trigger_state(pending=False, stage="idle")
+        # 收到对应检测结果后再清空 SN，避免操作者在等待期间误以为可以扫下一件。
+        if self._manual_sn:
+            self._manual_sn = ""
+            self.manualSnChanged.emit()
+        self._set_status_message(f"手动触发完成，检测结果 {status}")
 
     def _set_runtime_state(
         self,

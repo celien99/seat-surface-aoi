@@ -32,7 +32,7 @@ flowchart LR
 - 固定采集方式：2 个机位共享 3 路光源，`capture_mode=fixed_camera`、`capture_schedule=shared_light_parallel`、`light_order=1,2,3`。
 - 当前现场接线：工控机通过 RS232/USB 转串口连接 FL-ACDH；FL-ACDH 同步输出 `F1~F3` 已短接合成一根触发线，并联到两台相机黄色 `Line0`；FL-ACDH `GND` 与相机 IO `GND` 共地；相机 `Line1` 仅保留为调试输出。
 - 在线模式使用共享内存和 Python detector；采图模式不启用共享内存，只采图保存原图并向外部信号回传 `RECHECK`。
-- `display_app` 默认仍是只读展示；显式加 `--enable-manual-trigger` 后，首页 SN 输入框和”手动触发”按钮会按 C++ `tcp_signal` 的 `start_sn` 两步协议发送 `start` 与 `sn <SN>`，只模拟外部信号源，不直接控制相机、频闪或共享内存。手动触发提交中按钮显示”提交中”并禁用输入框，成功后自动清空 SN 输入框便于连续触发。
+- `display_app` 默认仍是只读展示；显式加 `--enable-manual-trigger` 后，首页 SN 输入框和”手动触发”按钮会按 C++ `tcp_signal` 的 `start_sn` 两步协议发送 `start` 与 `sn <SN>`，只模拟外部信号源，不直接控制相机、频闪或共享内存。手动触发提交中按钮显示”提交中”，收到 `sn_ack` 后切换为”等待结果”加载态并继续禁用输入框，直到同一 SN 的新版 `display_latest.json` 刷新后才恢复并清空输入。
 - Python detector 返回的 `RECHECK/ERROR` 中，若消息匹配 ROI 未识别到目标物体模式（如”未识别到目标”），前端展示为信息性黄色提示而非告警/复检红色错误，不触发 `trigger_error`。
 
 C++ 主控只保留上述当前链路。非当前链路的兼容路径、未使用 backend 枚举和对应源码已移除；共享内存协议布局保持与 Python detector 二进制兼容，C++ 结构命名统一为固定机位视图语义。
@@ -258,7 +258,7 @@ uv run seat-aoi-display `
   --manual-trigger-port 9000
 ```
 
-按钮提交的是控制面触发信号，不传图、不读写 Frame/Result 共享内存。C++ 收到 `start` 与 `sn <SN>` 后仍按 `StationController` 完整执行相机、频闪、共享内存检测和保守结果校验。生产现场如果同一个 `9000` 端口已有 PLC/外部上位机长连接，需要先确认连接仲裁策略，避免展示前端抢占真实触发连接。
+按钮提交的是控制面触发信号，不传图、不读写 Frame/Result 共享内存。C++ 收到 `start` 与 `sn <SN>` 后仍按 `StationController` 完整执行相机、频闪、共享内存检测和保守结果校验；`sn_ack` 只表示触发信号提交成功，不表示检测完成。前端会在等待同一 SN 的展示结果期间保持按钮 loading 和输入禁用，默认 30 秒超时，可用 `--manual-trigger-result-timeout-ms` 调整。生产现场如果同一个 `9000` 端口已有 PLC/外部上位机长连接，需要先确认连接仲裁策略，避免展示前端抢占真实触发连接。
 
 ## 安全边界
 

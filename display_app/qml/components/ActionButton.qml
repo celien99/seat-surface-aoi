@@ -11,6 +11,7 @@ Button {
     property color disabledTextColor: Theme.textMuted
     property string buttonText: ""
     property bool compact: false
+    property bool busy: false
 
     hoverEnabled: true
     focusPolicy: Qt.StrongFocus
@@ -25,14 +26,61 @@ Button {
     opacity: enabled ? 1.0 : 0.62
     scale: pressed ? 0.98 : 1.0
 
-    contentItem: Text {
-        text: buttonText || control.text
-        color: control.enabled ? textColor : disabledTextColor
-        font: control.font
-        horizontalAlignment: Text.AlignHCenter
-        verticalAlignment: Text.AlignVCenter
-        elide: Text.ElideRight
-        maximumLineCount: 1
+    contentItem: Item {
+        implicitWidth: contentRow.implicitWidth
+        implicitHeight: Math.max(contentRow.implicitHeight, Theme.fontSizeSM + 4)
+
+        Row {
+            id: contentRow
+            anchors.centerIn: parent
+            spacing: Theme.spacingXS
+
+            Item {
+                id: spinner
+                width: 14
+                height: 14
+                anchors.verticalCenter: parent.verticalCenter
+                visible: control.busy
+
+                Rectangle {
+                    width: 14
+                    height: 14
+                    radius: 7
+                    color: "transparent"
+                    border.width: 2
+                    border.color: control.enabled ? textColor : disabledTextColor
+                    opacity: 0.25
+                }
+
+                Rectangle {
+                    width: 4
+                    height: 4
+                    radius: 2
+                    color: control.enabled ? textColor : disabledTextColor
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.top: parent.top
+                }
+
+                RotationAnimator on rotation {
+                    running: control.busy && control.visible
+                    loops: Animation.Infinite
+                    from: 0
+                    to: 360
+                    duration: 900
+                }
+            }
+
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: buttonText || control.text
+                color: control.enabled ? textColor : disabledTextColor
+                font: control.font
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight
+                maximumLineCount: 1
+            }
+        }
     }
 
     background: Rectangle {

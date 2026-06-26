@@ -36,6 +36,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--manual-trigger-sn-prefix", default="sn", help="两步协议 SN 前缀。")
     parser.add_argument("--manual-trigger-start-ack", default="start_ack\\n", help="到位信号确认文本。")
     parser.add_argument("--manual-trigger-sn-ack", default="sn_ack\\n", help="SN 确认文本。")
+    parser.add_argument("--manual-trigger-result-timeout-ms", type=int, default=30000, help="手动触发后等待展示结果的最长时间。")
     args, qt_args = parser.parse_known_args(argv)
     args.qt_args = qt_args
     return args
@@ -70,6 +71,7 @@ def main(argv: list[str] | None = None) -> int:
         line_id=args.line_id,
         grid_layout=args.grid_layout,
         ng_popup_seconds=args.ng_popup_seconds,
+        manual_trigger_result_timeout_ms=args.manual_trigger_result_timeout_ms,
         journal=journal,
         manual_trigger_client=manual_trigger_client,
     )

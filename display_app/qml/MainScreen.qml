@@ -89,6 +89,13 @@ Rectangle {
                     maxBadgeWidth: 100
                 }
 
+                StatusBadge {
+                    visible: viewModel && viewModel.manualTriggerPending && viewModel.triggerErrorDisplay === ""
+                    badgeText: viewModel && viewModel.manualTriggerStage === "waiting_result" ? qsTr("等待检测结果") : qsTr("提交触发")
+                    badgeStatus: "warning"
+                    maxBadgeWidth: 112
+                }
+
                 RowLayout {
                     spacing: 4
 
@@ -160,10 +167,14 @@ Rectangle {
                 ActionButton {
                     buttonText: {
                         if (!viewModel || !viewModel.triggerEnabled && !viewModel.manualTriggerPending) return qsTr("只读展示")
+                        if (viewModel.manualTriggerPending && viewModel.manualTriggerStage === "waiting_result") return qsTr("等待结果")
                         if (viewModel.manualTriggerPending) return qsTr("提交中")
                         return qsTr("手动触发")
                     }
+                    busy: viewModel && viewModel.manualTriggerPending
                     bgColor: viewModel && viewModel.triggerEnabled ? Theme.accent : Theme.bgTertiary
+                    disabledBgColor: viewModel && viewModel.manualTriggerPending ? Theme.statusWarningDim : Qt.rgba(1, 1, 1, 0.04)
+                    disabledTextColor: viewModel && viewModel.manualTriggerPending ? Theme.statusWarning : Theme.textMuted
                     implicitHeight: 32
                     Layout.preferredWidth: 104
                     enabled: viewModel && viewModel.triggerEnabled

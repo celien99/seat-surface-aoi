@@ -62,14 +62,65 @@ def test_main_view_model_submits_manual_trigger_and_persists_action(tmp_path: Pa
 
     view_model.submitManualTrigger("SN-100")
     assert server.done.wait(2.0)
-    _wait_until(lambda: not view_model.manualTriggerPending)
+    _wait_until(lambda: view_model.manualTriggerStage == "waiting_result")
 
-    assert view_model.triggerEnabled is True
+    assert view_model.triggerEnabled is False
+    assert view_model.manualTriggerPending is True
+    assert view_model.manualTriggerStage == "waiting_result"
+    assert view_model.manualSn == "SN-100"
     assert view_model.triggerError == ""
     assert server.lines == ["start\n", "sn SN-100\n"]
     journal_text = (tmp_path / "display_operator_events.jsonl").read_text(encoding="utf-8")
     assert "manual_trigger" in journal_text
     assert "SN-100" in journal_text
+
+
+def test_main_view_model_manual_trigger_unlocks_after_matching_display_result(tmp_path: Path) -> None:
+    _ensure_qt_app()
+    server = _StartSnServer()
+    server.start()
+    client = ManualTriggerClient(
+        ManualTriggerConfig(host="127.0.0.1", port=server.port, timeout_ms=1000)
+    )
+    view_model = MainViewModel(
+        DisplayBridge(tmp_path, CameraImageProvider()),
+        manual_trigger_client=client,
+    )
+
+    view_model.submitManualTrigger("SN-200")
+    assert server.done.wait(2.0)
+    _wait_until(lambda: view_model.manualTriggerStage == "waiting_result")
+
+    _write_latest(tmp_path, seat_id="SN-200", decision="OK")
+    view_model.pollLatest()
+
+    assert view_model.manualTriggerPending is False
+    assert view_model.manualTriggerStage == "idle"
+    assert view_model.triggerEnabled is True
+    assert view_model.manualSn == ""
+    assert view_model.lastTriggerResult == "OK"
+
+
+def test_main_view_model_manual_trigger_timeout_reenables_input(tmp_path: Path) -> None:
+    _ensure_qt_app()
+    server = _StartSnServer()
+    server.start()
+    client = ManualTriggerClient(
+        ManualTriggerConfig(host="127.0.0.1", port=server.port, timeout_ms=1000)
+    )
+    view_model = MainViewModel(
+        DisplayBridge(tmp_path, CameraImageProvider()),
+        manual_trigger_client=client,
+        manual_trigger_result_timeout_ms=1000,
+    )
+
+    view_model.submitManualTrigger("SN-300")
+    assert server.done.wait(2.0)
+    _wait_until(lambda: view_model.manualTriggerStage == "waiting_result")
+    _wait_until(lambda: _refresh_and_check(view_model, lambda: not view_model.manualTriggerPending), timeout_s=2.0)
+
+    assert view_model.triggerEnabled is True
+    assert "等待检测结果超时" in view_model.triggerError
 
 
 class _StartSnServer:
@@ -113,6 +164,37 @@ def _read_line(conn: socket.socket) -> str:
 def _ensure_qt_app() -> None:
     if QCoreApplication.instance() is None:
         QCoreApplication([])
+
+
+def _write_latest(tmp_path: Path, *, seat_id: str, decision: str) -> None:
+    import json
+    import time
+
+    payload = {
+        "schema": "seat_surface_aoi.display_event.v1",
+        "timestamp_ms": int(time.time() * 1000),
+        "source": "python_detector",
+        "sequence_id": 10,
+        "trigger_id": 20,
+        "seat_id": seat_id,
+        "sku": "seat_a_black_leather",
+        "recipe_id": "seat_a_black_leather_v1",
+        "decision": decision,
+        "quality_pass": True,
+        "error_code": 0,
+        "elapsed_ms": 50.0,
+        "defect_count": 0,
+        "defects": [],
+        "message": "",
+        "images": [],
+        "overlays": [],
+    }
+    (tmp_path / "display_latest.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _refresh_and_check(view_model: MainViewModel, predicate: object) -> bool:
+    view_model.refreshTriggerState()
+    return bool(predicate())
 
 
 def _wait_until(predicate: object, timeout_s: float = 2.0) -> None:
