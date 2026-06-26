@@ -169,11 +169,27 @@ function Build-Controller {
   Copy-Item -LiteralPath $exe.FullName -Destination (Join-Path $binDir "seat_aoi_controller.exe") -Force
 }
 
+function Wait-ServiceStopped {
+  param([string]$Name, [int]$TimeoutSeconds = 30)
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  while ((Get-Date) -lt $deadline) {
+    $service = Get-Service -Name $Name -ErrorAction SilentlyContinue
+    if ($null -eq $service -or $service.Status -eq "Stopped") {
+      return $true
+    }
+    Start-Sleep -Milliseconds 500
+  }
+  return $false
+}
+
 function Remove-ServiceIfExists {
   param([string]$Nssm, [string]$Name)
   $service = Get-Service -Name $Name -ErrorAction SilentlyContinue
   if ($null -ne $service) {
     Invoke-NativeOptional $Nssm stop $Name
+    if (-not (Wait-ServiceStopped -Name $Name)) {
+      throw "Service did not stop within 30 seconds: $Name. Stop it manually before reinstalling."
+    }
     Invoke-Native $Nssm remove $Name confirm
   }
 }
@@ -304,6 +320,10 @@ $ControllerExe = Join-Path $ProjectRoot "bin\seat_aoi_controller.exe"
 
 Push-Location $ProjectRoot
 try {
+  $Nssm = Resolve-Nssm -ExplicitPath $NssmPath -Root $ProjectRoot
+  Remove-ServiceIfExists -Nssm $Nssm -Name $DetectorServiceName
+  Remove-ServiceIfExists -Nssm $Nssm -Name $ControllerServiceName
+
   if (-not $SkipPythonSync) {
     Install-PythonEnvironment -Root $ProjectRoot -ExplicitPython $PythonExe
   }
@@ -326,7 +346,6 @@ try {
     Invoke-Native $VenvPython -m tools.validate_model_assets --recipe $Recipe
   }
 
-  $Nssm = Resolve-Nssm -ExplicitPath $NssmPath -Root $ProjectRoot
   Install-NssmService `
     -Nssm $Nssm `
     -Name $DetectorServiceName `
