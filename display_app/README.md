@@ -74,7 +74,7 @@ uv run seat-aoi-display `
   --manual-trigger-port 9000
 ```
 
-手动触发客户端会向 C++ 发送 `start`，收到 `start_ack` 后发送 `sn <SN>`，收到 `sn_ack` 后在界面显示“已提交”。SN 只允许字母、数字、横线、下划线和点，最大 48 个字符，避免写入共享内存 `seat_id` 时被截断。默认未加 `--enable-manual-trigger` 时按钮保持“只读展示”，不会连接 C++ 触发端口。
+手动触发客户端会向 C++ 发送 `start`，收到 `start_ack` 后发送 `sn <SN>`，收到 `sn_ack` 后在界面显示"已提交"并**自动清空 SN 输入框**，便于连续触发。提交过程中按钮显示"提交中"且输入框和按钮禁用。SN 只允许字母、数字、横线、下划线和点，最大 48 个字符，避免写入共享内存 `seat_id` 时被截断。默认未加 `--enable-manual-trigger` 时按钮保持"只读展示"，不会连接 C++ 触发端口。
 
 如果 C++ `tcp_signal` 正在监听但没有客户端连接，或客户端尚未提交完整 `start` + `sn <SN>`，这属于外部触发空闲等待；前端不会把它显示为复检，也不会增加复检统计。只有 C++ 已收到完整触发并进入采集/检测后返回的 `RECHECK/ERROR`，才会作为业务结果展示。
 
@@ -125,10 +125,13 @@ display_app/
 
 前端启动时如果 `display_latest.json` 仍是上一次运行留下的旧结果，只更新图像和状态，不计入当前会话统计、不追加新的操作员日志；收到当前会话的新 detector 事件后才开始计数。
 
-当模型资产未替换、ROI YOLO 缺失或 PatchCore/PCA 资产不可用时，Python detector 会返回 `RECHECK + CONFIGURATION_ERROR` 并在事件中标记 `sample_collection.enabled=true`。前端状态栏会显示“采样模式”，同时继续展示 raw 图，便于产线操作员确认拍摄效果并积累训练样本。
+当模型资产未替换、ROI YOLO 缺失或 PatchCore/PCA 资产不可用时，Python detector 会返回 `RECHECK + CONFIGURATION_ERROR` 并在事件中标记 `sample_collection.enabled=true`。前端状态栏会显示”采样模式”，同时继续展示 raw 图，便于产线操作员确认拍摄效果并积累训练样本。
+
+当 Python detector 返回的 `RECHECK/ERROR` 消息匹配 ROI 未识别到目标物体模式（如”未识别到目标”、”目标丢失”、”ROI未匹配”等），前端将其展示为**信息性黄色提示**而非告警/复检红色错误。此类事件不会触发 `trigger_error` 告警，状态栏正常显示”在线检测”，决策统计仍按实际 decision 字段记录。
 
 ## 手动触发边界
 
 - 手动触发只提交控制面信号，不传输图像，也不绕过 C++ 的采集、检测等待和结果保守校验。
+- 手动触发提交中按钮显示"提交中"并禁用输入控件；成功后自动清空 SN 输入框，便于操作员连续扫描不同座椅。
 - 生产配置当前 `tcp_signal` 只维护一个客户端连接；如果 PLC/外部工控机已占用同一端口，不应在同一时间直接启用展示前端手动触发，除非现场已确认连接仲裁方案。
 - 完整触发进入采集/检测后，C++ 缺帧、设备故障、共享内存错误、Python detector 超时或质量门禁失败仍只能返回 `RECHECK` 或 `ERROR`，前端按钮不会改变判定规则。

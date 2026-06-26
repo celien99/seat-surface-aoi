@@ -380,8 +380,13 @@ class MainViewModel(QObject):
     def _finishManualTrigger(self, success: bool, message: str, payload: object) -> None:
         if success:
             self._set_status_message(message)
+            self._set_trigger_error("")
             if isinstance(payload, dict):
                 self._persist_action("manual_trigger", payload)
+            # 成功后清空输入框，便于连续触发
+            if self._manual_sn:
+                self._manual_sn = ""
+                self.manualSnChanged.emit()
         else:
             self._set_trigger_error(message)
             self._set_status_message("手动触发提交失败")
@@ -435,6 +440,9 @@ class MainViewModel(QObject):
             camera_ids = sorted({_display_camera_id(item) for item in event.defects})
         self._ensure_cameras(camera_ids)
 
+        # ROI 未识别到目标物体属于信息性提示，不应触发告警或复检流程
+        is_target_issue = _is_target_detection_issue(event)
+
         for entry in self._camera_list:
             camera_id = str(entry["cameraId"])
             entry["live"] = camera_id in image_camera_ids or camera_id in camera_ids
@@ -442,6 +450,9 @@ class MainViewModel(QObject):
             if status == "NG" and camera_id == defect_camera_id:
                 entry["status"] = "ng"
                 entry["defectLabel"] = _defect_label(defect)
+            elif is_target_issue:
+                entry["status"] = "warn"
+                entry["defectLabel"] = event.message or "未识别到目标物体"
             elif status == "ERROR":
                 entry["status"] = "error"
                 entry["defectLabel"] = event.message or status
@@ -460,12 +471,15 @@ class MainViewModel(QObject):
         self._last_trigger_result = status
         self.lastTriggerResultChanged.emit()
         self._set_operation_mode(_operation_mode(event, status))
-        self._set_status_message(_event_status_message(event, status))
+        if is_target_issue:
+            self._set_status_message(event.message or "未识别到目标物体")
+        else:
+            self._set_status_message(_event_status_message(event, status))
         self._set_runtime_state(
             system_status="running",
             line_status="online",
             line_connected=True,
-            trigger_error="" if event.error_code == 0 else event.message or f"error_code={event.error_code}",
+            trigger_error="" if (event.error_code == 0 or is_target_issue) else event.message or f"error_code={event.error_code}",
         )
 
         if status == "NG" and defect is not None:
@@ -513,13 +527,15 @@ class MainViewModel(QObject):
 
     def _append_detection_log(self, event: DisplayEvent, status: str, defect: DisplayDefect | None) -> None:
         timestamp = (event.timestamp_ms / 1000.0) if event.timestamp_ms else time.time()
+        is_target_issue = _is_target_detection_issue(event)
+        reason = (event.message or "未识别到目标物体") if is_target_issue else _event_status_message(event, status)
         record = {
             "id": self._next_log_id(),
             "timestamp": timestamp,
             "source": event.source,
             "camera_id": _display_camera_id(defect) if defect else "",
             "status": status,
-            "reason": _event_status_message(event, status),
+            "reason": reason,
             "defect_type": _defect_label(defect),
             "confidence": float(defect.score if defect else 0.0),
             "operator_action": "",
@@ -799,6 +815,33 @@ def _is_controller_alert(event: ControllerEvent) -> bool:
         "signal_result_publish_failed",
         "capture_only_result_publish_failed",
     }
+
+
+# Python 检测器返回的消息中，匹配以下任一模式即判定为"ROI 未识别到目标物体"，
+# 应展示为信息性提示而非复检/告警。
+_TARGET_DETECTION_ISSUE_PATTERNS = (
+    "未识别到目标",
+    "目标未检测到",
+    "目标未识别",
+    "目标丢失",
+    "未检测到目标",
+    "无目标",
+    "ROI未匹配",
+    "ROI无结果",
+    "未匹配到目标",
+    "目标不存在",
+    "检测目标失败",
+    "target not found",
+    "no target detected",
+)
+
+
+def _is_target_detection_issue(event: DisplayEvent) -> bool:
+    """判定检测器返回的 ERROR/RECHECK 是否属于"ROI 未发现目标"信息性提示。"""
+    if not event.message:
+        return False
+    message_lower = event.message.lower()
+    return any(p.lower() in message_lower for p in _TARGET_DETECTION_ISSUE_PATTERNS)
 
 
 def _stats_from_logs(logs: list[dict[str, Any]]) -> DisplayStats:
