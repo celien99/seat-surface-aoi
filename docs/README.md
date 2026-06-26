@@ -12,6 +12,7 @@
 | [C++ 主控当前逻辑梳理](cpp_controller_current_logic.md) | 当前工控机已调通固定双机位 + 三路共享频闪链路的模块职责、采集时序和故障闭环。 |
 | [C++ 主控部署与硬件运维](cpp_controller_operations.md) | 外部信号、相机、频闪、生产配置、上线 SOP、测试机联调和失败场景。 |
 | [Python 检测算法与模型运维](python_detector_operations.md) | Python 算法入口、配方、ROI/标定、模型后端、trace、训练样本、回放、benchmark 和上机预检。 |
+| [Python Detector 优化升级报告](python_detector_performance_report.md) | 2026-06 向量化重构性能量化：6 轮优化提交，23× 算法加速，PCA 精度 38.5%→95.0%。 |
 | [工控机上线补齐报告](deployment_readiness_report.md) | 当前固定双机位 + 三光源工控机交接状态、接线、待确认项和启动流程。 |
 
 辅助图片保留在 `docs/assets/`：
@@ -47,6 +48,7 @@
 4. 梳理当前 C++ 已调通链路时读 [C++ 主控当前逻辑梳理](cpp_controller_current_logic.md)。
 5. 接硬件、上线、测试机联调时读 [C++ 主控部署与硬件运维](cpp_controller_operations.md)。
 6. 改 Python 算法、配方、模型、trace 或训练闭环时读 [Python 检测算法与模型运维](python_detector_operations.md)。
-7. 需要快速定位代码调用链时读 [项目调用关系摘要](project_function_call_map.md)。
-8. 固定双机位 + 三光源工控机交接时读 [工控机上线补齐报告](deployment_readiness_report.md)，确认 COM 口、触发端 IP、光源数量和模型资产状态。
-9. 上 Windows 工控机前运行 `uv run python -m tools.validate_deployment_preflight`；放行前再运行 `uv run python -m tools.validate_deployment_preflight --strict-production`。
+7. 了解 Python 检测层性能优化历程和量化数据时读 [Python Detector 优化升级报告](python_detector_performance_report.md)。
+8. 需要快速定位代码调用链时读 [项目调用关系摘要](project_function_call_map.md)。
+9. 固定双机位 + 三光源工控机交接时读 [工控机上线补齐报告](deployment_readiness_report.md)，确认 COM 口、触发端 IP、光源数量和模型资产状态。
+10. 上 Windows 工控机前运行 `uv run python -m tools.validate_deployment_preflight`；放行前再运行 `uv run python -m tools.validate_deployment_preflight --strict-production`。
