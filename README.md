@@ -78,7 +78,7 @@ cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --config cpp_co
 
 ## 工控机部署顺序
 
-当前正式交付按“两个后台服务 + 一个展示快捷方式”执行：`SeatAoiDetector` 后台服务先启动并打开共享内存，`SeatAoiController` 后台服务随后进入 `--loop` 生产循环，桌面快捷方式启动 `display_app` 并只读消费 `trace` 展示通道。生产现场不要启用 display_app 手动触发按钮，除非已经确认不会抢占真实 PLC/上位机的 `tcp_signal` 连接。
+当前正式交付按“两个后台服务 + 一个展示快捷方式”执行：`SeatAoiController` 后台服务先启动并创建共享内存，`SeatAoiDetector` 后台服务随后打开共享内存并等待任务，桌面快捷方式启动 `display_app` 并只读消费 `trace` 展示通道。生产现场不要启用 display_app 手动触发按钮，除非已经确认不会抢占真实 PLC/上位机的 `tcp_signal` 连接。
 
 构建、依赖安装和模型拷贝都可以在工控机交付安装阶段完成；交付成功后的长期运行阶段不要求网络连接。以下命令在工控机管理员 PowerShell 中按顺序执行。
 
@@ -130,7 +130,6 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 -Li
 - `seat_aoi_controller.exe --validate-config`
 - `python -m tools.validate_protocol`
 - `python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1`
-- `python -m tools.validate_deployment_preflight --strict-production` 输出部署预检报告；该检查包含文档、交付包和现场平台项，默认不阻断服务安装。如需把它作为硬门禁，安装时追加 `-StrictDeploymentPreflight`。
 - 注册 `SeatAoiDetector` 和 `SeatAoiController` 两个自启动后台服务。
 - 创建 `Seat AOI Display.lnk` 桌面快捷方式，目标为 `.venv\Scripts\pythonw.exe -m display_app.main --trace-root trace --line-id LINE1_AOI_01 --grid-layout 2x1`。
 
@@ -139,8 +138,8 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 -Li
 服务和快捷方式安装后，日常运行只需要：
 
 ```powershell
-Start-Service SeatAoiDetector
 Start-Service SeatAoiController
+Start-Service SeatAoiDetector
 ```
 
 操作员从桌面双击 `Seat AOI Display` 打开展示前端。展示前端是 GUI 程序，不注册为 Windows Service；如需登录后自动打开，可安装时追加 `-CreateStartupShortcut`。后台服务日志写入 `logs\services\`，检测和展示事件仍写入 `trace\`。

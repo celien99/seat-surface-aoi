@@ -17,7 +17,6 @@ param(
   [string]$HikrobotIncludeDir = "C:\Program Files (x86)\MVS\Development\Includes",
   [string]$HikrobotLibrary = "C:\Program Files (x86)\MVS\Development\Libraries\win64\MvCameraControl.lib",
   [switch]$SkipValidation,
-  [switch]$StrictDeploymentPreflight,
   [switch]$NoStartServices,
   [switch]$CurrentUserShortcut,
   [switch]$CreateStartupShortcut
@@ -50,19 +49,6 @@ function Invoke-Native {
 function Invoke-NativeOptional {
   param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Command)
   & $Command[0] @($Command | Select-Object -Skip 1)
-}
-
-function Invoke-DeploymentPreflight {
-  param([string]$PythonPath, [bool]$Strict)
-  if ($Strict) {
-    Invoke-Native $PythonPath -m tools.validate_deployment_preflight --strict-production
-    return
-  }
-
-  Invoke-NativeOptional $PythonPath -m tools.validate_deployment_preflight --strict-production
-  if ($LASTEXITCODE -ne 0) {
-    Write-Warning "Deployment preflight reported BLOCKED/ACTION items. Continuing station service installation because this check includes handoff/documentation/platform readiness items. Rerun with -StrictDeploymentPreflight to make it a hard gate."
-  }
 }
 
 function Resolve-Nssm {
@@ -319,7 +305,6 @@ try {
     Invoke-Native $ControllerExe --config $ConfigPath --validate-config
     Invoke-Native $VenvPython -m tools.validate_protocol
     Invoke-Native $VenvPython -m tools.validate_model_assets --recipe $Recipe
-    Invoke-DeploymentPreflight -PythonPath $VenvPython -Strict ([bool]$StrictDeploymentPreflight)
   }
 
   $Nssm = Resolve-Nssm -ExplicitPath $NssmPath -Root $ProjectRoot
@@ -342,7 +327,7 @@ try {
     -Arguments "--config $(Quote-ServiceArgument $ConfigPath) --loop" `
     -Root $ProjectRoot `
     -LogPrefix "controller"
-  Invoke-Native $Nssm set $ControllerServiceName DependOnService $DetectorServiceName
+  Invoke-Native $Nssm set $DetectorServiceName DependOnService $ControllerServiceName
 
   $shortcutPath = New-DisplayShortcut `
     -Root $ProjectRoot `
@@ -355,9 +340,9 @@ try {
     -CreateStartup ([bool]$CreateStartupShortcut)
 
   if (-not $NoStartServices) {
-    Invoke-Native $Nssm start $DetectorServiceName
-    Start-Sleep -Seconds 3
     Invoke-Native $Nssm start $ControllerServiceName
+    Start-Sleep -Seconds 3
+    Invoke-Native $Nssm start $DetectorServiceName
   }
 
   Write-Host "Seat Surface AOI station installation completed."

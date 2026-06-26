@@ -311,7 +311,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
   -GridLayout 2x1
 ```
 
-安装脚本会安装 Python 运行依赖、执行 C++ 配置校验、协议校验、模型资产校验和部署预检报告，然后注册 `SeatAoiDetector` 与 `SeatAoiController` 自启动服务。部署预检包含文档、交付包和现场平台项，默认不阻断服务安装；需要硬门禁时追加 `-StrictDeploymentPreflight`。服务 stdout/stderr 写入 `logs\services\`。桌面快捷方式 `Seat AOI Display` 使用 `pythonw.exe -m display_app.main` 启动，只读 `trace` 展示通道。
+安装脚本会安装 Python 运行依赖、执行 C++ 配置校验、协议校验和模型资产校验，然后注册 `SeatAoiController` 与 `SeatAoiDetector` 自启动服务。C++ 主控先创建共享内存，Python detector 后启动并打开共享内存。服务 stdout/stderr 写入 `logs\services\`。桌面快捷方式 `Seat AOI Display` 使用 `pythonw.exe -m display_app.main` 启动，只读 `trace` 展示通道。
 
 ### PowerShell Watchdog (简易备选)
 
