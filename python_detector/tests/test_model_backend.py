@@ -11,7 +11,10 @@ from python_detector.models.inference_engine import (
     ModelInferenceError,
     ModelRegistry,
     OnnxModel,
+    PatchCoreModel,
 )
+from python_detector.models.embedding import SpatialEmbedding
+from python_detector.models.patchcore import SpatialAnomalyScore
 from python_detector.models.yolo_decode import decode_yolo_rows, decode_yolo_segmentation
 from python_detector.pipeline.feature_builder import FeatureGroup
 
@@ -60,6 +63,42 @@ class _Session:
     def run(self, _output_names, inputs):
         self.last_inputs = inputs
         return [self.output]
+
+
+class _SpatialExtractor:
+    def __init__(self) -> None:
+        self.patch_embeddings = np.asarray([[0.0, 0.0], [1.0, 1.0]], dtype=np.float32)
+
+    def extract_spatial(self, feature_group, config):  # type: ignore[no-untyped-def]
+        return SpatialEmbedding(
+            patch_embeddings=self.patch_embeddings,
+            spatial_shape=(1, 2),
+            patch_dim=2,
+            backend="test_spatial",
+            version="test_v1",
+            layer_names=("layer2",),
+            input_shape_nchw=feature_group.tensor_shape_nchw(),
+            layer_shapes={"layer2": (2, 1, 2)},
+        )
+
+
+class _SpatialKnn:
+    def __init__(self, anomaly_map) -> None:  # type: ignore[no-untyped-def]
+        self.anomaly_map = anomaly_map
+
+    def score_spatial(self, *_args, **_kwargs):  # type: ignore[no-untyped-def]
+        anomaly_map = np.asarray(self.anomaly_map, dtype=np.float32)
+        return SpatialAnomalyScore(
+            anomaly_map=anomaly_map,
+            spatial_shape=(1, 2),
+            nearest_distances=anomaly_map,
+            memory_bank_size=1,
+            embedding_dim=2,
+            backend="exact_knn",
+            version="bank_v1",
+            faiss_index_path=None,
+            fallback_reason=None,
+        )
 
 
 def test_fake_model_modes_cover_ok_recheck_ng() -> None:
@@ -430,3 +469,72 @@ def test_onnx_decode_none_fails_conservatively() -> None:
     model.session = _Session([[0, 0, 1, 1, 0.9, 0]])
     with pytest.raises(RuntimeError, match="输出解码未配置"):
         model.run(_feature_group())
+
+
+def test_patchcore_spatial_squeezes_singleton_anomaly_map_without_numpy_truth_error() -> None:
+    model = PatchCoreModel(
+        ModelConfig(
+            backend="patchcore_knn",
+            model_family="patchcore",
+            class_names=("unknown_anomaly",),
+            embedding_backend="onnx_wideresnet50",
+            embedding_model_path="unused.onnx",
+            memory_bank_path="unused_bank.json",
+            score_threshold=0.1,
+            spatial_mode=True,
+            spatial_layers=("layer2",),
+        ),
+        embedding_extractor=_SpatialExtractor(),  # type: ignore[arg-type]
+        knn_index=_SpatialKnn([[[0.0, 0.9]]]),  # type: ignore[arg-type]
+    )
+
+    candidates = model.run(_feature_group())
+
+    assert candidates
+    assert candidates[0].score == pytest.approx(0.9)
+
+
+def test_patchcore_spatial_rejects_multi_channel_anomaly_map_without_numpy_truth_error() -> None:
+    model = PatchCoreModel(
+        ModelConfig(
+            backend="patchcore_knn",
+            model_family="patchcore",
+            class_names=("unknown_anomaly",),
+            embedding_backend="onnx_wideresnet50",
+            embedding_model_path="unused.onnx",
+            memory_bank_path="unused_bank.json",
+            score_threshold=0.1,
+            spatial_mode=True,
+            spatial_layers=("layer2",),
+        ),
+        embedding_extractor=_SpatialExtractor(),  # type: ignore[arg-type]
+        knn_index=_SpatialKnn([[[0.0, 0.9]], [[0.1, 0.2]]]),  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(RuntimeError, match="anomaly_map 必须是 2 维矩阵"):
+        model.run(_feature_group())
+
+
+def test_patchcore_spatial_uses_numpy_max_for_2d_anomaly_map() -> None:
+    model = PatchCoreModel(
+        ModelConfig(
+            backend="patchcore_knn",
+            model_family="patchcore",
+            class_names=("unknown_anomaly",),
+            embedding_backend="onnx_wideresnet50",
+            embedding_model_path="unused.onnx",
+            memory_bank_path="unused_bank.json",
+            score_threshold=0.1,
+            spatial_mode=True,
+            spatial_layers=("layer2",),
+        ),
+        embedding_extractor=_SpatialExtractor(),  # type: ignore[arg-type]
+        knn_index=_SpatialKnn([[0.0, 0.9]]),  # type: ignore[arg-type]
+    )
+
+    candidates = model.run(_feature_group())
+
+    assert candidates
+    assert candidates[0].class_name == "unknown_anomaly"
+    assert candidates[0].score == pytest.approx(0.9)
+    assert model.config.spatial_mode is True

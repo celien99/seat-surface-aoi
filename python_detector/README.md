@@ -137,7 +137,7 @@ python_detector/
 │   ├── defect_filter.py        # 类别阈值、面积阈值等缺陷过滤
 │   └── rule_engine.py          # OK/NG/RECHECK/ERROR 规则判定
 ├── models/
-│   ├── inference_engine.py     # Fake/ONNX/PatchCore 后端统一推理入口和模型缓存
+│   ├── inference_engine.py     # Fake/ONNX/PatchCore 后端统一推理入口、空间 anomaly map 校验和模型缓存
 │   ├── onnx_runtime.py         # ONNX Runtime session、numpy 输入和统一保守错误包装
 │   ├── embedding.py            # statistical 与 onnx_wideresnet50 embedding 入口
 │   ├── pca.py                  # PCA JSON 参数加载、版本校验和投影
@@ -283,13 +283,13 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 **空间 PatchCore 模式（`spatial_mode: true`）：** 在配方模型配置中启用 `spatial_mode` 后，PatchCore 从"全局嵌入"（整个 ROI → 1 个向量 → 标量分数）切换为"空间嵌入"（ROI → 中间层特征图 → H×W 个 patch 向量 → anomaly_map 热力图）。空间 embedding 保持 ONNX 输出为 `numpy` 数组，使用最近邻索引上采样、通道拼接和 `reshape` 生成 patch 矩阵；PCA 使用批量矩阵乘法投影；PatchCore exact KNN fallback 使用分块矩阵距离和 `partition/sort` 取 top-k，FAISS 后处理直接对距离矩阵做 `sqrt/clip/reshape`。空间模式提供三项关键提升：
 
-1. **像素级缺陷定位**：从 anomaly_map 连通域自动生成缺陷 bbox，不再使用整个 ROI 边界。连通域分析使用 `scipy.ndimage.label` + `find_objects` 向量化实现（替代旧版 Python BFS），异常分数热力图、PCA 投影和 patch embedding 数据流全程保持 `numpy.ndarray`，仅在 trace JSON 序列化时转为列表。
+1. **像素级缺陷定位**：从 anomaly_map 连通域自动生成缺陷 bbox，不再使用整个 ROI 边界。连通域分析使用 `scipy.ndimage.label` + `find_objects` 向量化实现（替代旧版 Python BFS），异常分数热力图、PCA 投影和 patch embedding 数据流全程保持 `numpy.ndarray`。在线推理先把 `anomaly_map` 和 `nearest_distances` 归一化为二维有限矩阵并确认形状一致，再做最大值统计和连通域提取；异常形状或非有限值按模型异常处理，不允许隐式降级为 OK。trace JSON 序列化时再转换为列表。
 2. **小缺陷召回率提升**：Global Average Pooling 不再淹没小面积缺陷信号。
 3. **检测热力图**：TraceWriter 自动将 ROI 空间的 anomaly_map 映射回 raw 原图坐标，渲染为 raw 原图尺寸的 JET 伪彩色热力图（40% 热力 + 60% 底图），同时绘制绿色 bbox 轮廓，替代旧的 ROI 裁剪图 overlay。
 
 空间模式要求：`embedding_backend=onnx_wideresnet50`、`spatial_layers` 非空（如 `[layer2, layer3]`），并使用 `--spatial-mode` 重新导出 ONNX 模型和重新训练记忆库。**生产配方默认启用 `spatial_mode: true`**，当前 layer2+layer3 原始 patch embedding 为 1536 维，在线先用 `seat_pca.json`（v2, 524维, 95%累积方差）投影，再进入 PatchCore bank/FAISS 评分并生成像素级 anomaly_map 热力图。若需回退到全局嵌入路径（整个 ROI → 1 个向量 → 标量分数），在配方中设置 `spatial_mode: false`。anomaly_map 二值化阈值可通过 `anomaly_binarize_min_ratio`（默认 0.5）和 `anomaly_binarize_relative`（默认 0.3）配置，阈值公式为 `max(score_threshold × min_ratio, max_anomaly × relative)`。
 
-模型资产缺失、占位文件未替换、后端依赖缺失、PCA 参数或 PatchCore memory bank 未就绪会抛出 `ModelAssetUnavailableError`，由 pipeline 转成 `RECHECK` + `CONFIGURATION_ERROR`，并写入 `sample_collection.reason=model_asset_unavailable`。模型已经加载但输出为空、bbox 越界、class id 错误或维度不匹配仍按模型运行异常处理，不能静默降级为 `OK`。
+模型资产缺失、占位文件未替换、后端依赖缺失、PCA 参数或 PatchCore memory bank 未就绪会抛出 `ModelAssetUnavailableError`，由 pipeline 转成 `RECHECK` + `CONFIGURATION_ERROR`，并写入 `sample_collection.reason=model_asset_unavailable`。模型已经加载但输出为空、bbox 越界、class id 错误、维度不匹配、空间 anomaly map 非二维或非有限，仍按模型运行异常处理，不能静默降级为 `OK`。
 
 离线训练工具复用同一套模型输入契约：
 

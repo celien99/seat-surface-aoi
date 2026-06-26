@@ -364,6 +364,16 @@ class PatchCoreModel:
             self.config.pca_version,
             self.config.faiss_index_path,
         )
+        anomaly_map = _as_anomaly_map_array(score.anomaly_map)
+        nearest_distances = _as_anomaly_map_array(score.nearest_distances, name="nearest_distances")
+        spatial_shape = (int(score.spatial_shape[0]), int(score.spatial_shape[1]))
+        if anomaly_map.shape != spatial_shape:
+            raise RuntimeError(f"PatchCore anomaly_map shape 必须与 spatial_shape 一致: {anomaly_map.shape} != {spatial_shape}")
+        if nearest_distances.shape != anomaly_map.shape:
+            raise RuntimeError(
+                f"PatchCore nearest_distances shape 必须与 anomaly_map 一致: {nearest_distances.shape} != {anomaly_map.shape}"
+            )
+        max_anomaly = float(anomaly_map.max())
         feature_group.anomaly_summary = {
             "model_family": self.config.model_family,
             "memory_bank_version": score.version,
@@ -372,20 +382,19 @@ class PatchCoreModel:
             "fallback_reason": score.fallback_reason,
             "spatial_mode": True,
             "spatial_shape": list(score.spatial_shape),
-            "anomaly_map": score.anomaly_map,
-            "nearest_distances": score.nearest_distances,
+            "anomaly_map": anomaly_map,
+            "nearest_distances": nearest_distances,
             "memory_bank_size": score.memory_bank_size,
             "embedding_dim": score.embedding_dim,
-            "max_anomaly": max(max(row) for row in score.anomaly_map),
+            "max_anomaly": max_anomaly,
         }
 
-        max_anomaly = float(score.anomaly_map.max())
         if max_anomaly < self.config.score_threshold:
             return []
 
         class_name = self.config.class_names[0] if self.config.class_names else "unknown_anomaly"
         bboxes = _anomaly_map_bboxes(
-            score.anomaly_map,
+            anomaly_map,
             score.spatial_shape,
             self.config.score_threshold,
             feature_group,
@@ -574,6 +583,7 @@ def _anomaly_map_bboxes(
     """
     from scipy import ndimage
 
+    anomaly_map = _as_anomaly_map_array(anomaly_map)
     h_out, w_out = anomaly_map.shape
     roi_h, roi_w = feature_group.feature_shape_hw
     if roi_h <= 0 or roi_w <= 0 or h_out <= 0 or w_out <= 0:
@@ -620,3 +630,18 @@ def _anomaly_map_bboxes(
     # 按分数降序
     results.sort(key=lambda item: item[1], reverse=True)
     return results
+
+
+def _as_anomaly_map_array(value: Any, *, name: str = "anomaly_map") -> np.ndarray:
+    array = np.asarray(value, dtype=np.float32)
+    while array.ndim > 2 and array.shape[0] == 1:
+        array = array[0]
+    while array.ndim > 2 and array.shape[-1] == 1:
+        array = array[..., 0]
+    if array.ndim != 2:
+        raise RuntimeError(f"PatchCore {name} 必须是 2 维矩阵，实际 shape={array.shape}")
+    if array.size == 0:
+        raise RuntimeError(f"PatchCore {name} 为空")
+    if not np.isfinite(array).all():
+        raise RuntimeError(f"PatchCore {name} 包含非有限值")
+    return array
