@@ -63,17 +63,17 @@ class PcaProjector:
         params = self.load(pca_path)
         if expected_version is not None and params.version != expected_version:
             raise RuntimeError(f"PCA 版本不匹配: {params.version} != {expected_version}")
-        if not embeddings:
-            raise RuntimeError("批量 PCA 输入为空")
         try:
             matrix = np.asarray(embeddings, dtype=np.float64)
         except ValueError as exc:
             raise RuntimeError("PCA 批量输入维度不一致") from exc
-        input_dim = matrix.shape[1] if matrix.ndim == 2 else 0
-        if input_dim != len(params.mean):
-            raise RuntimeError(f"PCA 输入维度不匹配: {input_dim} != {len(params.mean)}")
+        if matrix.size == 0:
+            raise RuntimeError("批量 PCA 输入为空")
         if matrix.ndim != 2:
             raise RuntimeError(f"PCA 批量输入必须是 2 维矩阵，实际: {matrix.ndim}")
+        input_dim = int(matrix.shape[1])
+        if input_dim != len(params.mean):
+            raise RuntimeError(f"PCA 输入维度不匹配: {input_dim} != {len(params.mean)}")
         components = np.asarray(params.components, dtype=np.float64)
         if components.ndim != 2 or components.shape[1] != input_dim:
             actual_dim = int(components.shape[1]) if components.ndim == 2 else 0

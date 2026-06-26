@@ -283,7 +283,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 **空间 PatchCore 模式（`spatial_mode: true`）：** 在配方模型配置中启用 `spatial_mode` 后，PatchCore 从"全局嵌入"（整个 ROI → 1 个向量 → 标量分数）切换为"空间嵌入"（ROI → 中间层特征图 → H×W 个 patch 向量 → anomaly_map 热力图）。空间 embedding 保持 ONNX 输出为 `numpy` 数组，使用最近邻索引上采样、通道拼接和 `reshape` 生成 patch 矩阵；PCA 使用批量矩阵乘法投影；PatchCore exact KNN fallback 使用分块矩阵距离和 `partition/sort` 取 top-k，FAISS 后处理直接对距离矩阵做 `sqrt/clip/reshape`。空间模式提供三项关键提升：
 
-1. **像素级缺陷定位**：从 anomaly_map 连通域自动生成缺陷 bbox，不再使用整个 ROI 边界。连通域分析使用 `scipy.ndimage.label` + `find_objects` 向量化实现（替代旧版 Python BFS），异常分数热力图、PCA 投影和 patch embedding 数据流全程保持 `numpy.ndarray`。在线推理先把 `anomaly_map` 和 `nearest_distances` 归一化为二维有限矩阵并确认形状一致，再做最大值统计和连通域提取；异常形状或非有限值按模型异常处理，不允许隐式降级为 OK。trace JSON 序列化时再转换为列表。
+1. **像素级缺陷定位**：从 anomaly_map 连通域自动生成缺陷 bbox，不再使用整个 ROI 边界。连通域分析使用 `scipy.ndimage.label` + `find_objects` 向量化实现（替代旧版 Python BFS），异常分数热力图、PCA 投影和 patch embedding 数据流全程保持 `numpy.ndarray`。批量 PCA 会先把输入转换为二维矩阵，并用 `size/ndim/shape` 显式校验空输入和维度，不对 `numpy.ndarray` 做布尔判断。在线推理先把 `anomaly_map` 和 `nearest_distances` 归一化为二维有限矩阵并确认形状一致，再做最大值统计和连通域提取；异常形状或非有限值按模型异常处理，不允许隐式降级为 OK。trace JSON 序列化时再转换为列表。
 2. **小缺陷召回率提升**：Global Average Pooling 不再淹没小面积缺陷信号。
 3. **检测热力图**：TraceWriter 自动将 ROI 空间的 anomaly_map 映射回 raw 原图坐标，渲染为 raw 原图尺寸的 JET 伪彩色热力图（40% 热力 + 60% 底图），同时绘制绿色 bbox 轮廓，替代旧的 ROI 裁剪图 overlay。
 

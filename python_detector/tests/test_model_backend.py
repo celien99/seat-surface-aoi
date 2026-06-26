@@ -15,6 +15,7 @@ from python_detector.models.inference_engine import (
 )
 from python_detector.models.embedding import SpatialEmbedding
 from python_detector.models.patchcore import SpatialAnomalyScore
+from python_detector.models.pca import PcaProjector
 from python_detector.models.yolo_decode import decode_yolo_rows, decode_yolo_segmentation
 from python_detector.pipeline.feature_builder import FeatureGroup
 
@@ -538,3 +539,22 @@ def test_patchcore_spatial_uses_numpy_max_for_2d_anomaly_map() -> None:
     assert candidates[0].class_name == "unknown_anomaly"
     assert candidates[0].score == pytest.approx(0.9)
     assert model.config.spatial_mode is True
+
+
+def test_pca_project_batch_accepts_numpy_matrix_without_truth_value_error(tmp_path) -> None:
+    pca_path = tmp_path / "pca.json"
+    pca_path.write_text(
+        '{"version":"pca_v1","mean":[1.0,2.0],"components":[[1.0,0.0],[0.0,1.0]]}',
+        encoding="utf-8",
+    )
+
+    projected, version, input_dim, output_dim = PcaProjector().project_batch(
+        np.asarray([[2.0, 4.0], [0.0, 2.5]], dtype=np.float32),
+        str(pca_path),
+        "pca_v1",
+    )
+
+    assert version == "pca_v1"
+    assert input_dim == 2
+    assert output_dim == 2
+    np.testing.assert_allclose(projected, np.asarray([[1.0, 2.0], [-1.0, 0.5]], dtype=np.float64))
