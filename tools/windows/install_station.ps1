@@ -17,6 +17,7 @@ param(
   [string]$HikrobotIncludeDir = "C:\Program Files (x86)\MVS\Development\Includes",
   [string]$HikrobotLibrary = "C:\Program Files (x86)\MVS\Development\Libraries\win64\MvCameraControl.lib",
   [switch]$SkipValidation,
+  [switch]$StrictDeploymentPreflight,
   [switch]$NoStartServices,
   [switch]$CurrentUserShortcut,
   [switch]$CreateStartupShortcut
@@ -49,6 +50,19 @@ function Invoke-Native {
 function Invoke-NativeOptional {
   param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Command)
   & $Command[0] @($Command | Select-Object -Skip 1)
+}
+
+function Invoke-DeploymentPreflight {
+  param([string]$PythonPath, [bool]$Strict)
+  if ($Strict) {
+    Invoke-Native $PythonPath -m tools.validate_deployment_preflight --strict-production
+    return
+  }
+
+  Invoke-NativeOptional $PythonPath -m tools.validate_deployment_preflight --strict-production
+  if ($LASTEXITCODE -ne 0) {
+    Write-Warning "Deployment preflight reported BLOCKED/ACTION items. Continuing station service installation because this check includes handoff/documentation/platform readiness items. Rerun with -StrictDeploymentPreflight to make it a hard gate."
+  }
 }
 
 function Resolve-Nssm {
@@ -89,24 +103,33 @@ function Get-DisplayPython {
 
 function Install-PythonEnvironment {
   param([string]$Root, [string]$ExplicitPython)
+
+  $venvPath = Join-Path $Root ".venv"
+  $venvPython = Join-Path $venvPath "Scripts\python.exe"
+
   if (Get-Command uv -ErrorAction SilentlyContinue) {
-    Invoke-Native uv sync --extra onnx --extra faiss --extra display
+    if (-not (Test-Path -LiteralPath $venvPython)) {
+      Invoke-Native uv venv $venvPath
+    }
+    $requirementsPath = Join-Path $env:TEMP "seat-aoi-runtime-requirements.txt"
+    Invoke-Native uv export --format requirements.txt --frozen --no-hashes --no-emit-project --no-dev --extra onnx --extra faiss --extra display --output-file $requirementsPath
+    Invoke-Native uv pip install --python $venvPython --requirement $requirementsPath
+    Invoke-Native uv pip check --python $venvPython
     return
   }
 
-  $venvPython = Join-Path $Root ".venv\Scripts\python.exe"
   if (-not (Test-Path -LiteralPath $venvPython)) {
     if ($ExplicitPython) {
-      Invoke-Native $ExplicitPython -m venv (Join-Path $Root ".venv")
+      Invoke-Native $ExplicitPython -m venv $venvPath
     } elseif (Get-Command py -ErrorAction SilentlyContinue) {
-      Invoke-Native py -3.10 -m venv (Join-Path $Root ".venv")
+      Invoke-Native py -3.10 -m venv $venvPath
     } else {
-      Invoke-Native python -m venv (Join-Path $Root ".venv")
+      Invoke-Native python -m venv $venvPath
     }
   }
 
   Invoke-Native $venvPython -m pip install --upgrade pip
-  Invoke-Native $venvPython -m pip install -e ".[onnx,faiss,display]"
+  Invoke-Native $venvPython -m pip install numpy PyYAML scipy onnxruntime faiss-cpu PySide6
   Invoke-Native $venvPython -m pip check
 }
 
@@ -296,7 +319,7 @@ try {
     Invoke-Native $ControllerExe --config $ConfigPath --validate-config
     Invoke-Native $VenvPython -m tools.validate_protocol
     Invoke-Native $VenvPython -m tools.validate_model_assets --recipe $Recipe
-    Invoke-Native $VenvPython -m tools.validate_deployment_preflight --strict-production
+    Invoke-DeploymentPreflight -PythonPath $VenvPython -Strict ([bool]$StrictDeploymentPreflight)
   }
 
   $Nssm = Resolve-Nssm -ExplicitPath $NssmPath -Root $ProjectRoot

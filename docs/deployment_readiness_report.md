@@ -208,9 +208,9 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
 
 ### 安装脚本动作
 
-- 安装 Python 依赖：`uv sync --extra onnx --extra faiss --extra display`。
+- 安装 Python 运行依赖；脚本通过 `uv export --no-emit-project` 生成依赖清单并安装到 `.venv`，不构建当前项目 wheel。
 - 可选构建 C++ 主控，并复制到 `bin\seat_aoi_controller.exe`。
-- 执行 C++ 配置校验、共享内存协议校验、模型资产校验和严格部署预检。
+- 执行 C++ 配置校验、共享内存协议校验、模型资产校验，并输出部署预检报告；部署预检默认不阻断服务安装，需要硬门禁时追加 `-StrictDeploymentPreflight`。
 - 用 NSSM 注册 `SeatAoiDetector` 和 `SeatAoiController` 两个自启动后台服务；`SeatAoiController` 依赖 `SeatAoiDetector`。
 - 创建公共桌面 `Seat AOI Display.lnk`，用 `pythonw.exe -m display_app.main --trace-root trace --line-id LINE1_AOI_01 --grid-layout 2x1` 启动展示前端。
 

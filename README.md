@@ -109,7 +109,7 @@ Copy-Item "$ModelRoot\patchcore\seat_patchcore.faiss" ".\model\patchcore\seat_pa
 # 4. 配置生产环境参数：按现场确认 COM 口、相机 SN、结果回传 IP/端口
 notepad .\cpp_controller\config\station_runtime.production.conf
 
-# 5. 一键安装：同步 Python 依赖、构建 C++ 主控、注册后台服务、创建展示快捷方式
+# 5. 一键安装：安装 Python 运行依赖、构建 C++ 主控、注册后台服务、创建展示快捷方式
 powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
   -BuildController `
   -EnableHikrobotMvs `
@@ -126,11 +126,11 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 -Li
 
 安装脚本默认会执行：
 
-- `uv sync --extra onnx --extra faiss --extra display`
+- `uv export --no-emit-project ...` 生成运行依赖清单，并安装到 `.venv`；不会构建或安装当前项目 wheel，因此不会因为缺少文档文件阻断生产安装。
 - `seat_aoi_controller.exe --validate-config`
 - `python -m tools.validate_protocol`
 - `python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1`
-- `python -m tools.validate_deployment_preflight --strict-production`
+- `python -m tools.validate_deployment_preflight --strict-production` 输出部署预检报告；该检查包含文档、交付包和现场平台项，默认不阻断服务安装。如需把它作为硬门禁，安装时追加 `-StrictDeploymentPreflight`。
 - 注册 `SeatAoiDetector` 和 `SeatAoiController` 两个自启动后台服务。
 - 创建 `Seat AOI Display.lnk` 桌面快捷方式，目标为 `.venv\Scripts\pythonw.exe -m display_app.main --trace-root trace --line-id LINE1_AOI_01 --grid-layout 2x1`。
 
