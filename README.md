@@ -124,6 +124,19 @@ Set-Location C:\seat-surface-aoi
 powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 -LineId LINE1_AOI_01 -GridLayout 2x1
 ```
 
+联调或需要 display_app 手动触发全链路时，安装脚本追加 `-EnableDisplayManualTrigger`，快捷方式会启用首页 SN 输入和“手动触发”按钮，并向 C++ `tcp_signal` 端口发送 `start`/`sn <SN>` 两步协议：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
+  -BuildController `
+  -EnableHikrobotMvs `
+  -EnableDisplayManualTrigger `
+  -ManualTriggerHost 127.0.0.1 `
+  -ManualTriggerPort 9000 `
+  -LineId LINE1_AOI_01 `
+  -GridLayout 2x1
+```
+
 安装脚本默认会执行：
 
 - `uv export --no-emit-project ...` 生成运行依赖清单，并安装到 `.venv`；不会构建或安装当前项目 wheel，因此不会因为缺少文档文件阻断生产安装。

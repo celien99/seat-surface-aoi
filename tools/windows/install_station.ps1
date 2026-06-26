@@ -19,7 +19,11 @@ param(
   [switch]$SkipValidation,
   [switch]$NoStartServices,
   [switch]$CurrentUserShortcut,
-  [switch]$CreateStartupShortcut
+  [switch]$CreateStartupShortcut,
+  [switch]$EnableDisplayManualTrigger,
+  [string]$ManualTriggerHost = "127.0.0.1",
+  [int]$ManualTriggerPort = 9000,
+  [int]$ManualTriggerTimeoutMs = 1000
 )
 
 $ErrorActionPreference = "Stop"
@@ -232,6 +236,10 @@ function New-DisplayShortcut {
     [string]$Trace,
     [string]$Line,
     [string]$Grid,
+    [bool]$EnableManualTrigger,
+    [string]$ManualTriggerHost,
+    [int]$ManualTriggerPort,
+    [int]$ManualTriggerTimeoutMs,
     [bool]$UseCurrentUserDesktop,
     [bool]$CreateStartup
   )
@@ -255,6 +263,17 @@ function New-DisplayShortcut {
     "--grid-layout",
     (Quote-ShortcutArgument $Grid)
   )
+  if ($EnableManualTrigger) {
+    $argumentParts += @(
+      "--enable-manual-trigger",
+      "--manual-trigger-host",
+      (Quote-ShortcutArgument $ManualTriggerHost),
+      "--manual-trigger-port",
+      "$ManualTriggerPort",
+      "--manual-trigger-timeout-ms",
+      "$ManualTriggerTimeoutMs"
+    )
+  }
 
   $shortcutPath = Join-Path $desktop "$Name.lnk"
   $shell = New-Object -ComObject WScript.Shell
@@ -336,6 +355,10 @@ try {
     -Trace $TraceRoot `
     -Line $LineId `
     -Grid $GridLayout `
+    -EnableManualTrigger ([bool]$EnableDisplayManualTrigger) `
+    -ManualTriggerHost $ManualTriggerHost `
+    -ManualTriggerPort $ManualTriggerPort `
+    -ManualTriggerTimeoutMs $ManualTriggerTimeoutMs `
     -UseCurrentUserDesktop ([bool]$CurrentUserShortcut) `
     -CreateStartup ([bool]$CreateStartupShortcut)
 

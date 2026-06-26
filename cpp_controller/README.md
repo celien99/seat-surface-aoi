@@ -313,6 +313,8 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
 
 安装脚本会安装 Python 运行依赖、执行 C++ 配置校验、协议校验和模型资产校验，然后注册 `SeatAoiController` 与 `SeatAoiDetector` 自启动服务。C++ 主控先创建共享内存，Python detector 后启动并打开共享内存。服务 stdout/stderr 写入 `logs\services\`。桌面快捷方式 `Seat AOI Display` 使用 `pythonw.exe -m display_app.main` 启动，只读 `trace` 展示通道。
 
+如果现场需要通过 display_app 手动触发全链路，安装时追加 `-EnableDisplayManualTrigger -ManualTriggerHost 127.0.0.1 -ManualTriggerPort 9000`，脚本会把 `--enable-manual-trigger` 写入桌面快捷方式参数。生产接入真实 PLC/上位机时不要同时启用该快捷方式的手动触发，除非已经确认 `tcp_signal` 连接仲裁策略。
+
 ### PowerShell Watchdog (简易备选)
 
 ```powershell

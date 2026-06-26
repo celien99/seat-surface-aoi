@@ -50,6 +50,19 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
 
 如只希望当前用户可见，安装时追加 `-CurrentUserShortcut`；如需要登录 Windows 后自动打开展示前端，追加 `-CreateStartupShortcut`。生产快捷方式默认不启用 `--enable-manual-trigger`，避免抢占真实 PLC/上位机连接。
 
+需要让桌面快捷方式支持手动触发全链路时，安装时显式追加：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
+  -EnableDisplayManualTrigger `
+  -ManualTriggerHost 127.0.0.1 `
+  -ManualTriggerPort 9000 `
+  -LineId LINE1_AOI_01 `
+  -GridLayout 2x1
+```
+
+该快捷方式会把 `--enable-manual-trigger`、`--manual-trigger-host` 和 `--manual-trigger-port` 写入启动参数；按钮仍只发送控制面触发信号，不直接控制相机、频闪或共享内存。
+
 联调时可显式启用首页手动触发按钮：
 
 ```powershell
