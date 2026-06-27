@@ -209,7 +209,7 @@ uv run python -m python_detector.detector_main `
 - `display_latest.json`：最近一次 Python detector 判定，原子替换，适合 PySide6/QML 轮询。
 - `display_events.jsonl`：检测结果追加日志，适合前端日志页或回放。
 
-事件字段包含 `sequence_id`、`trigger_id`、`seat_id`、`sku`、`recipe_id`、`decision`、`quality_pass`、`error_code`、`elapsed_ms`、缺陷列表、质量/错误消息、`sample_collection`、`trace_dir`、原始采集 PNG 图、ROI PNG 图和 overlay PNG 图路径。展示通道由本仓库 `display_app/` 的 PySide6/QML 前端只读消费，也可供外部 `online-detection-app` 对接；它不读写现有 C++/Python 共享内存 slot。如果展示 JSON 落盘失败，只打印告警，不改变已写回 C++ 的检测结果。检测 trace、原始采集图、ROI 图或 overlay 写入失败会在写回共享内存前把当前件改为 `RECHECK/DEVICE_FAULT`，避免磁盘异常时继续输出 `OK`。采集失败、detector timeout 等 C++ 侧保守结果可由前端读取 `trace_root/cpp_controller_events.jsonl` 补充显示。
+事件字段包含 `sequence_id`、`trigger_id`、`seat_id`、`sku`、`recipe_id`、`decision`、`quality_pass`、`error_code`、`elapsed_ms`、缺陷列表、质量/错误消息、`sample_collection`、`trace_dir`、原始采集 PNG 图、ROI PNG 图、生产 overlay PNG 图和 PatchCore 连续 heatmap PNG 图路径。展示通道由本仓库 `display_app/` 的 PySide6/QML 前端只读消费，也可供外部 `online-detection-app` 对接；它不读写现有 C++/Python 共享内存 slot。如果展示 JSON 落盘失败，只打印告警，不改变已写回 C++ 的检测结果。检测 trace、原始采集图、ROI 图、overlay 或 heatmap 写入失败会在写回共享内存前把当前件改为 `RECHECK/DEVICE_FAULT`，避免磁盘异常时继续输出 `OK`。采集失败、detector timeout 等 C++ 侧保守结果可由前端读取 `trace_root/cpp_controller_events.jsonl` 补充显示。
 
 当 ONNX 模型文件不存在、仍是 1 字节占位文件、ONNX/numpy 依赖缺失、PCA 参数或 PatchCore memory bank 未就绪时，pipeline 会返回 `RECHECK` + `CONFIGURATION_ERROR`，并在 `error.json` 中写入 `asset_unavailable=true` 和具体资产路径。这类状态表示“当前没有足够模型能力判定”，不会输出 `OK`，也不会直接输出 `NG`；trace 会保存 `raw_images/` 原始采集图，前端可直接显示，后续训练工具可继续从 trace/manifest 生成训练样本。
 
@@ -285,7 +285,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 1. **像素级缺陷定位**：从 anomaly_map 连通域自动生成缺陷 bbox，不再使用整个 ROI 边界。连通域分析使用 `scipy.ndimage.label` + `find_objects` 向量化实现（替代旧版 Python BFS），异常分数热力图、PCA 投影和 patch embedding 数据流全程保持 `numpy.ndarray`。批量 PCA 会先把输入转换为二维矩阵，并用 `size/ndim/shape` 显式校验空输入和维度，不对 `numpy.ndarray` 做布尔判断。在线推理先把 `anomaly_map` 和 `nearest_distances` 归一化为二维有限矩阵并确认形状一致，再做最大值统计和连通域提取；异常形状或非有限值按模型异常处理，不允许隐式降级为 OK。trace JSON 序列化时再转换为列表。
 2. **小缺陷召回率提升**：Global Average Pooling 不再淹没小面积缺陷信号。
-3. **检测热力图**：TraceWriter 自动将 ROI 空间的 anomaly_map 映射回 raw 原图坐标，渲染为 raw 原图尺寸的 JET 伪彩色热力图（40% 热力 + 60% 底图），同时绘制绿色 bbox 轮廓，替代旧的 ROI 裁剪图 overlay。
+3. **检测热力图**：TraceWriter 自动将 ROI 空间的 anomaly_map 映射回 raw 原图坐标，并分开写两类图。`patchcore_heatmaps/` 保存连续 JET 伪彩 anomaly_map，接近原生 PatchCore demo 的调试热力图；`overlays/` 只在最终缺陷候选 bbox 内叠加达到 PatchCore 二值化阈值的黄/红热色，低分正常 ROI 保持灰度原图，同时绘制判定框和缺陷 bbox，作为生产展示图。
 
 空间模式要求：`embedding_backend=onnx_wideresnet50`、`spatial_layers` 非空（如 `[layer2, layer3]`），并使用 `--spatial-mode` 重新导出 ONNX 模型和重新训练记忆库。**生产配方默认启用 `spatial_mode: true`**，当前 layer2+layer3 原始 patch embedding 为 1536 维，在线先用 `seat_pca.json`（v2, 524维, 95%累积方差）投影，再进入 PatchCore bank/FAISS 评分并生成像素级 anomaly_map 热力图。若需回退到全局嵌入路径（整个 ROI → 1 个向量 → 标量分数），在配方中设置 `spatial_mode: false`。anomaly_map 二值化阈值可通过 `anomaly_binarize_min_ratio`（默认 0.5）和 `anomaly_binarize_relative`（默认 0.3）配置，阈值公式为 `max(score_threshold × min_ratio, max_anomaly × relative)`。
 
@@ -318,7 +318,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 - `fusion_summary.json`
 - `timings.json`
 - `error.json`
-- 原始采集 PNG 图、ROI PNG 图和检测 overlay PNG 图；原始图路径为 `raw_images/<camera_id>/<pose_id>/<light_id>.png`，ROI 图路径为 `images/<camera_id>/<pose_id>/<roi_name>/<light_id>.png`，overlay 路径为 `overlays/<camera_id>/<pose_id>/<roi_name>.png`。overlay 以匹配光源的 raw 原图为底图，尺寸等于 raw 原图；anomaly_map 从 ROI 坐标映射回 raw 坐标后叠加，缺陷 bbox 按 raw 坐标绘制。PNG filter scanline 构造、raw 灰度转 RGB、heatmap 上采样/坐标映射/alpha blend 和矩形绘制均使用 `numpy` 批量处理，仍使用内置 zlib PNG writer，不新增图像编码依赖。只要该 ROI 已完成预处理，OK、NG、RECHECK 和 ERROR trace 都会写检测 overlay；NG/RECHECK/ERROR 有缺陷候选时额外绘制候选 bbox。
+- 原始采集 PNG 图、ROI PNG 图、检测 overlay PNG 图和 PatchCore heatmap PNG 图；原始图路径为 `raw_images/<camera_id>/<pose_id>/<light_id>.png`，ROI 图路径为 `images/<camera_id>/<pose_id>/<roi_name>/<light_id>.png`，overlay 路径为 `overlays/<camera_id>/<pose_id>/<roi_name>.png`，连续 heatmap 路径为 `patchcore_heatmaps/<camera_id>/<pose_id>/<roi_name>.png`。overlay 以匹配光源的 raw 原图为底图，尺寸等于 raw 原图；anomaly_map 从 ROI 坐标映射回 raw 坐标后只在最终缺陷候选 bbox 内叠加达到二值化阈值的热区，低分区域不再整片染蓝或染黄，缺陷 bbox 按 raw 坐标绘制。`patchcore_heatmaps/` 使用连续 min-max anomaly_map 伪彩，只用于算法排障和阈值复核，不直接代表最终生产判定。PNG filter scanline 构造、raw 灰度转 RGB、heatmap 上采样/坐标映射/alpha blend 和矩形绘制均使用 `numpy` 批量处理，仍使用内置 zlib PNG writer，不新增图像编码依赖。只要该 ROI 已完成预处理，OK、NG、RECHECK 和 ERROR trace 都会写检测 overlay；NG/RECHECK/ERROR 有缺陷候选时额外绘制候选 bbox。
 
 在线 `SeatSurfaceAoiAlgorithm` 调用 `TraceWriter` 时，如果任一 JSON、原始图、ROI 图或 overlay 写入失败，会记录 `context["trace_error"]`，并把当前结果改为 `RECHECK`、`error_code=DEVICE_FAULT`、`quality_pass=false` 后再交给 `ShmClient` 写回 C++。展示通道 `display_latest.json` / `display_events.jsonl` 属于结果发布后的只读前端辅助输出，失败只打印告警，不反向修改已经发布的共享内存结果。
 
@@ -383,5 +383,3 @@ uv run pytest python_detector/tests/test_model_backend.py
 uv sync --group dev --extra onnx --extra faiss
 uv run pytest python_detector/tests/test_v4_alignment_modules.py
 ```
-
-

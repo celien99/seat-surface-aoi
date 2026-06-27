@@ -85,6 +85,7 @@ def build_display_event(job: SeatInspectionJob, run: AlgorithmRun) -> dict[str, 
         "trace_dir": str(trace_dir) if trace_dir is not None else "",
         "images": _image_assets(trace_dir) if trace_dir is not None else [],
         "overlays": _overlay_assets(trace_dir, result) if trace_dir is not None else [],
+        "heatmaps": _patchcore_heatmap_assets(trace_dir) if trace_dir is not None else [],
     }
 
 
@@ -210,6 +211,30 @@ def _overlay_assets(trace_dir: Path, result: InspectionResult) -> list[dict[str,
                 "camera_id": defect.camera_id,
                 "pose_id": defect.pose_id or defect.camera_id,
                 "roi_name": defect.roi_name,
+                "path": str(path.resolve()),
+            }
+        )
+    return assets
+
+
+def _patchcore_heatmap_assets(trace_dir: Path) -> list[dict[str, Any]]:
+    heatmap_root = trace_dir / "patchcore_heatmaps"
+    if not heatmap_root.is_dir():
+        return []
+    assets: list[dict[str, Any]] = []
+    for path in _iter_image_files(heatmap_root):
+        rel = path.relative_to(heatmap_root)
+        parts = rel.parts
+        if len(parts) != 3:
+            continue
+        camera_id, pose_id = parts[0], parts[1]
+        roi_name = Path(parts[-1]).stem
+        assets.append(
+            {
+                "kind": "patchcore_heatmap",
+                "camera_id": camera_id,
+                "pose_id": pose_id,
+                "roi_name": roi_name,
                 "path": str(path.resolve()),
             }
         )

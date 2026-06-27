@@ -303,6 +303,7 @@ class PatchCoreModel:
             "backend": score.backend,
             "faiss_index_path": score.faiss_index_path,
             "fallback_reason": score.fallback_reason,
+            "score_threshold": float(self.config.score_threshold),
             "anomaly_score": score.anomaly_score,
             "nearest_distance": score.nearest_distance,
             "knn_distances": list(score.knn_distances),
@@ -387,6 +388,9 @@ class PatchCoreModel:
             "memory_bank_size": score.memory_bank_size,
             "embedding_dim": score.embedding_dim,
             "max_anomaly": max_anomaly,
+            "score_threshold": float(self.config.score_threshold),
+            "anomaly_binarize_min_ratio": float(self.config.anomaly_binarize_min_ratio),
+            "anomaly_binarize_relative": float(self.config.anomaly_binarize_relative),
         }
 
         if max_anomaly < self.config.score_threshold:
@@ -480,6 +484,8 @@ class ModelRegistry:
             config.spatial_layers,
             int(config.spatial_upsample_height),
             int(config.spatial_upsample_width),
+            float(config.anomaly_binarize_min_ratio),
+            float(config.anomaly_binarize_relative),
         )
 
     def _create_model(self, config: ModelConfig) -> ModelBackend:

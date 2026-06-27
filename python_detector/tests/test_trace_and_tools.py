@@ -4,7 +4,7 @@ import json
 
 from python_detector.config.recipe_schema import ModelConfig, RecipeManager
 from python_detector.image_codec import load_raster_image, write_gray_png, write_rgb_png
-from python_detector.ipc.data_types import CameraBundle, InspectionResult, SeatInspectionJob
+from python_detector.ipc.data_types import CameraBundle, DefectResult, InspectionResult, SeatInspectionJob
 from python_detector.pipeline.pipeline import InspectionPipeline
 from python_detector.pipeline.quality_gate import FrameQuality, QualityReport
 from python_detector.trace.trace_writer import TraceWriter
@@ -123,7 +123,7 @@ def test_trace_writer_defect_bboxes_at_raw_coordinates(tmp_path: Path) -> None:
     assert overlay_img.pixels[offset : offset + 3] == bytes((255, 64, 64))
 
 
-def test_trace_writer_heatmap_overlay_changes_roi_pixels(tmp_path: Path) -> None:
+def test_trace_writer_heatmap_without_defect_keeps_roi_pixels_unchanged(tmp_path: Path) -> None:
     recipe = _recipe(tmp_path, save_ok_ratio=1.0)
     pipeline = InspectionPipeline()
     job = make_simulated_job()
@@ -138,7 +138,10 @@ def test_trace_writer_heatmap_overlay_changes_roi_pixels(tmp_path: Path) -> None
                 "pose_id": prepared.pose_id,
                 "roi_name": "seat",
                 "spatial_shape": [2, 2],
-                "anomaly_map": ((0.0, 1.0), (0.5, 0.25)),
+                "score_threshold": 1.0,
+                "anomaly_binarize_min_ratio": 1.0,
+                "anomaly_binarize_relative": 1.0,
+                "anomaly_map": ((0.1, 0.2), (0.3, 1.0)),
             }
         ],
     }
@@ -149,11 +152,105 @@ def test_trace_writer_heatmap_overlay_changes_roi_pixels(tmp_path: Path) -> None
     overlay_img = load_raster_image(trace_dir / "overlays" / "TOP_BACK" / "TOP_BACK" / "seat.png")
     raw_frame = job.camera_bundles[0].light_frames[roi_frame.light_id]
     origin_x, origin_y = roi_frame.origin_xy
-    sample_x = min(raw_frame.width - 2, origin_x + max(1, roi_frame.width // 2))
-    sample_y = min(raw_frame.height - 2, origin_y + max(1, roi_frame.height // 2))
+    cold_x = origin_x + max(1, roi_frame.width // 4)
+    cold_y = origin_y + max(1, roi_frame.height // 4)
+    cold_offset = (cold_y * raw_frame.width + cold_x) * 3
+    cold_raw = bytes(raw_frame.image)[cold_y * raw_frame.stride_bytes + cold_x]
+    assert overlay_img.pixels[cold_offset : cold_offset + 3] == bytes((cold_raw, cold_raw, cold_raw))
+
+
+def test_trace_writer_writes_continuous_patchcore_heatmap(tmp_path: Path) -> None:
+    recipe = _recipe(tmp_path, save_ok_ratio=1.0)
+    pipeline = InspectionPipeline()
+    job = make_simulated_job()
+    result = pipeline.process(job, recipe)
+    prepared = pipeline.last_context["prepared_bundles"][0]
+    roi_frame = prepared.rois["seat"]["DIFFUSE"]
+    context = {
+        **pipeline.last_context,
+        "spatial_maps": [
+            {
+                "camera_id": prepared.camera_id,
+                "pose_id": prepared.pose_id,
+                "roi_name": "seat",
+                "spatial_shape": [2, 2],
+                "score_threshold": 1.0,
+                "anomaly_map": ((0.0, 1.0), (0.5, 0.25)),
+            }
+        ],
+    }
+
+    trace_dir = TraceWriter(recipe.trace.root_dir).write(job, recipe, result, context)
+
+    assert trace_dir is not None
+    heatmap_img = load_raster_image(trace_dir / "patchcore_heatmaps" / "TOP_BACK" / "TOP_BACK" / "seat.png")
+    raw_frame = job.camera_bundles[0].light_frames[roi_frame.light_id]
+    sample_x = min(raw_frame.width - 2, roi_frame.origin_xy[0] + max(1, roi_frame.width // 2))
+    sample_y = min(raw_frame.height - 2, roi_frame.origin_xy[1] + max(1, roi_frame.height // 2))
     pixel_offset = (sample_y * raw_frame.width + sample_x) * 3
     raw_value = bytes(raw_frame.image)[sample_y * raw_frame.stride_bytes + sample_x]
-    assert overlay_img.pixels[pixel_offset : pixel_offset + 3] != bytes((raw_value, raw_value, raw_value))
+    assert heatmap_img.pixels[pixel_offset : pixel_offset + 3] != bytes((raw_value, raw_value, raw_value))
+
+
+def test_trace_writer_heatmap_only_renders_inside_defect_bbox(tmp_path: Path) -> None:
+    recipe = _recipe(tmp_path, save_ok_ratio=1.0)
+    pipeline = InspectionPipeline()
+    job = make_simulated_job()
+    result = pipeline.process(job, recipe)
+    prepared = pipeline.last_context["prepared_bundles"][0]
+    roi_frame = prepared.rois["seat"]["DIFFUSE"]
+    origin_x, origin_y = roi_frame.origin_xy
+    result = replace(
+        result,
+        decision="RECHECK",
+        defects=[
+            DefectResult(
+                defect_id="1-0",
+                class_name="unknown_anomaly",
+                severity="suspect",
+                camera_id=prepared.camera_id,
+                pose_id=prepared.pose_id,
+                roi_name="seat",
+                bbox_xyxy_pixel=(origin_x + 2, origin_y + 2, origin_x + 12, origin_y + 12),
+                score=1.0,
+                area_px=121,
+                evidence_lights=["DIFFUSE"],
+                mask_offset=None,
+                decision="RECHECK",
+            )
+        ],
+    )
+    context = {
+        **pipeline.last_context,
+        "spatial_maps": [
+            {
+                "camera_id": prepared.camera_id,
+                "pose_id": prepared.pose_id,
+                "roi_name": "seat",
+                "spatial_shape": [1, 1],
+                "score_threshold": 1.0,
+                "anomaly_map": ((1.0,),),
+            }
+        ],
+    }
+
+    trace_dir = TraceWriter(recipe.trace.root_dir).write(job, recipe, result, context)
+
+    assert trace_dir is not None
+    overlay_img = load_raster_image(trace_dir / "overlays" / "TOP_BACK" / "TOP_BACK" / "seat.png")
+    raw_frame = job.camera_bundles[0].light_frames[roi_frame.light_id]
+    outside_x = min(raw_frame.width - 5, origin_x + max(8, roi_frame.width // 2))
+    outside_y = min(raw_frame.height - 5, origin_y + max(8, roi_frame.height // 2))
+    outside_offset = (outside_y * raw_frame.width + outside_x) * 3
+    outside_raw = bytes(raw_frame.image)[outside_y * raw_frame.stride_bytes + outside_x]
+    assert overlay_img.pixels[outside_offset : outside_offset + 3] == bytes((outside_raw, outside_raw, outside_raw))
+
+    inside_x = origin_x + 7
+    inside_y = origin_y + 7
+    inside_offset = (inside_y * raw_frame.width + inside_x) * 3
+    inside_pixel = overlay_img.pixels[inside_offset : inside_offset + 3]
+    assert inside_pixel[0] > inside_pixel[1]
+    assert inside_pixel[0] > inside_pixel[2]
 
 
 def test_trace_writer_raw_index_matches_light_frames(tmp_path: Path) -> None:

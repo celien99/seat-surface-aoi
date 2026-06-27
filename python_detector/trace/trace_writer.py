@@ -46,6 +46,7 @@ class TraceWriter:
         self._write_raw_images(trace_dir, job)
         self._write_roi_images(trace_dir, context.get("prepared_bundles", []))
         self._write_detection_overlays(trace_dir, result, context.get("prepared_bundles", []), context.get("spatial_maps", []), job)
+        self._write_patchcore_heatmaps(trace_dir, context.get("prepared_bundles", []), context.get("spatial_maps", []), job)
         return trace_dir
 
     def _should_write(self, job: SeatInspectionJob, recipe: Recipe, result: InspectionResult) -> bool:
@@ -142,10 +143,36 @@ class TraceWriter:
             anomaly_entry = anomaly_maps.get(key)
             path = overlay_dir / _safe_name(camera_id) / _safe_name(pose_id) / f"{_safe_name(roi_name)}.png"
             if anomaly_entry is not None:
-                anomaly_map, _spatial_shape = anomaly_entry
-                self._write_heatmap_overlay_on_raw(path, raw_frame, roi_frame, result.decision, roi_defects, anomaly_map)
+                self._write_heatmap_overlay_on_raw(path, raw_frame, roi_frame, result.decision, roi_defects, anomaly_entry)
             else:
                 self._write_overlay_png_on_raw(path, raw_frame, result.decision, roi_defects)
+
+    def _write_patchcore_heatmaps(
+        self,
+        trace_dir: Path,
+        prepared_bundles: Any,
+        spatial_maps: list[dict[str, object]],
+        job: SeatInspectionJob,
+    ) -> None:
+        frame_groups = self._roi_frame_groups(prepared_bundles)
+        if not frame_groups:
+            return
+        raw_index = self._raw_frame_index(job)
+        anomaly_maps = self._anomaly_map_index(spatial_maps)
+        heatmap_dir = trace_dir / "patchcore_heatmaps"
+        for key in sorted(frame_groups):
+            anomaly_entry = anomaly_maps.get(key)
+            if anomaly_entry is None:
+                continue
+            camera_id, pose_id, roi_name = key
+            roi_frame = self._heatmap_background_frame(frame_groups[key])
+            if roi_frame is None:
+                continue
+            raw_frame = raw_index.get((camera_id, pose_id, roi_frame.light_id))
+            if raw_frame is None:
+                continue
+            path = heatmap_dir / _safe_name(camera_id) / _safe_name(pose_id) / f"{_safe_name(roi_name)}.png"
+            self._write_continuous_heatmap_on_raw(path, raw_frame, roi_frame, anomaly_entry)
 
     def _roi_frame_groups(self, prepared_bundles: Any) -> dict[tuple[str, str, str], dict[str, LightFrame]]:
         groups: dict[tuple[str, str, str], dict[str, LightFrame]] = {}
@@ -170,6 +197,9 @@ class TraceWriter:
                     return frame
         return frames.get("DIFFUSE") or next(iter(frames.values()), None)
 
+    def _heatmap_background_frame(self, frames: dict[str, LightFrame]) -> LightFrame | None:
+        return frames.get("DIFFUSE") or next(iter(frames.values()), None)
+
     def _write_gray_image(self, path: Path, frame: LightFrame) -> None:
         write_gray_png(path, frame.width, frame.height, self._frame_bytes(frame))
 
@@ -190,9 +220,9 @@ class TraceWriter:
     def _anomaly_map_index(
         self,
         spatial_maps: list[dict[str, object]],
-    ) -> dict[tuple[str, str, str], tuple[tuple[tuple[float, ...], ...], tuple[int, int]]]:
+    ) -> dict[tuple[str, str, str], dict[str, object]]:
         """从 spatial_maps 提取 anomaly_map 索引。"""
-        index: dict[tuple[str, str, str], tuple[tuple[tuple[float, ...], ...], tuple[int, int]]] = {}
+        index: dict[tuple[str, str, str], dict[str, object]] = {}
         for entry in spatial_maps or []:
             if not isinstance(entry, dict):
                 continue
@@ -208,7 +238,13 @@ class TraceWriter:
             roi_name = str(entry.get("roi_name", ""))
             if camera_id and roi_name:
                 anomaly_map_tuple = tuple(tuple(float(value) for value in row) for row in anomaly_map)
-                index[(camera_id, pose_id, roi_name)] = (anomaly_map_tuple, spatial_shape)
+                index[(camera_id, pose_id, roi_name)] = {
+                    "anomaly_map": anomaly_map_tuple,
+                    "spatial_shape": spatial_shape,
+                    "score_threshold": _optional_float(entry.get("score_threshold")),
+                    "anomaly_binarize_min_ratio": _optional_float(entry.get("anomaly_binarize_min_ratio")),
+                    "anomaly_binarize_relative": _optional_float(entry.get("anomaly_binarize_relative")),
+                }
         return index
 
     def _write_heatmap_overlay_on_raw(
@@ -218,31 +254,76 @@ class TraceWriter:
         roi_frame: LightFrame,
         result_decision: str,
         defects: list[DefectResult],
-        anomaly_map: tuple[tuple[float, ...], ...],
+        anomaly_entry: dict[str, object],
     ) -> None:
-        """将 JET 热力图叠加到 raw 原图，并绘制判定框和缺陷框。"""
+        """将阈值以上的 PatchCore 热区叠加到 raw 原图，并绘制判定框和缺陷框。"""
         raw_array = self._frame_array(raw_frame)
         raw_h, raw_w = raw_array.shape
         roi_w, roi_h = roi_frame.width, roi_frame.height
         rgb = np.repeat(raw_array[:, :, None], 3, axis=2)
 
+        anomaly_map = anomaly_entry.get("anomaly_map")
         anomaly_array = _resize_anomaly_map_array(anomaly_map, roi_h, roi_w)
         if anomaly_array.size > 0:
+            hot_mask, normalized = _thresholded_anomaly_heatmap(
+                anomaly_array,
+                _optional_float(anomaly_entry.get("score_threshold")),
+                _optional_float(anomaly_entry.get("anomaly_binarize_min_ratio")),
+                _optional_float(anomaly_entry.get("anomaly_binarize_relative")),
+            )
             ix, iy, source_indices = self._roi_to_raw_indices(roi_frame, raw_w, raw_h)
             if ix.size > 0:
                 flat_indices = (iy * raw_w) + ix
                 order = _last_occurrence_order(flat_indices)
                 target_indices = flat_indices[order]
-                anomaly_values = anomaly_array.reshape(-1)[source_indices][order]
+                defect_values = _points_inside_defects(ix[order], iy[order], defects)
+                hot_values = hot_mask.reshape(-1)[source_indices][order] & defect_values
+                if np.any(hot_values):
+                    hot_target_indices = target_indices[hot_values]
+                    heat_values = normalized.reshape(-1)[source_indices][order][hot_values]
+                    gray_values = raw_array.reshape(-1)[hot_target_indices]
+                    heat_rgb = _hot_colormap_array(heat_values)
+                    blended = (
+                        heat_rgb.astype(np.float32) * 0.7 + gray_values[:, None].astype(np.float32) * 0.3
+                    ).astype(
+                        np.uint8,
+                        copy=False,
+                    )
+                    rgb.reshape(-1, 3)[hot_target_indices] = blended
+
+        self._draw_overlay_marks_raw(rgb, raw_w, raw_h, result_decision, defects)
+        write_rgb_png(path, raw_w, raw_h, np.ascontiguousarray(rgb).tobytes())
+
+    def _write_continuous_heatmap_on_raw(
+        self,
+        path: Path,
+        raw_frame: LightFrame,
+        roi_frame: LightFrame,
+        anomaly_entry: dict[str, object],
+    ) -> None:
+        """写出连续 PatchCore anomaly_map 调试热力图，不参与生产判定展示。"""
+        raw_array = self._frame_array(raw_frame)
+        raw_h, raw_w = raw_array.shape
+        roi_w, roi_h = roi_frame.width, roi_frame.height
+        rgb = np.repeat(raw_array[:, :, None], 3, axis=2)
+
+        anomaly_array = _resize_anomaly_map_array(anomaly_entry.get("anomaly_map"), roi_h, roi_w)
+        normalized = _continuous_anomaly_heatmap(anomaly_array)
+        if normalized.size > 0:
+            ix, iy, source_indices = self._roi_to_raw_indices(roi_frame, raw_w, raw_h)
+            if ix.size > 0:
+                flat_indices = (iy * raw_w) + ix
+                order = _last_occurrence_order(flat_indices)
+                target_indices = flat_indices[order]
+                heat_values = normalized.reshape(-1)[source_indices][order]
                 gray_values = raw_array.reshape(-1)[target_indices]
-                heat_rgb = _jet_colormap_array(anomaly_values)
-                blended = (heat_rgb.astype(np.float32) * 0.4 + gray_values[:, None].astype(np.float32) * 0.6).astype(
+                heat_rgb = _jet_colormap_array(heat_values)
+                blended = (heat_rgb.astype(np.float32) * 0.45 + gray_values[:, None].astype(np.float32) * 0.55).astype(
                     np.uint8,
                     copy=False,
                 )
                 rgb.reshape(-1, 3)[target_indices] = blended
 
-        self._draw_overlay_marks_raw(rgb, raw_w, raw_h, result_decision, defects)
         write_rgb_png(path, raw_w, raw_h, np.ascontiguousarray(rgb).tobytes())
 
     def _roi_to_raw_indices(self, roi_frame: LightFrame, raw_w: int, raw_h: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -341,6 +422,18 @@ def _safe_name(value: str) -> str:
     return "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in str(value))
 
 
+def _optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(result):
+        return None
+    return result
+
+
 def _decision_color(decision: str) -> tuple[int, int, int]:
     return {
         "OK": (0, 180, 90),
@@ -384,6 +477,80 @@ def _jet_colormap_array(values: np.ndarray) -> np.ndarray:
     result[mask, 0] = 255.0 + (128.0 - 255.0) * t
 
     return np.clip(result, 0.0, 255.0).astype(np.uint8)
+
+
+def _hot_colormap_array(values: np.ndarray) -> np.ndarray:
+    """缺陷热区色图: [0, 1] -> 黄/橙/红，避免低分区域显示成蓝色。"""
+    clipped = np.clip(np.asarray(values, dtype=np.float32), 0.0, 1.0)
+    result = np.empty((clipped.size, 3), dtype=np.float32)
+    result[:, 0] = 255.0
+    result[:, 1] = 210.0 * (1.0 - clipped)
+    result[:, 2] = 32.0 * (1.0 - clipped)
+    return np.clip(result, 0.0, 255.0).astype(np.uint8)
+
+
+def _continuous_anomaly_heatmap(anomaly_array: np.ndarray) -> np.ndarray:
+    """将原始 anomaly_map min-max 归一化为连续调试热力图。"""
+    values = np.asarray(anomaly_array, dtype=np.float32)
+    if values.size == 0:
+        return np.zeros(values.shape, dtype=np.float32)
+    finite = np.isfinite(values)
+    if not np.any(finite):
+        return np.zeros(values.shape, dtype=np.float32)
+    finite_values = values[finite]
+    min_value = float(finite_values.min())
+    max_value = float(finite_values.max())
+    normalized = np.zeros(values.shape, dtype=np.float32)
+    if max_value <= min_value:
+        normalized[finite] = 1.0 if max_value > 0.0 else 0.0
+        return normalized
+    normalized[finite] = np.clip((values[finite] - min_value) / (max_value - min_value), 0.0, 1.0)
+    return normalized
+
+
+def _thresholded_anomaly_heatmap(
+    anomaly_array: np.ndarray,
+    score_threshold: float | None,
+    binarize_min_ratio: float | None,
+    binarize_relative: float | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """返回需要显示的异常掩码，以及阈值以上归一化热度。"""
+    values = np.asarray(anomaly_array, dtype=np.float32)
+    if values.size == 0:
+        return np.zeros(values.shape, dtype=bool), np.zeros(values.shape, dtype=np.float32)
+    finite = np.isfinite(values)
+    if not np.any(finite):
+        return np.zeros(values.shape, dtype=bool), np.zeros(values.shape, dtype=np.float32)
+
+    finite_values = values[finite]
+    max_value = float(finite_values.max())
+    if max_value <= 0.0:
+        return np.zeros(values.shape, dtype=bool), np.zeros(values.shape, dtype=np.float32)
+
+    min_ratio = 0.5 if binarize_min_ratio is None else max(0.0, float(binarize_min_ratio))
+    relative = 0.3 if binarize_relative is None else max(0.0, float(binarize_relative))
+    threshold = max_value * relative
+    if score_threshold is not None and score_threshold > 0.0:
+        threshold = max(threshold, float(score_threshold) * min_ratio)
+    threshold = min(threshold, max_value)
+
+    hot_mask = finite & (values >= threshold)
+    normalized = np.zeros(values.shape, dtype=np.float32)
+    denom = max(max_value - threshold, 1e-6)
+    normalized[hot_mask] = 0.35 + 0.65 * np.clip((values[hot_mask] - threshold) / denom, 0.0, 1.0)
+    return hot_mask, normalized
+
+
+def _points_inside_defects(x: np.ndarray, y: np.ndarray, defects: list[DefectResult]) -> np.ndarray:
+    if x.size == 0 or not defects:
+        return np.zeros(x.shape, dtype=bool)
+    mask = np.zeros(x.shape, dtype=bool)
+    for defect in defects:
+        x0, y0, x1, y1 = defect.bbox_xyxy_pixel
+        if x1 < x0 or y1 < y0:
+            continue
+        mask |= (x >= x0) & (x <= x1) & (y >= y0) & (y <= y1)
+    return mask
 
 
 def _resize_anomaly_map(

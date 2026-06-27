@@ -16,12 +16,15 @@ def test_build_display_event_includes_result_and_trace_assets(tmp_path: Path) ->
     raw_dir = trace_dir / "raw_images" / "TOP_BACK" / "TOP_BACK"
     image_dir = trace_dir / "images" / "TOP_BACK" / "TOP_BACK" / "seat"
     overlay_dir = trace_dir / "overlays" / "TOP_BACK" / "TOP_BACK"
+    heatmap_dir = trace_dir / "patchcore_heatmaps" / "TOP_BACK" / "TOP_BACK"
     raw_dir.mkdir(parents=True)
     image_dir.mkdir(parents=True)
     overlay_dir.mkdir(parents=True)
+    heatmap_dir.mkdir(parents=True)
     write_gray_png(raw_dir / "DIFFUSE.png", 1, 1, b"\x08")
     write_gray_png(image_dir / "DIFFUSE.png", 1, 1, b"\x10")
     write_rgb_png(overlay_dir / "seat.png", 1, 1, b"\xff\x00\x00")
+    write_rgb_png(heatmap_dir / "seat.png", 1, 1, b"\x00\x00\xff")
     job = make_simulated_job()
     defect = DefectResult(
         defect_id="D1",
@@ -61,6 +64,10 @@ def test_build_display_event_includes_result_and_trace_assets(tmp_path: Path) ->
     assert event["overlays"][0]["camera_id"] == "TOP_BACK"
     assert event["overlays"][0]["pose_id"] == "TOP_BACK"
     assert event["overlays"][0]["roi_name"] == "seat"
+    assert event["heatmaps"][0]["kind"] == "patchcore_heatmap"
+    assert event["heatmaps"][0]["camera_id"] == "TOP_BACK"
+    assert event["heatmaps"][0]["pose_id"] == "TOP_BACK"
+    assert event["heatmaps"][0]["roi_name"] == "seat"
 
 
 def test_build_display_event_includes_ok_overlay_without_defects(tmp_path: Path) -> None:
