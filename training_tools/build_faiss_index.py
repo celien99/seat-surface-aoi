@@ -21,12 +21,17 @@ def build_faiss_index(
     raw = json.loads(bank_path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise EmbeddingExtractionError(f"memory bank 必须是 JSON object: {bank_path}")
-    vectors_raw = raw.get("vectors", [])
-    if not isinstance(vectors_raw, list) or not vectors_raw:
-        raise EmptyMemoryBankError(f"memory bank 为空: {bank_path}")
     dimension = int(raw.get("embedding_dim", 0))
     if dimension <= 0:
         raise EmbeddingExtractionError(f"memory bank embedding_dim 无效: {dimension}")
+    vectors_path_value = raw.get("vectors_path")
+    if not isinstance(vectors_path_value, str) or not vectors_path_value:
+        raise EmptyMemoryBankError(f"memory bank 缺少 vectors_path: {bank_path}")
+    vectors_path = Path(vectors_path_value)
+    if not vectors_path.is_absolute():
+        vectors_path = bank_path.parent / vectors_path
+    if not vectors_path.exists():
+        raise EmptyMemoryBankError(f"memory bank vectors .npy 不存在: {vectors_path}")
 
     try:
         import faiss  # type: ignore
@@ -36,18 +41,25 @@ def build_faiss_index(
             "faiss-cpu 未安装，无法构建 FAISS 索引。安装: uv sync --group training"
         ) from exc
 
-    vectors = np.asarray(vectors_raw, dtype=np.float32)
+    vectors = np.asarray(np.load(str(vectors_path), mmap_mode="r", allow_pickle=False), dtype=np.float32)
+    if vectors.ndim != 2 or vectors.shape[0] <= 0:
+        raise EmptyMemoryBankError(f"memory bank 为空: {bank_path}")
     if vectors.shape[1] != dimension:
         raise EmbeddingExtractionError(
             f"vector 维度不匹配: {vectors.shape[1]} != {dimension}"
+        )
+    expected_count = raw.get("vector_count")
+    if expected_count is not None and int(expected_count) != int(vectors.shape[0]):
+        raise EmbeddingExtractionError(
+            f"vector_count 与 .npy 向量数不匹配: {expected_count} != {vectors.shape[0]}"
         )
 
     if index_type == "FlatL2":
         index = faiss.IndexFlatL2(dimension)
     elif index_type == "IVFFlat":
         quantizer = faiss.IndexFlatL2(dimension)
-        actual_nlist = nlist if nlist is not None else int(math.sqrt(len(vectors_raw)))
-        actual_nlist = max(1, min(actual_nlist, len(vectors_raw)))
+        actual_nlist = nlist if nlist is not None else int(math.sqrt(int(vectors.shape[0])))
+        actual_nlist = max(1, min(actual_nlist, int(vectors.shape[0])))
         index = faiss.IndexIVFFlat(quantizer, dimension, actual_nlist)
         index.train(vectors)
     else:
@@ -61,8 +73,8 @@ def build_faiss_index(
     loaded = faiss.read_index(str(output))
     if loaded.d != dimension:
         raise EmbeddingExtractionError(f"FAISS 索引校验失败：维度不匹配 {loaded.d} != {dimension}")
-    if loaded.ntotal != len(vectors_raw):
-        raise EmbeddingExtractionError(f"FAISS 索引校验失败：向量数不匹配 {loaded.ntotal} != {len(vectors_raw)}")
+    if loaded.ntotal != int(vectors.shape[0]):
+        raise EmbeddingExtractionError(f"FAISS 索引校验失败：向量数不匹配 {loaded.ntotal} != {vectors.shape[0]}")
     if index_type == "FlatL2":
         query = np.zeros((1, dimension), dtype=np.float32)
         distances, _indices = loaded.search(query, 1)
@@ -71,7 +83,7 @@ def build_faiss_index(
 
     return {
         "index_type": index_type,
-        "vector_count": len(vectors_raw),
+        "vector_count": int(vectors.shape[0]),
         "dimension": dimension,
         "faiss_index_path": str(output),
     }

@@ -269,8 +269,11 @@ model/roi_yolo/seat_roi_seg.onnx
 model/wideresnet50/seat_wrn50_embedding.onnx
 model/patchcore/seat_pca.json
 model/patchcore/seat_patchcore_bank.json
+model/patchcore/seat_patchcore_bank.npy
 model/patchcore/seat_patchcore.faiss
 ```
+
+`seat_patchcore_bank.json` 只保存版本、维度、`vector_count`、`vectors_path` 和训练 metadata；PatchCore 向量矩阵必须放在 `seat_patchcore_bank.npy`，不再支持把大体积向量数组内嵌到 JSON。`training_tools.train_patchcore_assets` 默认训练结束后清理 `embeddings.npy/pca_embeddings.npy` 中间矩阵，只有排障时才通过 `--keep-intermediate-embeddings` 保留。
 
 上线前校验：
 
@@ -375,6 +378,8 @@ uv run python -m training_tools.extract_embeddings `
   --output datasets/seat_trace_v1/embeddings.jsonl `
   --backend statistical
 ```
+
+该入口用于离线排障和审计，可输出逐样本 JSONL 明细；正式 PatchCore 资产训练不依赖这个 JSONL 文件。
 
 训练 PatchCore PCA、memory bank 和可选 FAISS：
 

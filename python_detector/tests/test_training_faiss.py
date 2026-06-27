@@ -6,13 +6,17 @@ import subprocess
 import sys
 import textwrap
 
+import numpy as np
 import pytest
 
 
 @pytest.fixture
 def memory_bank_json(tmp_path: Path) -> Path:
-    """构造包含 20 条 8 维向量的 memory bank JSON。"""
+    """构造包含 20 条 8 维向量的新格式 memory bank。"""
     path = tmp_path / "bank.json"
+    vectors_path = tmp_path / "bank.npy"
+    vectors = np.asarray([[float(i + j) for j in range(8)] for i in range(20)], dtype=np.float32)
+    np.save(vectors_path, vectors)
     bank = {
         "version": "bank_v1",
         "model_family": "patchcore",
@@ -20,7 +24,8 @@ def memory_bank_json(tmp_path: Path) -> Path:
         "coreset_ratio": 1.0,
         "pca_version": "pca_v1",
         "faiss_enabled": True,
-        "vectors": [[float(i + j) for j in range(8)] for i in range(20)],
+        "vector_count": 20,
+        "vectors_path": vectors_path.name,
     }
     path.write_text(json.dumps(bank), encoding="utf-8")
     return path
@@ -94,8 +99,21 @@ def test_build_faiss_empty_bank(tmp_path: Path) -> None:
     if not _faiss_available():
         pytest.skip("faiss-cpu 未安装")
 
+    empty_vectors = tmp_path / "empty.npy"
+    np.save(empty_vectors, np.empty((0, 3), dtype=np.float32))
     empty = tmp_path / "empty.json"
-    empty.write_text(json.dumps({"version": "v", "model_family": "patchcore", "embedding_dim": 3, "vectors": []}), encoding="utf-8")
+    empty.write_text(
+        json.dumps(
+            {
+                "version": "v",
+                "model_family": "patchcore",
+                "embedding_dim": 3,
+                "vector_count": 0,
+                "vectors_path": empty_vectors.name,
+            }
+        ),
+        encoding="utf-8",
+    )
 
     _run_faiss_case(
         f"""

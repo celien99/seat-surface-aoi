@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from python_detector.config.recipe_schema import CameraRecipe, Recipe
@@ -98,10 +99,10 @@ def test_collect_trace_dataset_cli_reports_broken_json(tmp_path: Path, capsys: p
 
 
 def test_patchcore_memory_bank_builder_is_available_from_training_tools(tmp_path: Path) -> None:
-    embeddings = tmp_path / "embeddings.jsonl"
-    embeddings.write_text(
-        "\n".join(json.dumps({"embedding": [float(index), float(index + 1)]}) for index in range(4)),
-        encoding="utf-8",
+    embeddings = tmp_path / "embeddings.npy"
+    np.save(
+        embeddings,
+        np.asarray([[float(index), float(index + 1)] for index in range(4)], dtype=np.float32),
     )
     output = tmp_path / "bank.json"
 
@@ -115,7 +116,8 @@ def test_patchcore_memory_bank_builder_is_available_from_training_tools(tmp_path
     )
 
     assert bank["embedding_dim"] == 2
-    assert len(bank["vectors"]) == 2
+    assert bank["vector_count"] == 2
+    assert (tmp_path / bank["vectors_path"]).exists()
 
 
 def test_collect_shm_dataset_reuses_detector_trace_and_manifest(tmp_path: Path) -> None:

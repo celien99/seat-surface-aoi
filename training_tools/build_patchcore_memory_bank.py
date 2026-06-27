@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 from pathlib import Path
 from typing import Any
 
@@ -17,22 +18,32 @@ def build_memory_bank(
     faiss_enabled: bool,
     coreset_method: str = "greedy",
     metadata: dict[str, Any] | None = None,
+    vectors_path: Path | None = None,
 ) -> dict[str, Any]:
+    import numpy as np
+
     if coreset_method not in ("greedy", "stride"):
         raise ValueError(f"coreset_method 必须是 greedy 或 stride: {coreset_method}")
+    vectors = _load_vector_matrix(input_path)
     if coreset_method == "greedy":
-        vectors = _load_vectors(input_path)
         selected = _coreset_greedy(vectors, coreset_ratio)
     else:
-        selected = _load_vectors_stride(input_path, coreset_ratio)
+        selected = _coreset_stride(vectors, coreset_ratio)
+    selected = np.asarray(selected, dtype=np.float32)
+    if selected.ndim != 2 or selected.shape[0] <= 0 or selected.shape[1] <= 0:
+        raise ValueError("PatchCore coreset 向量必须是非空二维矩阵")
+    output_vectors_path = vectors_path or output_path.with_suffix(".npy")
+    output_vectors_path.parent.mkdir(parents=True, exist_ok=True)
+    np.save(output_vectors_path, selected)
     bank = {
         "version": version,
         "model_family": "patchcore",
-        "embedding_dim": len(selected[0]),
+        "embedding_dim": int(selected.shape[1]),
         "coreset_ratio": coreset_ratio,
         "pca_version": pca_version,
         "faiss_enabled": faiss_enabled,
-        "vectors": selected,
+        "vector_count": int(selected.shape[0]),
+        "vectors_path": _json_path(output_path, output_vectors_path),
     }
     if metadata is not None:
         bank["metadata"] = metadata
@@ -41,111 +52,59 @@ def build_memory_bank(
     return bank
 
 
-def _load_vectors(input_path: Path) -> list[list[float]]:
-    vectors: list[list[float]] = []
-    for line_number, line in enumerate(input_path.read_text(encoding="utf-8").splitlines(), start=1):
-        if not line.strip():
-            continue
-        raw = json.loads(line)
-        vector = raw.get("embedding", raw) if isinstance(raw, dict) else raw
-        if not isinstance(vector, list) or not vector:
-            raise ValueError(f"{input_path}:{line_number}: embedding 必须是非空数组")
-        parsed = [float(value) for value in vector]
-        if not all(math.isfinite(value) for value in parsed):
-            raise ValueError(f"{input_path}:{line_number}: embedding 必须是有限数字")
-        vectors.append(parsed)
-    if not vectors:
+def _load_vector_matrix(input_path: Path):
+    import numpy as np
+
+    if not input_path.exists():
+        raise ValueError(f"embedding 文件不存在: {input_path}")
+    if input_path.suffix != ".npy":
+        raise ValueError(f"PatchCore memory bank 构建只接受 .npy embedding 矩阵: {input_path}")
+    vectors = np.load(str(input_path), mmap_mode="r", allow_pickle=False)
+    return _validate_matrix(input_path, vectors)
+
+
+def _validate_matrix(input_path: Path, vectors):
+    import numpy as np
+
+    if vectors.ndim != 2:
+        raise ValueError(f"{input_path}: embedding 必须是二维矩阵")
+    if vectors.shape[0] <= 0:
         raise ValueError(f"没有读取到 embedding: {input_path}")
-    dim = len(vectors[0])
-    for index, vector in enumerate(vectors, start=1):
-        if len(vector) != dim:
-            raise ValueError(f"{input_path}:{index}: embedding 维度不一致 {len(vector)} != {dim}")
+    if vectors.shape[1] <= 0:
+        raise ValueError(f"{input_path}: embedding 维度必须大于 0")
+    if not bool(np.isfinite(vectors).all()):
+        raise ValueError(f"{input_path}: embedding 必须是有限数字")
+    if vectors.dtype != np.float32:
+        return np.asarray(vectors, dtype=np.float32)
     return vectors
 
 
-def _load_vectors_stride(input_path: Path, coreset_ratio: float) -> list[list[float]]:
+def _coreset_stride(vectors, coreset_ratio: float):
+    import numpy as np
+
     if coreset_ratio <= 0.0 or coreset_ratio > 1.0:
         raise ValueError("coreset_ratio 必须在 (0, 1] 范围内")
-    count, dim = _scan_vector_file(input_path)
-    keep_count = max(1, math.ceil(count * coreset_ratio))
-    if keep_count >= count:
-        return _load_vectors(input_path)
-    step = count / keep_count
-    selected_indices = {min(int(item * step), count - 1) for item in range(keep_count)}
-    selected: list[list[float]] = []
-    for index, vector in _iter_vectors(input_path, expected_dim=dim):
-        if index in selected_indices:
-            selected.append(vector)
-    if not selected:
-        raise ValueError(f"没有读取到 stride coreset embedding: {input_path}")
-    return selected
-
-
-def _scan_vector_file(input_path: Path) -> tuple[int, int]:
-    count = 0
-    dim: int | None = None
-    for _index, vector in _iter_vectors(input_path):
-        if dim is None:
-            dim = len(vector)
-        count += 1
-    if count <= 0 or dim is None:
-        raise ValueError(f"没有读取到 embedding: {input_path}")
-    return count, dim
-
-
-def _iter_vectors(input_path: Path, *, expected_dim: int | None = None):
-    if not input_path.exists():
-        raise ValueError(f"embedding 文件不存在: {input_path}")
-    dim = expected_dim
-    with input_path.open("r", encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            if not line.strip():
-                continue
-            raw = json.loads(line)
-            vector = raw.get("embedding", raw) if isinstance(raw, dict) else raw
-            if not isinstance(vector, list) or not vector:
-                raise ValueError(f"{input_path}:{line_number}: embedding 必须是非空数组")
-            parsed = [float(value) for value in vector]
-            if not all(math.isfinite(value) for value in parsed):
-                raise ValueError(f"{input_path}:{line_number}: embedding 必须是有限数字")
-            if dim is None:
-                dim = len(parsed)
-            elif len(parsed) != dim:
-                raise ValueError(f"{input_path}:{line_number}: embedding 维度不一致 {len(parsed)} != {dim}")
-            yield line_number - 1, parsed
-
-
-def _coreset_stride(vectors: list[list[float]], coreset_ratio: float) -> list[list[float]]:
-    if coreset_ratio <= 0.0 or coreset_ratio > 1.0:
-        raise ValueError("coreset_ratio 必须在 (0, 1] 范围内")
-    keep_count = max(1, math.ceil(len(vectors) * coreset_ratio))
-    if keep_count >= len(vectors):
+    keep_count = max(1, math.ceil(vectors.shape[0] * coreset_ratio))
+    if keep_count >= vectors.shape[0]:
         return vectors
-    step = len(vectors) / keep_count
-    selected: list[list[float]] = []
-    seen: set[int] = set()
-    for item in range(keep_count):
-        index = min(int(item * step), len(vectors) - 1)
-        while index in seen and index + 1 < len(vectors):
-            index += 1
-        seen.add(index)
-        selected.append(vectors[index])
-    return selected
+    step = vectors.shape[0] / keep_count
+    indices = np.asarray([min(int(item * step), vectors.shape[0] - 1) for item in range(keep_count)], dtype=np.int64)
+    return vectors[indices]
 
 
 def _euclidean_sq(left: list[float], right: list[float]) -> float:
     return sum((a - b) ** 2 for a, b in zip(left, right))
 
 
-def _coreset_greedy(vectors: list[list[float]], coreset_ratio: float) -> list[list[float]]:
+def _coreset_greedy(vectors, coreset_ratio: float):
     """贪心最远点采样（近似最小化最大距离）。"""
     if coreset_ratio <= 0.0 or coreset_ratio > 1.0:
         raise ValueError("coreset_ratio 必须在 (0, 1] 范围内")
-    keep_count = max(1, math.ceil(len(vectors) * coreset_ratio))
-    if keep_count >= len(vectors):
+    keep_count = max(1, math.ceil(vectors.shape[0] * coreset_ratio))
+    if keep_count >= vectors.shape[0]:
         return vectors
     selected_indices = [0]
-    remaining = set(range(1, len(vectors)))
+    remaining = set(range(1, vectors.shape[0]))
     while len(selected_indices) < keep_count:
         farthest_idx = max(
             remaining,
@@ -155,19 +114,27 @@ def _coreset_greedy(vectors: list[list[float]], coreset_ratio: float) -> list[li
         )
         selected_indices.append(farthest_idx)
         remaining.remove(farthest_idx)
-    return [vectors[i] for i in selected_indices]
+    return vectors[selected_indices]
+
+
+def _json_path(output_path: Path, vectors_path: Path) -> str:
+    try:
+        return os.path.relpath(vectors_path, start=output_path.parent)
+    except ValueError:
+        return str(vectors_path)
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="构建 PatchCore memory bank JSON")
-    parser.add_argument("--input", required=True, type=Path, help="JSONL embedding 文件，每行是数组或包含 embedding 字段")
-    parser.add_argument("--output", required=True, type=Path, help="输出 memory bank JSON")
+    parser = argparse.ArgumentParser(description="从 .npy embedding 矩阵构建 PatchCore memory bank 元数据和向量资产")
+    parser.add_argument("--input", required=True, type=Path, help=".npy embedding 矩阵路径")
+    parser.add_argument("--output", required=True, type=Path, help="输出 memory bank 元数据 JSON")
     parser.add_argument("--version", required=True, help="memory bank 版本")
     parser.add_argument("--coreset-ratio", type=float, default=1.0, help="coreset 采样比例，范围 (0, 1]")
     parser.add_argument("--coreset-method", default="greedy", choices=["greedy", "stride"],
                         help="coreset 采样方法，默认 greedy")
     parser.add_argument("--pca-version", default=None, help="可选 PCA 版本")
     parser.add_argument("--faiss-enabled", action="store_true", help="记录该 bank 可由 FAISS 索引加速")
+    parser.add_argument("--vectors-output", type=Path, default=None, help="可选：PatchCore 向量 .npy 输出路径")
     args = parser.parse_args(argv)
     bank = build_memory_bank(
         args.input,
@@ -177,9 +144,10 @@ def main(argv: list[str] | None = None) -> int:
         pca_version=args.pca_version,
         faiss_enabled=args.faiss_enabled,
         coreset_method=args.coreset_method,
+        vectors_path=args.vectors_output,
     )
     print(
-        f"memory_bank={args.output} vectors={len(bank['vectors'])} dim={bank['embedding_dim']} "
+        f"memory_bank={args.output} vectors={bank['vector_count']} dim={bank['embedding_dim']} "
         f"version={bank['version']}"
     )
     return 0

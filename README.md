@@ -108,6 +108,7 @@ Copy-Item "$ModelRoot\roi_yolo\seat_roi_seg.onnx" ".\model\roi_yolo\seat_roi_seg
 Copy-Item "$ModelRoot\wideresnet50\seat_wrn50_embedding.onnx" ".\model\wideresnet50\seat_wrn50_embedding.onnx" -Force
 Copy-Item "$ModelRoot\patchcore\seat_pca.json" ".\model\patchcore\seat_pca.json" -Force
 Copy-Item "$ModelRoot\patchcore\seat_patchcore_bank.json" ".\model\patchcore\seat_patchcore_bank.json" -Force
+Copy-Item "$ModelRoot\patchcore\seat_patchcore_bank.npy" ".\model\patchcore\seat_patchcore_bank.npy" -Force
 Copy-Item "$ModelRoot\patchcore\seat_patchcore.faiss" ".\model\patchcore\seat_patchcore.faiss" -Force
 
 # 4. 配置生产环境参数：按现场确认 COM 口、相机 SN、结果回传 IP/端口
@@ -217,7 +218,7 @@ uv run python -m training_tools.collect_capture_dataset `
 `collect_capture_dataset` 默认按所选配方的 `light_order` 生成 `L1/L2/L3...` 到算法光源 ID 的映射；当前生产配方即 `L1/L2/L3 -> DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。它调用 `model/roi_yolo/seat_roi_seg.onnx` 做 ROI segmentation 定位，先按 mask 外接矩形裁出座椅 ROI，再把 mask 外像素置黑，只保留 mask 内目标物体，最后输出 `dataset_manifest.jsonl` 和当前配方光源数量一致的 ROI PNG。默认保留 ROI 原生尺寸，避免把纹理和细小缺陷压缩失真；只有在需要和 PatchCore 固定输入尺寸对齐时，才应显式传 `--roi-output-size WIDTHxHEIGHT`，并且该缩放会采用等比例 letterbox，而不是直接拉伸。`dataset_summary.json` 会记录 `roi_size_policy` 和 ROI 尺寸分布，`patchcore_training_summary.json` 会记录实际训练输入 `input_shape_summary`，用于确认训练和在线裁剪策略一致。ROI 冲突、低置信或越界样本会被跳过，不进入训练集。PatchCore 只能用人工确认的正常样本建库；`seat_defect_detector.onnx` 仍需要按缺陷类别人工标注后的 YOLO detect 数据集训练。
 生产缺陷判定链路采用无监督 PatchCore 主模型，不依赖 `model/supervised_defect/seat_defect_detector.onnx`。真实 OK 样本用于训练 WideResNet50 embedding、PCA、PatchCore memory bank 和可选 FAISS 索引；训练 embedding 默认使用配方 `models.<key>.input_channels`，与在线检测层保持一致，当前 2 个机位、3 种光源只是生产配方事实，算法层不固定光源数或输入通道数。NG/RECHECK 与人工复核样本用于阈值曲线和放行验证。
 
-**生产配方默认启用空间 PatchCore 模式（`spatial_mode: true`）**，检测链路提取 layer2+layer3 中间层特征图构建 H×W patch 嵌入，当前生产配方显式使用 `64x64` 空间 patch 网格，原始 patch embedding 为 1536 维，经 `seat_pca.json`（v2, 524 维，95% 累积方差）投影后进入 PatchCore memory bank/FAISS。离线 PCA 训练使用批量协方差计算和流式 JSONL 读写，避免 `64x64` patch embedding 在训练阶段一次性常驻内存。KNN 评分后生成像素级 `anomaly_map`，经 `scipy.ndimage.label` 连通域分析自动定位缺陷区域并输出 bbox。在线推理会先把 `anomaly_map` 和 `nearest_distances` 归一化为二维有限矩阵并确认形状一致，再做最大值统计和连通域提取，避免 numpy 数组布尔歧义或异常形状静默进入判定。TraceWriter 只生成一张检测 `overlay` 图：把 `anomaly_map` 映射回 raw 原图坐标，但只在最终缺陷候选 bbox 内叠加达到 PatchCore 二值化阈值的黄/红热色，其他低分 ROI 保持灰度原图，并绘制判定框和缺陷 bbox，供前端生产展示通道消费。若需回退到全局嵌入路径（整个 ROI → 1 个标量分数），在配方中设置 `spatial_mode: false`。
+**生产配方默认启用空间 PatchCore 模式（`spatial_mode: true`）**，检测链路提取 layer2+layer3 中间层特征图构建 H×W patch 嵌入，当前生产配方显式使用 `64x64` 空间 patch 网格，原始 patch embedding 为 1536 维，经 `seat_pca.json`（v2, 524 维，95% 累积方差）投影后进入 PatchCore memory bank/FAISS。离线训练和最终 memory bank 向量均使用 `.npy` 二进制矩阵保存，`seat_patchcore_bank.json` 只保存版本、维度、`vectors_path`、向量数和 metadata；默认训练完成后清理 `embeddings.npy/pca_embeddings.npy` 中间矩阵。KNN 评分后生成像素级 `anomaly_map`，经 `scipy.ndimage.label` 连通域分析自动定位缺陷区域并输出 bbox。在线推理会先把 `anomaly_map` 和 `nearest_distances` 归一化为二维有限矩阵并确认形状一致，再做最大值统计和连通域提取，避免 numpy 数组布尔歧义或异常形状静默进入判定。TraceWriter 只生成一张检测 `overlay` 图：把 `anomaly_map` 映射回 raw 原图坐标，但只在最终缺陷候选 bbox 内叠加达到 PatchCore 二值化阈值的黄/红热色，其他低分 ROI 保持灰度原图，并绘制判定框和缺陷 bbox，供前端生产展示通道消费。若需回退到全局嵌入路径（整个 ROI → 1 个标量分数），在配方中设置 `spatial_mode: false`。
 
 Python 检测层性能优化历程和量化数据见 [docs/python_detector_performance_report.md](docs/python_detector_performance_report.md)（2026-06 向量化重构：6 轮优化，23× 算法加速，PCA 精度 38.5%→95.0%）。
 

@@ -60,7 +60,24 @@ def compute_pca(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    if output_embeddings is not None:
+    if output_embeddings is not None and output_embeddings.suffix == ".npy":
+        output_embeddings.parent.mkdir(parents=True, exist_ok=True)
+        projected_matrix = np.lib.format.open_memmap(
+            output_embeddings,
+            mode="w+",
+            dtype=np.float32,
+            shape=(count, n_components),
+        )
+        written = 0
+        for batch, _metadata in _iter_embedding_batches(input_path, expected_dim=dim):
+            projected = (batch - mean) @ components.T
+            end = written + int(projected.shape[0])
+            projected_matrix[written:end, :] = projected.astype(np.float32, copy=False)
+            written = end
+        if written != count:
+            raise TrainingDataError(f"PCA embedding 写入数量不匹配: {written} != {count}")
+        projected_matrix.flush()
+    elif output_embeddings is not None:
         output_embeddings.parent.mkdir(parents=True, exist_ok=True)
         with output_embeddings.open("w", encoding="utf-8") as handle:
             written = 0
@@ -108,6 +125,9 @@ def _iter_embedding_batches(
 
     if not input_path.exists():
         raise TrainingDataError(f"embedding 文件不存在: {input_path}")
+    if input_path.suffix == ".npy":
+        yield from _iter_npy_embedding_batches(input_path, expected_dim=expected_dim, batch_size=batch_size)
+        return
     vectors: list[list[float]] = []
     metadata: list[dict[str, Any]] = []
     dim = expected_dim
@@ -142,6 +162,32 @@ def _iter_embedding_batches(
         yield np.asarray(vectors, dtype=np.float64), metadata
     if not saw_vector:
         raise TrainingDataError(f"没有读取到 embedding: {input_path}")
+
+
+def _iter_npy_embedding_batches(
+    input_path: Path,
+    *,
+    expected_dim: int | None,
+    batch_size: int,
+) -> Iterator[tuple["np.ndarray", list[dict[str, Any]]]]:
+    import numpy as np
+
+    matrix = np.load(str(input_path), mmap_mode="r", allow_pickle=False)
+    if matrix.ndim != 2:
+        raise TrainingDataError(f"{input_path}: embedding .npy 必须是二维矩阵")
+    if matrix.shape[0] <= 0:
+        raise TrainingDataError(f"没有读取到 embedding: {input_path}")
+    if matrix.shape[1] <= 0:
+        raise TrainingDataError(f"{input_path}: embedding 维度必须大于 0")
+    if expected_dim is not None and matrix.shape[1] != expected_dim:
+        raise DimensionMismatchError(f"{input_path}: embedding 维度不一致 {matrix.shape[1]} != {expected_dim}")
+    for start in range(0, int(matrix.shape[0]), batch_size):
+        end = min(start + batch_size, int(matrix.shape[0]))
+        batch = np.asarray(matrix[start:end], dtype=np.float64)
+        if not bool(np.isfinite(batch).all()):
+            raise TrainingDataError(f"{input_path}: embedding 必须是有限数字")
+        metadata = [{"sample_id": f"embedding_{index}"} for index in range(start, end)]
+        yield batch, metadata
 
 
 def _load_vectors(input_path: Path) -> tuple[list[list[float]], list[dict]]:

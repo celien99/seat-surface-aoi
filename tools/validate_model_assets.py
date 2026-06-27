@@ -166,7 +166,7 @@ def _validate_patchcore_chain(prefix: str, model: ModelConfig) -> list[AssetIssu
                 model.faiss_index_path,
                 f"{prefix}.faiss_index_path",
                 expected_dim=bank.embedding_dim,
-                expected_vectors=len(bank.vectors),
+                expected_vectors=int(bank.vectors.shape[0]),
             )
         )
     if bank is not None:

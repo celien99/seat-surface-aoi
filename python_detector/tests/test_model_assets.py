@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+
+import numpy as np
 
 from tools.validate_model_assets import load_recipe_by_id_or_path, validate_recipe_model_assets
 
@@ -97,11 +100,7 @@ def test_validate_model_assets_accepts_valid_pca_and_memory_bank(tmp_path: Path)
         encoding="utf-8",
     )
     bank_path = tmp_path / "bank.json"
-    bank_path.write_text(
-        '{"version":"bank_v1","model_family":"patchcore","embedding_dim":1,'
-        '"coreset_ratio":1.0,"pca_version":"pca_v1","vectors":[[0.0]]}',
-        encoding="utf-8",
-    )
+    _write_patchcore_bank(bank_path, np.asarray([[0.0]], dtype=np.float32), pca_version="pca_v1")
     recipe_path = tmp_path / "recipe.yaml"
     recipe_path.write_text(
         f"""
@@ -145,11 +144,7 @@ def test_validate_model_assets_rejects_patchcore_dimension_mismatch(tmp_path: Pa
         encoding="utf-8",
     )
     bank_path = tmp_path / "bank.json"
-    bank_path.write_text(
-        '{"version":"bank_v1","model_family":"patchcore","embedding_dim":3,'
-        '"coreset_ratio":1.0,"pca_version":"pca_v1","vectors":[[0.0,0.0,0.0]]}',
-        encoding="utf-8",
-    )
+    _write_patchcore_bank(bank_path, np.asarray([[0.0, 0.0, 0.0]], dtype=np.float32), pca_version="pca_v1")
     recipe_path = tmp_path / "recipe.yaml"
     recipe_path.write_text(
         f"""
@@ -195,26 +190,17 @@ def test_validate_model_assets_rejects_patchcore_metadata_mismatch(tmp_path: Pat
         encoding="utf-8",
     )
     bank_path = tmp_path / "bank.json"
-    bank_path.write_text(
-        """
-{
-  "version": "bank_v1",
-  "model_family": "patchcore",
-  "embedding_dim": 1,
-  "coreset_ratio": 1.0,
-  "pca_version": "pca_v1",
-  "faiss_enabled": false,
-  "metadata": {
-    "input_channels": ["light:DIFFUSE", "light:HIGH_LEFT"],
-    "spatial_mode": true,
-    "spatial_layers": ["layer2", "layer3"],
-    "spatial_upsample_height": 32,
-    "spatial_upsample_width": 64
-  },
-  "vectors": [[0.0]]
-}
-""",
-        encoding="utf-8",
+    _write_patchcore_bank(
+        bank_path,
+        np.asarray([[0.0]], dtype=np.float32),
+        pca_version="pca_v1",
+        metadata={
+            "input_channels": ["light:DIFFUSE", "light:HIGH_LEFT"],
+            "spatial_mode": True,
+            "spatial_layers": ["layer2", "layer3"],
+            "spatial_upsample_height": 32,
+            "spatial_upsample_width": 64,
+        },
     )
     recipe_path = tmp_path / "recipe.yaml"
     recipe_path.write_text(
@@ -257,3 +243,27 @@ models:
 
     assert any("PatchCore input_channels 与配方不匹配" in message for message in messages)
     assert any("PatchCore spatial_upsample_height 与配方不匹配: 32 != 64" in message for message in messages)
+
+
+def _write_patchcore_bank(
+    bank_path: Path,
+    vectors: np.ndarray,
+    *,
+    pca_version: str | None,
+    metadata: dict | None = None,
+) -> None:
+    vectors_path = bank_path.with_suffix(".npy")
+    np.save(vectors_path, np.asarray(vectors, dtype=np.float32))
+    payload = {
+        "version": "bank_v1",
+        "model_family": "patchcore",
+        "embedding_dim": int(vectors.shape[1]),
+        "coreset_ratio": 1.0,
+        "pca_version": pca_version,
+        "faiss_enabled": False,
+        "vector_count": int(vectors.shape[0]),
+        "vectors_path": vectors_path.name,
+    }
+    if metadata is not None:
+        payload["metadata"] = metadata
+    bank_path.write_text(json.dumps(payload), encoding="utf-8")

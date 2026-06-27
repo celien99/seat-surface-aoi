@@ -20,6 +20,33 @@ from training_tools.build_patchcore_memory_bank import build_memory_bank
 from training_tools.job_fixture import make_simulated_job
 
 
+def _write_patchcore_bank(
+    bank_path: Path,
+    vectors: np.ndarray,
+    *,
+    pca_version: str | None = None,
+    faiss_enabled: bool = False,
+) -> None:
+    vectors = np.asarray(vectors, dtype=np.float32)
+    vectors_path = bank_path.with_suffix(".npy")
+    np.save(vectors_path, vectors)
+    bank_path.write_text(
+        json.dumps(
+            {
+                "version": "bank_v1",
+                "model_family": "patchcore",
+                "embedding_dim": int(vectors.shape[1]),
+                "coreset_ratio": 1.0,
+                "pca_version": pca_version,
+                "faiss_enabled": faiss_enabled,
+                "vector_count": int(vectors.shape[0]),
+                "vectors_path": vectors_path.name,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_default_recipe_declares_v4_light_mapping_and_roi_locator() -> None:
     recipe = RecipeManager().load("seat_a_black_leather_v1")
     assert recipe.semantic_light_id("DOME") == "DIFFUSE"
@@ -535,19 +562,7 @@ def test_ecc_registration_applies_translation_before_feature_building() -> None:
 
 def test_patchcore_knn_backend_emits_unknown_anomaly_and_trace(tmp_path: Path) -> None:
     bank_path = tmp_path / "memory_bank.json"
-    bank_path.write_text(
-        json.dumps(
-            {
-                "version": "bank_v1",
-                "model_family": "patchcore",
-                "embedding_dim": 10,
-                "coreset_ratio": 1.0,
-                "pca_version": None,
-                "vectors": [[0.0] * 10],
-            }
-        ),
-        encoding="utf-8",
-    )
+    _write_patchcore_bank(bank_path, np.asarray([[0.0] * 10], dtype=np.float32))
     recipe = RecipeManager().load("seat_a_black_leather_v1")
     patchcore = ModelConfig(
         backend="patchcore_knn",
@@ -628,19 +643,7 @@ def test_patchcore_knn_backend_applies_pca_projection(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     bank_path = tmp_path / "memory_bank.json"
-    bank_path.write_text(
-        json.dumps(
-            {
-                "version": "bank_v1",
-                "model_family": "patchcore",
-                "embedding_dim": 2,
-                "coreset_ratio": 1.0,
-                "pca_version": "pca_v1",
-                "vectors": [[0.0, 0.0]],
-            }
-        ),
-        encoding="utf-8",
-    )
+    _write_patchcore_bank(bank_path, np.asarray([[0.0, 0.0]], dtype=np.float32), pca_version="pca_v1")
     recipe = RecipeManager().load("seat_a_black_leather_v1")
     patchcore = ModelConfig(
         backend="patchcore_knn",
@@ -669,10 +672,10 @@ def test_patchcore_knn_backend_applies_pca_projection(tmp_path: Path) -> None:
 
 
 def test_patchcore_memory_bank_builder_uses_coreset_stride(tmp_path: Path) -> None:
-    embeddings = tmp_path / "embeddings.jsonl"
-    embeddings.write_text(
-        "\n".join(json.dumps({"embedding": [float(index), float(index + 1)]}) for index in range(4)),
-        encoding="utf-8",
+    embeddings = tmp_path / "embeddings.npy"
+    np.save(
+        embeddings,
+        np.asarray([[float(index), float(index + 1)] for index in range(4)], dtype=np.float32),
     )
     output = tmp_path / "bank.json"
 
@@ -689,25 +692,12 @@ def test_patchcore_memory_bank_builder_uses_coreset_stride(tmp_path: Path) -> No
     assert bank["embedding_dim"] == 2
     assert bank["pca_version"] == "pca_v1"
     assert bank["faiss_enabled"] is True
-    assert len(bank["vectors"]) == 2
+    assert bank["vector_count"] == 2
 
 
 def test_patchcore_faiss_metadata_falls_back_to_exact_knn_when_index_missing(tmp_path: Path) -> None:
     bank_path = tmp_path / "memory_bank.json"
-    bank_path.write_text(
-        json.dumps(
-            {
-                "version": "bank_v1",
-                "model_family": "patchcore",
-                "embedding_dim": 10,
-                "coreset_ratio": 1.0,
-                "pca_version": None,
-                "faiss_enabled": True,
-                "vectors": [[0.0] * 10],
-            }
-        ),
-        encoding="utf-8",
-    )
+    _write_patchcore_bank(bank_path, np.asarray([[0.0] * 10], dtype=np.float32), faiss_enabled=True)
     recipe = RecipeManager().load("seat_a_black_leather_v1")
     patchcore = ModelConfig(
         backend="patchcore_knn",

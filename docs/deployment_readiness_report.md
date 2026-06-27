@@ -115,7 +115,8 @@
 | `model/roi_yolo/seat_roi_seg.onnx` | Dome/DIFFUSE 语义光源 ROI segmentation 定位 | 文件存在、非占位，类别与 `roi_locator.class_names: [seat]` 一致 |
 | `model/wideresnet50/seat_wrn50_embedding.onnx` | 多光源 ROI 空间 embedding 特征提取 | 输入通道数与生产配方 `input_channels` 一致，空间层输出维度与配方一致 |
 | `model/patchcore/seat_pca.json` | embedding 降维参数 | `pca_version=pca_seat_v2`，输入/输出维度与 memory bank 一致 |
-| `model/patchcore/seat_patchcore_bank.json` | PatchCore memory bank | PCA 维度、向量数、版本元数据通过校验 |
+| `model/patchcore/seat_patchcore_bank.json` | PatchCore memory bank 元数据 | 版本、PCA 维度、`vectors_path` 和训练 metadata 通过校验 |
+| `model/patchcore/seat_patchcore_bank.npy` | PatchCore memory bank 向量矩阵 | `float32` 二维矩阵，向量数和维度与 JSON 元数据一致 |
 | `model/patchcore/seat_patchcore.faiss` | FAISS 加速索引 | 可选；启用时维度和向量数必须与 memory bank 一致 |
 
 正式上线前必须运行：
@@ -191,6 +192,7 @@ Copy-Item "$ModelRoot\roi_yolo\seat_roi_seg.onnx" ".\model\roi_yolo\seat_roi_seg
 Copy-Item "$ModelRoot\wideresnet50\seat_wrn50_embedding.onnx" ".\model\wideresnet50\seat_wrn50_embedding.onnx" -Force
 Copy-Item "$ModelRoot\patchcore\seat_pca.json" ".\model\patchcore\seat_pca.json" -Force
 Copy-Item "$ModelRoot\patchcore\seat_patchcore_bank.json" ".\model\patchcore\seat_patchcore_bank.json" -Force
+Copy-Item "$ModelRoot\patchcore\seat_patchcore_bank.npy" ".\model\patchcore\seat_patchcore_bank.npy" -Force
 Copy-Item "$ModelRoot\patchcore\seat_patchcore.faiss" ".\model\patchcore\seat_patchcore.faiss" -Force
 
 # 4. 按现场确认 COM 口、相机 SN、结果回传 IP/端口

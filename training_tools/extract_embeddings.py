@@ -105,6 +105,52 @@ def extract_embeddings_to_file(
     return summary
 
 
+def extract_embeddings_to_npy(
+    manifest_path: Path,
+    output: Path,
+    *,
+    recipe_id: str = "seat_a_black_leather_v1",
+    model_key: str | None = None,
+    embedding_dim: int | None = None,
+    backend: str = "statistical",
+    model_path: str | None = None,
+    channel_order: tuple[str, ...] | None = None,
+    split: str | None = None,
+    spatial_mode: bool = False,
+    spatial_layers: tuple[str, ...] = (),
+    spatial_upsample_height: int = 32,
+    spatial_upsample_width: int = 32,
+) -> dict:
+    try:
+        manifest_groups = load_manifest_groups(manifest_path)
+    except TrainingDataError as exc:
+        if "manifest 没有样本" in str(exc):
+            raise TrainingDataError(f"manifest 中没有 OK 样本: {manifest_path}") from exc
+        raise
+    groups = [
+        group
+        for group in manifest_groups
+        if group.decision == "OK" and group.quality_pass and (split is None or group.split == split)
+    ]
+    if not groups:
+        raise TrainingDataError(f"manifest 中没有 OK 样本: {manifest_path}")
+
+    recipe = RecipeManager().load(recipe_id)
+    selected_model_key = model_key or _default_embedding_model_key(recipe)
+    model_config = _embedding_model_config(
+        recipe.models[selected_model_key],
+        backend=backend,
+        model_path=model_path,
+        embedding_dim=embedding_dim,
+        channel_order=channel_order,
+        spatial_mode=spatial_mode,
+        spatial_layers=spatial_layers,
+        spatial_upsample_height=spatial_upsample_height,
+        spatial_upsample_width=spatial_upsample_width,
+    )
+    return _write_group_embedding_matrix(groups, recipe, selected_model_key, model_config, output)
+
+
 def _extract_group_embeddings(
     groups: list[ManifestSampleGroup],
     recipe: Recipe,
@@ -119,6 +165,88 @@ def _extract_group_embeddings(
         output=None,
         collect_results=True,
     )["results"]
+
+
+def _write_group_embedding_matrix(
+    groups: list[ManifestSampleGroup],
+    recipe: Recipe,
+    model_key: str,
+    model_config: ModelConfig,
+    output: Path,
+) -> dict:
+    import numpy as np
+
+    extractor = EmbeddingExtractor()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if output.exists():
+        output.unlink()
+    rows_per_group = (
+        int(model_config.spatial_upsample_height) * int(model_config.spatial_upsample_width)
+        if model_config.spatial_mode and model_config.spatial_layers
+        else 1
+    )
+    total_rows = len(groups) * rows_per_group
+    if total_rows <= 0:
+        raise TrainingDataError(f"manifest 中没有 OK 样本: {output}")
+
+    embedding_count = 0
+    embedding_dim = 0
+    input_shape_counts: dict[tuple[int, int, int, int] | None, int] = {}
+    matrix = None
+    try:
+        for group in groups:
+            try:
+                feature_group = build_feature_group_from_manifest_group(group, recipe, model_key=model_key)
+                if model_config.spatial_mode and model_config.spatial_layers:
+                    spatial = extractor.extract_spatial(feature_group, model_config)
+                    values = np.asarray(spatial.patch_embeddings, dtype=np.float32)
+                    if values.ndim != 2:
+                        raise RuntimeError(f"spatial embedding 必须是二维矩阵: {values.shape}")
+                    if values.shape[0] != rows_per_group:
+                        raise RuntimeError(f"spatial embedding patch 数不匹配: {values.shape[0]} != {rows_per_group}")
+                    raw_shape = list(spatial.input_shape_nchw) if spatial.input_shape_nchw is not None else None
+                else:
+                    embedding = extractor.extract(feature_group, model_config)
+                    values = np.asarray([embedding.values], dtype=np.float32)
+                    raw_shape = list(embedding.input_shape_nchw) if embedding.input_shape_nchw is not None else None
+                if values.ndim != 2 or values.shape[0] <= 0 or values.shape[1] <= 0:
+                    raise RuntimeError(f"embedding 输出必须是非空二维矩阵: {values.shape}")
+                if not bool(np.isfinite(values).all()):
+                    raise RuntimeError("embedding 输出包含非有限值")
+                if matrix is None:
+                    embedding_dim = int(values.shape[1])
+                    matrix = np.lib.format.open_memmap(
+                        output,
+                        mode="w+",
+                        dtype=np.float32,
+                        shape=(total_rows, embedding_dim),
+                    )
+                elif values.shape[1] != embedding_dim:
+                    raise RuntimeError(f"embedding 维度不一致: {values.shape[1]} != {embedding_dim}")
+                end = embedding_count + int(values.shape[0])
+                matrix[embedding_count:end, :] = values
+                embedding_count = end
+                shape = tuple(int(value) for value in raw_shape) if isinstance(raw_shape, list) and len(raw_shape) == 4 else None
+                input_shape_counts[shape] = input_shape_counts.get(shape, 0) + int(values.shape[0])
+            except Exception as exc:
+                raise EmbeddingExtractionError(f"{group.group_id}: embedding 提取失败: {exc}") from exc
+        if matrix is None:
+            raise TrainingDataError(f"manifest 中没有 OK 样本: {output}")
+        if embedding_count != total_rows:
+            raise EmbeddingExtractionError(f"embedding 写入数量不匹配: {embedding_count} != {total_rows}")
+        matrix.flush()
+    except Exception:
+        if output.exists():
+            output.unlink()
+        raise
+
+    return {
+        "embedding_count": embedding_count,
+        "embedding_dim": embedding_dim,
+        "input_shape_summary": _input_shape_summary_from_counts(input_shape_counts),
+        "matrix_path": str(output),
+        "results": [],
+    }
 
 
 def _write_group_embeddings(

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-import math
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +16,8 @@ class PatchCoreBank:
     model_family: str
     embedding_dim: int
     coreset_ratio: float
-    vectors: tuple[tuple[float, ...], ...]
+    vectors_path: str
+    vectors: np.ndarray
     pca_version: str | None
     faiss_enabled: bool = False
     metadata: dict[str, Any] | None = None
@@ -233,23 +233,24 @@ class PatchCoreKnnIndex:
                 reason="empty_or_placeholder",
             )
         raw = json.loads(path.read_text(encoding="utf-8"))
-        bank = self._parse(raw, path_value)
+        bank = self._parse(raw, path)
         self._cache[path_value] = bank
         return bank
 
-    def _parse(self, raw: Any, source: str) -> PatchCoreBank:
+    def _parse(self, raw: Any, source: Path) -> PatchCoreBank:
         if not isinstance(raw, dict):
             raise RuntimeError(f"PatchCore memory bank 必须是 JSON object: {source}")
         version = self._str(raw.get("version"), "version")
         model_family = self._str(raw.get("model_family", "patchcore"), "model_family")
-        vectors_raw = raw.get("vectors")
-        if not isinstance(vectors_raw, list) or not vectors_raw:
-            raise RuntimeError("PatchCore vectors 必须是非空二维数组")
-        vectors = tuple(self._float_tuple(vector, "vectors") for vector in vectors_raw)
-        embedding_dim = self._positive_int(raw.get("embedding_dim", len(vectors[0])), "embedding_dim")
-        for vector in vectors:
-            if len(vector) != embedding_dim:
-                raise RuntimeError(f"PatchCore vector 维度不匹配: {len(vector)} != {embedding_dim}")
+        if "vectors" in raw:
+            raise RuntimeError("PatchCore memory bank 不再支持 JSON 内嵌 vectors，请使用 vectors_path 指向 .npy 向量矩阵")
+        embedding_dim = self._positive_int(raw.get("embedding_dim"), "embedding_dim")
+        vectors_path_value = self._str(raw.get("vectors_path"), "vectors_path")
+        vectors_path = _resolve_vectors_path(vectors_path_value, source.parent)
+        vectors = _load_vectors_npy(vectors_path, embedding_dim)
+        expected_count = raw.get("vector_count")
+        if expected_count is not None and int(expected_count) != int(vectors.shape[0]):
+            raise RuntimeError(f"PatchCore vector_count 与 .npy 向量数不匹配: {expected_count} != {vectors.shape[0]}")
         coreset_ratio = self._ratio(raw.get("coreset_ratio", 1.0), "coreset_ratio")
         if coreset_ratio <= 0.0:
             raise RuntimeError("PatchCore coreset_ratio 必须大于 0")
@@ -261,14 +262,12 @@ class PatchCoreKnnIndex:
             model_family=model_family,
             embedding_dim=embedding_dim,
             coreset_ratio=coreset_ratio,
+            vectors_path=str(vectors_path),
             vectors=vectors,
             pca_version=pca_version,
             faiss_enabled=bool(raw.get("faiss_enabled", False)),
             metadata=raw.get("metadata") if isinstance(raw.get("metadata"), dict) else None,
         )
-
-    def _euclidean(self, left: tuple[float, ...], right: tuple[float, ...]) -> float:
-        return _euclidean(left, right)
 
     def _score_with_faiss(
         self,
@@ -356,13 +355,40 @@ class PatchCoreKnnIndex:
             raise RuntimeError(f"PatchCore {name} 必须在 [0, 1] 范围内")
         return result
 
-    def _float_tuple(self, value: Any, name: str) -> tuple[float, ...]:
-        if not isinstance(value, list) or not value:
-            raise RuntimeError(f"PatchCore {name} 必须是非空数字数组")
-        result = tuple(float(item) for item in value)
-        if not all(math.isfinite(item) for item in result):
-            raise RuntimeError(f"PatchCore {name} 必须是有限数字")
-        return result
+def _resolve_vectors_path(path_value: str, bank_dir: Path) -> Path:
+    path = Path(path_value)
+    if path.is_absolute():
+        return path
+    return bank_dir / path
+
+
+def _load_vectors_npy(path: Path, expected_dim: int) -> np.ndarray:
+    if not path.exists():
+        raise ModelAssetUnavailableError(
+            f"PatchCore vectors .npy 不存在: {path}",
+            asset_kind="patchcore_vectors",
+            asset_path=str(path),
+            reason="missing",
+        )
+    if path.stat().st_size <= 1:
+        raise ModelAssetUnavailableError(
+            f"PatchCore vectors .npy 为空或仍是占位文件: {path}",
+            asset_kind="patchcore_vectors",
+            asset_path=str(path),
+            reason="empty_or_placeholder",
+        )
+    vectors = np.load(str(path), mmap_mode="r", allow_pickle=False)
+    if vectors.ndim != 2:
+        raise RuntimeError(f"PatchCore vectors .npy 必须是 2 维矩阵: {vectors.shape}")
+    if vectors.shape[0] <= 0:
+        raise RuntimeError("PatchCore vectors .npy 不能为空")
+    if vectors.shape[1] != expected_dim:
+        raise RuntimeError(f"PatchCore vectors .npy 维度不匹配: {vectors.shape[1]} != {expected_dim}")
+    if vectors.dtype != np.float32:
+        raise RuntimeError(f"PatchCore vectors .npy 必须是 float32，实际: {vectors.dtype}")
+    if not bool(np.isfinite(vectors).all()):
+        raise RuntimeError("PatchCore vectors .npy 包含非有限值")
+    return vectors
 
 
 def _topk_distances(queries: np.ndarray, bank_vectors: np.ndarray, knn_k: int, chunk_size: int = 256) -> np.ndarray:
@@ -410,8 +436,3 @@ def _finite_row_distances(distances_raw: np.ndarray) -> np.ndarray:
         copy=False,
     )
     return distances[np.isfinite(distances)]
-
-
-def _euclidean(left: tuple[float, ...], right: tuple[float, ...]) -> float:
-    diff = np.asarray(left, dtype=np.float32) - np.asarray(right, dtype=np.float32)
-    return float(np.sqrt(np.dot(diff, diff)))

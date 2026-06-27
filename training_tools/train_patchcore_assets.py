@@ -8,7 +8,7 @@ from pathlib import Path
 from training_tools.build_faiss_index import build_faiss_index
 from training_tools.build_patchcore_memory_bank import build_memory_bank
 from training_tools.compute_pca import compute_pca
-from training_tools.extract_embeddings import extract_embeddings_to_file
+from training_tools.extract_embeddings import extract_embeddings_to_npy
 from python_detector.config.recipe_schema import RecipeManager
 from training_tools.training_errors import DimensionMismatchError, EmbeddingExtractionError, TrainingDataError
 
@@ -36,12 +36,14 @@ def train_patchcore_assets(
     build_faiss: bool = False,
     faiss_index_type: str = "FlatL2",
     faiss_nlist: int | None = None,
+    keep_intermediate_embeddings: bool = False,
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
-    embeddings_path = output_dir / "embeddings.jsonl"
+    embeddings_npy_path = output_dir / "embeddings.npy"
     pca_path = output_dir / "seat_pca.json"
-    pca_embeddings_path = output_dir / "pca_embeddings.jsonl"
+    pca_embeddings_npy_path = output_dir / "pca_embeddings.npy"
     bank_path = output_dir / "seat_patchcore_bank.json"
+    bank_vectors_path = output_dir / "seat_patchcore_bank.npy"
     faiss_path = output_dir / "seat_patchcore.faiss"
 
     recipe = RecipeManager().load(recipe_id)
@@ -69,9 +71,9 @@ def train_patchcore_assets(
         "manifest_sha256": _sha256_file(manifest_path),
     }
 
-    embedding_summary = extract_embeddings_to_file(
+    embedding_summary = extract_embeddings_to_npy(
         manifest_path=manifest_path,
-        output=embeddings_path,
+        output=embeddings_npy_path,
         recipe_id=recipe_id,
         model_key=selected_model_key,
         embedding_dim=embedding_dim,
@@ -84,17 +86,17 @@ def train_patchcore_assets(
         spatial_upsample_height=spatial_upsample_height,
         spatial_upsample_width=spatial_upsample_width,
     )
-    source_embeddings_path = embeddings_path
+    source_embeddings_path = embeddings_npy_path
     pca_result = None
     if pca_components is not None:
         pca_result = compute_pca(
-            input_path=embeddings_path,
+            input_path=source_embeddings_path,
             output_path=pca_path,
             n_components=pca_components,
             version=pca_version,
-            output_embeddings=pca_embeddings_path,
+            output_embeddings=pca_embeddings_npy_path,
         )
-        source_embeddings_path = pca_embeddings_path
+        source_embeddings_path = pca_embeddings_npy_path
 
     bank = build_memory_bank(
         source_embeddings_path,
@@ -105,6 +107,7 @@ def train_patchcore_assets(
         faiss_enabled=build_faiss,
         coreset_method=coreset_method,
         metadata=training_contract,
+        vectors_path=bank_vectors_path,
     )
     faiss_result = None
     if build_faiss:
@@ -114,6 +117,12 @@ def train_patchcore_assets(
             index_type=faiss_index_type,
             nlist=faiss_nlist,
         )
+
+    retained_embeddings_path = embeddings_npy_path if keep_intermediate_embeddings else None
+    retained_pca_embeddings_path = pca_embeddings_npy_path if keep_intermediate_embeddings and pca_result is not None else None
+    if not keep_intermediate_embeddings:
+        _unlink_if_exists(embeddings_npy_path)
+        _unlink_if_exists(pca_embeddings_npy_path)
 
     summary = {
         "manifest": str(manifest_path),
@@ -126,16 +135,18 @@ def train_patchcore_assets(
         "embedding_dim": embedding_summary["embedding_dim"],
         "input_shape_summary": embedding_summary["input_shape_summary"],
         "training_contract": training_contract,
-        "embeddings_path": str(embeddings_path),
+        "embeddings_npy_path": str(retained_embeddings_path) if retained_embeddings_path is not None else None,
         "pca_path": str(pca_path) if pca_result is not None else None,
-        "pca_embeddings_path": str(pca_embeddings_path) if pca_result is not None else None,
+        "pca_embeddings_npy_path": str(retained_pca_embeddings_path) if retained_pca_embeddings_path is not None else None,
         "pca_output_dim": pca_result["output_dim"] if pca_result is not None else None,
         "memory_bank_path": str(bank_path),
+        "memory_bank_vectors_path": str(bank_vectors_path),
         "memory_bank_version": bank["version"],
-        "memory_bank_vectors": len(bank["vectors"]),
+        "memory_bank_vectors": bank["vector_count"],
         "memory_bank_dim": bank["embedding_dim"],
         "coreset_ratio": coreset_ratio,
         "coreset_method": coreset_method,
+        "intermediate_embeddings_retained": keep_intermediate_embeddings,
         "faiss_index_path": str(faiss_path) if faiss_result is not None else None,
         "faiss_index_type": faiss_result["index_type"] if faiss_result is not None else None,
     }
@@ -152,6 +163,13 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _unlink_if_exists(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
 
 
 def _default_embedding_model_key(recipe) -> str:
@@ -212,6 +230,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--build-faiss", action="store_true")
     parser.add_argument("--faiss-index-type", default="FlatL2", choices=["FlatL2", "IVFFlat"])
     parser.add_argument("--faiss-nlist", type=int, default=None)
+    parser.add_argument(
+        "--keep-intermediate-embeddings",
+        action="store_true",
+        help="调试时保留 embeddings.npy/pca_embeddings.npy；默认训练完成后清理中间矩阵",
+    )
     args = parser.parse_args(argv)
 
     channel_order = None
@@ -244,6 +267,7 @@ def main(argv: list[str] | None = None) -> int:
             build_faiss=args.build_faiss,
             faiss_index_type=args.faiss_index_type,
             faiss_nlist=args.faiss_nlist,
+            keep_intermediate_embeddings=args.keep_intermediate_embeddings,
         )
     except (TrainingDataError, DimensionMismatchError, EmbeddingExtractionError, ValueError) as exc:
         print(f"train_patchcore_assets_failed={exc}")
