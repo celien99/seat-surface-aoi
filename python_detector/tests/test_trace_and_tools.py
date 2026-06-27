@@ -159,39 +159,6 @@ def test_trace_writer_heatmap_without_defect_keeps_roi_pixels_unchanged(tmp_path
     assert overlay_img.pixels[cold_offset : cold_offset + 3] == bytes((cold_raw, cold_raw, cold_raw))
 
 
-def test_trace_writer_writes_continuous_patchcore_heatmap(tmp_path: Path) -> None:
-    recipe = _recipe(tmp_path, save_ok_ratio=1.0)
-    pipeline = InspectionPipeline()
-    job = make_simulated_job()
-    result = pipeline.process(job, recipe)
-    prepared = pipeline.last_context["prepared_bundles"][0]
-    roi_frame = prepared.rois["seat"]["DIFFUSE"]
-    context = {
-        **pipeline.last_context,
-        "spatial_maps": [
-            {
-                "camera_id": prepared.camera_id,
-                "pose_id": prepared.pose_id,
-                "roi_name": "seat",
-                "spatial_shape": [2, 2],
-                "score_threshold": 1.0,
-                "anomaly_map": ((0.0, 1.0), (0.5, 0.25)),
-            }
-        ],
-    }
-
-    trace_dir = TraceWriter(recipe.trace.root_dir).write(job, recipe, result, context)
-
-    assert trace_dir is not None
-    heatmap_img = load_raster_image(trace_dir / "patchcore_heatmaps" / "TOP_BACK" / "TOP_BACK" / "seat.png")
-    raw_frame = job.camera_bundles[0].light_frames[roi_frame.light_id]
-    sample_x = min(raw_frame.width - 2, roi_frame.origin_xy[0] + max(1, roi_frame.width // 2))
-    sample_y = min(raw_frame.height - 2, roi_frame.origin_xy[1] + max(1, roi_frame.height // 2))
-    pixel_offset = (sample_y * raw_frame.width + sample_x) * 3
-    raw_value = bytes(raw_frame.image)[sample_y * raw_frame.stride_bytes + sample_x]
-    assert heatmap_img.pixels[pixel_offset : pixel_offset + 3] != bytes((raw_value, raw_value, raw_value))
-
-
 def test_trace_writer_heatmap_only_renders_inside_defect_bbox(tmp_path: Path) -> None:
     recipe = _recipe(tmp_path, save_ok_ratio=1.0)
     pipeline = InspectionPipeline()

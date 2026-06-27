@@ -298,9 +298,8 @@ uv run python -m tools.validate_model_assets --recipe seat_a_robot_flyshot_produ
 - `raw_images/<camera_id>/<pose_id>/<light_id>.png`
 - `images/<camera_id>/<pose_id>/<roi_name>/<light_id>.png`
 - `overlays/<camera_id>/<pose_id>/<roi_name>.png`
-- `patchcore_heatmaps/<camera_id>/<pose_id>/<roi_name>.png`
 
-`patchcore_heatmaps/` 是连续 anomaly_map 伪彩调试图，用于复核 PatchCore 原始空间响应；`overlays/` 是生产展示图，只在最终缺陷候选 bbox 内叠加阈值以上热区并绘制判定框。
+`overlays/` 是唯一检测可视化 PNG：它使用 PatchCore anomaly_map，但只在最终缺陷候选 bbox 内叠加阈值以上热区并绘制判定框，避免额外生成调试热力图污染 trace。
 
 保存策略：
 
