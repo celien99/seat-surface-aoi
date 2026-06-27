@@ -16,14 +16,15 @@ def build_memory_bank(
     pca_version: str | None,
     faiss_enabled: bool,
     coreset_method: str = "greedy",
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if coreset_method not in ("greedy", "stride"):
         raise ValueError(f"coreset_method 必须是 greedy 或 stride: {coreset_method}")
-    vectors = _load_vectors(input_path)
     if coreset_method == "greedy":
+        vectors = _load_vectors(input_path)
         selected = _coreset_greedy(vectors, coreset_ratio)
     else:
-        selected = _coreset_stride(vectors, coreset_ratio)
+        selected = _load_vectors_stride(input_path, coreset_ratio)
     bank = {
         "version": version,
         "model_family": "patchcore",
@@ -33,6 +34,8 @@ def build_memory_bank(
         "faiss_enabled": faiss_enabled,
         "vectors": selected,
     }
+    if metadata is not None:
+        bank["metadata"] = metadata
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(bank, ensure_ascii=False, indent=2), encoding="utf-8")
     return bank
@@ -58,6 +61,58 @@ def _load_vectors(input_path: Path) -> list[list[float]]:
         if len(vector) != dim:
             raise ValueError(f"{input_path}:{index}: embedding 维度不一致 {len(vector)} != {dim}")
     return vectors
+
+
+def _load_vectors_stride(input_path: Path, coreset_ratio: float) -> list[list[float]]:
+    if coreset_ratio <= 0.0 or coreset_ratio > 1.0:
+        raise ValueError("coreset_ratio 必须在 (0, 1] 范围内")
+    count, dim = _scan_vector_file(input_path)
+    keep_count = max(1, math.ceil(count * coreset_ratio))
+    if keep_count >= count:
+        return _load_vectors(input_path)
+    step = count / keep_count
+    selected_indices = {min(int(item * step), count - 1) for item in range(keep_count)}
+    selected: list[list[float]] = []
+    for index, vector in _iter_vectors(input_path, expected_dim=dim):
+        if index in selected_indices:
+            selected.append(vector)
+    if not selected:
+        raise ValueError(f"没有读取到 stride coreset embedding: {input_path}")
+    return selected
+
+
+def _scan_vector_file(input_path: Path) -> tuple[int, int]:
+    count = 0
+    dim: int | None = None
+    for _index, vector in _iter_vectors(input_path):
+        if dim is None:
+            dim = len(vector)
+        count += 1
+    if count <= 0 or dim is None:
+        raise ValueError(f"没有读取到 embedding: {input_path}")
+    return count, dim
+
+
+def _iter_vectors(input_path: Path, *, expected_dim: int | None = None):
+    if not input_path.exists():
+        raise ValueError(f"embedding 文件不存在: {input_path}")
+    dim = expected_dim
+    with input_path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            raw = json.loads(line)
+            vector = raw.get("embedding", raw) if isinstance(raw, dict) else raw
+            if not isinstance(vector, list) or not vector:
+                raise ValueError(f"{input_path}:{line_number}: embedding 必须是非空数组")
+            parsed = [float(value) for value in vector]
+            if not all(math.isfinite(value) for value in parsed):
+                raise ValueError(f"{input_path}:{line_number}: embedding 必须是有限数字")
+            if dim is None:
+                dim = len(parsed)
+            elif len(parsed) != dim:
+                raise ValueError(f"{input_path}:{line_number}: embedding 维度不一致 {len(parsed)} != {dim}")
+            yield line_number - 1, parsed
 
 
 def _coreset_stride(vectors: list[list[float]], coreset_ratio: float) -> list[list[float]]:
@@ -132,4 +187,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -650,6 +650,14 @@ def _models_from_dict(data: dict[str, Any], light_order: tuple[str, ...]) -> dic
                 raw.get("spatial_upsample_width", 32),
                 f"models.{model_key}.spatial_upsample_width",
             ),
+            anomaly_binarize_min_ratio=_ratio(
+                raw.get("anomaly_binarize_min_ratio", 0.5),
+                f"models.{model_key}.anomaly_binarize_min_ratio",
+            ),
+            anomaly_binarize_relative=_ratio(
+                raw.get("anomaly_binarize_relative", 0.3),
+                f"models.{model_key}.anomaly_binarize_relative",
+            ),
         )
     if "default" not in models:
         models["default"] = ModelConfig(input_channels=_default_model_input_channels(light_order))

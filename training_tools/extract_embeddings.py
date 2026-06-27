@@ -30,6 +30,42 @@ def extract_embeddings(
     spatial_upsample_height: int = 32,
     spatial_upsample_width: int = 32,
 ) -> list[dict]:
+    result = extract_embeddings_to_file(
+        manifest_path=manifest_path,
+        output=output,
+        recipe_id=recipe_id,
+        model_key=model_key,
+        embedding_dim=embedding_dim,
+        backend=backend,
+        model_path=model_path,
+        channel_order=channel_order,
+        split=split,
+        spatial_mode=spatial_mode,
+        spatial_layers=spatial_layers,
+        spatial_upsample_height=spatial_upsample_height,
+        spatial_upsample_width=spatial_upsample_width,
+        collect_results=True,
+    )
+    return result["results"]
+
+
+def extract_embeddings_to_file(
+    manifest_path: Path,
+    output: Path,
+    *,
+    recipe_id: str = "seat_a_black_leather_v1",
+    model_key: str | None = None,
+    embedding_dim: int | None = None,
+    backend: str = "statistical",
+    model_path: str | None = None,
+    channel_order: tuple[str, ...] | None = None,
+    split: str | None = None,
+    spatial_mode: bool = False,
+    spatial_layers: tuple[str, ...] = (),
+    spatial_upsample_height: int = 32,
+    spatial_upsample_width: int = 32,
+    collect_results: bool = False,
+) -> dict:
     try:
         manifest_groups = load_manifest_groups(manifest_path)
     except TrainingDataError as exc:
@@ -57,14 +93,16 @@ def extract_embeddings(
         spatial_upsample_height=spatial_upsample_height,
         spatial_upsample_width=spatial_upsample_width,
     )
-    results = _extract_group_embeddings(groups, recipe, selected_model_key, model_config)
-
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(
-        "\n".join(json.dumps(entry, ensure_ascii=False, sort_keys=True) for entry in results) + "\n",
-        encoding="utf-8",
+    summary = _write_group_embeddings(
+        groups,
+        recipe,
+        selected_model_key,
+        model_config,
+        output,
+        collect_results=collect_results,
     )
-    return results
+    return summary
 
 
 def _extract_group_embeddings(
@@ -73,17 +111,82 @@ def _extract_group_embeddings(
     model_key: str,
     model_config: ModelConfig,
 ) -> list[dict]:
+    return _write_group_embeddings(
+        groups,
+        recipe,
+        model_key,
+        model_config,
+        output=None,
+        collect_results=True,
+    )["results"]
+
+
+def _write_group_embeddings(
+    groups: list[ManifestSampleGroup],
+    recipe: Recipe,
+    model_key: str,
+    model_config: ModelConfig,
+    output: Path | None,
+    *,
+    collect_results: bool,
+) -> dict:
     extractor = EmbeddingExtractor()
     results: list[dict] = []
-    for group in groups:
-        try:
-            feature_group = build_feature_group_from_manifest_group(group, recipe, model_key=model_key)
-            if model_config.spatial_mode and model_config.spatial_layers:
-                spatial = extractor.extract_spatial(feature_group, model_config)
-                for patch_idx, patch_embedding in enumerate(spatial.patch_embeddings):
-                    patch_row = patch_idx // spatial.spatial_shape[1]
-                    patch_col = patch_idx % spatial.spatial_shape[1]
-                    results.append(
+    embedding_count = 0
+    embedding_dim = 0
+    input_shape_counts: dict[tuple[int, int, int, int] | None, int] = {}
+
+    handle = output.open("w", encoding="utf-8") if output is not None else None
+    try:
+        def emit(entry: dict) -> None:
+            nonlocal embedding_count, embedding_dim
+            embedding_count += 1
+            embedding_dim = int(entry.get("embedding_dim") or len(entry.get("embedding", ())))
+            raw_shape = entry.get("input_shape_nchw")
+            shape = tuple(int(value) for value in raw_shape) if isinstance(raw_shape, list) and len(raw_shape) == 4 else None
+            input_shape_counts[shape] = input_shape_counts.get(shape, 0) + 1
+            if handle is not None:
+                handle.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
+            if collect_results:
+                results.append(entry)
+
+        for group in groups:
+            try:
+                feature_group = build_feature_group_from_manifest_group(group, recipe, model_key=model_key)
+                if model_config.spatial_mode and model_config.spatial_layers:
+                    spatial = extractor.extract_spatial(feature_group, model_config)
+                    for patch_idx, patch_embedding in enumerate(spatial.patch_embeddings):
+                        patch_row = patch_idx // spatial.spatial_shape[1]
+                        patch_col = patch_idx % spatial.spatial_shape[1]
+                        emit(
+                            {
+                                "sample_id": group.sample_id,
+                                "group_id": group.group_id,
+                                "source_trace_dir": group.source_trace_dir,
+                                "recipe_id": recipe.recipe_id,
+                                "model_key": model_key,
+                                "camera_id": group.camera_id,
+                                "roi_name": group.roi_name,
+                                "split": group.split,
+                                "label_status": group.label_status,
+                                "lights": list(group.lights),
+                                "embedding": [float(value) for value in patch_embedding.tolist()],
+                                "embedding_dim": len(patch_embedding),
+                                "backend": spatial.backend,
+                                "embedding_version": spatial.version,
+                                "layer_names": list(spatial.layer_names),
+                                "input_shape_nchw": list(spatial.input_shape_nchw) if spatial.input_shape_nchw is not None else None,
+                                "spatial_mode": True,
+                                "patch_index": patch_idx,
+                                "patch_row": patch_row,
+                                "patch_col": patch_col,
+                                "spatial_shape": list(spatial.spatial_shape),
+                                "patch_dim": spatial.patch_dim,
+                            }
+                        )
+                else:
+                    embedding = extractor.extract(feature_group, model_config)
+                    emit(
                         {
                             "sample_id": group.sample_id,
                             "group_id": group.group_id,
@@ -95,45 +198,46 @@ def _extract_group_embeddings(
                             "split": group.split,
                             "label_status": group.label_status,
                             "lights": list(group.lights),
-                            "embedding": list(patch_embedding),
-                            "embedding_dim": len(patch_embedding),
-                            "backend": spatial.backend,
-                            "embedding_version": spatial.version,
-                            "layer_names": list(spatial.layer_names),
-                            "input_shape_nchw": list(spatial.input_shape_nchw) if spatial.input_shape_nchw is not None else None,
-                            "spatial_mode": True,
-                            "patch_index": patch_idx,
-                            "patch_row": patch_row,
-                            "patch_col": patch_col,
-                            "spatial_shape": list(spatial.spatial_shape),
-                            "patch_dim": spatial.patch_dim,
+                            "embedding": [float(value) for value in embedding.values],
+                            "embedding_dim": len(embedding.values),
+                            "backend": embedding.backend,
+                            "embedding_version": embedding.version,
+                            "layer_names": list(embedding.layer_names),
+                            "input_shape_nchw": list(embedding.input_shape_nchw) if embedding.input_shape_nchw is not None else None,
                         }
                     )
-            else:
-                embedding = extractor.extract(feature_group, model_config)
-                results.append(
-                    {
-                        "sample_id": group.sample_id,
-                        "group_id": group.group_id,
-                        "source_trace_dir": group.source_trace_dir,
-                        "recipe_id": recipe.recipe_id,
-                        "model_key": model_key,
-                        "camera_id": group.camera_id,
-                        "roi_name": group.roi_name,
-                        "split": group.split,
-                        "label_status": group.label_status,
-                        "lights": list(group.lights),
-                        "embedding": list(embedding.values),
-                        "embedding_dim": len(embedding.values),
-                        "backend": embedding.backend,
-                        "embedding_version": embedding.version,
-                        "layer_names": list(embedding.layer_names),
-                        "input_shape_nchw": list(embedding.input_shape_nchw) if embedding.input_shape_nchw is not None else None,
-                    }
-                )
-        except Exception as exc:
-            raise EmbeddingExtractionError(f"{group.group_id}: embedding 提取失败: {exc}") from exc
-    return results
+            except Exception as exc:
+                raise EmbeddingExtractionError(f"{group.group_id}: embedding 提取失败: {exc}") from exc
+    finally:
+        if handle is not None:
+            handle.close()
+
+    return {
+        "embedding_count": embedding_count,
+        "embedding_dim": embedding_dim,
+        "input_shape_summary": _input_shape_summary_from_counts(input_shape_counts),
+        "results": results,
+    }
+
+
+def _input_shape_summary_from_counts(counts: dict[tuple[int, int, int, int] | None, int]) -> dict:
+    shapes = [
+        {
+            "input_shape_nchw": list(shape) if shape is not None else None,
+            "count": count,
+        }
+        for shape, count in sorted(counts.items(), key=lambda item: item[0] or (0, 0, 0, 0))
+    ]
+    heights = [shape[2] for shape in counts if shape is not None]
+    widths = [shape[3] for shape in counts if shape is not None]
+    return {
+        "distinct_shapes": shapes,
+        "height_min": min(heights) if heights else None,
+        "height_max": max(heights) if heights else None,
+        "width_min": min(widths) if widths else None,
+        "width_max": max(widths) if widths else None,
+        "fixed_input_size": len({(shape[2], shape[3]) for shape in counts if shape is not None}) == 1,
+    }
 
 
 def _embedding_model_config(

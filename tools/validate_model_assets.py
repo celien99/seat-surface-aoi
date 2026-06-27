@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -168,7 +169,114 @@ def _validate_patchcore_chain(prefix: str, model: ModelConfig) -> list[AssetIssu
                 expected_vectors=len(bank.vectors),
             )
         )
+    if bank is not None:
+        issues.extend(_validate_patchcore_metadata(prefix, model, bank))
     return issues
+
+
+def _validate_patchcore_metadata(prefix: str, model: ModelConfig, bank: PatchCoreBank) -> list[AssetIssue]:
+    metadata = bank.metadata or {}
+    if not metadata:
+        if not model.spatial_mode and model.embedding_backend != "onnx_wideresnet50":
+            return []
+        return [
+            AssetIssue(
+                "WARN",
+                f"{prefix}.memory_bank_path",
+                "PatchCore memory bank 缺少 metadata，无法校验 input_channels、spatial_shape 和 embedding 模型 hash",
+            )
+        ]
+    issues: list[AssetIssue] = []
+    expected_channels = list(model.input_channels)
+    actual_channels = metadata.get("input_channels")
+    if actual_channels is not None and list(actual_channels) != expected_channels:
+        issues.append(
+            AssetIssue(
+                "ERROR",
+                f"{prefix}.memory_bank_path",
+                f"PatchCore input_channels 与配方不匹配: {actual_channels} != {expected_channels}",
+            )
+        )
+    expected_spatial_mode = bool(model.spatial_mode)
+    actual_spatial_mode = metadata.get("spatial_mode")
+    if actual_spatial_mode is not None and bool(actual_spatial_mode) != expected_spatial_mode:
+        issues.append(
+            AssetIssue(
+                "ERROR",
+                f"{prefix}.memory_bank_path",
+                f"PatchCore spatial_mode 与配方不匹配: {actual_spatial_mode} != {expected_spatial_mode}",
+            )
+        )
+    expected_layers = list(model.spatial_layers)
+    actual_layers = metadata.get("spatial_layers")
+    if actual_layers is not None and list(actual_layers) != expected_layers:
+        issues.append(
+            AssetIssue(
+                "ERROR",
+                f"{prefix}.memory_bank_path",
+                f"PatchCore spatial_layers 与配方不匹配: {actual_layers} != {expected_layers}",
+            )
+        )
+    _append_int_metadata_issue(
+        issues,
+        prefix,
+        metadata,
+        "spatial_upsample_height",
+        int(model.spatial_upsample_height),
+    )
+    _append_int_metadata_issue(
+        issues,
+        prefix,
+        metadata,
+        "spatial_upsample_width",
+        int(model.spatial_upsample_width),
+    )
+    expected_embedding_path = model.embedding_model_path
+    expected_hash = metadata.get("embedding_model_sha256")
+    if expected_embedding_path and expected_hash:
+        path = _resolve_repo_path(expected_embedding_path)
+        if path.exists() and not _is_empty_placeholder(path):
+            actual_hash = _sha256_file(path)
+            if actual_hash != expected_hash:
+                issues.append(
+                    AssetIssue(
+                        "ERROR",
+                        f"{prefix}.embedding_model_path",
+                        f"WideResNet50 embedding ONNX hash 与 PatchCore bank metadata 不匹配: {actual_hash} != {expected_hash}",
+                    )
+                )
+    return issues
+
+
+def _append_int_metadata_issue(
+    issues: list[AssetIssue],
+    prefix: str,
+    metadata: dict[str, Any],
+    field: str,
+    expected: int,
+) -> None:
+    actual = metadata.get(field)
+    if actual is None:
+        return
+    try:
+        actual_int = int(actual)
+    except (TypeError, ValueError):
+        issues.append(
+            AssetIssue(
+                "ERROR",
+                f"{prefix}.memory_bank_path",
+                f"PatchCore {field} metadata 无效: {actual}",
+            )
+        )
+        return
+    if actual_int != expected:
+        issues.append(
+            AssetIssue(
+                "ERROR",
+                f"{prefix}.memory_bank_path",
+                f"PatchCore {field} 与配方不匹配: {actual_int} != {expected}",
+            )
+        )
 
 
 def _load_pca_if_valid(path_value: str | None) -> PcaParameters | None:
@@ -250,6 +358,14 @@ def _resolve_repo_path(path_value: str) -> Path:
 
 def _is_empty_placeholder(path: Path) -> bool:
     return path.stat().st_size <= 1
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _issue_to_dict(issue: AssetIssue) -> dict[str, Any]:

@@ -4,6 +4,7 @@ import argparse
 import json
 import math
 from pathlib import Path
+from typing import Any, Iterator
 
 from training_tools.training_errors import DimensionMismatchError, TrainingDataError
 
@@ -16,27 +17,35 @@ def compute_pca(
     version: str,
     output_embeddings: Path | None = None,
 ) -> dict:
-    """用 numpy SVD 计算 PCA 参数并输出 JSON。"""
-    vectors, _metadata = _load_vectors(input_path)
-    dim = len(vectors[0])
+    """用批量协方差特征分解计算 PCA 参数并输出 JSON。"""
+    import numpy as np
+
+    count, dim, vector_sum = _scan_vector_sum(input_path)
 
     if n_components > dim:
         raise DimensionMismatchError(
             f"n_components ({n_components}) 不能超过输入维度 ({dim})"
         )
+    if n_components > count:
+        raise DimensionMismatchError(
+            f"n_components ({n_components}) 不能超过样本数 ({count})"
+        )
 
-    import numpy as np
+    mean = vector_sum / float(count)
+    scatter = np.zeros((dim, dim), dtype=np.float64)
+    for batch, _metadata in _iter_embedding_batches(input_path, expected_dim=dim):
+        centered = batch - mean
+        scatter += centered.T @ centered
 
-    matrix = np.asarray(vectors, dtype=np.float64)
-    mean = np.mean(matrix, axis=0)
-    centered = matrix - mean
-
-    u, s, vt = np.linalg.svd(centered, full_matrices=False)
-    components = vt[:n_components]
-    total_variance = float(np.sum(s ** 2))
+    eigenvalues, eigenvectors = np.linalg.eigh(scatter)
+    order = np.argsort(eigenvalues)[::-1]
+    selected = order[:n_components]
+    components = eigenvectors[:, selected].T
+    selected_values = np.maximum(eigenvalues[selected], 0.0)
+    total_variance = float(np.maximum(eigenvalues, 0.0).sum())
     explained_variance_ratio = [
-        float((sv ** 2) / total_variance) if total_variance > 0 else 0.0
-        for sv in s[:n_components]
+        float(value / total_variance) if total_variance > 0 else 0.0
+        for value in selected_values.tolist()
     ]
 
     output = {
@@ -52,22 +61,87 @@ def compute_pca(
     output_path.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
 
     if output_embeddings is not None:
-        projected = (centered @ components.T).tolist()
         output_embeddings.parent.mkdir(parents=True, exist_ok=True)
-        lines = []
-        for idx, (meta, proj) in enumerate(zip(_metadata, projected)):
-            entry = {
-                "sample_id": meta.get("sample_id", f"pca_{idx}"),
-                "camera_id": meta.get("camera_id", ""),
-                "roi_name": meta.get("roi_name", ""),
-                "embedding": [float(v) for v in proj],
-                "embedding_dim": n_components,
-                "pca_version": version,
-            }
-            lines.append(json.dumps(entry, ensure_ascii=False))
-        output_embeddings.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        with output_embeddings.open("w", encoding="utf-8") as handle:
+            written = 0
+            for batch, metadata in _iter_embedding_batches(input_path, expected_dim=dim):
+                projected = (batch - mean) @ components.T
+                for meta, proj in zip(metadata, projected):
+                    entry = {
+                        "sample_id": meta.get("sample_id", f"pca_{written}"),
+                        "camera_id": meta.get("camera_id", ""),
+                        "roi_name": meta.get("roi_name", ""),
+                        "embedding": [float(v) for v in proj.tolist()],
+                        "embedding_dim": n_components,
+                        "pca_version": version,
+                    }
+                    handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                    written += 1
 
     return output
+
+
+def _scan_vector_sum(input_path: Path) -> tuple[int, int, "np.ndarray"]:
+    import numpy as np
+
+    count = 0
+    dim: int | None = None
+    vector_sum: np.ndarray | None = None
+    for batch, _metadata in _iter_embedding_batches(input_path):
+        if dim is None:
+            dim = int(batch.shape[1])
+            vector_sum = np.zeros(dim, dtype=np.float64)
+        count += int(batch.shape[0])
+        vector_sum += batch.sum(axis=0)
+    if count <= 0 or dim is None or vector_sum is None:
+        raise TrainingDataError(f"没有读取到 embedding: {input_path}")
+    return count, dim, vector_sum
+
+
+def _iter_embedding_batches(
+    input_path: Path,
+    *,
+    expected_dim: int | None = None,
+    batch_size: int = 512,
+) -> Iterator[tuple["np.ndarray", list[dict[str, Any]]]]:
+    import numpy as np
+
+    if not input_path.exists():
+        raise TrainingDataError(f"embedding 文件不存在: {input_path}")
+    vectors: list[list[float]] = []
+    metadata: list[dict[str, Any]] = []
+    dim = expected_dim
+    saw_vector = False
+    with input_path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            saw_vector = True
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise TrainingDataError(f"{input_path}:{line_number}: JSON 解析失败: {exc}") from exc
+            if "embedding" not in entry:
+                raise TrainingDataError(f"{input_path}:{line_number}: 缺少 embedding 字段")
+            vector = [float(v) for v in entry["embedding"]]
+            if not all(math.isfinite(v) for v in vector):
+                raise TrainingDataError(f"{input_path}:{line_number}: embedding 必须是有限数字")
+            if dim is None:
+                dim = len(vector)
+            elif len(vector) != dim:
+                raise DimensionMismatchError(
+                    f"{input_path}:{line_number}: embedding 维度不一致 {len(vector)} != {dim}"
+                )
+            vectors.append(vector)
+            metadata.append(entry)
+            if len(vectors) >= batch_size:
+                yield np.asarray(vectors, dtype=np.float64), metadata
+                vectors = []
+                metadata = []
+    if vectors:
+        yield np.asarray(vectors, dtype=np.float64), metadata
+    if not saw_vector:
+        raise TrainingDataError(f"没有读取到 embedding: {input_path}")
 
 
 def _load_vectors(input_path: Path) -> tuple[list[list[float]], list[dict]]:

@@ -101,6 +101,10 @@ models:
     score_threshold: 0.20
     spatial_mode: true
     spatial_layers: [layer2, layer3]
+    spatial_upsample_height: 64
+    spatial_upsample_width: 64
+    anomaly_binarize_min_ratio: 0.5
+    anomaly_binarize_relative: 0.3
 trace:
   enabled: true
   root_dir: trace

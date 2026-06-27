@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
 from training_tools.build_faiss_index import build_faiss_index
 from training_tools.build_patchcore_memory_bank import build_memory_bank
 from training_tools.compute_pca import compute_pca
-from training_tools.extract_embeddings import extract_embeddings
+from training_tools.extract_embeddings import extract_embeddings_to_file
+from python_detector.config.recipe_schema import RecipeManager
 from training_tools.training_errors import DimensionMismatchError, EmbeddingExtractionError, TrainingDataError
 
 
@@ -42,11 +44,36 @@ def train_patchcore_assets(
     bank_path = output_dir / "seat_patchcore_bank.json"
     faiss_path = output_dir / "seat_patchcore.faiss"
 
-    embeddings = extract_embeddings(
+    recipe = RecipeManager().load(recipe_id)
+    selected_model_key = model_key or _default_embedding_model_key(recipe)
+    base_model = recipe.models[selected_model_key]
+    effective_input_channels = channel_order if channel_order is not None else base_model.input_channels
+    effective_spatial_layers = spatial_layers if spatial_layers else base_model.spatial_layers
+    effective_embedding_model_path = embedding_model_path or base_model.embedding_model_path
+    training_contract = {
+        "recipe_id": recipe_id,
+        "model_key": selected_model_key,
+        "split": split,
+        "input_channels": list(effective_input_channels),
+        "embedding_backend": embedding_backend,
+        "embedding_model_path": effective_embedding_model_path,
+        "embedding_model_sha256": _sha256_file(Path(effective_embedding_model_path)) if effective_embedding_model_path else None,
+        "embedding_version": base_model.embedding_version,
+        "spatial_mode": bool(spatial_mode),
+        "spatial_layers": list(effective_spatial_layers),
+        "spatial_upsample_height": int(spatial_upsample_height),
+        "spatial_upsample_width": int(spatial_upsample_width),
+        "pca_version": pca_version if pca_components is not None else None,
+        "pca_components": pca_components,
+        "manifest_path": str(manifest_path),
+        "manifest_sha256": _sha256_file(manifest_path),
+    }
+
+    embedding_summary = extract_embeddings_to_file(
         manifest_path=manifest_path,
         output=embeddings_path,
         recipe_id=recipe_id,
-        model_key=model_key,
+        model_key=selected_model_key,
         embedding_dim=embedding_dim,
         backend=embedding_backend,
         model_path=embedding_model_path,
@@ -77,6 +104,7 @@ def train_patchcore_assets(
         pca_version=pca_version if pca_components is not None else None,
         faiss_enabled=build_faiss,
         coreset_method=coreset_method,
+        metadata=training_contract,
     )
     faiss_result = None
     if build_faiss:
@@ -91,12 +119,13 @@ def train_patchcore_assets(
         "manifest": str(manifest_path),
         "output_dir": str(output_dir),
         "recipe_id": recipe_id,
-        "model_key": model_key,
+        "model_key": selected_model_key,
         "split": split,
         "embedding_backend": embedding_backend,
-        "embedding_count": len(embeddings),
-        "embedding_dim": len(embeddings[0]["embedding"]) if embeddings else 0,
-        "input_shape_summary": _input_shape_summary(embeddings),
+        "embedding_count": embedding_summary["embedding_count"],
+        "embedding_dim": embedding_summary["embedding_dim"],
+        "input_shape_summary": embedding_summary["input_shape_summary"],
+        "training_contract": training_contract,
         "embeddings_path": str(embeddings_path),
         "pca_path": str(pca_path) if pca_result is not None else None,
         "pca_embeddings_path": str(pca_embeddings_path) if pca_result is not None else None,
@@ -115,6 +144,24 @@ def train_patchcore_assets(
         encoding="utf-8",
     )
     return summary
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _default_embedding_model_key(recipe) -> str:
+    for key, config in recipe.models.items():
+        if config.embedding_backend != "none":
+            return key
+    for key, config in recipe.models.items():
+        if config.model_family == "patchcore":
+            return key
+    raise TrainingDataError(f"配方没有可用于 embedding 的模型配置: {recipe.recipe_id}")
 
 
 def _input_shape_summary(embeddings: list[dict]) -> dict:

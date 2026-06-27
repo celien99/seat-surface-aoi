@@ -20,6 +20,7 @@ class PatchCoreBank:
     vectors: tuple[tuple[float, ...], ...]
     pca_version: str | None
     faiss_enabled: bool = False
+    metadata: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -263,6 +264,7 @@ class PatchCoreKnnIndex:
             vectors=vectors,
             pca_version=pca_version,
             faiss_enabled=bool(raw.get("faiss_enabled", False)),
+            metadata=raw.get("metadata") if isinstance(raw.get("metadata"), dict) else None,
         )
 
     def _euclidean(self, left: tuple[float, ...], right: tuple[float, ...]) -> float:

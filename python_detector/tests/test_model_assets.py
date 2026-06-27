@@ -21,6 +21,10 @@ def test_production_recipe_loads_full_model_chain() -> None:
     assert recipe.roi_locator.model_path == "model/roi_yolo/seat_roi_seg.onnx"
     assert recipe.models["patchcore_unknown_detector"].backend == "patchcore_knn"
     assert recipe.models["patchcore_unknown_detector"].role == "primary"
+    assert recipe.models["patchcore_unknown_detector"].spatial_upsample_height == 64
+    assert recipe.models["patchcore_unknown_detector"].spatial_upsample_width == 64
+    assert recipe.models["patchcore_unknown_detector"].anomaly_binarize_min_ratio == 0.5
+    assert recipe.models["patchcore_unknown_detector"].anomaly_binarize_relative == 0.3
 
 
 def test_production_robot_recipe_uses_patchcore_primary_detector() -> None:
@@ -180,3 +184,76 @@ models:
     messages = [issue.message for issue in validate_recipe_model_assets(recipe)]
 
     assert any("PCA 输出维度与 PatchCore memory bank 维度不匹配: 2 != 3" in message for message in messages)
+
+
+def test_validate_model_assets_rejects_patchcore_metadata_mismatch(tmp_path: Path) -> None:
+    embedding = tmp_path / "embedding.onnx"
+    embedding.write_bytes(b"onnx")
+    pca_path = tmp_path / "pca.json"
+    pca_path.write_text(
+        '{"version":"pca_v1","mean":[0.0,0.0],"components":[[1.0,0.0]]}',
+        encoding="utf-8",
+    )
+    bank_path = tmp_path / "bank.json"
+    bank_path.write_text(
+        """
+{
+  "version": "bank_v1",
+  "model_family": "patchcore",
+  "embedding_dim": 1,
+  "coreset_ratio": 1.0,
+  "pca_version": "pca_v1",
+  "faiss_enabled": false,
+  "metadata": {
+    "input_channels": ["light:DIFFUSE", "light:HIGH_LEFT"],
+    "spatial_mode": true,
+    "spatial_layers": ["layer2", "layer3"],
+    "spatial_upsample_height": 32,
+    "spatial_upsample_width": 64
+  },
+  "vectors": [[0.0]]
+}
+""",
+        encoding="utf-8",
+    )
+    recipe_path = tmp_path / "recipe.yaml"
+    recipe_path.write_text(
+        f"""
+recipe_id: asset_bad_metadata
+sku: sku
+light_order: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT]
+cameras:
+  TOP:
+    model_key: patchcore
+thresholds:
+  unknown_anomaly: {{ng_score: 0.55, recheck_score: 0.20, min_area_px: 1}}
+models:
+  default:
+    backend: fake
+    role: primary
+    class_names: [unknown_anomaly]
+  patchcore:
+    backend: patchcore_knn
+    model_family: patchcore
+    role: primary
+    class_names: [unknown_anomaly]
+    input_channels: [light:DIFFUSE, light:POLAR_DIFFUSE, light:HIGH_LEFT]
+    embedding_backend: onnx_wideresnet50
+    embedding_model_path: {embedding}
+    embedding_dim: 2
+    pca_path: {pca_path}
+    pca_version: pca_v1
+    memory_bank_path: {bank_path}
+    spatial_mode: true
+    spatial_layers: [layer2, layer3]
+    spatial_upsample_height: 64
+    spatial_upsample_width: 64
+""",
+        encoding="utf-8",
+    )
+    recipe = load_recipe_by_id_or_path(str(recipe_path))
+
+    messages = [issue.message for issue in validate_recipe_model_assets(recipe)]
+
+    assert any("PatchCore input_channels 与配方不匹配" in message for message in messages)
+    assert any("PatchCore spatial_upsample_height 与配方不匹配: 32 != 64" in message for message in messages)
