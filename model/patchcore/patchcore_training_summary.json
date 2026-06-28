@@ -1,16 +1,16 @@
 {
   "coreset_method": "stride",
-  "coreset_ratio": 0.25,
+  "coreset_ratio": 0.1,
   "embedding_backend": "onnx_wideresnet50",
-  "embedding_count": 172032,
+  "embedding_count": 2752512,
   "embedding_dim": 1536,
-  "embeddings_path": "model/patchcore/embeddings.jsonl",
+  "embeddings_npy_path": null,
   "faiss_index_path": "model/patchcore/seat_patchcore.faiss",
   "faiss_index_type": "FlatL2",
   "input_shape_summary": {
     "distinct_shapes": [
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -19,7 +19,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -28,7 +28,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -37,7 +37,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -46,7 +46,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -55,7 +55,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -64,7 +64,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -73,7 +73,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -82,7 +82,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -91,7 +91,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -100,7 +100,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -109,7 +109,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -118,7 +118,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -127,7 +127,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -136,7 +136,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -145,7 +145,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -154,7 +154,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -163,7 +163,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -172,7 +172,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -181,7 +181,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -190,7 +190,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -199,7 +199,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -208,7 +208,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -217,7 +217,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -226,7 +226,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -235,7 +235,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -244,7 +244,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -253,7 +253,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -262,7 +262,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -271,7 +271,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -280,7 +280,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -289,7 +289,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -298,7 +298,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -307,7 +307,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -316,7 +316,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -325,7 +325,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -334,7 +334,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -343,7 +343,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -352,7 +352,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -361,7 +361,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -370,7 +370,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -379,7 +379,7 @@
         ]
       },
       {
-        "count": 4096,
+        "count": 65536,
         "input_shape_nchw": [
           1,
           3,
@@ -394,14 +394,16 @@
     "width_max": 1652,
     "width_min": 1235
   },
+  "intermediate_embeddings_retained": false,
   "manifest": "datasets/seat_roi_train/dataset_manifest.jsonl",
   "memory_bank_dim": 524,
   "memory_bank_path": "model/patchcore/seat_patchcore_bank.json",
-  "memory_bank_vectors": 43008,
-  "memory_bank_version": "bank_v3_spatial64_small",
+  "memory_bank_vectors": 275252,
+  "memory_bank_vectors_path": "model/patchcore/seat_patchcore_bank.npy",
+  "memory_bank_version": "bank_v4_spatial256",
   "model_key": "patchcore_detector",
   "output_dir": "model/patchcore",
-  "pca_embeddings_path": "model/patchcore/pca_embeddings.jsonl",
+  "pca_embeddings_npy_path": null,
   "pca_output_dim": 524,
   "pca_path": "model/patchcore/seat_pca.json",
   "recipe_id": "seat_a_black_leather_production_v1",
@@ -420,15 +422,15 @@
     "manifest_sha256": "05b9a4febfbfc71def01e4f2bf0481b1a468fb1955e6d88ab23a30a6b44116aa",
     "model_key": "patchcore_detector",
     "pca_components": 524,
-    "pca_version": "pca_seat_v2",
+    "pca_version": "pca_seat_v3",
     "recipe_id": "seat_a_black_leather_production_v1",
     "spatial_layers": [
       "layer2",
       "layer3"
     ],
     "spatial_mode": true,
-    "spatial_upsample_height": 64,
-    "spatial_upsample_width": 64,
+    "spatial_upsample_height": 256,
+    "spatial_upsample_width": 256,
     "split": "train"
   }
 }

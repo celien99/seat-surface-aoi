@@ -88,7 +88,7 @@ models:
     embedding_dim: 1536
     embedding_layers: [layer2, layer3]
     pca_path: model/patchcore/seat_pca.json
-    pca_version: pca_seat_v2
+    pca_version: pca_seat_v3
     memory_bank_path: model/patchcore/seat_patchcore_bank.json
     faiss_index_path: model/patchcore/seat_patchcore.faiss
     coreset_ratio: 1.0
