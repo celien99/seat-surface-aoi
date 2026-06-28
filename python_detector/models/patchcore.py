@@ -21,6 +21,12 @@ class PatchCoreBank:
     pca_version: str | None
     faiss_enabled: bool = False
     metadata: dict[str, Any] | None = None
+    distance_mean: float | None = None
+    distance_std: float | None = None
+
+
+# z-score 到 anomaly_score 的缩放常量：z = Z_SCALE 时 score = 1.0
+_Z_SCALE: float = 6.0
 
 
 @dataclass(frozen=True)
@@ -51,6 +57,27 @@ class SpatialAnomalyScore:
     fallback_reason: str | None = None
 
     __hash__ = None  # np.ndarray 不可哈希，显式禁用 hash
+
+
+def _calibrated_score(
+    nearest: "np.ndarray | float",
+    score_scale: float,
+    distance_mean: float | None,
+    distance_std: float | None,
+) -> "np.ndarray | float":
+    """用训练数据距离分布做 z-score 归一化，替代人工 score_scale。
+
+    当 bank 包含 distance_mean 和 distance_std 时，使用 z-score：
+        z = (nearest - mean) / max(std, ε)
+        anomaly_score = clip(z / Z_SCALE, 0, 1)
+
+    当校准统计量缺失时回退到旧行为：
+        anomaly_score = clip(nearest * score_scale, 0, 1)
+    """
+    if distance_mean is not None and distance_std is not None and distance_std > 0.0:
+        z = (nearest - distance_mean) / max(distance_std, 1e-6)
+        return z / _Z_SCALE
+    return nearest * score_scale
 
 
 class PatchCoreKnnIndex:
@@ -94,7 +121,7 @@ class PatchCoreKnnIndex:
         fallback_reason = self._faiss_fallback_reason(bank, faiss_index_path)
         distances = _topk_distances(np.asarray([embedding], dtype=np.float32), np.asarray(bank.vectors, dtype=np.float32), k)[0]
         nearest = float(distances[0])
-        anomaly_score = min(max(nearest * score_scale, 0.0), 1.0)
+        anomaly_score = min(max(_calibrated_score(nearest, score_scale, bank.distance_mean, bank.distance_std), 0.0), 1.0)
         return PatchCoreScore(
             anomaly_score=anomaly_score,
             nearest_distance=nearest,
@@ -173,7 +200,7 @@ class PatchCoreKnnIndex:
             if distances_raw.ndim != 2 or distances_raw.shape[0] != queries.shape[0]:
                 return None
             nearest = _nearest_finite_distances(distances_raw)
-            score_array = np.clip(nearest * np.float32(score_scale), 0.0, 1.0)
+            score_array = np.clip(_calibrated_score(nearest, score_scale, bank.distance_mean, bank.distance_std), 0.0, 1.0)
             h_out, w_out = spatial_shape
             return SpatialAnomalyScore(
                 anomaly_map=score_array.reshape(h_out, w_out),
@@ -202,7 +229,7 @@ class PatchCoreKnnIndex:
         h_out, w_out = spatial_shape
         queries = np.asarray(patch_embeddings, dtype=np.float32)
         nearest = _topk_distances(queries, np.asarray(bank.vectors, dtype=np.float32), knn_k)[:, 0]
-        score_array = np.clip(nearest * np.float32(score_scale), 0.0, 1.0)
+        score_array = np.clip(_calibrated_score(nearest, score_scale, bank.distance_mean, bank.distance_std), 0.0, 1.0)
         return SpatialAnomalyScore(
             anomaly_map=score_array.reshape(h_out, w_out),
             spatial_shape=spatial_shape,
@@ -268,6 +295,8 @@ class PatchCoreKnnIndex:
             pca_version=pca_version,
             faiss_enabled=bool(raw.get("faiss_enabled", False)),
             metadata=raw.get("metadata") if isinstance(raw.get("metadata"), dict) else None,
+            distance_mean=raw.get("distance_mean") if isinstance(raw.get("distance_mean"), (int, float)) else None,
+            distance_std=raw.get("distance_std") if isinstance(raw.get("distance_std"), (int, float)) else None,
         )
 
     def _score_with_faiss(
@@ -294,7 +323,7 @@ class PatchCoreKnnIndex:
             if distances.size == 0:
                 return None
             nearest = float(distances[0])
-            anomaly_score = min(max(nearest * score_scale, 0.0), 1.0)
+            anomaly_score = min(max(_calibrated_score(nearest, score_scale, bank.distance_mean, bank.distance_std), 0.0), 1.0)
             return PatchCoreScore(
                 anomaly_score=anomaly_score,
                 nearest_distance=nearest,

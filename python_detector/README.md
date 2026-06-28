@@ -294,6 +294,8 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 空间模式要求：`embedding_backend=onnx_wideresnet50`、`spatial_layers` 非空（如 `[layer2, layer3]`），并使用 `--spatial-mode` 重新导出 ONNX 模型和重新训练记忆库。**生产配方默认启用 `spatial_mode: true`**，当前生产配方显式使用 `256x256` 空间 patch 网格，layer2+layer3 原始 patch embedding 为 1536 维，在线先用 `seat_pca.json`（v3, 524维, 95%累积方差）投影，再进入 PatchCore bank/FAISS 评分并生成像素级 anomaly_map 热力图。若需回退到全局嵌入路径（整个 ROI → 1 个向量 → 标量分数），在配方中设置 `spatial_mode: false`。anomaly_map 二值化阈值可通过 `anomaly_binarize_min_ratio`（默认 0.5）和 `anomaly_binarize_relative`（默认 0.3）配置，阈值公式为 `max(score_threshold × min_ratio, max_anomaly × relative)`。
 
+**异常分数自校准**：KNN 距离到异常分数的映射已从人工 `anomaly_score_scale` 改为训练数据 z-score 自校准。训练阶段对 memory bank 做 self-KNN (k=2) 自动计算正常样本的距离均值 `distance_mean` 和标准差 `distance_std`，写入 `seat_patchcore_bank.json`。推理时评分公式为 `anomaly_score = clip((nearest - distance_mean) / distance_std / 6.0, 0, 1)`。配方中 `anomaly_score_scale: 0.0`（默认）启用自校准；设为正值则回退到旧版固定倍率。校准统计量可在训练完成后单独补充：`python -m training_tools.build_patchcore_memory_bank calibrate --vectors ... --bank ... --faiss-index ...`。
+
 模型资产缺失、占位文件未替换、后端依赖缺失、PCA 参数或 PatchCore memory bank 未就绪会抛出 `ModelAssetUnavailableError`，由 pipeline 转成 `RECHECK` + `CONFIGURATION_ERROR`，并写入 `sample_collection.reason=model_asset_unavailable`。模型已经加载但输出为空、bbox 越界、class id 错误、维度不匹配、空间 anomaly map 非二维或非有限，仍按模型运行异常处理，不能静默降级为 `OK`。
 
 离线训练工具复用同一套模型输入契约：
