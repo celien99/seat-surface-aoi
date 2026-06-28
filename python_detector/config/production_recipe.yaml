@@ -31,7 +31,7 @@ quality:
   min_motion_gradient: 1.0
   max_light_mean_delta: 80
   max_registration_error_px: 1.5
-  max_capture_span_us: 500000
+  max_capture_span_us: 1000000
   max_exposure_delta_us: 200
   max_gain_delta: 0.2
   require_monotonic_timestamps: true
@@ -97,8 +97,8 @@ models:
     score_threshold: 0.20
     spatial_mode: true
     spatial_layers: [layer2, layer3]
-    spatial_upsample_height: 64
-    spatial_upsample_width: 64
+    spatial_upsample_height: 256
+    spatial_upsample_width: 256
     anomaly_binarize_min_ratio: 0.5
     anomaly_binarize_relative: 0.3
 trace:

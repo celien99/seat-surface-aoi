@@ -139,8 +139,8 @@ class ModelConfig:
     anomaly_score_scale: float = 1.0
     spatial_mode: bool = False
     spatial_layers: tuple[str, ...] = ()
-    spatial_upsample_height: int = 32
-    spatial_upsample_width: int = 32
+    spatial_upsample_height: int = 256
+    spatial_upsample_width: int = 256
     anomaly_binarize_min_ratio: float = 0.5
     """anomaly_map 二值化阈值下限：max(score_threshold * min_ratio, max_anomaly * relative)，控制最低灵敏度。"""
     anomaly_binarize_relative: float = 0.3
