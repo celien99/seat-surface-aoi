@@ -408,7 +408,6 @@ def _embedding_model_config(
         faiss_index_path=base.faiss_index_path,
         coreset_ratio=base.coreset_ratio,
         knn_k=base.knn_k,
-        anomaly_score_scale=base.anomaly_score_scale,
         spatial_mode=spatial_mode,
         spatial_layers=spatial_layers if spatial_layers else base.spatial_layers,
         spatial_upsample_height=spatial_upsample_height,

@@ -93,7 +93,6 @@ models:
     faiss_index_path: model/patchcore/seat_patchcore.faiss
     coreset_ratio: 1.0
     knn_k: 1
-    anomaly_score_scale: 0.0055
     score_threshold: 0.20
     spatial_mode: true
     spatial_layers: [layer2, layer3]

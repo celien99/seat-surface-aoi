@@ -90,7 +90,6 @@ models:
       - stat_pool
     coreset_ratio: 1.0
     knn_k: 1
-    anomaly_score_scale: 1.0
 trace:
   enabled: true
   root_dir: trace

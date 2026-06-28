@@ -70,7 +70,6 @@ class PatchCoreModel:
             embedding_values,
             self.config.memory_bank_path,
             self.config.knn_k,
-            self.config.anomaly_score_scale,
             self.config.pca_version,
             self.config.faiss_index_path,
         )
@@ -136,7 +135,6 @@ class PatchCoreModel:
             spatial.spatial_shape,
             self.config.memory_bank_path,
             self.config.knn_k,
-            self.config.anomaly_score_scale,
             self.config.pca_version,
             self.config.faiss_index_path,
         )

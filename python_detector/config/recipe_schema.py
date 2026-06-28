@@ -516,10 +516,6 @@ def _models_from_dict(data: dict[str, Any], light_order: tuple[str, ...]) -> dic
             else _str(raw.get("faiss_index_path"), f"models.{model_key}.faiss_index_path"),
             coreset_ratio=coreset_ratio,
             knn_k=_positive_int(raw.get("knn_k", 1), f"models.{model_key}.knn_k"),
-            anomaly_score_scale=_non_negative_float(
-                raw.get("anomaly_score_scale", 0.0),
-                f"models.{model_key}.anomaly_score_scale",
-            ),
             spatial_mode=bool(raw.get("spatial_mode", False)),
             spatial_layers=_optional_unique_str_tuple(
                 raw.get("spatial_layers", ()),

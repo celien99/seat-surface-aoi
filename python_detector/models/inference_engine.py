@@ -282,7 +282,6 @@ class ModelRegistry:
             config.faiss_index_path or "",
             float(config.coreset_ratio),
             int(config.knn_k),
-            float(config.anomaly_score_scale),
             config.spatial_mode,
             config.spatial_layers,
             int(config.spatial_upsample_height),

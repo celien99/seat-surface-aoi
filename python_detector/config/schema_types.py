@@ -132,9 +132,6 @@ class ModelConfig:
     faiss_index_path: str | None = None
     coreset_ratio: float = 1.0
     knn_k: int = 1
-    anomaly_score_scale: float = 0.0
-    """PatckCore 距离到异常分数的缩放系数。0 表示使用训练数据自校准的 z-score 归一化。
-    正值仍使用固定倍率回退行为，用于无校准统计量的 bank。"""
     spatial_mode: bool = False
     spatial_layers: tuple[str, ...] = ()
     spatial_upsample_height: int = 256

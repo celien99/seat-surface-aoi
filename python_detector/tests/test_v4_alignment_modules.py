@@ -41,6 +41,8 @@ def _write_patchcore_bank(
                 "faiss_enabled": faiss_enabled,
                 "vector_count": int(vectors.shape[0]),
                 "vectors_path": vectors_path.name,
+                "distance_mean": 0.0,
+                "distance_std": 0.01,
             }
         ),
         encoding="utf-8",
@@ -573,7 +575,6 @@ def test_patchcore_knn_backend_emits_defect_and_trace(tmp_path: Path) -> None:
         embedding_dim=10,
         memory_bank_path=str(bank_path),
         score_threshold=0.01,
-        anomaly_score_scale=2.0,
         knn_k=1,
     )
     recipe = replace(
@@ -654,7 +655,6 @@ def test_patchcore_knn_backend_applies_pca_projection(tmp_path: Path) -> None:
         pca_version="pca_v1",
         memory_bank_path=str(bank_path),
         score_threshold=0.01,
-        anomaly_score_scale=2.0,
         knn_k=1,
     )
     recipe = replace(recipe, models={**recipe.models, "patchcore_safety_net": patchcore})
@@ -706,7 +706,6 @@ def test_patchcore_faiss_metadata_falls_back_to_exact_knn_when_index_missing(tmp
         memory_bank_path=str(bank_path),
         faiss_index_path=str(tmp_path / "missing.faiss"),
         score_threshold=0.01,
-        anomaly_score_scale=2.0,
         knn_k=1,
     )
     recipe = replace(recipe, models={**recipe.models, "patchcore_safety_net": patchcore})
