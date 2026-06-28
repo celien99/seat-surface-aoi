@@ -97,7 +97,7 @@ models:
     faiss_index_path: model/patchcore/seat_patchcore.faiss
     coreset_ratio: 1.0
     knn_k: 1
-    score_threshold: 0.20
+    score_threshold: 0.48  # 对齐 tanh 校准：p99≈0.46，阈值设在正常边界之上
     spatial_mode: true
     spatial_layers: [layer2, layer3]
     spatial_upsample_height: 256
