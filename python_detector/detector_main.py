@@ -62,12 +62,29 @@ class DetectorProcess:
         self.frame_slot_size = frame_slot_size
         self.result_slot_size = result_slot_size
 
+    def __enter__(self) -> "DetectorProcess":
+        self.initialize()
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.shutdown()
+
     def initialize(self) -> None:
         self.shm_client = ShmClient(
             slot_count=self.slot_count,
             frame_slot_size=self.frame_slot_size,
             result_slot_size=self.result_slot_size,
         )
+
+    def shutdown(self) -> None:
+        """释放共享内存映射等系统资源。可重复调用，多次调用无副作用。"""
+        if self.shm_client is not None:
+            try:
+                self.shm_client.close()
+            except Exception:
+                pass
+            finally:
+                self.shm_client = None
 
     def run_forever(self) -> None:
         if self.shm_client is None:

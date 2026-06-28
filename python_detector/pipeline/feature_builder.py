@@ -12,10 +12,6 @@ FeatureValues = list[int] | np.ndarray
 TensorNchw = list[list[list[list[float]]]] | np.ndarray
 
 
-class _TensorArray(np.ndarray):
-    def __bool__(self) -> bool:
-        return self.size > 0
-
 
 @dataclass
 class FeatureGroup:
@@ -55,7 +51,7 @@ class FeatureGroup:
                 if len(shape) != 4:
                     return None
                 return (int(shape[0]), int(shape[1]), int(shape[2]), int(shape[3]))
-        except Exception:
+        except ImportError:
             pass
         batch = len(tensor)
         channels = len(tensor[0]) if batch > 0 else 0
@@ -216,13 +212,13 @@ class FeatureBuilder:
             raise ValueError("feature tensor shape is invalid")
         channels: list[np.ndarray] = []
         if not channel_names:
-            return np.empty((1, 0, height, width), dtype=np.float32).view(_TensorArray)
+            return np.empty((1, 0, height, width), dtype=np.float32)
         for channel_name in channel_names:
             values = features.get(channel_name)
             if values is None:
                 raise ValueError(f"model input channel missing: {channel_name}")
             channels.append(self._normalize_feature(values, height, width, input_scale))
-        return np.stack(channels, axis=0)[None, :, :, :].view(_TensorArray)
+        return np.stack(channels, axis=0)[None, :, :, :]
 
     def _normalize_feature(self, values: FeatureValues, height: int, width: int, input_scale: float) -> np.ndarray:
         array = np.asarray(values)

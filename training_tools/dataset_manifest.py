@@ -169,7 +169,6 @@ def build_feature_group_from_manifest_group(
         light_order=light_order,
         frames=frames,
         registration=registration,
-        pixel_size_mm=None,
         calibration_id=first_frame.calibration_id,
         roi_bbox_xyxy_pixel=first_frame.bbox_xyxy_pixel,
     )

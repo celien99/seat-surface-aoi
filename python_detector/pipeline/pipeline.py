@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import traceback
 
 import numpy as np
 
@@ -153,6 +154,7 @@ class InspectionPipeline:
                 "error": {
                     "type": exc.__class__.__name__,
                     "message": str(exc),
+                    "traceback": traceback.format_exc(),
                 },
             }
             return self.rule_engine.make_quality_fail_result(job, quality_report, elapsed_ms)
@@ -177,6 +179,7 @@ class InspectionPipeline:
                 "error": {
                     "type": exc.__class__.__name__,
                     "message": str(exc),
+                    "traceback": traceback.format_exc(),
                 },
             }
             return self.rule_engine.make_error_result(job, ErrorCode.INTERNAL_ERROR, elapsed_ms)

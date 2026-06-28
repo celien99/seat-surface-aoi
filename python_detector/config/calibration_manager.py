@@ -31,10 +31,10 @@ class Calibration:
     calibration_id: str
     camera_id: str
     image_size: tuple[int, int]
-    pixel_size_mm: float | None
     base_light_id: str
     light_alignment: dict[str, tuple[float, ...]]
     roi_templates: dict[str, RoiTemplate]
+    pixel_size_mm: float | None = None
 
 
 class CalibrationManager:

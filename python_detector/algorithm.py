@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,7 @@ class SeatSurfaceAoiAlgorithm:
                 "error": {
                     "type": exc.__class__.__name__,
                     "message": str(exc),
+                    "traceback": traceback.format_exc(),
                 }
             }
             result = InspectionResult(
@@ -63,6 +65,7 @@ class SeatSurfaceAoiAlgorithm:
                 trace_error = {
                     "type": exc.__class__.__name__,
                     "message": str(exc),
+                    "traceback": traceback.format_exc(),
                 }
                 self.pipeline.last_context.setdefault("trace_error", trace_error)
                 result = InspectionResult(

@@ -69,7 +69,7 @@ def _decode_row_table(array: np.ndarray) -> list[list[float]]:
 
 
 def _decode_ultralytics_output(array: np.ndarray, *, confidence_threshold: float) -> list[list[float]]:
-    rows = _normalize_ultralytics_rows(array, context="Ultralytics YOLO", max_transposed_rows=128)
+    rows = _normalize_ultralytics_rows(array, context="Ultralytics YOLO")
     if rows.shape[1] < 5:
         raise RuntimeError(f"Ultralytics YOLO rows 输出形状无效: {tuple(rows.shape)}")
     class_scores = rows[:, 4:]
@@ -200,19 +200,26 @@ def _decode_ultralytics_segmentation(
     ]
 
 
-def _normalize_ultralytics_rows(array: np.ndarray, *, context: str, max_transposed_rows: int) -> np.ndarray:
+def _normalize_ultralytics_rows(array: np.ndarray, *, context: str) -> np.ndarray:
+    """将 Ultralytics YOLO ONNX 输出规范化为 (N, features) 行表。
+
+    假定特征维度 >= 5（4 个 bbox 坐标 + 至少 1 个类别分数），检测数 N 可变。
+    仅当特征维度明确在 axis=0 时才转置；不再使用启发式猜测，
+    避免少检测框时错误转置导致坐标/分数互换。
+    """
     if array.ndim == 3 and array.shape[0] == 1:
         array = array[0]
     if array.ndim != 2:
         raise RuntimeError(f"{context} 输出形状无效: {tuple(array.shape)}")
-    if array.shape[0] < 5 and array.shape[1] >= 5:
+    if array.shape[1] >= 5:
         rows = array
-    elif array.shape[1] < 5 and array.shape[0] >= 5:
-        rows = array.T
-    elif array.shape[0] <= array.shape[1] and array.shape[0] < max_transposed_rows:
+    elif array.shape[0] >= 5:
         rows = array.T
     else:
-        rows = array
+        raise RuntimeError(
+            f"{context} 无法确定输出方向: shape={tuple(array.shape)}，"
+            f"两个维度均 < 5，不符合 YOLO 输出约定"
+        )
     if rows.ndim != 2 or rows.shape[1] < 5:
         raise RuntimeError(f"{context} rows 输出形状无效: {tuple(rows.shape)}")
     return rows

@@ -116,7 +116,9 @@ python_detector/
 │   ├── production_recipe.yaml  # 固定机位生产完整模型链路配方，RecipeManager 默认加载
 │   ├── production_robot_flyshot_recipe.yaml # 机器人飞拍生产完整模型链路配方
 │   ├── production_model.example.yaml # 真实模型接入参考模板，不参与默认加载
-│   ├── recipe_schema.py        # 配方 dataclass、YAML 加载、字段校验和模型引用校验
+│   ├── schema_types.py         # 配方 frozen dataclass 定义（Recipe、ModelConfig、QualityConfig 等 17 个类型）
+│   ├── recipe_schema.py        # 配方 YAML 加载、字段解析（_*_from_dict）和 RecipeManager
+│   ├── schema_validators.py    # 配方校验函数和类型检查原语（_validate_*、_str、_float 等）
 │   ├── calibration_manager.py  # 标定文件、ROI 模板加载和几何合法性校验
 │   ├── calibration/            # 按 camera_id 存放模拟/生产标定模板，机器人飞拍按 pose 使用不同 calibration_id
 │   └── roi/                    # ROI 模板，生产模板需按现场标定替换

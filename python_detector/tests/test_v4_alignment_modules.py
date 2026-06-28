@@ -526,7 +526,6 @@ def test_ecc_registration_applies_translation_before_feature_building() -> None:
         calibration_id="calib/simulated_v1",
         camera_id="TOP_BACK",
         image_size=(width, height),
-        pixel_size_mm=0.12,
         base_light_id="DIFFUSE",
         light_alignment={},
         roi_templates={},

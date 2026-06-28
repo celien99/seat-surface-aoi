@@ -56,8 +56,12 @@ class SpatialAnomalyScore:
 class PatchCoreKnnIndex:
     def __init__(self) -> None:
         self._cache: dict[str, PatchCoreBank] = {}
-        self._array_cache: dict[int, np.ndarray] = {}
         self._faiss_index_cache: dict[str, tuple[int, int, Any]] = {}
+
+    def clear_caches(self) -> None:
+        """清除所有内部缓存，用于配方热更新或长期运行后释放内存。"""
+        self._cache.clear()
+        self._faiss_index_cache.clear()
 
     def score(
         self,
@@ -88,7 +92,7 @@ class PatchCoreKnnIndex:
         if faiss_score is not None:
             return faiss_score
         fallback_reason = self._faiss_fallback_reason(bank, faiss_index_path)
-        distances = _topk_distances(np.asarray([embedding], dtype=np.float32), self._bank_array(bank), k)[0]
+        distances = _topk_distances(np.asarray([embedding], dtype=np.float32), np.asarray(bank.vectors, dtype=np.float32), k)[0]
         nearest = float(distances[0])
         anomaly_score = min(max(nearest * score_scale, 0.0), 1.0)
         return PatchCoreScore(
@@ -197,7 +201,7 @@ class PatchCoreKnnIndex:
     ) -> SpatialAnomalyScore:
         h_out, w_out = spatial_shape
         queries = np.asarray(patch_embeddings, dtype=np.float32)
-        nearest = _topk_distances(queries, self._bank_array(bank), knn_k)[:, 0]
+        nearest = _topk_distances(queries, np.asarray(bank.vectors, dtype=np.float32), knn_k)[:, 0]
         score_array = np.clip(nearest * np.float32(score_scale), 0.0, 1.0)
         return SpatialAnomalyScore(
             anomaly_map=score_array.reshape(h_out, w_out),
@@ -321,14 +325,6 @@ class PatchCoreKnnIndex:
         except Exception:
             return "faiss_unavailable"
         return "faiss_load_or_search_failed"
-
-    def _bank_array(self, bank: PatchCoreBank) -> np.ndarray:
-        cache_key = id(bank)
-        array = self._array_cache.get(cache_key)
-        if array is None:
-            array = np.asarray(bank.vectors, dtype=np.float32)
-            self._array_cache[cache_key] = array
-        return array
 
     def _load_faiss_index(self, path: Path) -> Any:
         stat = path.stat()

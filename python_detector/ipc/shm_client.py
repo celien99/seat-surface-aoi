@@ -105,8 +105,15 @@ class ShmClient:
         self._camera_index_by_view: dict[tuple[str, str], int] = {}
 
     def close(self) -> None:
-        self.frames.close()
-        self.results.close()
+        """释放共享内存映射。可重复调用，无副作用。"""
+        try:
+            self.frames.close()
+        except Exception:
+            pass
+        try:
+            self.results.close()
+        except Exception:
+            pass
 
     def wait_next_job(self, timeout_ms: int) -> SeatInspectionJob | None:
         deadline = time.monotonic() + timeout_ms / 1000.0

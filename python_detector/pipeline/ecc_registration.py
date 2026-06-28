@@ -70,7 +70,7 @@ class EccRegistration:
         """OpenCV findTransformECC 梯度下降配准，平移模型仅 2 参数。"""
         try:
             import cv2  # type: ignore
-        except Exception:
+        except ImportError:
             return None
         try:
             warp_matrix = np.eye(2, 3, dtype=np.float32)
@@ -83,11 +83,11 @@ class EccRegistration:
                 base_array, moving_array, warp_matrix,
                 cv2.MOTION_TRANSLATION, criteria,
             )
-            if not np.isfinite(correlation):
+            corr = float(np.asarray(correlation).ravel()[0])
+            if not math.isfinite(corr):
                 return None
             dx = int(round(float(warp_matrix[0, 2])))
             dy = int(round(float(warp_matrix[1, 2])))
-            corr = float(correlation)
             converged = corr >= float(min_correlation) and corr >= 0.0
             mean_error = math.sqrt(float(dx * dx + dy * dy))
             return EccAlignmentResult(
@@ -100,7 +100,7 @@ class EccRegistration:
                 mean_error_px=mean_error,
                 message="ECC (OpenCV) pass" if converged else "ECC (OpenCV) correlation below threshold",
             )
-        except Exception:
+        except (cv2.error, ValueError, TypeError, IndexError):
             return None
 
     def _ecc_exhaustive(

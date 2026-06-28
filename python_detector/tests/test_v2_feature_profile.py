@@ -24,7 +24,8 @@ def test_v2_feature_profile_uses_recipe_declared_channels() -> None:
     assert first.tensor_channel_names == expected_channels
     assert first.feature_shape_hw == (48, 64)
     assert len(first.features[expected_channels[0]]) == 48 * 64
-    assert len(first.tensor_nchw or []) == 1
+    assert first.tensor_nchw is not None
+    assert len(first.tensor_nchw) == 1
     assert len(first.tensor_nchw[0]) == len(expected_channels)
     assert len(first.tensor_nchw[0][0]) == 48
     assert len(first.tensor_nchw[0][0][0]) == 64
@@ -77,7 +78,6 @@ def test_feature_builder_supports_arbitrary_light_channel_expressions() -> None:
             is_pass=True,
             message="ok",
         ),
-        pixel_size_mm=0.12,
         calibration_id="calib/simulated_v1",
         roi_bbox_xyxy_pixel=(0, 0, 3, 3),
     )
@@ -148,7 +148,6 @@ def test_feature_builder_defaults_model_channels_from_two_light_recipe() -> None
             is_pass=True,
             message="ok",
         ),
-        pixel_size_mm=0.12,
         calibration_id="calib/simulated_v1",
         roi_bbox_xyxy_pixel=(0, 0, 3, 3),
     )
@@ -217,7 +216,6 @@ def test_feature_builder_rejects_mismatched_feature_source_shapes() -> None:
             is_pass=True,
             message="ok",
         ),
-        pixel_size_mm=0.12,
         calibration_id="calib/simulated_v1",
         roi_bbox_xyxy_pixel=(0, 0, 3, 3),
     )
@@ -253,7 +251,6 @@ def test_feature_builder_does_not_read_unrequested_extension_channels() -> None:
             is_pass=True,
             message="ok",
         ),
-        pixel_size_mm=0.12,
         calibration_id="calib/simulated_v1",
         roi_bbox_xyxy_pixel=(0, 0, 3, 3),
     )

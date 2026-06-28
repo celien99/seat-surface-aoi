@@ -34,7 +34,6 @@ class ReflectanceCube:
     light_order: tuple[str, ...]
     frames: dict[str, LightFrame]
     registration: RegistrationReport
-    pixel_size_mm: float | None
     calibration_id: str
     roi_bbox_xyxy_pixel: tuple[int, int, int, int]
     roi_to_source_matrix: tuple[float, ...] | None = None
@@ -94,7 +93,6 @@ class ReflectanceCubeBuilder:
             light_order=light_order,
             frames={light_id: registered_frames[light_id] for light_id in light_order if light_id in registered_frames},
             registration=registration,
-            pixel_size_mm=bundle.calibration.pixel_size_mm,
             calibration_id=bundle.calibration.calibration_id,
             roi_bbox_xyxy_pixel=roi_bbox,
             roi_to_source_matrix=transform_frame.roi_to_source_matrix if transform_frame is not None else None,
