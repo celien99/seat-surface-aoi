@@ -386,10 +386,10 @@ bool HikrobotMvsCamera::wait_frame(std::uint64_t trigger_id,
                                    std::uint32_t light_seq_index,
                                    CapturedFrame* out_frame,
                                    int timeout_ms) {
-  if (out_frame == nullptr || !initialized_ || !grabbing_ || timeout_ms <= 0 || !armed_ ||
-      armed_trigger_id_ != trigger_id ||
-      armed_light_index_ != light_param.light_index ||
-      armed_light_seq_index_ != light_seq_index) {
+  // 流水线采集模式下 arm 顺序与 wait_frame 顺序不同（阶段 A 先触发
+  // 所有光源，阶段 B 再按序收帧），因此 wait_frame 不再校验 armed_
+  // 状态，仅校验相机是否处于可收帧状态。调用方保证 arm 已先行完成。
+  if (out_frame == nullptr || !initialized_ || !grabbing_ || timeout_ms <= 0) {
     set_error("Hikrobot MVS wait_frame 前置状态非法");
     return false;
   }

@@ -76,13 +76,24 @@ private:
                                const LightChannelParam& light_param,
                                std::uint32_t light_seq_index,
                                AcquisitionError* error);
-  bool fire_one_light_step(const ExternalTrigger& trigger,
-                            const std::vector<RuntimeCaptureSlotConfig>& views,
-                            const LightChannelParam& light_param,
-                            std::uint32_t light_seq_index,
-                            std::vector<std::vector<CapturedFrame>>& frames_by_view,
-                            std::vector<std::vector<bool>>& captured,
-                            AcquisitionError* error);
+  // 阶段 A：触发单路光源（sleep + FL-ACDH 8/9/A/7），不等待相机帧。
+  // 移除了 drain_stale_frames：MV-CH120-20GC 在 Continuous+Trigger 下
+  // SetFloatValue 不会向 SDK 缓冲区注入残留帧。
+  bool trigger_one_light_step(const ExternalTrigger& trigger,
+                               const std::vector<RuntimeCaptureSlotConfig>& views,
+                               const LightChannelParam& light_param,
+                               std::uint32_t light_seq_index,
+                               AcquisitionError* error);
+  // 阶段 B：并行收取所有相机的硬触发帧。
+  bool wait_all_views_for_light_step(const ExternalTrigger& trigger,
+                                      const std::vector<RuntimeCaptureSlotConfig>& views,
+                                      const LightChannelParam& light_param,
+                                      std::uint32_t light_seq_index,
+                                      std::vector<std::vector<CapturedFrame>>& frames_by_view,
+                                      std::vector<std::vector<bool>>& captured,
+                                      AcquisitionError* error);
+  // 采集链路故障时清空所有相机 SDK 缓冲区中的残留帧，防止下一轮取到错位帧。
+  void drain_all_camera_buffers(const std::vector<RuntimeCaptureSlotConfig>& views);
   bool arm_view_camera(const ExternalTrigger& trigger,
                        const RuntimeCaptureSlotConfig& view,
                        const LightChannelParam& light_param,

@@ -90,14 +90,7 @@ bool CameraDevice::capture(std::uint64_t trigger_id,
   if (config_.simulate_missing_frame) {
     return false;
   }
-  if (armed_ && armed_trigger_id_ != trigger_id) {
-    return false;
-  }
-  if (armed_ &&
-      (armed_light_index_ != light_param.light_index ||
-       armed_light_seq_index_ != light_seq_index)) {
-    return false;
-  }
+  // 流水线采集模式下不再校验 armed_ 状态对齐，调用方保证 arm 已先行完成。
   if (replay_enabled_) {
     return capture_replay_frame(trigger_id, light_param, light_seq_index, out_frame);
   }

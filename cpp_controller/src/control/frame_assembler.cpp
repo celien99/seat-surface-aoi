@@ -272,6 +272,12 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
   std::vector<std::vector<bool>> captured(
       capture_plan.size(), std::vector<bool>(sequence.channels.size(), false));
 
+  // =========================================================================
+  // 阶段 A：快速连续 arm + 触发所有光源，不等待相机帧。
+  // 利用 Continuous+Trigger 模式下 arm 仅影响下一次触发沿的特性，
+  // 将 arm_settle 和 FL-ACDH 串口开销（~60ms/路）与上一路曝光+传输
+  // 并行化，三路触发间隔约 62ms，曝光 40ms 绝不重叠。
+  // =========================================================================
   for (std::uint32_t light_seq_index = 0;
        light_seq_index < sequence.channels.size();
        ++light_seq_index) {
@@ -280,10 +286,31 @@ bool FrameAssembler::acquire_shared_light_parallel_frames(
       continue;
     }
     if (!arm_all_views_parallel(trigger, capture_plan, light_param, light_seq_index, error)) {
+      drain_all_camera_buffers(capture_plan);
       return false;
     }
-    if (!fire_one_light_step(trigger, capture_plan, light_param, light_seq_index,
-                             frames_by_view, captured, error)) {
+    if (!trigger_one_light_step(trigger, capture_plan, light_param, light_seq_index, error)) {
+      drain_all_camera_buffers(capture_plan);
+      return false;
+    }
+  }
+
+  // =========================================================================
+  // 阶段 B：按光源顺序统一收取所有相机帧。
+  // MVS SDK buffer_count=8 ≥ 6 帧保证不丢帧；GetImageBuffer 按触发顺序
+  // 返回帧，因此按 light_seq_index 顺序收取即可正确匹配光源。
+  // =========================================================================
+  for (std::uint32_t light_seq_index = 0;
+       light_seq_index < sequence.channels.size();
+       ++light_seq_index) {
+    const auto light_param = sequence.channels[light_seq_index];
+    if (!light_param.enabled) {
+      continue;
+    }
+    if (!wait_all_views_for_light_step(trigger, capture_plan, light_param, light_seq_index,
+                                       frames_by_view, captured, error)) {
+      drain_all_camera_buffers(capture_plan);
+      handle_acquisition_failure();
       return false;
     }
   }
@@ -349,49 +376,16 @@ bool FrameAssembler::arm_all_views_parallel(
   return true;
 }
 
-bool FrameAssembler::fire_one_light_step(
+bool FrameAssembler::trigger_one_light_step(
     const ExternalTrigger& trigger,
     const std::vector<RuntimeCaptureSlotConfig>& views,
     const LightChannelParam& light_param,
     std::uint32_t light_seq_index,
-    std::vector<std::vector<CapturedFrame>>& frames_by_view,
-    std::vector<std::vector<bool>>& captured,
     AcquisitionError* error) {
-  // 在触发 FL-ACDH 前并行 drain 所有相机的残留帧。
-  // arm() 改变 ExposureTime 时，Continuous+Trigger 模式下的相机 SDK
-  // 可能立即生成一帧图像存入内部缓冲区。不排空会导致 GetImageBuffer
-  // 优先取到残留帧而非硬触发帧，造成光源帧全部错位。
-  // 启动和相机重启时 start()/cancel_wait() 仍会排空旧帧。
-  {
-    std::vector<std::future<bool>> drain_futures;
-    drain_futures.reserve(views.size());
-    for (const auto& view : views) {
-      drain_futures.push_back(std::async(std::launch::async, [&]() {
-        auto* cam = camera_for_index(view.camera_index);
-        if (cam != nullptr) {
-          cam->drain_stale_frames(100);
-        }
-        return cam != nullptr;
-      }));
-    }
-    bool any_drain_failed = false;
-    for (auto& f : drain_futures) {
-      if (!f.get()) {
-        any_drain_failed = true;
-      }
-    }
-    if (any_drain_failed) {
-      set_acquisition_error(error, ErrorCode::CameraFault,
-                            AcquisitionStage::ArmCamera,
-                            views.front().camera_index,
-                            light_param.light_index, light_seq_index,
-                            "one or more cameras missing before light trigger");
-      handle_acquisition_failure();
-      return false;
-    }
-  }
-
-  // 1. 短稳定延迟后触发 FL-ACDH
+  // 短稳定延迟后触发 FL-ACDH。
+  // 不再调用 drain_stale_frames：海康 MV-CH120-20GC 在 Continuous+Trigger
+  // 模式下 SetFloatValue(ExposureTime) 不会向 SDK 缓冲区注入残留帧，
+  // 相机启动/重启时的旧帧已由 start()/cancel_wait() 排空。
   std::this_thread::sleep_for(std::chrono::milliseconds(2));
   if (!light_controllers_.front()->trigger_channel(
           light_param, trigger.trigger_id, light_seq_index,
@@ -407,56 +401,78 @@ bool FrameAssembler::fire_one_light_step(
     handle_acquisition_failure();
     return false;
   }
+  return true;
+}
 
-  // 2. 并行等待所有相机获取硬触发帧
-  {
-    struct FrameResult {
-      bool ok = false;
-      CapturedFrame frame;
-      std::size_t view_index = 0;
-      AcquisitionError error;
-    };
-    std::vector<std::future<FrameResult>> frame_futures;
-    frame_futures.reserve(views.size());
-    for (std::size_t vi = 0; vi < views.size(); ++vi) {
-      frame_futures.push_back(std::async(std::launch::async, [&, vi]() -> FrameResult {
-        FrameResult result;
-        result.view_index = vi;
-        result.ok = wait_view_light_frame(trigger, views[vi], light_param,
-                                          light_seq_index, &result.frame, &result.error);
-        return result;
-      }));
-    }
-    bool any_wait_failed = false;
-    std::ostringstream wait_failure_detail;
-    for (auto& f : frame_futures) {
-      auto result = f.get();
-      if (!result.ok) {
-        any_wait_failed = true;
-        record_camera_failure(views[result.view_index].camera_index);
-        if (wait_failure_detail.tellp() > 0) {
-          wait_failure_detail << " | ";
-        }
-        wait_failure_detail << result.error.message;
-        continue;
+bool FrameAssembler::wait_all_views_for_light_step(
+    const ExternalTrigger& trigger,
+    const std::vector<RuntimeCaptureSlotConfig>& views,
+    const LightChannelParam& light_param,
+    std::uint32_t light_seq_index,
+    std::vector<std::vector<CapturedFrame>>& frames_by_view,
+    std::vector<std::vector<bool>>& captured,
+    AcquisitionError* error) {
+  // 并行等待所有相机获取硬触发帧。
+  // 阶段 A 已按光源顺序连续触发，帧按触发顺序进入 SDK 缓冲区；
+  // 阶段 B 按相同顺序收取，GetImageBuffer 返回顺序与触发顺序一致。
+  struct FrameResult {
+    bool ok = false;
+    CapturedFrame frame;
+    std::size_t view_index = 0;
+    AcquisitionError error;
+  };
+  std::vector<std::future<FrameResult>> frame_futures;
+  frame_futures.reserve(views.size());
+  for (std::size_t vi = 0; vi < views.size(); ++vi) {
+    frame_futures.push_back(std::async(std::launch::async, [&, vi]() -> FrameResult {
+      FrameResult result;
+      result.view_index = vi;
+      result.ok = wait_view_light_frame(trigger, views[vi], light_param,
+                                        light_seq_index, &result.frame, &result.error);
+      return result;
+    }));
+  }
+  bool any_wait_failed = false;
+  std::ostringstream wait_failure_detail;
+  for (auto& f : frame_futures) {
+    auto result = f.get();
+    if (!result.ok) {
+      any_wait_failed = true;
+      record_camera_failure(views[result.view_index].camera_index);
+      if (wait_failure_detail.tellp() > 0) {
+        wait_failure_detail << " | ";
       }
-      record_camera_success(views[result.view_index].camera_index);
-      frames_by_view[result.view_index][light_seq_index] = std::move(result.frame);
-      captured[result.view_index][light_seq_index] = true;
+      wait_failure_detail << result.error.message;
+      continue;
     }
-    if (any_wait_failed) {
-      set_acquisition_error(error, ErrorCode::MissingFrame,
-                            AcquisitionStage::WaitFrame,
-                            views.front().camera_index,
-                            light_param.light_index, light_seq_index,
-                            wait_failure_detail.tellp() > 0
-                                ? wait_failure_detail.str()
-                                : "one or more cameras timed out waiting for frame");
-      handle_acquisition_failure();
-      return false;
-    }
+    record_camera_success(views[result.view_index].camera_index);
+    frames_by_view[result.view_index][light_seq_index] = std::move(result.frame);
+    captured[result.view_index][light_seq_index] = true;
+  }
+  if (any_wait_failed) {
+    set_acquisition_error(error, ErrorCode::MissingFrame,
+                          AcquisitionStage::WaitFrame,
+                          views.front().camera_index,
+                          light_param.light_index, light_seq_index,
+                          wait_failure_detail.tellp() > 0
+                              ? wait_failure_detail.str()
+                              : "one or more cameras timed out waiting for frame");
+    handle_acquisition_failure();
+    return false;
   }
   return true;
+}
+
+void FrameAssembler::drain_all_camera_buffers(
+    const std::vector<RuntimeCaptureSlotConfig>& views) {
+  // 采集链路故障时清空所有相机 SDK 缓冲区中的残留帧，
+  // 防止下一轮采集取到错位帧。
+  for (const auto& view : views) {
+    auto* cam = camera_for_index(view.camera_index);
+    if (cam != nullptr) {
+      cam->drain_stale_frames(50);
+    }
+  }
 }
 
 bool FrameAssembler::arm_view_camera(const ExternalTrigger& trigger,

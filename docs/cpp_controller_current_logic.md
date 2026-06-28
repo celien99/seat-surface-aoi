@@ -62,11 +62,13 @@ main.cpp
           -> build_light_sequence(light_order=1,2,3)
           -> build_capture_plan(camera.0, camera.1)
           -> prepare_sequence()
-          -> 每路光源循环:
+          -> 每路光源循环（阶段 A：快速连续触发）:
               -> 并行 arm 所有相机，仅更新 ExposureTime/Gain
-              -> 等待 arm_settle_ms
+              -> 等待 arm_settle_ms (10ms)
               -> FL-ACDH trigger_channel(8/9/A/7)
-              -> 并行 wait_frame(GetImageBuffer)
+              -> （不等待 GetImageBuffer，立即进入下一路光源）
+          -> 每路光源循环（阶段 B：统一收帧）:
+              -> 并行 wait_frame(GetImageBuffer) 收取全部 6 帧
           -> 物理按光源采集，发布前重排为 view 优先
       -> 保存原图（如果 image_save.enabled）
       -> FrameRingBuffer.publish()
@@ -80,8 +82,9 @@ main.cpp
 
 - 相机初始化时设置 `Continuous + TriggerMode On + TriggerSource=Line0 + RisingEdge`。
 - `arm()` 阶段不重复写 `TriggerSource`，只更新曝光和增益，避免相机短暂错过硬触发沿。
-- SDK 缓存在每轮频闪触发前并行 drain 所有相机，排空 arm() 改曝光参数可能在 Continuous 模式下即时产生的残留帧，避免误取为硬触发帧；相机启动或故障重启时也会排空旧帧。
-- 物理采集顺序是“光源优先、相机并行”，共享内存发布顺序是“机位优先、光源顺序”，方便 Python 按视角组包。
+- 海康 MV-CH120-20GC 在 Continuous+Trigger 模式下 `SetFloatValue(ExposureTime)` 不会向 SDK 缓冲区注入残留帧，因此正常采集路径不再调用 `drain_stale_frames`，仅相机启动或故障重启时排空旧帧。采集链路故障时通过 `drain_all_camera_buffers()` 清空所有相机缓冲区防止下一轮帧错位。
+- 采集分两阶段：阶段 A 快速连续触发三路光源（arm→settle→FL-ACDH，不等待 GetImageBuffer），阶段 B 按光源顺序统一收取 6 帧。MVS SDK `buffer_count=8 ≥ 6` 帧保证不丢帧。
+- 物理采集顺序是”光源优先、相机并行”，共享内存发布顺序是”机位优先、光源顺序”，方便 Python 按视角组包。
 
 ## 在线模式与采图模式
 
