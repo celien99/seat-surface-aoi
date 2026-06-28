@@ -41,6 +41,9 @@ class SpatialEmbedding:
 
 
 class EmbeddingExtractor:
+    def __init__(self) -> None:
+        self._onnx_sessions: dict[str, object] = {}
+
     def extract(self, feature_group: FeatureGroup, config: ModelConfig) -> UnifiedEmbedding:
         if config.embedding_backend == "statistical":
             values = self._statistical_embedding(feature_group, config.embedding_dim)
@@ -87,7 +90,7 @@ class EmbeddingExtractor:
             raise RuntimeError("WideResNet50 spatial embedding 输入 tensor 缺失")
 
         np_runtime = numpy_module("WideResNet50 spatial embedding")
-        session = create_onnx_session(str(path), "WideResNet50 spatial embedding")
+        session = self._cached_onnx_session(path, "WideResNet50 spatial embedding")
         tensor = np_runtime.asarray(feature_group.tensor_nchw, dtype=np_runtime.float32)
         outputs = run_first_input(session, tensor, "WideResNet50 spatial embedding")
 
@@ -159,13 +162,21 @@ class EmbeddingExtractor:
         if feature_group.tensor_nchw is None:
             raise RuntimeError("WideResNet50 embedding 输入 tensor 缺失")
         np_runtime = numpy_module("WideResNet50 embedding")
-        session = create_onnx_session(str(path), "WideResNet50 embedding")
+        session = self._cached_onnx_session(path, "WideResNet50 embedding")
         tensor = np_runtime.asarray(feature_group.tensor_nchw, dtype=np_runtime.float32)
         outputs = run_first_input(session, tensor, "WideResNet50 embedding")
         vector = np.asarray(outputs[0], dtype=np.float32).reshape(-1)
         if vector.size != config.embedding_dim:
             raise RuntimeError(f"embedding 维度不匹配: {vector.size} != {config.embedding_dim}")
         return tuple(float(value) for value in vector.tolist())
+
+    def _cached_onnx_session(self, path: Path, purpose: str) -> object:
+        cache_key = str(path)
+        session = self._onnx_sessions.get(cache_key)
+        if session is None:
+            session = create_onnx_session(str(path), purpose)
+            self._onnx_sessions[cache_key] = session
+        return session
 
 def _upsample_nearest_array(
     fm: np.ndarray,

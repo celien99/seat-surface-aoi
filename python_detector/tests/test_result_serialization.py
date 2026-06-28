@@ -40,7 +40,6 @@ def test_write_result_slot_preserves_camera_and_evidence_indices() -> None:
     client.results = type("ResultMap", (), {"mm": mmap.mmap(-1, DEFAULT_RESULT_SLOT_SIZE)})()
     defect = DefectResult(
         defect_id="D1",
-        class_name="scratch",
         severity="critical",
         camera_id="TOP_CUSHION",
         pose_id="T2_CUSHION",
@@ -66,11 +65,11 @@ def test_write_result_slot_preserves_camera_and_evidence_indices() -> None:
     client._write_result_slot(0, result, [defect], RESULT_SLOT_HEADER_SIZE + DEFECT_RESULT_META.size)
 
     unpacked = DEFECT_RESULT_META.unpack_from(client.results.mm, result_slot_defects_offset())
-    camera_index = unpacked[3]
-    camera_id = unpacked[4].split(b"\0", 1)[0].decode()
-    pose_id = unpacked[5].split(b"\0", 1)[0].decode()
-    evidence_light_count = unpacked[13]
-    evidence_lights = unpacked[14:22]
+    camera_index = unpacked[2]
+    camera_id = unpacked[3].split(b"\0", 1)[0].decode()
+    pose_id = unpacked[4].split(b"\0", 1)[0].decode()
+    evidence_light_count = unpacked[12]
+    evidence_lights = unpacked[13:21]
     assert camera_index == 1
     assert camera_id == "TOP_CUSHION"
     assert pose_id == "T2_CUSHION"
@@ -85,7 +84,6 @@ def test_write_result_slot_uses_dynamic_camera_index_for_robot_flyshot() -> None
     client._remember_camera_index("EYE_IN_HAND", "T2_CUSHION", 0)
     defect = DefectResult(
         defect_id="D1",
-        class_name="scratch",
         severity="critical",
         camera_id="EYE_IN_HAND",
         pose_id="T2_CUSHION",
@@ -111,9 +109,9 @@ def test_write_result_slot_uses_dynamic_camera_index_for_robot_flyshot() -> None
     client._write_result_slot(0, result, [defect], RESULT_SLOT_HEADER_SIZE + DEFECT_RESULT_META.size)
 
     unpacked = DEFECT_RESULT_META.unpack_from(client.results.mm, result_slot_defects_offset())
-    camera_index = unpacked[3]
-    camera_id = unpacked[4].split(b"\0", 1)[0].decode()
-    pose_id = unpacked[5].split(b"\0", 1)[0].decode()
+    camera_index = unpacked[2]
+    camera_id = unpacked[3].split(b"\0", 1)[0].decode()
+    pose_id = unpacked[4].split(b"\0", 1)[0].decode()
     assert camera_index == 0
     assert camera_id == "EYE_IN_HAND"
     assert pose_id == "T2_CUSHION"
@@ -149,7 +147,6 @@ def _defect(
 ) -> DefectResult:
     return DefectResult(
         defect_id="D1",
-        class_name="scratch",
         severity="critical",
         camera_id=camera_id,
         pose_id=camera_id,

@@ -90,7 +90,6 @@ struct SeatJobMeta {
 
 struct DefectResultMeta {
   char defect_id[kStringIdSize];
-  char class_name[kStringIdSize];
   char severity[kStringIdSize];
   std::uint32_t camera_index;
   char camera_id[kStringIdSize];
@@ -122,7 +121,7 @@ struct InspectionResultMeta {
 
 static_assert(sizeof(LightFrameMeta) == 324, "Unexpected LightFrameMeta size");
 static_assert(sizeof(SeatJobMeta) == 232, "Unexpected SeatJobMeta size");
-static_assert(sizeof(DefectResultMeta) == 464, "Unexpected DefectResultMeta size");
+static_assert(sizeof(DefectResultMeta) == 400, "Unexpected DefectResultMeta size");
 static_assert(sizeof(InspectionResultMeta) == 104, "Unexpected InspectionResultMeta size");
 
 }  // namespace seat_aoi

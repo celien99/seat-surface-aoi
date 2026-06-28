@@ -35,7 +35,6 @@ class RuleEngine:
             defects.append(
                 DefectResult(
                     defect_id=f"{job.sequence_id}-{index}",
-                    class_name=candidate.class_name,
                     severity=filtered.severity,
                     camera_id=candidate.camera_id,
                     pose_id=candidate.pose_id or candidate.camera_id,

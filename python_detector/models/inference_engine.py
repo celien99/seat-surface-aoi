@@ -21,7 +21,6 @@ from python_detector.pipeline.feature_builder import FeatureGroup
 class DefectCandidate:
     camera_id: str
     roi_name: str
-    class_name: str
     score: float
     bbox_xyxy_pixel: tuple[int, int, int, int]
     area_px: int
@@ -125,7 +124,6 @@ class FakeModel:
             camera_id=feature_group.camera_id,
             pose_id=feature_group.pose_id,
             roi_name=feature_group.roi_name,
-            class_name="scratch",
             score=score,
             bbox_xyxy_pixel=bbox,
             area_px=(bbox[2] - bbox[0] + 1) * (bbox[3] - bbox[1] + 1),
@@ -195,7 +193,7 @@ class OnnxModel:
             if not math.isfinite(class_value) or not class_value.is_integer():
                 raise RuntimeError(f"ONNX 输出 class_id 不是整数: {class_value}")
             class_id = int(class_value)
-            if class_id < 0 or class_id >= len(self.config.class_names):
+            if class_id < 0:
                 raise RuntimeError(f"ONNX 输出 class_id 越界: {class_id}")
             bbox = self._map_bbox_xyxy(row[:4], feature_group)
             area_px = max(bbox[2] - bbox[0] + 1, 0) * max(bbox[3] - bbox[1] + 1, 0)
@@ -204,7 +202,6 @@ class OnnxModel:
                     camera_id=feature_group.camera_id,
                     pose_id=feature_group.pose_id,
                     roi_name=feature_group.roi_name,
-                    class_name=self.config.class_names[class_id],
                     score=score,
                     bbox_xyxy_pixel=bbox,
                     area_px=area_px,
@@ -318,13 +315,11 @@ class PatchCoreModel:
             height, width = feature_group.feature_shape_hw
             bbox = _map_roi_bbox_to_source((0.0, 0.0, float(width - 1), float(height - 1)), feature_group)
             area_px = max(bbox[2] - bbox[0] + 1, 0) * max(bbox[3] - bbox[1] + 1, 0)
-        class_name = self.config.class_names[0] if self.config.class_names else "unknown_anomaly"
         return [
             DefectCandidate(
                 camera_id=feature_group.camera_id,
                 pose_id=feature_group.pose_id,
                 roi_name=feature_group.roi_name,
-                class_name=class_name,
                 score=score.anomaly_score,
                 bbox_xyxy_pixel=bbox,
                 area_px=area_px,
@@ -396,7 +391,6 @@ class PatchCoreModel:
         if max_anomaly < self.config.score_threshold:
             return []
 
-        class_name = self.config.class_names[0] if self.config.class_names else "unknown_anomaly"
         bboxes = _anomaly_map_bboxes(
             anomaly_map,
             score.spatial_shape,
@@ -418,7 +412,6 @@ class PatchCoreModel:
                     camera_id=feature_group.camera_id,
                     pose_id=feature_group.pose_id,
                     roi_name=feature_group.roi_name,
-                    class_name=class_name,
                     score=bbox_score,
                     bbox_xyxy_pixel=bbox_xyxy,
                     area_px=area_px,
@@ -464,7 +457,6 @@ class ModelRegistry:
             config.role,
             config.input_channels,
             float(config.input_scale),
-            config.class_names,
             config.output_decode,
             config.bbox_format,
             float(config.score_threshold),

@@ -26,7 +26,7 @@ model/
 
 ## 产物要求
 
-- `seat_roi_seg.onnx`：生产推荐 ROI 定位产物。输入当前配方的 `DOME` 语义光源图，输出 YOLO segmentation mask；在线链路用 mask 自动生成运行时 `polygon_xy`，ROI 模板只作为安全边界和默认约束。当前项目 ROI 单类别为 `seat`，必须与 `roi_locator.class_names` 一致。
+- `seat_roi_seg.onnx`：生产推荐 ROI 定位产物。输入当前配方的 `DOME` 语义光源图，输出 YOLO segmentation mask；在线链路用 mask 自动生成运行时 `polygon_xy`，ROI 模板只作为安全边界和默认约束。当前项目 ROI 名称为 `seat`，必须与 `roi_locator.class_names` 一致；这里的 `class_names` 只服务 ROI 定位，不代表缺陷类别。
 - `seat_roi_yolo.onnx`：兼容 bbox ROI 产物。输入 Dome 语义光源图，输出 `[x1, y1, x2, y2, score, class_id]` 行表，或通过 `output_decode: ultralytics_yolo` 解析 Ultralytics ONNX 输出。
 - `seat_wrn50_embedding.onnx`：空间 PatchCore 模式下输出 layer2+layer3 中间层特征图，当前拼接后的原始 patch embedding 为 1536 维；全局模式才输出一维 embedding，维度必须与配方 `models.<key>.embedding_dim` 一致。
 - `seat_pca.json`：包含 `version`、`mean`、`components`，版本必须与配方 `pca_version` 一致；当前生产资产使用 `pca_seat_v2`，输入维度为 1536，输出维度为 524。
@@ -35,7 +35,7 @@ model/
 - `seat_patchcore.faiss`：可选；缺失或不可加载时在线后端回退 exact KNN，并在 trace 中记录 fallback reason。启用时维度和向量数必须与 `seat_patchcore_bank.json` / `seat_patchcore_bank.npy` 一致。
 - `embeddings.npy` / `pca_embeddings.npy`：训练过程中的中间 embedding 矩阵。`training_tools.train_patchcore_assets` 默认训练完成后删除它们，仅在显式传 `--keep-intermediate-embeddings` 做排障时保留。独立调试命令 `training_tools.extract_embeddings` 仍可输出 JSONL 明细，但生产训练链路不再依赖 JSONL。
 
-当前生产缺陷判定链路不依赖 `model/supervised_defect/seat_defect_detector.onnx`。座椅 ROI 定位由 `seat_roi_seg.onnx` 完成，表面异常判定由 WideResNet50 embedding + PCA + PatchCore memory bank/FAISS 无监督主模型完成。监督 YOLO 只能作为离线研究或对比实验资产，不是生产配方必需项。
+当前生产缺陷判定链路不依赖 `model/supervised_defect/seat_defect_presence.onnx`。座椅 ROI 定位由 `seat_roi_seg.onnx` 完成，表面异常判定由 WideResNet50 embedding + PCA + PatchCore memory bank/FAISS 无监督主模型完成。监督 YOLO 只能作为离线研究或对比实验资产，不是生产配方必需项。
 
 部署前执行：
 
@@ -80,7 +80,7 @@ uv run python -m training_tools.train_patchcore_assets `
   --manifest datasets/seat_roi_train/dataset_manifest.jsonl `
   --output-dir model/patchcore `
   --recipe seat_a_black_leather_production_v1 `
-  --model-key patchcore_unknown_detector `
+  --model-key patchcore_detector `
   --embedding-backend onnx_wideresnet50 `
   --embedding-model model/wideresnet50/seat_wrn50_embedding.onnx `
   --split train `

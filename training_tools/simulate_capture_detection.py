@@ -277,7 +277,7 @@ def _annotated_roi(
             height,
             max(0, x0),
             max(banner_height, y0 + banner_height - 22),
-            f"{defect.class_name} {defect.score:.3f}",
+            f"{defect.decision} {defect.score:.3f}",
             (255, 255, 255),
             scale=2,
         )

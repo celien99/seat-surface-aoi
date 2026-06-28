@@ -194,9 +194,15 @@ bool StationController::wait_for_trigger(ExternalTrigger* out_trigger, std::stri
                         "recovering from fault: " + snapshot.alarm_message);
   }
   // 无限等待模式 (trigger_timeout_ms=0)：仅真实错误时返回 false
-  if (!signal_client_->wait_trigger(out_trigger, config_.trigger_timeout_ms, error_message)) {
-    const std::string message =
-        error_message != nullptr ? *error_message : "external signal trigger wait failed";
+  std::string local_error;
+  std::string* wait_error = error_message != nullptr ? error_message : &local_error;
+  wait_error->clear();
+  if (!signal_client_->wait_trigger(out_trigger, config_.trigger_timeout_ms, wait_error)) {
+    const std::string message = *wait_error;
+    if (message.empty()) {
+      health_.transition_to(StationState::Ready, "station ready");
+      return false;
+    }
     ++consecutive_trigger_faults_;
     health_.record_fault(ErrorCode::DeviceFault, message);
     health_.transition_to(StationState::Fault, message);

@@ -324,7 +324,6 @@ def _collect_capture_group(
                     light_id=light_id,
                     image_path=image_path.as_posix(),
                     has_defect=False,
-                    defect_classes=[],
                     bbox_xyxy_pixel=[],
                     split=split,
                     label_status=label_status,

@@ -84,8 +84,8 @@
 
 差距：
 
-- 真实 YOLO ROI 权重、输入尺寸、类别训练集和评估报告仍需按现场数据产出。
-- 机器人飞拍 pose 的 ROI 类别、姿态误差和标定版本必须单独用现场样本验证。
+- 真实 YOLO ROI 权重、输入尺寸、ROI 标注训练集和评估报告仍需按现场数据产出。
+- 机器人飞拍 pose 的 ROI 名称映射、姿态误差和标定版本必须单独用现场样本验证。
 
 #### 3.2 ROI 裁剪与图像配准
 
@@ -163,7 +163,7 @@
 - 已提供 `training_tools.build_patchcore_memory_bank`，支持从 JSONL embedding 构建 memory bank 并保存 coreset 参数、PCA 版本和 FAISS 元数据；训练与回放类入口统一归属 `training_tools/`，不再在 `tools/` 保留兼容包装。
 - 已支持 `faiss_index_path`，部署环境有有效 FAISS 索引时优先使用 FAISS；缺索引或缺依赖时回退 exact KNN，并在 trace 中记录 `backend` 与 `fallback_reason`。
 - 已在 `model/patchcore/` 预留 PCA、memory bank 和 FAISS 索引产物路径，并提供模型资产校验工具。
-- anomaly score 会作为 `unknown_anomaly` 候选进入融合、缺陷过滤和规则引擎，低置信但可疑样本走 `RECHECK`。
+- anomaly score 会作为通用缺陷候选进入融合、缺陷过滤和规则引擎，低置信但可疑样本走 `RECHECK`。
 
 差距：
 
@@ -174,15 +174,15 @@
 
 统一架构要求：
 
-- 缺陷过滤与分类。
+- 缺陷过滤与判定。
 - 规则引擎。
 - OK/NG 判定、可视化、报警输出、MES 系统对接。
 
 当前状态：
 
 - 已实现候选融合/NMS。
-- 已将缺陷过滤抽为 `DefectFilter`，便于后续接入二阶段分类器或工艺过滤规则。
-- 已实现类别阈值、面积阈值、`OK`、`NG`、`RECHECK`、`ERROR` 判定。
+- 已将缺陷过滤抽为 `DefectFilter`，便于维护单一缺陷判定阈值、面积过滤、长宽比过滤和工艺过滤规则。
+- 已实现单一 `decision_threshold`、面积阈值、`OK`、`NG`、`RECHECK`、`ERROR` 判定。
 - 已支持 trace、ROI 图和检测 overlay；只要 ROI 已完成预处理，OK 与 NG/RECHECK/ERROR 都会生成 overlay，缺陷候选存在时额外绘制候选框。
 
 差距：
@@ -238,11 +238,11 @@
 
 1. 分别接入固定机位和机器人飞拍生产配置的真实 PLC/编码器、相机、频闪、机器人/IO 网关 SDK，并做节拍、稳定性和故障注入压测。
 2. 验证两种采集模式的 `camera_id`、`pose_id`、`shot_id`、`calibration_id`、光源通道和 Python 配方完全一致。
-3. 训练并接入真实 Dome YOLO ROI 定位权重，固化 ROI 类别、置信度、姿态误差和复检阈值。
+3. 训练并接入真实 Dome YOLO ROI 定位权重，固化 ROI 名称映射、置信度、姿态误差和复检阈值。
 4. 用现场数据验证 ECC 参数，必要时替换为 OpenCV ECC 或更高精度配准后端。
 5. 接入真实 WideResNet50 embedding 权重，固化输入归一化、特征层、embedding 维度和批处理策略。
 6. 使用 `training_tools.collect_trace_dataset` 从两类采集模式的现场 trace 生成训练样本 manifest，完成真实人工标注和数据分层。
-7. 基于正常样本训练 PCA 与 PatchCore memory bank，替换 `model/patchcore/` 占位产物，产出阈值曲线和按缺陷类别/ROI/材质/颜色/采集模式的评估报告。
+7. 基于正常样本训练 PCA 与 PatchCore memory bank，替换 `model/patchcore/` 占位产物，产出阈值曲线和按 ROI/材质/颜色/缺陷尺寸/采集模式分层的检测评估报告。
 8. 在部署环境生成并接入 FAISS 加速索引，验证 KNN 延迟、内存占用和 exact KNN 回退。
 9. 按现场硬件规格固化 ONNX Runtime、FAISS、OpenCV 和 NumPy 版本，完成 AI Runtime 性能基准。
 10. 按现场工艺扩展多 ROI 关联规则、MES/报警接口、数据平台、模型版本平台和系统监控服务。

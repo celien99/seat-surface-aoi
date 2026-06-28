@@ -43,7 +43,7 @@ flowchart LR
 - FL-ACDH `GND` 需要与两台相机 IO `GND` 共地。
 - 相机 `Line1` 的 `ExposureStartActive` 仅保留为调试/示波器输出，不参与当前触发闭环。
 
-C++ 主控只保留上述当前链路。非当前链路的兼容路径、未使用 backend 枚举和对应源码已移除；共享内存协议布局保持与 Python detector 二进制兼容，C++ 结构命名统一为固定机位视图语义。
+C++ 主控只保留上述当前链路。非当前链路的兼容路径、未使用 backend 枚举和对应源码已移除；共享内存协议布局保持与 Python detector 二进制兼容，结果缺陷结构只传缺陷 ID、严重度、位置、分数和证据光源，不再携带缺陷类别字段。
 
 当前工控机已调通链路的模块职责、源码调用关系、采集时序和故障闭环见 [C++ 主控当前逻辑梳理](../docs/cpp_controller_current_logic.md)。
 
@@ -84,7 +84,7 @@ cpp_controller/
 6. 校验 `sequence_id`、`trigger_id`、`seat_id`、CRC 和结果语义。
 7. 通过外部信号回传 `OK`、`NG` 或 `RECHECK`。`ERROR` 会映射为外部 `RECHECK`。
 
-外部触发尚未完整到达时不进入一次检测任务：`tcp_signal` 没有客户端、客户端已连接但还没发送触发行、`start_sn` 只收到 `start` 但未收到 `sn <SN>`、或文件队列暂无新触发行，都只保持 Ready 状态并继续等待；这类空闲等待不会写 `inspection_recheck`，不会发布 Frame SHM，也不会等待 Python detector。只有完整触发进入采集/检测后，缺帧、设备故障、共享内存错误、检测超时、质量门禁失败或协议/CRC 错误才按 fail-closed 输出 `RECHECK/ERROR`。
+外部触发尚未完整到达时不进入一次检测任务：`tcp_signal` 没有客户端、客户端已连接但还没发送触发行、`start_sn` 只收到 `start` 但未收到 `sn <SN>`、或文件队列暂无新触发行，都只保持 Ready 状态并继续等待；`wait_trigger=false` 且错误文本为空表示本轮无新触发，不记录设备故障。这类空闲等待不会写 `inspection_recheck`，不会发布 Frame SHM，也不会等待 Python detector。只有完整触发进入采集/检测后，缺帧、设备故障、共享内存错误、检测超时、质量门禁失败或协议/CRC 错误才按 fail-closed 输出 `RECHECK/ERROR`。
 
 采图模式 `controller_mode=capture_only`：
 
@@ -222,6 +222,8 @@ uv run python -m tools.validate_protocol
 uv run python tools/run_simulated_ipc.py
 uv run python tools/run_simulated_ipc.py --replay-capture
 ```
+
+默认模拟 IPC 会生成临时 runtime config，并关闭本地磁盘水位门禁；正式生产、测试和采图配置仍按 `image_save.cleanup_min_free_ratio=0.20` 执行容量保护。
 
 本次主控收敛及代码优化后，`ipc_safety_checks` 覆盖了以下关键点：
 

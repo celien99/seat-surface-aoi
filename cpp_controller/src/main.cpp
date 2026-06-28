@@ -118,7 +118,9 @@ int main(int argc, char** argv) {
     seat_aoi::ExternalTrigger trigger;
     std::string error;
     if (!station.wait_for_trigger(&trigger, &error)) {
-      std::cerr << "trigger wait fault: " << error << std::endl;
+      if (!error.empty()) {
+        std::cerr << "trigger wait fault: " << error << std::endl;
+      }
       // wait_for_trigger 内部已有递增退避，此处仅最短间隔兜底
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
       continue;

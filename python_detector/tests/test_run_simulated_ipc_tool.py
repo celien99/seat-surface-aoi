@@ -188,6 +188,56 @@ def test_replay_capture_flag_passes_replay_config_to_controller_and_detector(mon
     assert detector_command[-1] == "120000"
 
 
+def test_default_simulated_ipc_uses_temp_config_without_disk_watermark(monkeypatch, tmp_path) -> None:
+    tool = importlib.import_module("tools.run_simulated_ipc")
+
+    controller = tmp_path / "seat_aoi_controller.exe"
+    protocol_layout = tmp_path / "protocol_layout.exe"
+    ipc_checks = tmp_path / "ipc_safety_checks.exe"
+    for path in (controller, protocol_layout, ipc_checks):
+        path.write_text("", encoding="utf-8")
+    artifacts = tool.BuildArtifacts(
+        controller=controller,
+        protocol_layout=protocol_layout,
+        ipc_checks=ipc_checks,
+    )
+    runtime_root = tmp_path / "runtime"
+    popen_commands: list[list[str]] = []
+    run_commands: list[list[str]] = []
+    original_write_simulated_runtime_config = tool.write_simulated_runtime_config
+
+    class FakeProcess:
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+        def terminate(self):
+            return None
+
+    monkeypatch.setattr(tool, "build_cpp", lambda: artifacts)
+    monkeypatch.setattr(tool, "run", lambda command, *, cwd=None, env=None: run_commands.append([str(item) for item in command]))
+    monkeypatch.setattr(tool, "python_runner", lambda: ["python"])
+    monkeypatch.setattr(
+        tool,
+        "write_simulated_runtime_config",
+        lambda: original_write_simulated_runtime_config(runtime_root),
+    )
+    monkeypatch.setattr(tool.subprocess, "Popen", lambda command: popen_commands.append([str(item) for item in command]) or FakeProcess())
+    monkeypatch.setattr(tool.subprocess, "run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tool.time, "sleep", lambda _seconds: None)
+
+    assert tool.main([]) == 0
+
+    generated_config = runtime_root / "station_runtime.simulated_ipc.conf"
+    config_text = generated_config.read_text(encoding="utf-8")
+    assert "image_save.cleanup_enabled=false" in config_text
+    assert "image_save.cleanup_min_free_ratio=0" in config_text
+    assert ["--config", str(generated_config)] == popen_commands[0][1:3]
+    assert ["--config", str(generated_config)] == run_commands[1][3:5]
+
+
 def test_timeout_override_is_passed_to_controller_and_detector(monkeypatch, tmp_path) -> None:
     tool = importlib.import_module("tools.run_simulated_ipc")
 

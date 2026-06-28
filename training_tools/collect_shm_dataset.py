@@ -105,7 +105,7 @@ def _trace_all_algorithm(trace_root: Path | str) -> SeatSurfaceAoiAlgorithm:
                 roi_locator=recipe.roi_locator,
                 registration=recipe.registration,
                 fusion=recipe.fusion,
-                thresholds=recipe.thresholds,
+                decision_threshold=recipe.decision_threshold,
                 models=recipe.models,
                 trace=TraceConfig(
                     enabled=True,

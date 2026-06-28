@@ -46,6 +46,8 @@ uv run python -m tools.validate_protocol
 uv run python tools/run_simulated_ipc.py
 ```
 
+默认模拟 IPC 会生成临时 C++ runtime config，把 trace/images 指向系统临时目录并关闭磁盘水位门禁，避免开发机磁盘余量影响本地回归；生产和测试机配置仍保留 `image_save.cleanup_min_free_ratio=0.20`。
+
 C++ 单独构建与验证：
 
 ```powershell
@@ -200,7 +202,7 @@ seat-surface-aoi/
 └── tools/               # 协议校验、模拟 IPC、打包、预检和 Windows 交付安装脚本
 ```
 
-ROI 定位模型当前使用单类别 `seat`。训练数据应采用 YOLO segmentation 格式，导出的产物放入 `model/roi_yolo/seat_roi_seg.onnx`，并与 `python_detector/config/*recipe*.yaml` 中的 `roi_locator.class_names: [seat]`、ROI 模板和标定文件保持一致。
+ROI 定位模型当前只映射一个目标 ROI 名称 `seat`。训练数据应采用 YOLO segmentation 格式，导出的产物放入 `model/roi_yolo/seat_roi_seg.onnx`，并与 `python_detector/config/*recipe*.yaml` 中的 `roi_locator.class_names: [seat]`、ROI 模板和标定文件保持一致；这里的 `class_names` 只服务 ROI 定位，不代表缺陷类别。
 
 已有 ROI 模型和 `images_capture/` 真实平铺 PNG 后，先把采图目录转换成现有训练链路可消费的 ROI manifest，再训练 PatchCore/PCA/FAISS 或监督模型：
 
@@ -215,8 +217,8 @@ uv run python -m training_tools.collect_capture_dataset `
   --skip-failed
 ```
 
-`collect_capture_dataset` 默认按所选配方的 `light_order` 生成 `L1/L2/L3...` 到算法光源 ID 的映射；当前生产配方即 `L1/L2/L3 -> DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。它调用 `model/roi_yolo/seat_roi_seg.onnx` 做 ROI segmentation 定位，先按 mask 外接矩形裁出座椅 ROI，再把 mask 外像素置黑，只保留 mask 内目标物体，最后输出 `dataset_manifest.jsonl` 和当前配方光源数量一致的 ROI PNG。默认保留 ROI 原生尺寸，避免把纹理和细小缺陷压缩失真；只有在需要和 PatchCore 固定输入尺寸对齐时，才应显式传 `--roi-output-size WIDTHxHEIGHT`，并且该缩放会采用等比例 letterbox，而不是直接拉伸。`dataset_summary.json` 会记录 `roi_size_policy` 和 ROI 尺寸分布，`patchcore_training_summary.json` 会记录实际训练输入 `input_shape_summary`，用于确认训练和在线裁剪策略一致。ROI 冲突、低置信或越界样本会被跳过，不进入训练集。PatchCore 只能用人工确认的正常样本建库；`seat_defect_detector.onnx` 仍需要按缺陷类别人工标注后的 YOLO detect 数据集训练。
-生产缺陷判定链路采用无监督 PatchCore 主模型，不依赖 `model/supervised_defect/seat_defect_detector.onnx`。真实 OK 样本用于训练 WideResNet50 embedding、PCA、PatchCore memory bank 和可选 FAISS 索引；训练 embedding 默认使用配方 `models.<key>.input_channels`，与在线检测层保持一致，当前 2 个机位、3 种光源只是生产配方事实，算法层不固定光源数或输入通道数。NG/RECHECK 与人工复核样本用于阈值曲线和放行验证。
+`collect_capture_dataset` 默认按所选配方的 `light_order` 生成 `L1/L2/L3...` 到算法光源 ID 的映射；当前生产配方即 `L1/L2/L3 -> DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`。它调用 `model/roi_yolo/seat_roi_seg.onnx` 做 ROI segmentation 定位，先按 mask 外接矩形裁出座椅 ROI，再把 mask 外像素置黑，只保留 mask 内目标物体，最后输出 `dataset_manifest.jsonl` 和当前配方光源数量一致的 ROI PNG。默认保留 ROI 原生尺寸，避免把纹理和细小缺陷压缩失真；只有在需要和 PatchCore 固定输入尺寸对齐时，才应显式传 `--roi-output-size WIDTHxHEIGHT`，并且该缩放会采用等比例 letterbox，而不是直接拉伸。`dataset_summary.json` 会记录 `roi_size_policy` 和 ROI 尺寸分布，`patchcore_training_summary.json` 会记录实际训练输入 `input_shape_summary`，用于确认训练和在线裁剪策略一致。ROI 冲突、低置信或越界样本会被跳过，不进入训练集。PatchCore 只能用人工确认的正常样本建库。
+生产缺陷判定链路采用无监督 PatchCore 主模型，不依赖缺陷类别识别模型。真实 OK 样本用于训练 WideResNet50 embedding、PCA、PatchCore memory bank 和可选 FAISS 索引；训练 embedding 默认使用配方 `models.<key>.input_channels`，与在线检测层保持一致，当前 2 个机位、3 种光源只是生产配方事实，算法层不固定光源数或输入通道数。NG/RECHECK 与人工复核样本用于阈值曲线和放行验证；检测结果只表达缺陷存在性、位置、分数和处置判定，不输出缺陷类别。
 
 **生产配方默认启用空间 PatchCore 模式（`spatial_mode: true`）**，检测链路提取 layer2+layer3 中间层特征图构建 H×W patch 嵌入，当前生产配方显式使用 `64x64` 空间 patch 网格，原始 patch embedding 为 1536 维，经 `seat_pca.json`（v2, 524 维，95% 累积方差）投影后进入 PatchCore memory bank/FAISS。离线训练和最终 memory bank 向量均使用 `.npy` 二进制矩阵保存，`seat_patchcore_bank.json` 只保存版本、维度、`vectors_path`、向量数和 metadata；默认训练完成后清理 `embeddings.npy/pca_embeddings.npy` 中间矩阵。KNN 评分后生成像素级 `anomaly_map`，经 `scipy.ndimage.label` 连通域分析自动定位缺陷区域并输出 bbox。在线推理会先把 `anomaly_map` 和 `nearest_distances` 归一化为二维有限矩阵并确认形状一致，再做最大值统计和连通域提取，避免 numpy 数组布尔歧义或异常形状静默进入判定。TraceWriter 只生成一张检测 `overlay` 图：把 `anomaly_map` 映射回 raw 原图坐标，但只在最终缺陷候选 bbox 内叠加达到 PatchCore 二值化阈值的黄/红热色，其他低分 ROI 保持灰度原图，并绘制判定框和缺陷 bbox，供前端生产展示通道消费。若需回退到全局嵌入路径（整个 ROI → 1 个标量分数），在配方中设置 `spatial_mode: false`。
 

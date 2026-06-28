@@ -97,7 +97,7 @@ class CameraDefaults:
 
 
 @dataclass(frozen=True)
-class ThresholdConfig:
+class DecisionThresholdConfig:
     ng_score: float = 0.35
     recheck_score: float = 0.20
     min_area_px: int = 1
@@ -110,7 +110,6 @@ class ThresholdConfig:
 @dataclass(frozen=True)
 class FusionConfig:
     iou_threshold: float = 0.5
-    class_aware: bool = True
     max_candidates_per_roi: int = 16
 
 
@@ -123,7 +122,6 @@ class ModelConfig:
     role: str = "primary"
     input_channels: tuple[str, ...] = ()
     input_scale: float = 255.0
-    class_names: tuple[str, ...] = ("scratch",)
     output_decode: str = "none"
     bbox_format: str = "xyxy_pixel"
     score_threshold: float = 0.0
@@ -170,7 +168,7 @@ class Recipe:
     roi_locator: RoiLocatorConfig = field(default_factory=RoiLocatorConfig)
     registration: RegistrationConfig = field(default_factory=RegistrationConfig)
     fusion: FusionConfig = field(default_factory=FusionConfig)
-    thresholds: dict[str, ThresholdConfig] = field(default_factory=dict)
+    decision_threshold: DecisionThresholdConfig = field(default_factory=DecisionThresholdConfig)
     models: dict[str, ModelConfig] = field(default_factory=lambda: {"default": ModelConfig()})
     trace: TraceConfig = field(default_factory=TraceConfig)
 
@@ -283,6 +281,8 @@ def load_recipe_file(path: str | Path) -> Recipe:
 
 
 def recipe_from_dict(data: dict[str, Any]) -> Recipe:
+    if "thresholds" in data:
+        raise RecipeValidationError("thresholds 已移除；当前缺陷检测只使用 decision_threshold 单一判定阈值")
     recipe_id = _required_str(data, "recipe_id")
     sku = _required_str(data, "sku")
     light_order = _recipe_light_order_from_dict(data)
@@ -297,7 +297,7 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
         registration.base_light_id,
     )
     cameras = _cameras_from_dict(data.get("cameras", {}), camera_defaults)
-    thresholds = _thresholds_from_dict(_dict(data.get("thresholds", {}), "thresholds"))
+    decision_threshold = _decision_threshold_from_dict(_dict(data.get("decision_threshold", {}), "decision_threshold"))
     models = _models_from_dict(_dict(data.get("models", {"default": {"backend": "fake"}}), "models"), light_order)
     trace = _trace_from_dict(_dict(data.get("trace", {}), "trace"))
 
@@ -307,7 +307,7 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
     _validate_registration_lights(light_order, quality.required_lights, registration)
     _validate_camera_lights(cameras, quality.required_lights, registration)
     _validate_model_refs(cameras, models)
-    _validate_model_thresholds(models, thresholds)
+    _validate_model_configs(models)
     if not cameras:
         raise RecipeValidationError("至少需要配置一个启用机位")
     return Recipe(
@@ -321,7 +321,7 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
         roi_locator=roi_locator,
         registration=registration,
         fusion=fusion,
-        thresholds=thresholds,
+        decision_threshold=decision_threshold,
         models=models,
         trace=trace,
     )
@@ -441,9 +441,10 @@ def _registration_from_dict(data: dict[str, Any], default_required_lights: tuple
 
 
 def _fusion_from_dict(data: dict[str, Any]) -> FusionConfig:
+    if "class_aware" in data:
+        raise RecipeValidationError("fusion.class_aware 已移除；当前缺陷候选统一按 camera/pose/ROI 做融合")
     return FusionConfig(
         iou_threshold=_ratio(data.get("iou_threshold", 0.5), "fusion.iou_threshold"),
-        class_aware=bool(data.get("class_aware", True)),
         max_candidates_per_roi=_positive_int(data.get("max_candidates_per_roi", 16), "fusion.max_candidates_per_roi"),
     )
 
@@ -547,33 +548,35 @@ def _cameras_from_dict(data: Any, camera_defaults: CameraDefaults) -> tuple[Came
     return tuple(cameras)
 
 
-def _thresholds_from_dict(data: dict[str, Any]) -> dict[str, ThresholdConfig]:
-    thresholds: dict[str, ThresholdConfig] = {}
-    for class_name, raw in data.items():
-        raw = _dict(raw, f"thresholds.{class_name}")
-        ng_score = _ratio(raw.get("ng_score", 0.35), f"thresholds.{class_name}.ng_score")
-        recheck_score = _ratio(raw.get("recheck_score", 0.20), f"thresholds.{class_name}.recheck_score")
-        if recheck_score > ng_score:
-            raise RecipeValidationError(
-                f"thresholds.{class_name}.recheck_score 不能大于 ng_score: {recheck_score} > {ng_score}"
-            )
-        thresholds[str(class_name)] = ThresholdConfig(
-            ng_score=ng_score,
-            recheck_score=recheck_score,
-            min_area_px=_non_negative_int(raw.get("min_area_px", 1), f"thresholds.{class_name}.min_area_px"),
+def _decision_threshold_from_dict(data: dict[str, Any]) -> DecisionThresholdConfig:
+    ng_score = _ratio(data.get("ng_score", 0.35), "decision_threshold.ng_score")
+    recheck_score = _ratio(data.get("recheck_score", 0.20), "decision_threshold.recheck_score")
+    if recheck_score > ng_score:
+        raise RecipeValidationError(
+            f"decision_threshold.recheck_score 不能大于 ng_score: {recheck_score} > {ng_score}"
         )
-    return thresholds
+    return DecisionThresholdConfig(
+        ng_score=ng_score,
+        recheck_score=recheck_score,
+        min_area_px=_non_negative_int(data.get("min_area_px", 1), "decision_threshold.min_area_px"),
+        min_aspect_ratio=_non_negative_float(data.get("min_aspect_ratio", 0.0), "decision_threshold.min_aspect_ratio"),
+        max_aspect_ratio=_non_negative_float(data.get("max_aspect_ratio", 0.0), "decision_threshold.max_aspect_ratio"),
+    )
 
 
 def _models_from_dict(data: dict[str, Any], light_order: tuple[str, ...]) -> dict[str, ModelConfig]:
     models: dict[str, ModelConfig] = {}
     for model_key, raw in data.items():
         raw = _dict(raw, f"models.{model_key}")
+        if "class_names" in raw:
+            raise RecipeValidationError(
+                f"models.{model_key}.class_names 已移除；当前缺陷检测统一输出固定 defect 结果"
+            )
         backend = _str(raw.get("backend", "fake"), f"models.{model_key}.backend")
         if backend not in {"fake", "onnx", "patchcore_knn"}:
             raise RecipeValidationError(f"不支持的模型后端: {backend}")
         model_family = _str(raw.get("model_family", "supervised"), f"models.{model_key}.model_family")
-        if model_family not in {"supervised", "patchcore", "efficientad", "yolo_seg", "classifier"}:
+        if model_family not in {"supervised", "patchcore", "efficientad", "yolo_seg"}:
             raise RecipeValidationError(f"不支持的模型家族: {model_family}")
         role = _str(raw.get("role", "primary"), f"models.{model_key}.role")
         if role not in {"primary", "safety_net"}:
@@ -590,7 +593,6 @@ def _models_from_dict(data: dict[str, Any], light_order: tuple[str, ...]) -> dic
             ),
             f"models.{model_key}.input_channels",
         )
-        class_names = _unique_str_tuple(raw.get("class_names", ("scratch",)), f"models.{model_key}.class_names")
         embedding_backend = _str(raw.get("embedding_backend", "none"), f"models.{model_key}.embedding_backend")
         if embedding_backend not in {"none", "statistical", "onnx_wideresnet50"}:
             raise RecipeValidationError(
@@ -607,7 +609,6 @@ def _models_from_dict(data: dict[str, Any], light_order: tuple[str, ...]) -> dic
             role=role,
             input_channels=input_channels,
             input_scale=_positive_float(raw.get("input_scale", 255.0), f"models.{model_key}.input_scale"),
-            class_names=class_names,
             output_decode=_output_decode(raw.get("output_decode", "none"), f"models.{model_key}.output_decode"),
             bbox_format=_bbox_format(raw.get("bbox_format", "xyxy_pixel"), f"models.{model_key}.bbox_format"),
             score_threshold=_ratio(raw.get("score_threshold", 0.0), f"models.{model_key}.score_threshold"),
@@ -783,11 +784,8 @@ def _validate_model_ref(models: dict[str, ModelConfig], model_key: str, location
         raise RecipeValidationError(f"{location} 引用的模型角色必须是 {expected_role}: {model_key}")
 
 
-def _validate_model_thresholds(models: dict[str, ModelConfig], thresholds: dict[str, ThresholdConfig]) -> None:
+def _validate_model_configs(models: dict[str, ModelConfig]) -> None:
     for model_key, model in models.items():
-        missing = [class_name for class_name in model.class_names if class_name not in thresholds]
-        if missing:
-            raise RecipeValidationError(f"models.{model_key}.class_names 缺少显式 thresholds 配置: {missing}")
         if model.backend == "patchcore_knn":
             if model.memory_bank_path in (None, ""):
                 raise RecipeValidationError(f"models.{model_key}.backend=patchcore_knn 必须配置 memory_bank_path")

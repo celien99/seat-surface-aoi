@@ -31,7 +31,6 @@ class DatasetSample:
     light_id: str
     image_path: str
     has_defect: bool
-    defect_classes: list[str]
     bbox_xyxy_pixel: list[list[int]]
     split: str
     label_status: str
@@ -51,7 +50,6 @@ class DatasetSample:
             "light_id": self.light_id,
             "image_path": self.image_path,
             "has_defect": self.has_defect,
-            "defect_classes": self.defect_classes,
             "bbox_xyxy_pixel": self.bbox_xyxy_pixel,
             "split": self.split,
             "label_status": self.label_status,
@@ -195,7 +193,6 @@ def _collect_trace_dir(
                 light_id=light_id,
                 image_path=relative_image_path.as_posix(),
                 has_defect=bool(defect_items),
-                defect_classes=sorted({str(item.get("class_name") or "") for item in defect_items if item.get("class_name")}),
                 bbox_xyxy_pixel=[_bbox(item, trace_dir) for item in defect_items],
                 split=split,
                 label_status=label_status,
@@ -301,18 +298,15 @@ def _safe_name(value: str) -> str:
 def _summary(samples: list[DatasetSample]) -> dict[str, Any]:
     decisions: dict[str, int] = {}
     cameras: dict[str, int] = {}
-    defect_classes: dict[str, int] = {}
     for sample in samples:
         decisions[sample.decision] = decisions.get(sample.decision, 0) + 1
         cameras[sample.camera_id] = cameras.get(sample.camera_id, 0) + 1
-        for class_name in sample.defect_classes:
-            defect_classes[class_name] = defect_classes.get(class_name, 0) + 1
     return {
         "sample_count": len(samples),
         "trace_count": len({sample.source_trace_dir for sample in samples}),
         "decision_counts": decisions,
         "camera_counts": cameras,
-        "defect_class_counts": defect_classes,
+        "defect_sample_count": sum(1 for sample in samples if sample.has_defect),
         "label_status_counts": {status: sum(1 for sample in samples if sample.label_status == status) for status in sorted({sample.label_status for sample in samples})},
     }
 

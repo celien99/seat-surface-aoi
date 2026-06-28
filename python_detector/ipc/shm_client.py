@@ -124,7 +124,7 @@ class ShmClient:
 
     def publish_result(self, result: InspectionResult) -> None:
         defects = result.defects[:MAX_DEFECTS_PER_RESULT]
-        defect_entry_size = struct.calcsize("<64s64s64sI64s64s64s4ifII8iqII")
+        defect_entry_size = struct.calcsize("<64s64sI64s64s64s4ifII8iqII")
         payload_size = RESULT_SLOT_HEADER_SIZE + len(defects) * defect_entry_size
         # 防御性裁剪：如果 payload 超过 slot 容量，按可用空间缩减缺陷数量，
         # 避免写穿 mmap 损毁相邻 slot 或共享内存头部。
@@ -445,9 +445,8 @@ class ShmClient:
         evidence = [self._light_index(light) for light in defect.evidence_lights]
         evidence = (evidence + [0] * MAX_EVIDENCE_LIGHTS)[:MAX_EVIDENCE_LIGHTS]
         return struct.pack(
-            "<64s64s64sI64s64s64s4ifII8iqII",
+            "<64s64sI64s64s64s4ifII8iqII",
             encode_cstr(defect.defect_id),
-            encode_cstr(defect.class_name),
             encode_cstr(defect.severity),
             self._camera_index_for_defect(defect),
             encode_cstr(defect.camera_id),

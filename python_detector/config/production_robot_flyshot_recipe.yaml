@@ -10,12 +10,12 @@ v4_lights:
     DARKFIELD_L: HIGH_LEFT
     BRIGHTFIELD: POLAR_DIFFUSE
 camera_defaults:
-  model_key: patchcore_unknown_detector
+  model_key: patchcore_detector
   roi_template: python_detector/config/roi/production_full_roi.yaml
   base_light_id: POLAR_DIFFUSE
   light_order: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT]
   roi_models:
-    seat: patchcore_unknown_detector
+    seat: patchcore_detector
 cameras:
   T1_BACKREST:
     camera_id: EYE_IN_HAND
@@ -67,25 +67,21 @@ registration:
   min_correlation: 0.05
 fusion:
   iou_threshold: 0.5
-  class_aware: true
   max_candidates_per_roi: 16
-thresholds:
-  unknown_anomaly:
-    ng_score: 0.55
-    recheck_score: 0.20
-    min_area_px: 1
+decision_threshold:
+  ng_score: 0.55
+  recheck_score: 0.20
+  min_area_px: 1
 models:
   default:
     backend: fake
     fake_mode: auto
     model_family: patchcore
     role: primary
-    class_names: [unknown_anomaly]
-  patchcore_unknown_detector:
+  patchcore_detector:
     backend: patchcore_knn
     model_family: patchcore
     role: primary
-    class_names: [unknown_anomaly]
     input_channels:
       - light:DIFFUSE
       - light:POLAR_DIFFUSE

@@ -394,7 +394,6 @@ def _embedding_model_config(
         role=base.role,
         input_channels=channel_order if channel_order is not None else base.input_channels,
         input_scale=base.input_scale,
-        class_names=base.class_names,
         output_decode=base.output_decode,
         bbox_format=base.bbox_format,
         score_threshold=base.score_threshold,

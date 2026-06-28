@@ -41,7 +41,7 @@ def test_collect_trace_dataset_generates_manifest_and_images(tmp_path: Path) -> 
     assert rows[0]["split"] == "train"
     assert rows[0]["label_status"] == "unlabeled"
     assert all(row["has_defect"] is True for row in rows)
-    assert all(row["defect_classes"] == ["scratch"] for row in rows)
+    assert all("defect_classes" not in row for row in rows)
     assert all(row["bbox_xyxy_pixel"] == [[1, 2, 10, 12]] for row in rows)
     for row in rows:
         assert (output / row["image_path"]).read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
@@ -330,7 +330,6 @@ def test_simulate_capture_detection_writes_png_detection_images(tmp_path: Path) 
     )()
     defect = DefectResult(
         defect_id="D1",
-        class_name="scratch",
         severity="minor",
         camera_id="TOP_BACK",
         pose_id="TOP_BACK",
@@ -426,7 +425,6 @@ def _write_trace(trace_dir: Path) -> Path:
                 "defects": [
                     {
                         "defect_id": "defect_1",
-                        "class_name": "scratch",
                         "camera_id": "TOP_BACK",
                         "roi_name": "seat",
                         "bbox_xyxy_pixel": [1, 2, 10, 12],
@@ -500,7 +498,6 @@ def _write_robot_pose_trace(trace_dir: Path) -> Path:
                 "defects": [
                     {
                         "defect_id": "defect_1",
-                        "class_name": "scratch",
                         "camera_id": "EYE_IN_HAND",
                         "pose_id": "T1_BACKREST",
                         "roi_name": "seat",

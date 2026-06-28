@@ -46,6 +46,8 @@ class ISignalClient {
 public:
   virtual ~ISignalClient() = default;
   virtual bool initialize(const SignalClientConfig& config) = 0;
+  // 返回 false 且 error_message 为空表示本轮没有新触发，站点保持 Ready 继续等待。
+  // 返回 false 且 error_message 非空表示真实信号故障或协议错误，需要 fail closed。
   virtual bool wait_trigger(ExternalTrigger* out_trigger,
                             int timeout_ms,
                             std::string* error_message) = 0;

@@ -54,8 +54,6 @@ def evaluate_detections(
         for idx, gt in enumerate(ground_truths):
             if idx in matched_gt:
                 continue
-            if pred.get("class_name") != gt.get("class_name"):
-                continue
             gt_bbox = tuple(int(v) for v in gt["bbox_xyxy_pixel"])
             iou = compute_iou(pred_bbox, gt_bbox)
             if iou > best_iou:
@@ -93,7 +91,6 @@ def evaluate_dataset_predictions(
     total_fn = 0
     image_metrics: list[dict] = []
     breakdown: dict[str, dict[str, dict[str, int]]] = {
-        "by_class": {},
         "by_roi": {},
         "by_camera": {},
         "by_split": {},
@@ -113,13 +110,6 @@ def evaluate_dataset_predictions(
         _accumulate_breakdown(breakdown["by_roi"], item["metadata"].get("roi_name", ""), metrics)
         _accumulate_breakdown(breakdown["by_camera"], item["metadata"].get("camera_id", ""), metrics)
         _accumulate_breakdown(breakdown["by_split"], item["metadata"].get("split", ""), metrics)
-        _accumulate_class_breakdown(
-            breakdown["by_class"],
-            item["predictions"],
-            item["ground_truths"],
-            iou_threshold=iou_threshold,
-            score_threshold=score_threshold,
-        )
 
     total_preds = total_tp + total_fp
     total_gts = total_tp + total_fn
@@ -207,7 +197,6 @@ def _predict_manifest_groups(
                 },
                 "predictions": [
                     {
-                        "class_name": candidate.class_name,
                         "score": candidate.score,
                         "bbox_xyxy_pixel": candidate.bbox_xyxy_pixel,
                     }
@@ -215,7 +204,6 @@ def _predict_manifest_groups(
                 ],
                 "ground_truths": [
                     {
-                        "class_name": str(gt.get("class_name", "")),
                         "bbox_xyxy_pixel": tuple(int(value) for value in gt["bbox_xyxy_pixel"]),
                         "severity": str(gt.get("severity", "")),
                     }
@@ -232,31 +220,6 @@ def _accumulate_breakdown(target: dict[str, dict[str, int]], key: str, metrics: 
     bucket["true_positives"] += int(metrics["true_positives"])
     bucket["false_positives"] += int(metrics["false_positives"])
     bucket["false_negatives"] += int(metrics["false_negatives"])
-
-
-def _accumulate_class_breakdown(
-    target: dict[str, dict[str, int]],
-    predictions: list[dict],
-    ground_truths: list[dict],
-    *,
-    iou_threshold: float,
-    score_threshold: float,
-) -> None:
-    class_names = sorted(
-        {
-            str(item.get("class_name", ""))
-            for item in [*predictions, *ground_truths]
-            if str(item.get("class_name", ""))
-        }
-    )
-    for class_name in class_names:
-        metrics = evaluate_detections(
-            [item for item in predictions if item.get("class_name") == class_name],
-            [item for item in ground_truths if item.get("class_name") == class_name],
-            iou_threshold=iou_threshold,
-            score_threshold=score_threshold,
-        )
-        _accumulate_breakdown(target, class_name, metrics)
 
 
 def _finalize_breakdown(raw: dict[str, dict[str, dict[str, int]]]) -> dict[str, dict[str, dict[str, float]]]:

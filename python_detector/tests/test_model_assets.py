@@ -13,21 +13,21 @@ def test_production_recipe_loads_full_model_chain() -> None:
 
     assert recipe.recipe_id == "seat_a_black_leather_production_v1"
     assert recipe.quality.required_lights == ("DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT")
-    assert recipe.model_key_for("TOP_BACK", "seat") == "patchcore_unknown_detector"
+    assert recipe.model_key_for("TOP_BACK", "seat") == "patchcore_detector"
     assert recipe.safety_net_model_keys_for("TOP_BACK", "seat") == ()
-    assert recipe.models["patchcore_unknown_detector"].input_channels == (
+    assert recipe.models["patchcore_detector"].input_channels == (
         "light:DIFFUSE",
         "light:POLAR_DIFFUSE",
         "light:HIGH_LEFT",
     )
     assert recipe.roi_locator.backend == "onnx_yolo_seg"
     assert recipe.roi_locator.model_path == "model/roi_yolo/seat_roi_seg.onnx"
-    assert recipe.models["patchcore_unknown_detector"].backend == "patchcore_knn"
-    assert recipe.models["patchcore_unknown_detector"].role == "primary"
-    assert recipe.models["patchcore_unknown_detector"].spatial_upsample_height == 64
-    assert recipe.models["patchcore_unknown_detector"].spatial_upsample_width == 64
-    assert recipe.models["patchcore_unknown_detector"].anomaly_binarize_min_ratio == 0.5
-    assert recipe.models["patchcore_unknown_detector"].anomaly_binarize_relative == 0.3
+    assert recipe.models["patchcore_detector"].backend == "patchcore_knn"
+    assert recipe.models["patchcore_detector"].role == "primary"
+    assert recipe.models["patchcore_detector"].spatial_upsample_height == 64
+    assert recipe.models["patchcore_detector"].spatial_upsample_width == 64
+    assert recipe.models["patchcore_detector"].anomaly_binarize_min_ratio == 0.5
+    assert recipe.models["patchcore_detector"].anomaly_binarize_relative == 0.3
 
 
 def test_production_robot_recipe_uses_patchcore_primary_detector() -> None:
@@ -36,7 +36,7 @@ def test_production_robot_recipe_uses_patchcore_primary_detector() -> None:
     assert recipe.recipe_id == "seat_a_robot_flyshot_production_v1"
     assert recipe.registration.method == "ecc"
     assert recipe.roi_locator.backend == "onnx_yolo_seg"
-    assert recipe.model_key_for("EYE_IN_HAND", "seat", "T1_BACKREST") == "patchcore_unknown_detector"
+    assert recipe.model_key_for("EYE_IN_HAND", "seat", "T1_BACKREST") == "patchcore_detector"
     assert recipe.safety_net_model_keys_for("EYE_IN_HAND", "seat", "T1_BACKREST") == ()
 
 
@@ -61,18 +61,18 @@ roi_locator:
 cameras:
   TOP:
     model_key: patchcore
-thresholds:
-  unknown_anomaly: {{ng_score: 0.55, recheck_score: 0.20, min_area_px: 1}}
+decision_threshold:
+  ng_score: 0.55
+  recheck_score: 0.20
+  min_area_px: 1
 models:
   default:
     backend: fake
     role: primary
-    class_names: [unknown_anomaly]
   patchcore:
     backend: patchcore_knn
     model_family: patchcore
     role: primary
-    class_names: [unknown_anomaly]
     embedding_backend: onnx_wideresnet50
     embedding_model_path: {embedding}
     pca_path: {pca}
@@ -111,19 +111,18 @@ cameras:
   TOP:
     model_key: default
     safety_net_model_key: patchcore
-thresholds:
-  scratch: {{ng_score: 0.35, recheck_score: 0.20, min_area_px: 8}}
-  unknown_anomaly: {{ng_score: 0.55, recheck_score: 0.20, min_area_px: 1}}
+decision_threshold:
+  ng_score: 0.55
+  recheck_score: 0.20
+  min_area_px: 1
 models:
   default:
     backend: fake
     role: primary
-    class_names: [scratch]
   patchcore:
     backend: patchcore_knn
     model_family: patchcore
     role: safety_net
-    class_names: [unknown_anomaly]
     embedding_backend: statistical
     embedding_dim: 2
     pca_path: {pca_path}
@@ -154,18 +153,18 @@ light_order: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT, HIGH_RIGHT]
 cameras:
   TOP:
     model_key: patchcore
-thresholds:
-  unknown_anomaly: {{ng_score: 0.55, recheck_score: 0.20, min_area_px: 1}}
+decision_threshold:
+  ng_score: 0.55
+  recheck_score: 0.20
+  min_area_px: 1
 models:
   default:
     backend: fake
     role: primary
-    class_names: [unknown_anomaly]
   patchcore:
     backend: patchcore_knn
     model_family: patchcore
     role: primary
-    class_names: [unknown_anomaly]
     embedding_backend: statistical
     embedding_dim: 2
     pca_path: {pca_path}
@@ -211,18 +210,18 @@ light_order: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT]
 cameras:
   TOP:
     model_key: patchcore
-thresholds:
-  unknown_anomaly: {{ng_score: 0.55, recheck_score: 0.20, min_area_px: 1}}
+decision_threshold:
+  ng_score: 0.55
+  recheck_score: 0.20
+  min_area_px: 1
 models:
   default:
     backend: fake
     role: primary
-    class_names: [unknown_anomaly]
   patchcore:
     backend: patchcore_knn
     model_family: patchcore
     role: primary
-    class_names: [unknown_anomaly]
     input_channels: [light:DIFFUSE, light:POLAR_DIFFUSE, light:HIGH_LEFT]
     embedding_backend: onnx_wideresnet50
     embedding_model_path: {embedding}

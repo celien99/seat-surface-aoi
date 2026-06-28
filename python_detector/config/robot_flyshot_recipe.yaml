@@ -11,14 +11,14 @@ v4_lights:
     BRIGHTFIELD: POLAR_DIFFUSE
 camera_defaults:
   model_key: fake_default
-  safety_net_model_key: unknown_safety_net
+  safety_net_model_key: patchcore_safety_net
   roi_template: python_detector/config/roi/default_roi.yaml
   base_light_id: POLAR_DIFFUSE
   light_order: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT]
   roi_models:
     seat: fake_default
   roi_safety_net_models:
-    seat: unknown_safety_net
+    seat: patchcore_safety_net
 cameras:
   T1_BACKREST:
     camera_id: EYE_IN_HAND
@@ -62,33 +62,22 @@ registration:
   min_correlation: 0.05
 fusion:
   iou_threshold: 0.5
-  class_aware: true
   max_candidates_per_roi: 16
-thresholds:
-  scratch:
-    ng_score: 0.35
-    recheck_score: 0.20
-    min_area_px: 8
-  dent:
-    ng_score: 0.30
-    recheck_score: 0.18
-    min_area_px: 20
-  unknown_anomaly:
-    ng_score: 0.55
-    recheck_score: 0.20
-    min_area_px: 1
+decision_threshold:
+  ng_score: 0.35
+  recheck_score: 0.20
+  min_area_px: 8
 models:
   fake_default:
     backend: fake
     fake_mode: auto
     model_family: supervised
     role: primary
-  unknown_safety_net:
+  patchcore_safety_net:
     backend: fake
     fake_mode: ok
     model_family: patchcore
     role: safety_net
-    class_names: [unknown_anomaly]
     score_threshold: 0.20
     embedding_backend: statistical
     embedding_version: robot_flyshot_stat_v1

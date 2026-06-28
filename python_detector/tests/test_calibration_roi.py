@@ -42,7 +42,7 @@ def _frame(light_id: str, calibration_id: str = "calib/simulated_v1", camera_id:
     )
 
 
-def test_calibration_manager_loads_identity_roi() -> None:
+def test_calibration_manager_loads_idefectity_roi() -> None:
     calibration = CalibrationManager().load(
         "TOP_BACK",
         "calib/simulated_v1",
@@ -52,7 +52,7 @@ def test_calibration_manager_loads_identity_roi() -> None:
     assert calibration.light_alignment["DIFFUSE"] == (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
 
 
-def test_calibration_manager_default_path_is_independent_from_cwd(monkeypatch, tmp_path: Path) -> None:
+def test_calibration_manager_default_path_is_independefect_from_cwd(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
 
     calibration = CalibrationManager().load(

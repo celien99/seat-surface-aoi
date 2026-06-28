@@ -57,6 +57,7 @@ class PatchCoreKnnIndex:
     def __init__(self) -> None:
         self._cache: dict[str, PatchCoreBank] = {}
         self._array_cache: dict[int, np.ndarray] = {}
+        self._faiss_index_cache: dict[str, tuple[int, int, Any]] = {}
 
     def score(
         self,
@@ -159,11 +160,7 @@ class PatchCoreKnnIndex:
         if not path.exists() or path.stat().st_size <= 1:
             return None
         try:
-            import faiss  # type: ignore
-        except Exception:
-            return None
-        try:
-            index = faiss.read_index(str(path))
+            index = self._load_faiss_index(path)
             index_dim = int(getattr(index, "d"))
             if index_dim != bank.embedding_dim:
                 return None
@@ -283,11 +280,7 @@ class PatchCoreKnnIndex:
         if not path.exists() or path.stat().st_size <= 1:
             return None
         try:
-            import faiss  # type: ignore
-        except Exception:
-            return None
-        try:
-            index = faiss.read_index(str(path))
+            index = self._load_faiss_index(path)
             index_dim = int(getattr(index, "d"))
             if index_dim != len(embedding):
                 return None
@@ -336,6 +329,20 @@ class PatchCoreKnnIndex:
             array = np.asarray(bank.vectors, dtype=np.float32)
             self._array_cache[cache_key] = array
         return array
+
+    def _load_faiss_index(self, path: Path) -> Any:
+        stat = path.stat()
+        cache_key = str(path)
+        cached = self._faiss_index_cache.get(cache_key)
+        if cached is not None:
+            cached_size, cached_mtime_ns, cached_index = cached
+            if cached_size == stat.st_size and cached_mtime_ns == stat.st_mtime_ns:
+                return cached_index
+        import faiss  # type: ignore
+
+        index = faiss.read_index(str(path))
+        self._faiss_index_cache[cache_key] = (int(stat.st_size), int(stat.st_mtime_ns), index)
+        return index
 
     def _str(self, value: Any, name: str) -> str:
         if not isinstance(value, str) or not value:

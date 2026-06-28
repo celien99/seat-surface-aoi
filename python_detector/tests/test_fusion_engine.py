@@ -8,7 +8,6 @@ from python_detector.pipeline.fusion_engine import FusionEngine
 def _candidate(
     score: float,
     bbox_xyxy_pixel: tuple[int, int, int, int],
-    class_name: str = "scratch",
     camera_id: str = "TOP_BACK",
     evidence_lights: list[str] | None = None,
 ) -> DefectCandidate:
@@ -16,7 +15,6 @@ def _candidate(
     return DefectCandidate(
         camera_id=camera_id,
         roi_name="seat",
-        class_name=class_name,
         score=score,
         bbox_xyxy_pixel=bbox_xyxy_pixel,
         area_px=(x1 - x0 + 1) * (y1 - y0 + 1),
@@ -24,7 +22,7 @@ def _candidate(
     )
 
 
-def test_fusion_suppresses_overlapping_same_class_candidates() -> None:
+def test_fusion_suppresses_overlapping_same_roi_candidates() -> None:
     candidates = [
         _candidate(0.80, (10, 10, 30, 30), evidence_lights=["HIGH_LEFT"]),
         _candidate(0.90, (11, 11, 29, 29), evidence_lights=["HIGH_RIGHT"]),
@@ -40,17 +38,18 @@ def test_fusion_suppresses_overlapping_same_class_candidates() -> None:
     assert best.evidence_lights == ["HIGH_RIGHT", "HIGH_LEFT"]
 
 
-def test_fusion_keeps_different_class_or_camera_candidates() -> None:
+def test_fusion_suppresses_same_roi_and_keeps_different_camera_candidates() -> None:
     candidates = [
-        _candidate(0.90, (10, 10, 30, 30), class_name="scratch", camera_id="TOP_BACK"),
-        _candidate(0.85, (11, 11, 29, 29), class_name="dent", camera_id="TOP_BACK"),
-        _candidate(0.80, (11, 11, 29, 29), class_name="scratch", camera_id="TOP_CUSHION"),
+        _candidate(0.90, (10, 10, 30, 30), camera_id="TOP_BACK"),
+        _candidate(0.85, (11, 11, 29, 29), camera_id="TOP_BACK"),
+        _candidate(0.80, (11, 11, 29, 29), camera_id="TOP_CUSHION"),
     ]
 
-    fused = FusionEngine().fuse(candidates, FusionConfig(iou_threshold=0.5, class_aware=True))
+    fused = FusionEngine().fuse(candidates, FusionConfig(iou_threshold=0.5))
 
-    assert fused.suppressed_count == 0
-    assert len(fused.candidates) == 3
+    assert fused.suppressed_count == 1
+    assert len(fused.candidates) == 2
+    assert {candidate.camera_id for candidate in fused.candidates} == {"TOP_BACK", "TOP_CUSHION"}
 
 
 def test_fusion_caps_candidates_per_roi() -> None:

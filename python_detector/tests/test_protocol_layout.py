@@ -6,7 +6,7 @@ def test_protocol_sizes_match_cpp_static_asserts() -> None:
     assert protocol_sizes()["LightFrameMeta"] == 324
     assert protocol_sizes()["FrameSlotHeader"] == 268
     assert protocol_sizes()["ResultSlotHeader"] == 140
-    assert protocol_sizes()["DefectResultMeta"] == 464
+    assert protocol_sizes()["DefectResultMeta"] == 400
 
 
 def test_error_code_values_match_cpp_enum() -> None:

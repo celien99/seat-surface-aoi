@@ -31,7 +31,6 @@ class ManifestRow:
     split: str
     label_status: str
     has_defect: bool
-    defect_classes: tuple[str, ...]
     bbox_xyxy_pixel: tuple[tuple[int, int, int, int], ...]
     ground_truth: tuple[dict[str, Any], ...]
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -240,9 +239,8 @@ def read_pgm(path: Path) -> RasterImage:
 def _row_from_dict(raw: dict[str, Any], line_number: int, manifest_path: Path) -> ManifestRow:
     sample_id = _required_str(raw, "sample_id", line_number, manifest_path)
     light_id = _required_str(raw, "light_id", line_number, manifest_path)
-    defect_classes = _str_tuple(raw.get("defect_classes", ()))
     bboxes = _bbox_tuple(raw.get("bbox_xyxy_pixel", []), line_number, manifest_path, "bbox_xyxy_pixel")
-    ground_truth = _ground_truth(raw, defect_classes, bboxes, line_number, manifest_path)
+    ground_truth = _ground_truth(raw, bboxes, line_number, manifest_path)
     return ManifestRow(
         line_number=line_number,
         sample_id=sample_id,
@@ -260,7 +258,6 @@ def _row_from_dict(raw: dict[str, Any], line_number: int, manifest_path: Path) -
         split=str(raw.get("split", "unassigned")),
         label_status=str(raw.get("label_status", "unlabeled")),
         has_defect=bool(raw.get("has_defect", bool(ground_truth))),
-        defect_classes=defect_classes,
         bbox_xyxy_pixel=bboxes,
         ground_truth=ground_truth,
         metadata={key: value for key, value in raw.items() if key not in _KNOWN_FIELDS},
@@ -269,7 +266,6 @@ def _row_from_dict(raw: dict[str, Any], line_number: int, manifest_path: Path) -
 
 def _ground_truth(
     raw: dict[str, Any],
-    defect_classes: tuple[str, ...],
     bboxes: tuple[tuple[int, int, int, int], ...],
     line_number: int,
     manifest_path: Path,
@@ -281,13 +277,9 @@ def _ground_truth(
         return tuple(_normalize_gt(item, line_number, manifest_path) for item in raw_gt)
 
     gt_bboxes = _bbox_tuple(raw.get("ground_truth_bbox", []), line_number, manifest_path, "ground_truth_bbox")
-    gt_classes = _str_tuple(raw.get("ground_truth_class", ()))
-    if gt_bboxes or gt_classes:
-        if len(gt_bboxes) != len(gt_classes):
-            raise TrainingDataError(f"{manifest_path}:{line_number}: ground_truth bbox/class 数量不一致")
+    if gt_bboxes:
         return tuple(
             {
-                "class_name": class_name,
                 "bbox_xyxy_pixel": list(bbox),
                 "severity": str(raw.get("severity", "")),
                 "roi_name": str(raw.get("roi_name", "")),
@@ -295,20 +287,13 @@ def _ground_truth(
                 "color": str(raw.get("color", "")),
                 "light_evidence": _str_tuple(raw.get("light_evidence", ())),
             }
-            for bbox, class_name in zip(gt_bboxes, gt_classes)
+            for bbox in gt_bboxes
         )
 
     if not bboxes:
         return ()
-    if not defect_classes:
-        defect_classes = tuple("unknown" for _ in bboxes)
-    if len(defect_classes) == 1 and len(bboxes) > 1:
-        defect_classes = tuple(defect_classes[0] for _ in bboxes)
-    if len(defect_classes) != len(bboxes):
-        raise TrainingDataError(f"{manifest_path}:{line_number}: defect_classes 与 bbox_xyxy_pixel 数量不一致")
     return tuple(
         {
-            "class_name": class_name,
             "bbox_xyxy_pixel": list(bbox),
             "severity": str(raw.get("severity", "")),
             "roi_name": str(raw.get("roi_name", "")),
@@ -316,19 +301,15 @@ def _ground_truth(
             "color": str(raw.get("color", "")),
             "light_evidence": _str_tuple(raw.get("light_evidence", ())),
         }
-        for bbox, class_name in zip(bboxes, defect_classes)
+        for bbox in bboxes
     )
 
 
 def _normalize_gt(item: Any, line_number: int, manifest_path: Path) -> dict[str, Any]:
     if not isinstance(item, dict):
         raise TrainingDataError(f"{manifest_path}:{line_number}: ground_truth item 必须是 object")
-    class_name = str(item.get("class_name", ""))
-    if not class_name:
-        raise TrainingDataError(f"{manifest_path}:{line_number}: ground_truth 缺少 class_name")
     bboxes = _bbox_tuple([item.get("bbox_xyxy_pixel")], line_number, manifest_path, "ground_truth.bbox_xyxy_pixel")
     return {
-        "class_name": class_name,
         "bbox_xyxy_pixel": list(bboxes[0]),
         "severity": str(item.get("severity", "")),
         "roi_name": str(item.get("roi_name", "")),
@@ -418,13 +399,11 @@ _KNOWN_FIELDS = {
     "light_id",
     "image_path",
     "has_defect",
-    "defect_classes",
     "bbox_xyxy_pixel",
     "split",
     "label_status",
     "ground_truth",
     "ground_truth_bbox",
-    "ground_truth_class",
     "severity",
     "material",
     "color",

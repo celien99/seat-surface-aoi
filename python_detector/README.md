@@ -134,7 +134,7 @@ python_detector/
 │   ├── ecc_registration.py     # ECC 风格平移搜索和非基准光源 ROI 重采样
 │   ├── feature_builder.py      # 多光源特征和 NCHW tensor 构建
 │   ├── fusion_engine.py        # 候选框融合、NMS、候选数量限制
-│   ├── defect_filter.py        # 类别阈值、面积阈值等缺陷过滤
+│   ├── defect_filter.py        # 单一判定阈值、面积阈值和长宽比过滤
 │   └── rule_engine.py          # OK/NG/RECHECK/ERROR 规则判定
 ├── models/
 │   ├── inference_engine.py     # Fake/ONNX/PatchCore 后端统一推理入口、空间 anomaly map 校验和模型缓存
@@ -171,7 +171,7 @@ training_tools/
 └── pipeline_report.py          # 回放和 benchmark 报告格式化
 ```
 
-ROI 定位类别当前统一为 `seat`。`roi_locator.class_names`、ROI 模板、标定文件、trace 目录和训练用 YOLO segmentation 数据集都应使用该 ROI 名称；`production_full_roi.yaml` 的文件名仅表示全座椅安全边界模板，不代表类别名。
+ROI 定位当前统一映射到 `seat`。`roi_locator.class_names`、ROI 模板、标定文件、trace 目录和训练用 YOLO segmentation 数据集都应使用该 ROI 名称；`production_full_roi.yaml` 的文件名仅表示全座椅安全边界模板，不代表缺陷类别名。
 
 根目录 `tools/validate_architecture_readiness.py` 用于把 V4/PPT 架构要求固化成静态检查项：
 
@@ -239,7 +239,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 - `camera_defaults` 与每个 `cameras` 视角合并后的模型、ROI 模板、标定和光源字段合法性。
 - ROI 定位、配准基准光源和 fallback 光源合法性。
 - 模型引用存在，且 primary / safety_net 角色不能混用。
-- 模型输入通道、类别列表、阈值、bbox 格式和输出 decode 规则。
+- 模型输入通道、单一 `decision_threshold`、bbox 格式和输出 decode 规则。
 - PatchCore `faiss_index_path` 可选；真实产物放在根目录 `model/`，上线前用 `tools.validate_model_assets` 检查占位文件是否已替换。
 
 ### IPC 与协议
@@ -273,7 +273,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 ### 模型后端
 
-`InferenceEngine` 通过 `ModelRegistry` 缓存后端实例，缓存 key 包含后端、路径、fake 模式、模型族、角色、输入通道、类别列表、decode、bbox 格式、阈值、embedding/PCA/PatchCore 参数等关键配置，避免不同配方误复用模型。
+`InferenceEngine` 通过 `ModelRegistry` 缓存后端实例，缓存 key 包含后端、路径、fake 模式、模型族、角色、输入通道、decode、bbox 格式、阈值、embedding/PCA/PatchCore 参数等关键配置，避免不同配方误复用模型。
 
 当前后端：
 
@@ -295,7 +295,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 - `training_tools.dataset_manifest` 读取 `dataset_manifest.jsonl` 和 ROI PNG 图，将同一 trace/camera/pose/ROI 下的多光源样本聚合；旧 manifest 没有 `pose_id` 时默认回退到 `camera_id`。底层解码仍保留历史 PGM 兼容，但当前训练集和新 trace 均生成 PNG。
 - `training_tools.extract_embeddings` 调用在线 `FeatureBuilder` 和 `EmbeddingExtractor`，默认使用配方 `models.<key>.input_channels`，确保训练出的 PCA/PatchCore 资产与在线 `NCHW` 输入通道一致；只有显式传 `--channel-order` 时才覆盖通道顺序。独立调试入口可写 JSONL 明细；PatchCore 训练主链路直接写 `.npy` embedding 矩阵。
-- `training_tools.evaluate_pipeline` 调用在线 `InferenceEngine`，按 manifest 中的人工标注或弱标签计算整体、类别、ROI、camera 和 split 指标。
+- `training_tools.evaluate_pipeline` 调用在线 `InferenceEngine`，按 manifest 中的人工标注或弱标签计算整体、ROI、camera 和 split 指标；匹配只看 bbox/score，不看缺陷类别。
 - `training_tools.simulate_capture_detection` 从 `images_capture/` 平铺 PNG 选择同一序号的两机位三光源样本，构造 `SeatInspectionJob`，调用生产配方完整检测链路；默认只写最终检测报告 `detection_summary.json`、原图 `original_images/` 和可查看检测图 `detection_images/`，OK/NG/RECHECK/ERROR 都会生成检测图。只有显式传 `--write-trace` 时才额外输出完整 trace；它只做 Python-only 离线算法模拟，不控制 PLC、相机或频闪，也不经过共享内存。需要验证 C++ 写 SHM + Python 读 SHM 时，使用 `uv run python tools/run_simulated_ipc.py --replay-capture`。
 - `training_tools.collect_trace_dataset` 同时兼容旧 trace 目录 `images/<camera>/<roi>/<light>.png` 和新目录 `images/<camera>/<pose>/<roi>/<light>.png`，生成的样本路径与 manifest 都包含 `pose_id`，避免机器人飞拍同一末端相机下的不同 pose 互相覆盖。
 - `training_tools.collect_shm_dataset` 调用在线 `ShmClient`、`SeatSurfaceAoiAlgorithm` 和 `TraceWriter`，从 C++ 共享内存任务获取多相机多光源图像，保存按 `camera_id/pose_id` 分目录的 `raw_images/`、`raw_frame_manifest.jsonl`，并生成 trace/训练 manifest；它不控制 PLC、相机或频闪。
@@ -305,7 +305,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 ### 融合、规则和追溯
 
-`FusionEngine` 对同一 camera/pose/ROI/class 执行 IoU NMS，合并 evidence lights，并限制每个 ROI 候选数。NMS 抑制数和候选容量溢出数分开统计；如果容量溢出隐藏了候选且规则原本会输出 `OK`，`RuleEngine` 会改为 `RECHECK` 并写入 `CONFIGURATION_ERROR`，避免用 `OK` 掩盖算法不确定性。`DefectFilter` 和 `RuleEngine` 根据类别阈值、面积阈值、长宽比阈值和候选分数输出 `OK`、`NG`、`RECHECK` 或 `ERROR`。长宽比过滤（`min_aspect_ratio` / `max_aspect_ratio`）用于排除长条形噪声，不通过的 NG 候选降级为 RECHECK。
+`FusionEngine` 对同一 camera/pose/ROI 执行 IoU NMS，合并 evidence lights，并限制每个 ROI 候选数。NMS 抑制数和候选容量溢出数分开统计；如果容量溢出隐藏了候选且规则原本会输出 `OK`，`RuleEngine` 会改为 `RECHECK` 并写入 `CONFIGURATION_ERROR`，避免用 `OK` 掩盖算法不确定性。`DefectFilter` 和 `RuleEngine` 根据单一 `decision_threshold`、面积阈值、长宽比阈值和候选分数输出 `OK`、`NG`、`RECHECK` 或 `ERROR`。长宽比过滤（`min_aspect_ratio` / `max_aspect_ratio`）用于排除长条形噪声，不通过的 NG 候选降级为 RECHECK。缺陷结果不携带缺陷类别字段，只表达位置、分数、证据光源和处置判定。
 
 `TraceWriter` 按配方 trace 策略保存：
 
@@ -366,7 +366,7 @@ uv run python -m training_tools.simulate_capture_detection --input images_captur
 uv run python -m training_tools.export_wideresnet_embedding --output model/wideresnet50/seat_wrn50_embedding.onnx --input-channels 3 --spatial-mode --spatial-layers layer2,layer3
 # 可选调试：输出逐 patch JSONL 明细；正式 PatchCore 训练不依赖该文件。
 uv run python -m training_tools.extract_embeddings --manifest datasets/seat_trace_v1/dataset_manifest.jsonl --output datasets/seat_trace_v1/embeddings.jsonl --backend statistical
-uv run python -m training_tools.train_patchcore_assets --manifest datasets/seat_trace_v1/dataset_manifest.jsonl --output-dir model/patchcore --recipe seat_a_black_leather_production_v1 --model-key patchcore_unknown_detector --embedding-backend onnx_wideresnet50 --embedding-model model/wideresnet50/seat_wrn50_embedding.onnx --spatial-mode --spatial-layers layer2,layer3 --spatial-upsample-height 64 --spatial-upsample-width 64 --pca-components 524 --coreset-ratio 0.25 --coreset-method stride --build-faiss
+uv run python -m training_tools.train_patchcore_assets --manifest datasets/seat_trace_v1/dataset_manifest.jsonl --output-dir model/patchcore --recipe seat_a_black_leather_production_v1 --model-key patchcore_detector --embedding-backend onnx_wideresnet50 --embedding-model model/wideresnet50/seat_wrn50_embedding.onnx --spatial-mode --spatial-layers layer2,layer3 --spatial-upsample-height 64 --spatial-upsample-width 64 --pca-components 524 --coreset-ratio 0.25 --coreset-method stride --build-faiss
 uv run python -m training_tools.evaluate_pipeline --manifest datasets/seat_trace_v1/dataset_manifest.jsonl --output reports/evaluation_report.json --split test
 uv run python -m training_tools.train_roi_yolo --data datasets/roi_seg/dataset.yaml --task segment --imgsz 1024 --output model/roi_yolo/seat_roi_seg.onnx
 ```

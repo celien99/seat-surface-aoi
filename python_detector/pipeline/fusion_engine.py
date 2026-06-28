@@ -24,7 +24,6 @@ class FusionEngine:
                 candidate.camera_id,
                 candidate.pose_id,
                 candidate.roi_name,
-                candidate.class_name if config.class_aware else "*",
             )
             groups.setdefault(key, []).append(candidate)
 
@@ -36,7 +35,7 @@ class FusionEngine:
             fused.extend(kept)
             suppressed_count += suppressed
             overflow_count += overflow
-        fused.sort(key=lambda item: (item.camera_id, item.roi_name, item.class_name, -item.score))
+        fused.sort(key=lambda item: (item.camera_id, item.pose_id, item.roi_name, -item.score))
         return FusedResult(candidates=fused, suppressed_count=suppressed_count, overflow_count=overflow_count)
 
     def _nms_group(self, candidates: list[DefectCandidate], config: FusionConfig) -> tuple[list[DefectCandidate], int, int]:
@@ -74,7 +73,6 @@ class FusionEngine:
                 camera_id=secondary.camera_id,
                 pose_id=secondary.pose_id,
                 roi_name=secondary.roi_name,
-                class_name=secondary.class_name,
                 score=secondary.score,
                 bbox_xyxy_pixel=secondary.bbox_xyxy_pixel,
                 area_px=secondary.area_px,
@@ -84,7 +82,6 @@ class FusionEngine:
             camera_id=primary.camera_id,
             pose_id=primary.pose_id,
             roi_name=primary.roi_name,
-            class_name=primary.class_name,
             score=primary.score,
             bbox_xyxy_pixel=primary.bbox_xyxy_pixel,
             area_px=primary.area_px,

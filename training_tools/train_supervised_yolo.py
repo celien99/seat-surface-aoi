@@ -43,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("experiments/supervised_defect/seat_defect_detector.onnx"),
+        default=Path("experiments/supervised_defect/seat_defect_presence.onnx"),
     )
     parser.add_argument("--opset", type=int, default=17)
     args = parser.parse_args(argv)

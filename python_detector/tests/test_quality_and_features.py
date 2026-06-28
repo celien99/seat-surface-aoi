@@ -121,8 +121,8 @@ def test_explicit_robot_pose_recipe_rechecks_unknown_pose_bundle() -> None:
                     "calibration_id": "calib/t1_simulated_v1",
                 }
             ],
-            "thresholds": {"scratch": {"ng_score": 0.35, "recheck_score": 0.2}},
-            "models": {"default": {"backend": "fake", "role": "primary", "class_names": ["scratch"]}},
+            "decision_threshold": {"ng_score": 0.35, "recheck_score": 0.2},
+            "models": {"default": {"backend": "fake", "role": "primary"}},
         }
     )
     frames = {

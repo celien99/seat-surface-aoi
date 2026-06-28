@@ -25,8 +25,8 @@ def test_recipe_manager_loads_production_yaml() -> None:
     assert recipe.roi_locator.input_height == 1024
     assert recipe.roi_locator.input_channels == 3
     assert recipe.registration.method == "ecc"
-    assert recipe.models["patchcore_unknown_detector"].backend == "patchcore_knn"
-    assert recipe.models["patchcore_unknown_detector"].role == "primary"
+    assert recipe.models["patchcore_detector"].backend == "patchcore_knn"
+    assert recipe.models["patchcore_detector"].role == "primary"
 
 
 def test_recipe_manager_loads_robot_production_yaml() -> None:
@@ -36,7 +36,7 @@ def test_recipe_manager_loads_robot_production_yaml() -> None:
         ("EYE_IN_HAND", "T1_BACKREST"),
         ("EYE_IN_HAND", "T2_CUSHION"),
     ]
-    assert recipe.model_key_for("EYE_IN_HAND", "seat", "T2_CUSHION") == "patchcore_unknown_detector"
+    assert recipe.model_key_for("EYE_IN_HAND", "seat", "T2_CUSHION") == "patchcore_detector"
 
 
 def test_recipe_rejects_missing_required_field() -> None:
@@ -64,8 +64,8 @@ def test_recipe_defaults_required_lights_and_registration_from_light_order() -> 
             "sku": "sku",
             "light_order": ["KEY", "SIDE"],
             "cameras": {"TOP": {"model_key": "detector"}},
-            "thresholds": {"scratch": {"ng_score": 0.35, "recheck_score": 0.20}},
-            "models": {"detector": {"backend": "fake", "role": "primary", "class_names": ["scratch"]}},
+            "decision_threshold": {"ng_score": 0.35, "recheck_score": 0.20},
+            "models": {"detector": {"backend": "fake", "role": "primary"}},
         }
     )
 
@@ -123,7 +123,7 @@ def test_recipe_rejects_camera_light_order_missing_required_lights() -> None:
                         "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT"],
                     }
                 },
-                "thresholds": {"scratch": {"ng_score": 0.35, "recheck_score": 0.2}},
+                "decision_threshold": {"ng_score": 0.35, "recheck_score": 0.2},
                 "models": {"default": {"backend": "fake", "role": "primary"}},
             }
         )
@@ -155,16 +155,12 @@ def test_recipe_accepts_patchcore_as_primary_detector() -> None:
             "sku": "sku",
             "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
             "cameras": {"TOP": {"model_key": "patchcore_primary"}},
-            "thresholds": {
-                "scratch": {"ng_score": 0.35, "recheck_score": 0.20},
-                "unknown_anomaly": {"ng_score": 0.55, "recheck_score": 0.20},
-            },
+            "decision_threshold": {"ng_score": 0.55, "recheck_score": 0.20},
             "models": {
                 "patchcore_primary": {
                     "backend": "patchcore_knn",
                     "model_family": "patchcore",
                     "role": "primary",
-                    "class_names": ["unknown_anomaly"],
                     "embedding_backend": "statistical",
                     "memory_bank_path": "model/patchcore/seat_patchcore_bank.json",
                 }
@@ -182,9 +178,9 @@ def test_recipe_rejects_safety_net_as_primary_roi_model() -> None:
                 "recipe_id": "bad_safety_net_ref",
                 "sku": "sku",
                 "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
-                "cameras": {"TOP": {"roi_models": {"seat": "unknown_safety_net"}}},
+                "cameras": {"TOP": {"roi_models": {"seat": "patchcore_safety_net"}}},
                 "models": {
-                    "unknown_safety_net": {
+                    "patchcore_safety_net": {
                         "backend": "fake",
                         "model_family": "patchcore",
                         "role": "safety_net",
@@ -197,7 +193,7 @@ def test_recipe_rejects_safety_net_as_primary_roi_model() -> None:
 def test_recipe_accepts_roi_primary_and_safety_net_models() -> None:
     recipe = RecipeManager().load("seat_a_black_leather_v1")
     assert recipe.model_key_for("TOP_BACK", "seat") == "fake_default"
-    assert recipe.safety_net_model_keys_for("TOP_BACK", "seat") == ("unknown_safety_net",)
+    assert recipe.safety_net_model_keys_for("TOP_BACK", "seat") == ("patchcore_safety_net",)
 
 
 def test_recipe_applies_camera_defaults_to_reduce_per_camera_repetition() -> None:
@@ -227,17 +223,13 @@ def test_recipe_applies_camera_defaults_to_reduce_per_camera_repetition() -> Non
                 "TOP_BACK": {"calibration_id": "calib/top_back_production_v1"},
                 "TOP_CUSHION": {"calibration_id": "calib/top_cushion_production_v1"},
             },
-            "thresholds": {
-                "scratch": {"ng_score": 0.35, "recheck_score": 0.20},
-                "unknown_anomaly": {"ng_score": 0.55, "recheck_score": 0.20},
-            },
+            "decision_threshold": {"ng_score": 0.55, "recheck_score": 0.20},
             "models": {
-                "detector": {"backend": "fake", "role": "primary", "class_names": ["scratch"]},
+                "detector": {"backend": "fake", "role": "primary"},
                 "patchcore": {
                     "backend": "fake",
                     "model_family": "patchcore",
                     "role": "safety_net",
-                    "class_names": ["unknown_anomaly"],
                 },
             },
         }
@@ -260,20 +252,16 @@ def test_recipe_parses_onnx_model_io_contract() -> None:
             "recipe_id": "onnx_recipe",
             "sku": "sku",
             "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
-            "cameras": {"TOP": {"model_key": "scratch_onnx"}},
-            "thresholds": {
-                "scratch": {"ng_score": 0.35, "recheck_score": 0.20, "min_area_px": 8},
-                "dent": {"ng_score": 0.30, "recheck_score": 0.18, "min_area_px": 20},
-            },
+            "cameras": {"TOP": {"model_key": "defect_onnx"}},
+            "decision_threshold": {"ng_score": 0.30, "recheck_score": 0.18, "min_area_px": 20},
             "models": {
-                "scratch_onnx": {
+                "defect_onnx": {
                     "backend": "onnx",
-                    "model_path": "models/scratch.onnx",
+                    "model_path": "models/defect.onnx",
                     "model_family": "supervised",
                     "role": "primary",
                     "input_channels": ["light:DIFFUSE", "max_min:HIGH_LEFT:HIGH_RIGHT"],
                     "input_scale": 255.0,
-                    "class_names": ["scratch", "dent"],
                     "output_decode": "detection_rows",
                     "bbox_format": "xyxy_normalized",
                     "score_threshold": 0.25,
@@ -281,9 +269,8 @@ def test_recipe_parses_onnx_model_io_contract() -> None:
             },
         }
     )
-    model = recipe.models["scratch_onnx"]
+    model = recipe.models["defect_onnx"]
     assert model.input_channels == ("light:DIFFUSE", "max_min:HIGH_LEFT:HIGH_RIGHT")
-    assert model.class_names == ("scratch", "dent")
     assert model.output_decode == "detection_rows"
     assert model.bbox_format == "xyxy_normalized"
     assert model.score_threshold == 0.25
@@ -301,13 +288,12 @@ def test_recipe_accepts_ultralytics_yolo_decode_for_training_exports() -> None:
                 "output_decode": "ultralytics_yolo",
             },
             "cameras": {"TOP": {"model_key": "detector"}},
-            "thresholds": {"scratch": {"ng_score": 0.35, "recheck_score": 0.2}},
+            "decision_threshold": {"ng_score": 0.35, "recheck_score": 0.2},
             "models": {
                 "detector": {
                     "backend": "onnx",
-                    "model_path": "experiments/supervised_defect/seat_defect_detector.onnx",
+                    "model_path": "experiments/supervised_defect/seat_defect_presence.onnx",
                     "role": "primary",
-                    "class_names": ["scratch"],
                     "output_decode": "ultralytics_yolo",
                 }
             },
@@ -336,12 +322,11 @@ def test_recipe_accepts_yolo_seg_roi_locator() -> None:
                 "input_channels": 3,
             },
             "cameras": {"TOP": {"model_key": "detector"}},
-            "thresholds": {"scratch": {"ng_score": 0.35, "recheck_score": 0.2}},
+            "decision_threshold": {"ng_score": 0.35, "recheck_score": 0.2},
             "models": {
                 "detector": {
                     "backend": "fake",
                     "role": "primary",
-                    "class_names": ["scratch"],
                 }
             },
         }
@@ -367,8 +352,8 @@ def test_recipe_rejects_yolo_seg_with_bbox_decode() -> None:
                     "output_decode": "ultralytics_yolo",
                 },
                 "cameras": {"TOP": {"model_key": "detector"}},
-                "thresholds": {"scratch": {"ng_score": 0.35, "recheck_score": 0.2}},
-                "models": {"detector": {"backend": "fake", "role": "primary", "class_names": ["scratch"]}},
+                "decision_threshold": {"ng_score": 0.35, "recheck_score": 0.2},
+                "models": {"detector": {"backend": "fake", "role": "primary"}},
             }
         )
 
@@ -386,8 +371,8 @@ def test_recipe_accepts_arbitrary_positive_roi_locator_input_channels() -> None:
                 "input_channels": 2,
             },
             "cameras": {"TOP": {"model_key": "detector"}},
-            "thresholds": {"scratch": {"ng_score": 0.35, "recheck_score": 0.2}},
-            "models": {"detector": {"backend": "fake", "role": "primary", "class_names": ["scratch"]}},
+            "decision_threshold": {"ng_score": 0.35, "recheck_score": 0.2},
+            "models": {"detector": {"backend": "fake", "role": "primary"}},
         }
     )
 
@@ -408,8 +393,8 @@ def test_recipe_rejects_non_positive_roi_locator_input_channels() -> None:
                     "input_channels": 0,
                 },
                 "cameras": {"TOP": {"model_key": "detector"}},
-                "thresholds": {"scratch": {"ng_score": 0.35, "recheck_score": 0.2}},
-                "models": {"detector": {"backend": "fake", "role": "primary", "class_names": ["scratch"]}},
+                "decision_threshold": {"ng_score": 0.35, "recheck_score": 0.2},
+                "models": {"detector": {"backend": "fake", "role": "primary"}},
             }
         )
 
@@ -423,20 +408,16 @@ def test_recipe_parses_patchcore_faiss_index_path() -> None:
             "cameras": {
                 "TOP": {
                     "model_key": "default",
-                    "safety_net_model_key": "unknown_safety_net",
+                    "safety_net_model_key": "patchcore_safety_net",
                 }
             },
-            "thresholds": {
-                "scratch": {"ng_score": 0.35, "recheck_score": 0.20, "min_area_px": 8},
-                "unknown_anomaly": {"ng_score": 0.55, "recheck_score": 0.20, "min_area_px": 1},
-            },
+            "decision_threshold": {"ng_score": 0.55, "recheck_score": 0.20, "min_area_px": 1},
             "models": {
-                "default": {"backend": "fake", "role": "primary", "class_names": ["scratch"]},
-                "unknown_safety_net": {
+                "default": {"backend": "fake", "role": "primary"},
+                "patchcore_safety_net": {
                     "backend": "patchcore_knn",
                     "model_family": "patchcore",
                     "role": "safety_net",
-                    "class_names": ["unknown_anomaly"],
                     "embedding_backend": "statistical",
                     "memory_bank_path": "model/patchcore/seat_patchcore_bank.json",
                     "faiss_index_path": "model/patchcore/seat_patchcore.faiss",
@@ -445,13 +426,12 @@ def test_recipe_parses_patchcore_faiss_index_path() -> None:
         }
     )
 
-    assert recipe.models["unknown_safety_net"].faiss_index_path == "model/patchcore/seat_patchcore.faiss"
+    assert recipe.models["patchcore_safety_net"].faiss_index_path == "model/patchcore/seat_patchcore.faiss"
 
 
 def test_recipe_parses_fusion_config() -> None:
     recipe = RecipeManager().load("seat_a_black_leather_v1")
     assert recipe.fusion.iou_threshold == 0.5
-    assert recipe.fusion.class_aware is True
     assert recipe.fusion.max_candidates_per_roi == 16
 
 
@@ -465,8 +445,8 @@ def test_recipe_preserves_list_cameras_with_same_camera_different_pose() -> None
                 {"camera_id": "EYE_IN_HAND", "pose_id": "T1_BACKREST", "model_key": "default"},
                 {"camera_id": "EYE_IN_HAND", "pose_id": "T2_CUSHION", "model_key": "default"},
             ],
-            "thresholds": {"scratch": {"ng_score": 0.35, "recheck_score": 0.2}},
-            "models": {"default": {"backend": "fake", "role": "primary", "class_names": ["scratch"]}},
+            "decision_threshold": {"ng_score": 0.35, "recheck_score": 0.2},
+            "models": {"default": {"backend": "fake", "role": "primary"}},
         }
     )
 
@@ -506,30 +486,56 @@ def test_recipe_rejects_duplicate_list_camera_pose() -> None:
                     {"camera_id": "EYE_IN_HAND", "pose_id": "T1_BACKREST", "model_key": "default"},
                     {"camera_id": "EYE_IN_HAND", "pose_id": "T1_BACKREST", "model_key": "default"},
                 ],
-                "thresholds": {"scratch": {"ng_score": 0.35, "recheck_score": 0.2}},
-                "models": {"default": {"backend": "fake", "role": "primary", "class_names": ["scratch"]}},
+                "decision_threshold": {"ng_score": 0.35, "recheck_score": 0.2},
+                "models": {"default": {"backend": "fake", "role": "primary"}},
             }
         )
 
 
-def test_recipe_rejects_model_class_without_explicit_threshold() -> None:
-    with pytest.raises(RecipeValidationError, match="models.detector.class_names 缺少显式 thresholds 配置"):
+def test_recipe_rejects_removed_top_level_thresholds() -> None:
+    with pytest.raises(RecipeValidationError, match="thresholds 已移除"):
         recipe_from_dict(
             {
-                "recipe_id": "missing_class_threshold",
+                "recipe_id": "removed_thresholds",
                 "sku": "sku",
                 "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
                 "cameras": {"TOP": {"model_key": "detector"}},
-                "thresholds": {
-                    "scratch": {"ng_score": 0.35, "recheck_score": 0.20, "min_area_px": 8},
-                },
+                "thresholds": {"defect": {"ng_score": 0.35, "recheck_score": 0.20}},
+                "models": {"detector": {"backend": "fake", "role": "primary"}},
+            }
+        )
+
+
+def test_recipe_rejects_removed_model_class_names() -> None:
+    with pytest.raises(RecipeValidationError, match="models.detector.class_names 已移除"):
+        recipe_from_dict(
+            {
+                "recipe_id": "removed_model_class_names",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                "cameras": {"TOP": {"model_key": "detector"}},
+                "decision_threshold": {"ng_score": 0.35, "recheck_score": 0.20, "min_area_px": 8},
                 "models": {
                     "detector": {
                         "backend": "fake",
                         "role": "primary",
-                        "class_names": ["scratch", "dent"],
+                        "class_names": ["defect", "defect"],
                     }
                 },
+            }
+        )
+
+
+def test_recipe_rejects_removed_fusion_class_aware() -> None:
+    with pytest.raises(RecipeValidationError, match="fusion.class_aware 已移除"):
+        recipe_from_dict(
+            {
+                "recipe_id": "removed_class_aware",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
+                "fusion": {"class_aware": True},
+                "cameras": {"TOP": {"model_key": "detector"}},
+                "models": {"detector": {"backend": "fake", "role": "primary"}},
             }
         )
 
@@ -637,7 +643,7 @@ def test_recipe_rejects_threshold_recheck_above_ng() -> None:
                 "recipe_id": "bad_threshold_order",
                 "sku": "sku",
                 "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
-                "thresholds": {"scratch": {"ng_score": 0.3, "recheck_score": 0.5, "min_area_px": 1}},
+                "decision_threshold": {"ng_score": 0.3, "recheck_score": 0.5, "min_area_px": 1},
                 "cameras": {"TOP": {"model_key": "default"}},
                 "models": {"default": {"backend": "fake", "role": "primary"}},
             }
@@ -645,24 +651,24 @@ def test_recipe_rejects_threshold_recheck_above_ng() -> None:
 
 
 def test_recipe_rejects_invalid_threshold_ranges() -> None:
-    with pytest.raises(RecipeValidationError, match="thresholds.scratch.ng_score"):
+    with pytest.raises(RecipeValidationError, match="decision_threshold.ng_score"):
         recipe_from_dict(
             {
                 "recipe_id": "bad_threshold_score",
                 "sku": "sku",
                 "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
-                "thresholds": {"scratch": {"ng_score": 1.2, "recheck_score": 0.2, "min_area_px": 1}},
+                "decision_threshold": {"ng_score": 1.2, "recheck_score": 0.2, "min_area_px": 1},
                 "cameras": {"TOP": {"model_key": "default"}},
                 "models": {"default": {"backend": "fake", "role": "primary"}},
             }
         )
-    with pytest.raises(RecipeValidationError, match="thresholds.scratch.min_area_px"):
+    with pytest.raises(RecipeValidationError, match="decision_threshold.min_area_px"):
         recipe_from_dict(
             {
                 "recipe_id": "bad_threshold_area",
                 "sku": "sku",
                 "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
-                "thresholds": {"scratch": {"ng_score": 0.5, "recheck_score": 0.2, "min_area_px": -1}},
+                "decision_threshold": {"ng_score": 0.5, "recheck_score": 0.2, "min_area_px": -1},
                 "cameras": {"TOP": {"model_key": "default"}},
                 "models": {"default": {"backend": "fake", "role": "primary"}},
             }
@@ -701,22 +707,6 @@ def test_recipe_rejects_unsafe_model_io_config() -> None:
                         "backend": "fake",
                         "role": "primary",
                         "input_channels": ["light:DIFFUSE", "light:DIFFUSE"],
-                    }
-                },
-            }
-        )
-    with pytest.raises(RecipeValidationError, match="models.detector.class_names 存在重复项"):
-        recipe_from_dict(
-            {
-                "recipe_id": "bad_duplicate_class_names",
-                "sku": "sku",
-                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT", "HIGH_RIGHT"],
-                "cameras": {"TOP": {"model_key": "detector"}},
-                "models": {
-                    "detector": {
-                        "backend": "fake",
-                        "role": "primary",
-                        "class_names": ["scratch", "scratch"],
                     }
                 },
             }

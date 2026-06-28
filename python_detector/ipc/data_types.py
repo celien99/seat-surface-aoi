@@ -84,7 +84,6 @@ class SeatInspectionJob:
 @dataclass
 class DefectResult:
     defect_id: str
-    class_name: str
     severity: str
     camera_id: str
     roi_name: str

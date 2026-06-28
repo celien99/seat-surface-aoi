@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -357,6 +358,51 @@ def config_int_value(config_path: str | Path, key: str, fallback: int) -> int:
     return fallback
 
 
+def write_simulated_runtime_config(root: Path | None = None) -> Path:
+    runtime_root = root or Path(tempfile.mkdtemp(prefix="seat_aoi_simulated_ipc_"))
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    trace_root = runtime_root / "trace"
+    images_root = runtime_root / "images"
+    config_path = runtime_root / "station_runtime.simulated_ipc.conf"
+    config_path.write_text(
+        "\n".join(
+            [
+                "hardware_mode=simulated",
+                "signal.backend=simulated",
+                "camera.backend=simulated",
+                "light.backend=simulated",
+                "reset_shared_memory=true",
+                "slot_count=4",
+                "frame_slot_size=8388608",
+                "result_slot_size=65536",
+                "publish_timeout_ms=1000",
+                "detector_timeout_ms=8000",
+                "trigger_timeout_ms=1000",
+                "camera_timeout_ms=200",
+                "light_timeout_ms=200",
+                "arm_settle_ms=0",
+                "max_jobs=1",
+                "recipe_id=seat_a_black_leather_v1",
+                "controller_mode=online",
+                "capture_mode=fixed_camera",
+                "capture_schedule=shared_light_parallel",
+                "light_order=1,2,3",
+                f"trace_root={trace_root}",
+                f"image_save.root_dir={images_root}",
+                "image_save.enabled=false",
+                "image_save.save_original=true",
+                "image_save.cleanup_enabled=false",
+                "image_save.cleanup_min_free_ratio=0",
+                "image_save.cleanup_trace_root=false",
+                "image_save.fail_on_save_error=true",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return config_path
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="运行跨平台端到端模拟 IPC")
     parser.add_argument(
@@ -377,9 +423,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     config_path = str(REPLAY_CAPTURE_CONFIG) if args.replay_capture else args.config
+    if not config_path:
+        config_path = str(write_simulated_runtime_config())
     timeout_ms = args.timeout_ms
     if timeout_ms <= 0:
-        timeout_ms = config_int_value(config_path, "detector_timeout_ms", 8000) if config_path else 8000
+        timeout_ms = config_int_value(config_path, "detector_timeout_ms", 8000)
 
     try:
         artifacts = build_cpp()
@@ -398,8 +446,7 @@ def main(argv: list[str] | None = None) -> int:
     subprocess.run([str(controller), "--cleanup"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     controller_args = [str(controller), "--once"]
-    if config_path:
-        controller_args[1:1] = ["--config", config_path]
+    controller_args[1:1] = ["--config", config_path]
     if args.timeout_ms > 0 or not config_path:
         controller_args.extend(["--wait-ms", str(timeout_ms)])
     detector_args = [
@@ -409,8 +456,7 @@ def main(argv: list[str] | None = None) -> int:
         "--timeout-ms",
         str(timeout_ms),
     ]
-    if config_path:
-        detector_args[2:2] = ["--config", config_path]
+    detector_args[2:2] = ["--config", config_path]
 
     cpp_process = subprocess.Popen(controller_args)
     time.sleep(0.2)

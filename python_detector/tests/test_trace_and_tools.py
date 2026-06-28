@@ -25,7 +25,7 @@ def _recipe(root_dir: Path, save_ok_ratio: float = 1.0, fake_mode: str = "auto")
         models={
             **recipe.models,
             "fake_default": replace(recipe.models["fake_default"], fake_mode=fake_mode),
-            "unknown_safety_net": ModelConfig(backend="fake", fake_mode="ok", model_family="patchcore", role="safety_net"),
+            "patchcore_safety_net": ModelConfig(backend="fake", fake_mode="ok", model_family="patchcore", role="safety_net"),
         },
         trace=recipe.trace.__class__(enabled=True, root_dir=str(root_dir), save_ok_ratio=save_ok_ratio),
     )
@@ -173,7 +173,6 @@ def test_trace_writer_heatmap_only_renders_inside_defect_bbox(tmp_path: Path) ->
         defects=[
             DefectResult(
                 defect_id="1-0",
-                class_name="unknown_anomaly",
                 severity="suspect",
                 camera_id=prepared.camera_id,
                 pose_id=prepared.pose_id,

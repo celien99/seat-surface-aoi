@@ -372,7 +372,6 @@ def test_robot_flyshot_camera_index_from_frame_meta_is_used_for_result_serializa
     assert AtomicU32.load(client.frames.mm, frame_base) == SlotState.READING
     defect = DefectResult(
         defect_id="D1",
-        class_name="scratch",
         severity="critical",
         camera_id="EYE_IN_HAND",
         pose_id="T1_BACKREST",
@@ -401,9 +400,9 @@ def test_robot_flyshot_camera_index_from_frame_meta_is_used_for_result_serializa
     )
 
     unpacked = DEFECT_RESULT_META.unpack_from(client.results.mm, result_base + RESULT_SLOT_HEADER_SIZE)
-    assert unpacked[3] == 0
-    assert unpacked[4].split(b"\0", 1)[0].decode() == "EYE_IN_HAND"
-    assert unpacked[5].split(b"\0", 1)[0].decode() == "T1_BACKREST"
+    assert unpacked[2] == 0
+    assert unpacked[3].split(b"\0", 1)[0].decode() == "EYE_IN_HAND"
+    assert unpacked[4].split(b"\0", 1)[0].decode() == "T1_BACKREST"
 
 
 def test_duplicate_camera_light_frame_publishes_invalid_payload_error() -> None:

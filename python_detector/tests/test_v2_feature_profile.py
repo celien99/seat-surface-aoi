@@ -121,8 +121,8 @@ def test_feature_builder_defaults_model_channels_from_two_light_recipe() -> None
                     "light_order": ["KEY", "SIDE"],
                 }
             },
-            "thresholds": {"scratch": {"ng_score": 0.35, "recheck_score": 0.20}},
-            "models": {"detector": {"backend": "fake", "role": "primary", "class_names": ["scratch"]}},
+            "decision_threshold": {"ng_score": 0.35, "recheck_score": 0.20},
+            "models": {"detector": {"backend": "fake", "role": "primary"}},
         }
     )
     cube = ReflectanceCube(
@@ -172,7 +172,7 @@ def test_v2_roi_features_include_primary_and_safety_net_models() -> None:
     features = FeatureBuilder().build(cubes, recipe)
     model_keys = {(group.camera_id, group.roi_name, group.model_key) for group in features}
     assert ("TOP_BACK", "seat", "fake_default") in model_keys
-    assert ("TOP_BACK", "seat", "unknown_safety_net") in model_keys
+    assert ("TOP_BACK", "seat", "patchcore_safety_net") in model_keys
 
 
 def test_feature_builder_rejects_mismatched_feature_source_shapes() -> None:

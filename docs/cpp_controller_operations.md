@@ -48,6 +48,8 @@ uv run python -m tools.validate_deployment_preflight
 uv run python -m tools.validate_deployment_preflight --strict-production
 ```
 
+默认模拟 IPC 使用临时 runtime config，关闭本地磁盘水位门禁以避免开发机余量影响回归；带 `--config` 或 `--replay-capture` 时仍使用指定配置。
+
 生产配置只校验字段，不启动硬件：
 
 ```powershell

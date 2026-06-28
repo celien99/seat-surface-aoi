@@ -71,7 +71,7 @@ def test_recipe_rejects_v4_semantic_light_not_in_light_order() -> None:
                     }
                 },
                 "cameras": {"TOP": {"model_key": "default"}},
-                "thresholds": {"scratch": {"ng_score": 0.35, "recheck_score": 0.2}},
+                "decision_threshold": {"ng_score": 0.35, "recheck_score": 0.2},
                 "models": {"default": {"backend": "fake", "role": "primary"}},
             }
         )
@@ -387,7 +387,7 @@ def test_production_roi_source_reuses_diffuse_without_extra_feature_channel() ->
         roi_locator=replace(recipe.roi_locator, backend="fake_yolo", model_path="simulated-yolo.onnx"),
         models={
             **recipe.models,
-            "patchcore_unknown_detector": replace(recipe.models["patchcore_unknown_detector"], backend="fake"),
+            "patchcore_detector": replace(recipe.models["patchcore_detector"], backend="fake"),
         },
     )
     job = make_simulated_job()
@@ -434,7 +434,7 @@ def test_production_three_strobe_light_seq_index_is_validated() -> None:
         roi_locator=replace(recipe.roi_locator, backend="fake_yolo", model_path="simulated-yolo.onnx"),
         models={
             **recipe.models,
-            "patchcore_unknown_detector": replace(recipe.models["patchcore_unknown_detector"], backend="fake"),
+            "patchcore_detector": replace(recipe.models["patchcore_detector"], backend="fake"),
         },
     )
     job = make_simulated_job()
@@ -560,7 +560,7 @@ def test_ecc_registration_applies_translation_before_feature_building() -> None:
             assert high_left.image[y * high_left.stride_bytes + x] == base_pixels[y * width + x]
 
 
-def test_patchcore_knn_backend_emits_unknown_anomaly_and_trace(tmp_path: Path) -> None:
+def test_patchcore_knn_backend_emits_defect_and_trace(tmp_path: Path) -> None:
     bank_path = tmp_path / "memory_bank.json"
     _write_patchcore_bank(bank_path, np.asarray([[0.0] * 10], dtype=np.float32))
     recipe = RecipeManager().load("seat_a_black_leather_v1")
@@ -568,8 +568,7 @@ def test_patchcore_knn_backend_emits_unknown_anomaly_and_trace(tmp_path: Path) -
         backend="patchcore_knn",
         model_family="patchcore",
         role="safety_net",
-        class_names=("unknown_anomaly",),
-        input_channels=recipe.models["fake_default"].input_channels,
+                input_channels=recipe.models["fake_default"].input_channels,
         embedding_backend="statistical",
         embedding_version="stat_v1",
         embedding_dim=10,
@@ -580,7 +579,7 @@ def test_patchcore_knn_backend_emits_unknown_anomaly_and_trace(tmp_path: Path) -
     )
     recipe = replace(
         recipe,
-        models={**recipe.models, "unknown_safety_net": patchcore},
+        models={**recipe.models, "patchcore_safety_net": patchcore},
     )
     pipeline = InspectionPipeline(inference_engine=InferenceEngine(ModelRegistry()))
 
@@ -588,8 +587,7 @@ def test_patchcore_knn_backend_emits_unknown_anomaly_and_trace(tmp_path: Path) -
 
     assert result.decision in {"RECHECK", "NG"}
     assert result.defects
-    assert result.defects[0].class_name == "unknown_anomaly"
-    summaries = [item for item in pipeline.last_context["feature_summary"] if item["model_key"] == "unknown_safety_net"]
+    summaries = [item for item in pipeline.last_context["feature_summary"] if item["model_key"] == "patchcore_safety_net"]
     assert summaries[0]["embedding_summary"]["backend"] == "statistical"
     assert summaries[0]["anomaly_summary"]["memory_bank_version"] == "bank_v1"
     assert summaries[0]["anomaly_summary"]["backend"] == "exact_knn"
@@ -649,8 +647,7 @@ def test_patchcore_knn_backend_applies_pca_projection(tmp_path: Path) -> None:
         backend="patchcore_knn",
         model_family="patchcore",
         role="safety_net",
-        class_names=("unknown_anomaly",),
-        input_channels=recipe.models["fake_default"].input_channels,
+                input_channels=recipe.models["fake_default"].input_channels,
         embedding_backend="statistical",
         embedding_version="stat_v1",
         embedding_dim=10,
@@ -661,13 +658,13 @@ def test_patchcore_knn_backend_applies_pca_projection(tmp_path: Path) -> None:
         anomaly_score_scale=2.0,
         knn_k=1,
     )
-    recipe = replace(recipe, models={**recipe.models, "unknown_safety_net": patchcore})
+    recipe = replace(recipe, models={**recipe.models, "patchcore_safety_net": patchcore})
     pipeline = InspectionPipeline()
 
     result = pipeline.process(make_simulated_job(), recipe)
 
     assert result.defects
-    summaries = [item for item in pipeline.last_context["feature_summary"] if item["model_key"] == "unknown_safety_net"]
+    summaries = [item for item in pipeline.last_context["feature_summary"] if item["model_key"] == "patchcore_safety_net"]
     assert summaries[0]["pca_summary"] == {"version": "pca_v1", "input_dim": 10, "output_dim": 2}
 
 
@@ -703,8 +700,7 @@ def test_patchcore_faiss_metadata_falls_back_to_exact_knn_when_index_missing(tmp
         backend="patchcore_knn",
         model_family="patchcore",
         role="safety_net",
-        class_names=("unknown_anomaly",),
-        input_channels=recipe.models["fake_default"].input_channels,
+                input_channels=recipe.models["fake_default"].input_channels,
         embedding_backend="statistical",
         embedding_version="stat_v1",
         embedding_dim=10,
@@ -714,12 +710,12 @@ def test_patchcore_faiss_metadata_falls_back_to_exact_knn_when_index_missing(tmp
         anomaly_score_scale=2.0,
         knn_k=1,
     )
-    recipe = replace(recipe, models={**recipe.models, "unknown_safety_net": patchcore})
+    recipe = replace(recipe, models={**recipe.models, "patchcore_safety_net": patchcore})
     pipeline = InspectionPipeline()
 
     result = pipeline.process(make_simulated_job(), recipe)
 
     assert result.defects
-    summaries = [item for item in pipeline.last_context["feature_summary"] if item["model_key"] == "unknown_safety_net"]
+    summaries = [item for item in pipeline.last_context["feature_summary"] if item["model_key"] == "patchcore_safety_net"]
     assert summaries[0]["anomaly_summary"]["backend"] == "exact_knn"
     assert summaries[0]["anomaly_summary"]["fallback_reason"] == "faiss_index_missing"

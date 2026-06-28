@@ -43,7 +43,7 @@ def test_algorithm_fails_closed_when_trace_write_fails() -> None:
     assert run.context["trace_error"]["type"] == "OSError"
 
 
-def test_recipe_manager_default_path_is_independent_from_cwd(monkeypatch, tmp_path) -> None:
+def test_recipe_manager_default_path_is_independefect_from_cwd(monkeypatch, tmp_path) -> None:
     monkeypatch.chdir(tmp_path)
 
     recipe = RecipeManager().load("seat_a_black_leather_v1")

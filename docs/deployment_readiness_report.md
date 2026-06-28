@@ -112,7 +112,7 @@
 
 | 文件 | 用途 | 放行要求 |
 |------|------|----------|
-| `model/roi_yolo/seat_roi_seg.onnx` | Dome/DIFFUSE 语义光源 ROI segmentation 定位 | 文件存在、非占位，类别与 `roi_locator.class_names: [seat]` 一致 |
+| `model/roi_yolo/seat_roi_seg.onnx` | Dome/DIFFUSE 语义光源 ROI segmentation 定位 | 文件存在、非占位，ROI 名称映射与 `roi_locator.class_names: [seat]` 一致 |
 | `model/wideresnet50/seat_wrn50_embedding.onnx` | 多光源 ROI 空间 embedding 特征提取 | 输入通道数与生产配方 `input_channels` 一致，空间层输出维度与配方一致 |
 | `model/patchcore/seat_pca.json` | embedding 降维参数 | `pca_version=pca_seat_v2`，输入/输出维度与 memory bank 一致 |
 | `model/patchcore/seat_patchcore_bank.json` | PatchCore memory bank 元数据 | 版本、PCA 维度、`vectors_path` 和训练 metadata 通过校验 |

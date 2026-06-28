@@ -96,11 +96,11 @@ python_detector/config/default_recipe.yaml
 - `quality`
 - `roi_locator`
 - `registration`
-- `thresholds`
+- `decision_threshold`
 - `models`
 - `trace`
 
-`camera_defaults` 用来放同一配方内各视角共享的模型、ROI 模板、基准光源、光源顺序和 ROI 级模型映射，避免每个机位重复写同一组字段。`cameras` 在当前 schema 中表示检测视角配置，不只表示物理相机；相机条目会继承 `camera_defaults`，只需要写差异字段，例如固定机位的 `calibration_id`，或机器人飞拍的 `camera_id`、`pose_id` 和 `calibration_id`。固定机位方案通常让 `pose_id == camera_id`；机器人飞拍方案允许多个视角共享同一个末端相机 `camera_id=EYE_IN_HAND`，并通过不同 `pose_id` 选择 ROI、标定、模型和阈值。
+`camera_defaults` 用来放同一配方内各视角共享的模型、ROI 模板、基准光源、光源顺序和 ROI 级模型映射，避免每个机位重复写同一组字段。`cameras` 在当前 schema 中表示检测视角配置，不只表示物理相机；相机条目会继承 `camera_defaults`，只需要写差异字段，例如固定机位的 `calibration_id`，或机器人飞拍的 `camera_id`、`pose_id` 和 `calibration_id`。固定机位方案通常让 `pose_id == camera_id`；机器人飞拍方案允许多个视角共享同一个末端相机 `camera_id=EYE_IN_HAND`，并通过不同 `pose_id` 选择 ROI、标定和模型配置。
 
 旧配方继续支持在每个 `cameras.<view>` 下显式写 `model_key`、`safety_net_model_key`、`roi_template`、`base_light_id`、`light_order`、`roi_models` 和 `roi_safety_net_models`；这些字段会覆盖 `camera_defaults`。图像尺寸、像素尺寸和多光源对齐矩阵属于标定事实，优先维护在 `calibration/*.yaml` 中，不再在内置配方里重复写 `pixel_size_mm`。
 
@@ -166,7 +166,7 @@ roi_locator:
 - `onnx_yolo`：读取 Dome ROI 图，调用 ONNX 模型，解析 `[x1, y1, x2, y2, score, class_id]`。
 - `onnx_yolo_seg`：读取 Dome ROI 图，调用 YOLO segmentation ONNX，按 mask 自动生成运行时 `polygon_xy`；模板只作为安全边界。后续预处理会按 mask 外接框裁出 ROI，并将 mask 外像素置黑，使模型输入只保留 mask 内目标物体。
 
-缺 Dome ROI 图、输出越界、置信度不足、seg mask 面积异常、越出安全边界、姿态误差超差或类别未映射时返回 `RECHECK`。
+缺 Dome ROI 图、输出越界、置信度不足、seg mask 面积异常、越出安全边界、姿态误差超差或 ROI 名称未映射时返回 `RECHECK`。
 配置了 `input_width/input_height` 时，ROI 定位输入会先 letterbox 到模型训练尺寸；`input_channels=3` 会把当前 `DOME` 语义映射到的 Mono8 图复制为 3 通道，匹配 Ultralytics segmentation ONNX 的常见输入。
 
 配准使用 `registration.method`：
@@ -441,4 +441,4 @@ uv run python -m tools.validate_architecture_readiness --scope reference
 uv run python tools/run_simulated_ipc.py
 ```
 
-生产阈值必须基于人工确认标注和按缺陷类别、ROI、材质、颜色、机位、光源条件分层的数据验证。弱标签 trace 只能用于闭环排查和预训练资产准备。
+生产阈值必须基于人工确认标注，并按 ROI、材质、颜色、机位、光源条件和缺陷尺寸分层验证召回与误报。弱标签 trace 只能用于闭环排查和预训练资产准备。

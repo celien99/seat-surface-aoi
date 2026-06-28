@@ -3,6 +3,7 @@
 from python_detector.config.calibration_manager import Calibration, CalibrationManager, RoiTemplate
 from python_detector.config.recipe_schema import (
     CameraRecipe,
+    DecisionThresholdConfig,
     FusionConfig,
     ModelConfig,
     QualityConfig,
@@ -11,7 +12,6 @@ from python_detector.config.recipe_schema import (
     RecipeValidationError,
     RegistrationConfig,
     RoiLocatorConfig,
-    ThresholdConfig,
     TraceConfig,
     V4LightConfig,
     load_recipe_file,
@@ -22,6 +22,7 @@ __all__ = [
     "Calibration",
     "CalibrationManager",
     "CameraRecipe",
+    "DecisionThresholdConfig",
     "FusionConfig",
     "ModelConfig",
     "QualityConfig",
@@ -31,7 +32,6 @@ __all__ = [
     "RegistrationConfig",
     "RoiLocatorConfig",
     "RoiTemplate",
-    "ThresholdConfig",
     "TraceConfig",
     "V4LightConfig",
     "load_recipe_file",

@@ -295,9 +295,7 @@ bool ExternalSignalClient::wait_trigger(ExternalTrigger* out_trigger,
   }
 
   if (error_message != nullptr) {
-    *error_message = parse_error.empty()
-                         ? "外部信号触发超时，未收到新的规范化触发行"
-                         : "外部信号触发超时: " + parse_error;
+    *error_message = parse_error.empty() ? "" : "外部信号触发超时: " + parse_error;
   }
   return false;
 }

@@ -25,7 +25,6 @@ def test_build_display_event_includes_result_and_trace_assets(tmp_path: Path) ->
     job = make_simulated_job()
     defect = DefectResult(
         defect_id="D1",
-        class_name="scratch",
         severity="critical",
         camera_id="TOP_BACK",
         pose_id="TOP_BACK",
@@ -53,7 +52,7 @@ def test_build_display_event_includes_result_and_trace_assets(tmp_path: Path) ->
 
     assert event["schema"] == DISPLAY_EVENT_SCHEMA
     assert event["decision"] == "NG"
-    assert event["defects"][0]["class_name"] == "scratch"
+    assert "class_name" not in event["defects"][0]
     assert event["images"][0]["kind"] == "raw_image"
     assert event["images"][1]["kind"] == "roi_image"
     assert event["images"][1]["path"].endswith("DIFFUSE.png")

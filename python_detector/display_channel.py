@@ -91,7 +91,6 @@ def build_display_event(job: SeatInspectionJob, run: AlgorithmRun) -> dict[str, 
 def _defect_event(defect: DefectResult) -> dict[str, Any]:
     return {
         "defect_id": defect.defect_id,
-        "class_name": defect.class_name,
         "severity": defect.severity,
         "camera_id": defect.camera_id,
         "pose_id": defect.pose_id or defect.camera_id,

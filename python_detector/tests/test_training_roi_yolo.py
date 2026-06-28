@@ -99,8 +99,8 @@ def test_train_supervised_yolo_delegates_to_shared_export(monkeypatch: pytest.Mo
     from training_tools import train_supervised_yolo
 
     data = tmp_path / "dataset.yaml"
-    data.write_text("names: {0: scratch}\n", encoding="utf-8")
-    output = tmp_path / "seat_defect_detector.onnx"
+    data.write_text("names: {0: defect}\n", encoding="utf-8")
+    output = tmp_path / "seat_defect_presence.onnx"
     calls = {}
 
     def fake_train_roi_yolo(**kwargs):

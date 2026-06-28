@@ -22,12 +22,12 @@ def test_compute_iou_partial() -> None:
 
 def test_evaluate_detections_all_matched() -> None:
     preds = [
-        {"class_name": "scratch", "score": 0.9, "bbox_xyxy_pixel": (10, 10, 30, 30)},
-        {"class_name": "dent", "score": 0.7, "bbox_xyxy_pixel": (50, 50, 80, 80)},
+        {"score": 0.9, "bbox_xyxy_pixel": (10, 10, 30, 30)},
+        {"score": 0.7, "bbox_xyxy_pixel": (50, 50, 80, 80)},
     ]
     gts = [
-        {"class_name": "scratch", "bbox_xyxy_pixel": (10, 10, 30, 30)},
-        {"class_name": "dent", "bbox_xyxy_pixel": (50, 50, 80, 80)},
+        {"bbox_xyxy_pixel": (10, 10, 30, 30)},
+        {"bbox_xyxy_pixel": (50, 50, 80, 80)},
     ]
     report = evaluate_detections(preds, gts, iou_threshold=0.5)
     assert report["true_positives"] == 2
@@ -39,7 +39,7 @@ def test_evaluate_detections_all_matched() -> None:
 
 def test_evaluate_detections_no_predictions() -> None:
     preds: list[dict] = []
-    gts = [{"class_name": "scratch", "bbox_xyxy_pixel": (10, 10, 30, 30)}]
+    gts = [{"bbox_xyxy_pixel": (10, 10, 30, 30)}]
     report = evaluate_detections(preds, gts, iou_threshold=0.5)
     assert report["true_positives"] == 0
     assert report["false_negatives"] == 1
@@ -47,7 +47,7 @@ def test_evaluate_detections_no_predictions() -> None:
 
 
 def test_evaluate_detections_false_positives() -> None:
-    preds = [{"class_name": "scratch", "score": 0.9, "bbox_xyxy_pixel": (10, 10, 30, 30)}]
+    preds = [{"score": 0.9, "bbox_xyxy_pixel": (10, 10, 30, 30)}]
     gts: list[dict] = []
     report = evaluate_detections(preds, gts, iou_threshold=0.5)
     assert report["false_positives"] == 1
@@ -55,8 +55,8 @@ def test_evaluate_detections_false_positives() -> None:
 
 
 def test_evaluate_detections_score_below_threshold() -> None:
-    preds = [{"class_name": "scratch", "score": 0.1, "bbox_xyxy_pixel": (10, 10, 30, 30)}]
-    gts = [{"class_name": "scratch", "bbox_xyxy_pixel": (10, 10, 30, 30)}]
+    preds = [{"score": 0.1, "bbox_xyxy_pixel": (10, 10, 30, 30)}]
+    gts = [{"bbox_xyxy_pixel": (10, 10, 30, 30)}]
     report = evaluate_detections(preds, gts, iou_threshold=0.5, score_threshold=0.5)
     assert report["true_positives"] == 0
     assert report["false_negatives"] == 1
@@ -88,8 +88,7 @@ def test_evaluate_end_to_end_json(tmp_path: Path) -> None:
             "split": "test",
             "label_status": "verified",
             "ground_truth_bbox": [[10, 10, 30, 30]],
-            "ground_truth_class": ["scratch"],
-        })
+                    })
     manifest.write_text("\n".join(json.dumps(entry) for entry in entries) + "\n", encoding="utf-8")
 
     output = tmp_path / "evaluation_report.json"
@@ -103,7 +102,7 @@ def test_evaluate_end_to_end_json(tmp_path: Path) -> None:
     assert output.exists()
     assert "image_metrics" in report
     assert report["overall"]["total_samples"] == 1
-    assert "by_class" in report["breakdown"]
+    assert "by_roi" in report["breakdown"]
     assert report["image_metrics"][0]["lights"] == ["DIFFUSE", "HIGH_LEFT", "POLAR_DIFFUSE"]
 
 
@@ -121,7 +120,7 @@ def test_collect_trace_dataset_filter_decision(tmp_path: Path) -> None:
             "decision": decision,
             "quality_pass": decision == "OK",
             "defects": [] if decision == "OK" else [
-                {"class_name": "scratch", "camera_id": "TOP_BACK", "roi_name": "seat", "bbox_xyxy_pixel": [10, 10, 20, 20]}
+                {"camera_id": "TOP_BACK", "roi_name": "seat", "bbox_xyxy_pixel": [10, 10, 20, 20]}
             ],
         }), encoding="utf-8")
 

@@ -185,7 +185,6 @@ def test_onnx_detection_rows_decode_maps_normalized_roi_bbox() -> None:
         model_path="unused.onnx",
         output_decode="detection_rows",
         bbox_format="xyxy_normalized",
-        class_names=("scratch", "dent"),
         score_threshold=0.3,
     )
     model = object.__new__(OnnxModel)
@@ -200,7 +199,6 @@ def test_onnx_detection_rows_decode_maps_normalized_roi_bbox() -> None:
     candidates = model.run(_feature_group())
 
     assert len(candidates) == 1
-    assert candidates[0].class_name == "dent"
     assert candidates[0].score == pytest.approx(0.91)
     assert candidates[0].bbox_xyxy_pixel == (26, 32, 42, 44)
     assert candidates[0].area_px == 17 * 13
@@ -215,7 +213,6 @@ def test_onnx_ultralytics_yolo_decode_maps_transposed_output() -> None:
         model_path="unused.onnx",
         output_decode="ultralytics_yolo",
         bbox_format="xyxy_pixel",
-        class_names=("scratch", "dent"),
         score_threshold=0.3,
     )
     model.session = _Session(
@@ -234,9 +231,7 @@ def test_onnx_ultralytics_yolo_decode_maps_transposed_output() -> None:
     candidates = model.run(_feature_group())
 
     assert len(candidates) == 2
-    assert candidates[0].class_name == "scratch"
     assert candidates[0].bbox_xyxy_pixel == (37, 38, 47, 50)
-    assert candidates[1].class_name == "dent"
 
 
 def test_decode_ultralytics_yolo_filters_and_maps_candidates() -> None:
@@ -385,7 +380,6 @@ def test_onnx_detection_rows_maps_full_normalized_bbox_inside_roi() -> None:
         model_path="unused.onnx",
         output_decode="detection_rows",
         bbox_format="xyxy_normalized",
-        class_names=("scratch",),
         score_threshold=0.3,
     )
     model.session = _Session([[0.0, 0.0, 1.0, 1.0, 0.91, 0]])
@@ -402,7 +396,6 @@ def test_onnx_detection_rows_maps_perspective_roi_bbox_to_source() -> None:
         model_path="unused.onnx",
         output_decode="detection_rows",
         bbox_format="xyxy_pixel",
-        class_names=("scratch",),
         score_threshold=0.3,
     )
     group = replace(
@@ -442,6 +435,7 @@ def test_onnx_detection_rows_maps_perspective_roi_bbox_to_source() -> None:
         ("xyxy_pixel", [0.0, 0.0, 5.0, 10.0, 1.2, 0], "score 越界"),
         ("xyxy_pixel", [0.0, 0.0, 5.0, 10.0, float("nan"), 0], "score 越界"),
         ("xyxy_pixel", [0.0, 0.0, 5.0, 10.0, 0.91, 0.5], "class_id 不是整数"),
+        ("xyxy_pixel", [0.0, 0.0, 5.0, 10.0, 0.91, -1], "class_id 越界"),
     ],
 )
 def test_onnx_detection_rows_rejects_invalid_bbox_without_clamping(
@@ -455,7 +449,6 @@ def test_onnx_detection_rows_rejects_invalid_bbox_without_clamping(
         model_path="unused.onnx",
         output_decode="detection_rows",
         bbox_format=bbox_format,
-        class_names=("scratch",),
         score_threshold=0.3,
     )
     model.session = _Session([row])
@@ -477,7 +470,6 @@ def test_patchcore_spatial_squeezes_singleton_anomaly_map_without_numpy_truth_er
         ModelConfig(
             backend="patchcore_knn",
             model_family="patchcore",
-            class_names=("unknown_anomaly",),
             embedding_backend="onnx_wideresnet50",
             embedding_model_path="unused.onnx",
             memory_bank_path="unused_bank.json",
@@ -500,7 +492,6 @@ def test_patchcore_spatial_rejects_multi_channel_anomaly_map_without_numpy_truth
         ModelConfig(
             backend="patchcore_knn",
             model_family="patchcore",
-            class_names=("unknown_anomaly",),
             embedding_backend="onnx_wideresnet50",
             embedding_model_path="unused.onnx",
             memory_bank_path="unused_bank.json",
@@ -521,7 +512,6 @@ def test_patchcore_spatial_uses_numpy_max_for_2d_anomaly_map() -> None:
         ModelConfig(
             backend="patchcore_knn",
             model_family="patchcore",
-            class_names=("unknown_anomaly",),
             embedding_backend="onnx_wideresnet50",
             embedding_model_path="unused.onnx",
             memory_bank_path="unused_bank.json",
@@ -536,7 +526,6 @@ def test_patchcore_spatial_uses_numpy_max_for_2d_anomaly_map() -> None:
     candidates = model.run(_feature_group())
 
     assert candidates
-    assert candidates[0].class_name == "unknown_anomaly"
     assert candidates[0].score == pytest.approx(0.9)
     assert model.config.spatial_mode is True
 

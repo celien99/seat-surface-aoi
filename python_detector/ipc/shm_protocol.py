@@ -119,7 +119,7 @@ class StructSpec:
 SHM_HEADER = StructSpec.from_format("<IIIIQQQ")
 LIGHT_FRAME_META = StructSpec.from_format("<IIIIIIIIIIIIIQQQIf3f3f64s64s64sQQII")
 SEAT_JOB_META = StructSpec.from_format("<QQ64s64s64sIIIIQ")
-DEFECT_RESULT_META = StructSpec.from_format("<64s64s64sI64s64s64s4ifII8iqII")
+DEFECT_RESULT_META = StructSpec.from_format("<64s64sI64s64s64s4ifII8iqII")
 INSPECTION_RESULT_META = StructSpec.from_format("<QQ64sIIIIfI")
 FRAME_SLOT_HEADER_PREFIX = StructSpec.from_format("<IQQIIII")
 RESULT_SLOT_HEADER_PREFIX = StructSpec.from_format("<IQQIIII")
@@ -134,7 +134,7 @@ EXPECTED_SIZES = {
     "LightFrameMeta": 324,
     "SeatJobMeta": 232,
     "InspectionResultMeta": 104,
-    "DefectResultMeta": 464,
+    "DefectResultMeta": 400,
 }
 
 
