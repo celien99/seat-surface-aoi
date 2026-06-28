@@ -113,7 +113,23 @@ class EccRegistration:
         convergence_epsilon: float,
         min_correlation: float,
     ) -> EccAlignmentResult:
-        """暴力搜索平移配准（OpenCV 不可用或不收敛时的回退方案）。"""
+        """暴力搜索平移配准（OpenCV 不可用或不收敛时的回退方案）。
+
+        安全约束：
+        - search_radius_px 硬上限为 10，防止 O(R²) 爆炸
+        - max_iterations 作为总迭代次数的硬上限
+        """
+        # 硬上限防止暴力搜索在异常大半径下 O(R²) 爆炸
+        MAX_EXHAUSTIVE_RADIUS = 10
+        effective_radius = min(search_radius_px, MAX_EXHAUSTIVE_RADIUS)
+        if search_radius_px > MAX_EXHAUSTIVE_RADIUS:
+            message = (
+                f"ECC 暴力搜索半径 {search_radius_px} 超出硬上限 {MAX_EXHAUSTIVE_RADIUS}，"
+                f"已截断为 {MAX_EXHAUSTIVE_RADIUS}；建议检查 OpenCV 是否可用或减小 search_radius_px"
+            )
+        else:
+            message = ""
+
         best_shift = (0, 0)
         best_correlation = -1.0
         iterations = 0
@@ -121,16 +137,21 @@ class EccRegistration:
         base_f64 = base_array.astype(np.float64, copy=False)
         moving_f64 = moving_array.astype(np.float64, copy=False)
 
-        for radius in range(search_radius_px + 1):
+        for radius in range(effective_radius + 1):
             for dy in range(-radius, radius + 1):
                 for dx in range(-radius, radius + 1):
                     if max(abs(dx), abs(dy)) != radius:
                         continue
+                    # 硬上限：总迭代次数不得超过 max_iterations
+                    if iterations >= max_iterations:
+                        break
                     correlation = self._normalized_correlation(base_f64, moving_f64, dx, dy)
                     iterations += 1
                     if correlation > best_correlation:
                         best_correlation = correlation
                         best_shift = (dx, dy)
+                if iterations >= max_iterations:
+                    break
             if iterations >= max_iterations:
                 break
             if radius > 0 and abs(best_correlation - previous_best) < convergence_epsilon:
@@ -139,6 +160,9 @@ class EccRegistration:
 
         converged = best_correlation >= min_correlation and best_correlation >= 0.0
         mean_error = math.sqrt(float(best_shift[0] * best_shift[0] + best_shift[1] * best_shift[1]))
+        result_msg = message or (
+            "ECC (exhaustive) pass" if converged else "ECC (exhaustive) correlation below threshold"
+        )
         return EccAlignmentResult(
             light_id=light_id,
             matrix_3x3=self._translation_matrix(best_shift[0], best_shift[1]),
@@ -147,7 +171,7 @@ class EccRegistration:
             iterations=iterations,
             converged=converged,
             mean_error_px=mean_error,
-            message="ECC (exhaustive) pass" if converged else "ECC (exhaustive) correlation below threshold",
+            message=result_msg,
         )
 
     def apply_translation(self, moving: LightFrame, shift_xy: tuple[int, int]) -> LightFrame:

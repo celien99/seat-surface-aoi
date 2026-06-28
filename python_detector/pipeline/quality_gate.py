@@ -106,7 +106,7 @@ class ImageQualityGate:
         light_seq_indices = [frame.light_seq_index for frame in frames]
         if len(set(light_seq_indices)) != len(light_seq_indices):
             messages.append(f"{bundle.camera_id}: duplicate light_seq_index in required lights")
-        self._check_robot_pose_consistency(bundle, frames, messages)
+        self._check_robot_pose_consistency(bundle, frames, recipe, messages)
         self._check_required_light_capture_params(bundle, frames, recipe, messages)
 
     def _check_light_sequence(self, bundle: CameraBundle, recipe: Recipe, messages: list[str]) -> None:
@@ -131,6 +131,7 @@ class ImageQualityGate:
         self,
         bundle: CameraBundle,
         frames: list[LightFrame],
+        recipe: Recipe,
         messages: list[str],
     ) -> None:
         label = f"{bundle.camera_id}/{bundle.pose_id}" if bundle.pose_id else bundle.camera_id
@@ -156,11 +157,11 @@ class ImageQualityGate:
             reference_xyz = frames[0].robot_tcp_xyz_mm
             reference_rpy = frames[0].robot_rpy_deg
             for frame in frames[1:]:
-                if not self._float_tuple_close(reference_xyz, frame.robot_tcp_xyz_mm):
+                if not self._float_tuple_close(reference_xyz, frame.robot_tcp_xyz_mm, recipe.quality.max_pose_delta):
                     messages.append(f"{label}: inconsistent robot_tcp_xyz_mm in required lights")
                     break
             for frame in frames[1:]:
-                if not self._float_tuple_close(reference_rpy, frame.robot_rpy_deg):
+                if not self._float_tuple_close(reference_rpy, frame.robot_rpy_deg, recipe.quality.max_pose_delta):
                     messages.append(f"{label}: inconsistent robot_rpy_deg in required lights")
                     break
 
@@ -187,8 +188,13 @@ class ImageQualityGate:
         if gain_delta > recipe.quality.max_gain_delta:
             messages.append(f"{bundle.camera_id}: gain delta {gain_delta:.3f} exceeds {recipe.quality.max_gain_delta:.3f}")
 
-    def _float_tuple_close(self, left: tuple[float, ...], right: tuple[float, ...]) -> bool:
-        return len(left) == len(right) and all(abs(a - b) <= 1e-4 for a, b in zip(left, right))
+    def _float_tuple_close(self, left: tuple[float, ...], right: tuple[float, ...], tolerance: float = 1e-4) -> bool:
+        """比较两个浮点元组是否在容差范围内相等。
+
+        tolerance 通过 recipe.quality.max_pose_delta 配置，默认 1e-4（等同严格相等）。
+        实际部署时可根据机械臂定位精度调整。
+        """
+        return len(left) == len(right) and all(abs(a - b) <= tolerance for a, b in zip(left, right))
 
     def _check_frame(self, frame: LightFrame, recipe: Recipe) -> FrameQuality:
         values = frame.image

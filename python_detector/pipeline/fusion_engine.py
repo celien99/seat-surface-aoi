@@ -67,24 +67,22 @@ class FusionEngine:
         return None
 
     def _merge_candidates(self, primary: DefectCandidate, secondary: DefectCandidate) -> DefectCandidate:
+        """合并两个重叠候选：证据光源去重，bbox 取外包矩形保留完整空间证据。"""
         evidence_lights = list(dict.fromkeys(primary.evidence_lights + secondary.evidence_lights))
-        if secondary.score > primary.score:
-            return DefectCandidate(
-                camera_id=secondary.camera_id,
-                pose_id=secondary.pose_id,
-                roi_name=secondary.roi_name,
-                score=secondary.score,
-                bbox_xyxy_pixel=secondary.bbox_xyxy_pixel,
-                area_px=secondary.area_px,
-                evidence_lights=evidence_lights,
-            )
+        # 取外包矩形: min(x0,y0) 和 max(x1,y1)
+        ax0, ay0, ax1, ay1 = primary.bbox_xyxy_pixel
+        bx0, by0, bx1, by1 = secondary.bbox_xyxy_pixel
+        union_bbox = (min(ax0, bx0), min(ay0, by0), max(ax1, bx1), max(ay1, by1))
+        union_area = max(union_bbox[2] - union_bbox[0] + 1, 0) * max(union_bbox[3] - union_bbox[1] + 1, 0)
+        best_score = max(primary.score, secondary.score)
+        keeper = primary if primary.score >= secondary.score else secondary
         return DefectCandidate(
-            camera_id=primary.camera_id,
-            pose_id=primary.pose_id,
-            roi_name=primary.roi_name,
-            score=primary.score,
-            bbox_xyxy_pixel=primary.bbox_xyxy_pixel,
-            area_px=primary.area_px,
+            camera_id=keeper.camera_id,
+            pose_id=keeper.pose_id,
+            roi_name=keeper.roi_name,
+            score=best_score,
+            bbox_xyxy_pixel=union_bbox,
+            area_px=union_area,
             evidence_lights=evidence_lights,
         )
 

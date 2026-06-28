@@ -70,6 +70,12 @@ class FeatureChannelSpec:
     light_ids: tuple[str, ...]
 
 
+# 通道别名映射（向后兼容旧配方语法）。
+# 新配方请直接使用 input_channels 的规范语法:
+#   - light:<ID>          直接取光源像素值
+#   - abs_diff:<A>:<B>    两光源差的绝对值
+#   - max_min:<A>:<B>:... 多光源最大减最小差
+#   - local_contrast:<A>  像素减去局部均值
 _CHANNEL_ALIASES: dict[str, FeatureChannelSpec] = {
     "ch0_diffuse": FeatureChannelSpec("light", ("DIFFUSE",)),
     "ch1_polar_diffuse": FeatureChannelSpec("light", ("POLAR_DIFFUSE",)),

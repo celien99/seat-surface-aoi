@@ -320,7 +320,7 @@ class Preprocessor:
         output_height: int,
         roi_name: str,
     ) -> bytearray:
-        grid_y, grid_x = np.indices((output_height, output_width), dtype=np.float64)
+        grid_y, grid_x = np.indices((output_height, output_width), dtype=np.float32)
         denom = transform[6] * grid_x + transform[7] * grid_y + transform[8]
         if np.any(np.abs(denom) < 1e-9):
             raise ValueError(f"{frame.camera_id}/{frame.light_id}/{roi_name}: ROI 透视变换无效")
@@ -331,7 +331,7 @@ class Preprocessor:
 
     def _sample_bilinear_grid(self, frame: LightFrame, x: np.ndarray, y: np.ndarray) -> np.ndarray:
         source = np.frombuffer(frame.image, dtype=np.uint8, count=frame.stride_bytes * frame.height)
-        source = source.reshape(frame.height, frame.stride_bytes)[:, : frame.width].astype(np.float64, copy=False)
+        source = source.reshape(frame.height, frame.stride_bytes)[:, : frame.width].astype(np.float32, copy=False)
         clipped_x = np.clip(x, 0.0, float(frame.width - 1))
         clipped_y = np.clip(y, 0.0, float(frame.height - 1))
         x0 = clipped_x.astype(np.int64)

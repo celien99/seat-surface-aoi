@@ -53,6 +53,8 @@ class QualityConfig:
     max_gain_delta: float = 0.2
     require_monotonic_timestamps: bool = True
     require_unique_frame_indices: bool = True
+    max_pose_delta: float = 1e-4
+    """机器人位姿 (TCP/RPY) 比较容差，默认 1e-4 等同严格相等。"""
 
 
 @dataclass(frozen=True)
@@ -371,6 +373,7 @@ def _quality_from_dict(data: dict[str, Any], default_required_lights: tuple[str,
         max_gain_delta=_non_negative_float(data.get("max_gain_delta", 0.2), "quality.max_gain_delta"),
         require_monotonic_timestamps=bool(data.get("require_monotonic_timestamps", True)),
         require_unique_frame_indices=bool(data.get("require_unique_frame_indices", True)),
+        max_pose_delta=_non_negative_float(data.get("max_pose_delta", 1e-4), "quality.max_pose_delta"),
     )
 
 

@@ -627,6 +627,14 @@ class RoiLocator:
         src = np.asarray(mask, dtype=np.float32)[y0 : y1 + 1, x0 : x1 + 1]
         src_h, src_w = src.shape  # 即 bbox_h × bbox_w
 
+        # 防御 NaN/Inf 静默传播：ONNX 损坏输出会导致掩码全零，必须显式报错
+        if not np.isfinite(src).all():
+            nan_count = int((~np.isfinite(src)).sum())
+            raise RuntimeError(
+                f"ROI segmentation mask 包含 {nan_count} 个非有限值 (NaN/Inf)，"
+                f"可能是 ONNX 模型输出异常或输入数据损坏"
+            )
+
         # 归一化到 [0, 1]（兼容源 mask 值为 0/1 或 0/255）
         src_max = float(np.max(src))
         if src_max > 0.0:
