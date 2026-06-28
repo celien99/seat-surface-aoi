@@ -4,12 +4,11 @@ import json
 import os
 import tempfile
 import time
-from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
 from python_detector.algorithm import AlgorithmRun
-from python_detector.ipc.data_types import DefectResult, InspectionResult, SeatInspectionJob
+from python_detector.ipc.data_types import DefectResult, InspectionResult, SeatInspectionJob, jsonable_result
 
 
 DISPLAY_EVENT_SCHEMA = "seat_surface_aoi.display_event.v1"
@@ -80,8 +79,8 @@ def build_display_event(job: SeatInspectionJob, run: AlgorithmRun) -> dict[str, 
         "defects": [_defect_event(defect) for defect in result.defects],
         "quality_messages": quality_messages,
         "message": _message(quality_messages, error),
-        "error": _jsonable(error),
-        "sample_collection": _jsonable(run.context.get("sample_collection", {})),
+        "error": jsonable_result(error),
+        "sample_collection": jsonable_result(run.context.get("sample_collection", {})),
         "trace_dir": str(trace_dir) if trace_dir is not None else "",
         "images": _image_assets(trace_dir) if trace_dir is not None else [],
         "overlays": _overlay_assets(trace_dir, result) if trace_dir is not None else [],
@@ -226,27 +225,11 @@ def _iter_image_files(root: Path) -> list[Path]:
     return sorted(path for path in root.rglob("*") if path.is_file() and path.suffix.lower() == ".png")
 
 
-def _message(quality_messages: list[str], error: Any) -> str:
+def _message(quality_messages: list[str], error: dict) -> str:
     if quality_messages:
         return "；".join(quality_messages)
-    if isinstance(error, dict):
-        return str(error.get("message") or error.get("type") or "")
-    return ""
+    return str(error.get("message") or error.get("type") or "")
 
 
 def _safe_name(value: str) -> str:
     return "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in str(value))
-
-
-def _jsonable(value: Any) -> Any:
-    if is_dataclass(value):
-        return {field.name: _jsonable(getattr(value, field.name)) for field in fields(value)}
-    if isinstance(value, dict):
-        return {str(key): _jsonable(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(item) for item in value]
-    if isinstance(value, memoryview):
-        return {"memoryview_bytes": len(value)}
-    if hasattr(value, "value"):
-        return value.value
-    return value

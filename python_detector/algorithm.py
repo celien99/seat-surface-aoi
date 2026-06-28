@@ -73,7 +73,7 @@ class SeatSurfaceAoiAlgorithm:
                     trigger_id=job.trigger_id,
                     seat_id=job.seat_id,
                     decision="RECHECK",
-                    defects=[],
+                    defects=result.defects,
                     quality_pass=False,
                     error_code=ErrorCode.DEVICE_FAULT,
                     elapsed_ms=result.elapsed_ms,

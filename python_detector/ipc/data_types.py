@@ -116,3 +116,23 @@ def apply_homography(matrix: tuple[float, ...], x: float, y: float) -> tuple[flo
     mapped_x = (matrix[0] * x + matrix[1] * y + matrix[2]) / denom
     mapped_y = (matrix[3] * x + matrix[4] * y + matrix[5]) / denom
     return mapped_x, mapped_y
+
+
+def jsonable_result(value: object) -> object:
+    """将 dataclass/dict/list/memoryview 递归转换为 JSON 可序列化结构。
+
+    display_channel 与 trace_writer 共享使用，避免重复实现。
+    """
+    from dataclasses import fields, is_dataclass
+
+    if is_dataclass(value):
+        return {field.name: jsonable_result(getattr(value, field.name)) for field in fields(value)}
+    if isinstance(value, dict):
+        return {str(key): jsonable_result(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [jsonable_result(item) for item in value]
+    if isinstance(value, memoryview):
+        return {"memoryview_bytes": len(value)}
+    if hasattr(value, "value"):
+        return value.value
+    return value

@@ -123,7 +123,7 @@ python_detector/
 │   ├── calibration/            # 按 camera_id 存放模拟/生产标定模板，机器人飞拍按 pose 使用不同 calibration_id
 │   └── roi/                    # ROI 模板，生产模板需按现场标定替换
 ├── ipc/
-│   ├── data_types.py           # LightFrame、CameraBundle、SeatInspectionJob、InspectionResult 等数据结构
+│   ├── data_types.py           # LightFrame、CameraBundle、SeatInspectionJob、InspectionResult 等数据结构，以及 jsonable_result 共享序列化工具
 │   ├── shm_protocol.py         # Python 侧共享内存协议常量、结构体布局、CRC、枚举
 │   ├── shared_memory_map.py    # POSIX/Windows 共享内存名称映射和 mmap 打开封装
 │   └── shm_client.py           # 读取共享内存任务和写回结果

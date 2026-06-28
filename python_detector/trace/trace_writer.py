@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import fields, is_dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -11,7 +10,7 @@ import numpy as np
 
 from python_detector.config.recipe_schema import Recipe
 from python_detector.image_codec import write_gray_png, write_rgb_png
-from python_detector.ipc.data_types import DefectResult, InspectionResult, LightFrame, SeatInspectionJob
+from python_detector.ipc.data_types import DefectResult, InspectionResult, LightFrame, SeatInspectionJob, jsonable_result
 from python_detector.trace.overlay_renderer import (
     _decision_color,
     _hot_colormap_array,
@@ -80,7 +79,7 @@ class TraceWriter:
         return value / float(1 << 64)
 
     def _write_json(self, path: Path, value: Any) -> None:
-        path.write_text(json.dumps(_jsonable(value), ensure_ascii=False, indent=2), encoding="utf-8")
+        path.write_text(json.dumps(jsonable_result(value), ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _write_roi_images(self, trace_dir: Path, prepared_bundles: Any) -> None:
         for bundle in prepared_bundles or []:
@@ -349,20 +348,6 @@ class TraceWriter:
             raise ValueError(f"trace ROI 图像长度不足: {frame.camera_id}/{frame.light_id}")
         raw = np.frombuffer(frame.image, dtype=np.uint8, count=expected)
         return raw.reshape(frame.height, frame.stride_bytes)[:, : frame.width]
-
-def _jsonable(value: Any) -> Any:
-    if is_dataclass(value):
-        return {field.name: _jsonable(getattr(value, field.name)) for field in fields(value)}
-    if isinstance(value, dict):
-        return {str(k): _jsonable(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(v) for v in value]
-    if isinstance(value, memoryview):
-        return {"memoryview_bytes": len(value)}
-    if hasattr(value, "value"):
-        return value.value
-    return value
-
 
 def _safe_name(value: str) -> str:
     return "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in str(value))

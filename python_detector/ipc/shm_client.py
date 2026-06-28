@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import mmap
 import struct
+import sys
 import time
 from dataclasses import dataclass
 
@@ -139,7 +140,6 @@ class ShmClient:
             max_defects = (self.result_slot_size - RESULT_SLOT_HEADER_SIZE) // defect_entry_size
             truncated = max(max_defects, 0)
             if truncated < len(defects):
-                import sys
                 print(
                     f"result payload {payload_size} exceeds slot {self.result_slot_size}, "
                     f"truncating defects {len(defects)} -> {truncated}",

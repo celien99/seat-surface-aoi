@@ -31,7 +31,6 @@ from python_detector.config.schema_validators import (
     _dict,
     _float,
     _gray_value,
-    _int,
     _non_negative_float,
     _non_negative_int,
     _optional_str,
