@@ -23,10 +23,10 @@ class PatchCoreBank:
     metadata: dict[str, Any] | None = None
     distance_mean: float | None = None
     distance_std: float | None = None
+    distance_p99: float | None = None
+    """held-out 正常样本到 bank 最近邻距离的 p99 分位数"""
 
 
-# z-score 到 anomaly_score 的缩放常量：z = Z_SCALE 时 score = 1.0
-_Z_SCALE: float = 6.0
 
 
 @dataclass(frozen=True)
@@ -62,17 +62,17 @@ class SpatialAnomalyScore:
 def _calibrated_score(
     nearest: "np.ndarray | float",
     distance_mean: float,
-    distance_std: float,
+    distance_p99: float,
 ) -> "np.ndarray | float":
-    """用训练数据距离分布做 z-score 归一化。
+    """用训练数据 held-out 距离分位数做归一化。
 
-        z = (nearest - mean) / max(std, ε)
-        anomaly_score = clip(z / Z_SCALE, 0, 1)
+        anomaly_score = clip((nearest - mean) / max(p99 - mean, ε), 0, 1)
 
-    distance_mean / distance_std 来自 memory bank JSON，由训练阶段自动计算。
+    distance_mean 和 distance_p99 来自 memory bank JSON。
+    分数 0 = 正常均值, 1.0 = 正常边界 (p99)。
     """
-    z = (nearest - distance_mean) / max(distance_std, 1e-6)
-    return z / _Z_SCALE
+    span = max(distance_p99 - distance_mean, 1e-6)
+    return (nearest - distance_mean) / span
 
 
 class PatchCoreKnnIndex:
@@ -100,8 +100,8 @@ class PatchCoreKnnIndex:
             raise RuntimeError(f"PatchCore embedding 维度不匹配: {len(embedding)} != {bank.embedding_dim}")
         if expected_pca_version is not None and bank.pca_version not in (None, expected_pca_version):
             raise RuntimeError(f"PatchCore memory bank PCA 版本不匹配: {bank.pca_version} != {expected_pca_version}")
-        if bank.distance_mean is None or bank.distance_std is None:
-            raise RuntimeError("PatchCore memory bank 缺少 distance_mean/distance_std 校准统计量，请运行 calibrate 子命令")
+        if bank.distance_mean is None or bank.distance_p99 is None:
+            raise RuntimeError("PatchCore memory bank 缺少 distance_mean/distance_p99 校准统计量，请运行 calibrate 子命令")
         k = min(knn_k, len(bank.vectors))
         if k <= 0:
             raise RuntimeError("PatchCore memory bank 为空")
@@ -116,7 +116,7 @@ class PatchCoreKnnIndex:
         fallback_reason = self._faiss_fallback_reason(bank, faiss_index_path)
         distances = _topk_distances(np.asarray([embedding], dtype=np.float32), np.asarray(bank.vectors, dtype=np.float32), k)[0]
         nearest = float(distances[0])
-        anomaly_score = min(max(_calibrated_score(nearest, bank.distance_mean, bank.distance_std), 0.0), 1.0)
+        anomaly_score = min(max(_calibrated_score(nearest, bank.distance_mean, bank.distance_p99), 0.0), 1.0)
         return PatchCoreScore(
             anomaly_score=anomaly_score,
             nearest_distance=nearest,
@@ -150,8 +150,8 @@ class PatchCoreKnnIndex:
             raise RuntimeError(f"PatchCore patch embedding 维度不匹配: {patch_embeddings.shape[1]} != {bank.embedding_dim}")
         if expected_pca_version is not None and bank.pca_version not in (None, expected_pca_version):
             raise RuntimeError(f"PatchCore memory bank PCA 版本不匹配: {bank.pca_version} != {expected_pca_version}")
-        if bank.distance_mean is None or bank.distance_std is None:
-            raise RuntimeError("PatchCore memory bank 缺少 distance_mean/distance_std 校准统计量，请运行 calibrate 子命令")
+        if bank.distance_mean is None or bank.distance_p99 is None:
+            raise RuntimeError("PatchCore memory bank 缺少 distance_mean/distance_p99 校准统计量，请运行 calibrate 子命令")
         k = min(knn_k, len(bank.vectors))
         if k <= 0:
             raise RuntimeError("PatchCore memory bank 为空")
@@ -195,7 +195,7 @@ class PatchCoreKnnIndex:
             if distances_raw.ndim != 2 or distances_raw.shape[0] != queries.shape[0]:
                 return None
             nearest = _nearest_finite_distances(distances_raw)
-            score_array = np.clip(_calibrated_score(nearest, bank.distance_mean, bank.distance_std), 0.0, 1.0)
+            score_array = np.clip(_calibrated_score(nearest, bank.distance_mean, bank.distance_p99), 0.0, 1.0)
             h_out, w_out = spatial_shape
             return SpatialAnomalyScore(
                 anomaly_map=score_array.reshape(h_out, w_out),
@@ -223,7 +223,7 @@ class PatchCoreKnnIndex:
         h_out, w_out = spatial_shape
         queries = np.asarray(patch_embeddings, dtype=np.float32)
         nearest = _topk_distances(queries, np.asarray(bank.vectors, dtype=np.float32), knn_k)[:, 0]
-        score_array = np.clip(_calibrated_score(nearest, bank.distance_mean, bank.distance_std), 0.0, 1.0)
+        score_array = np.clip(_calibrated_score(nearest, bank.distance_mean, bank.distance_p99), 0.0, 1.0)
         return SpatialAnomalyScore(
             anomaly_map=score_array.reshape(h_out, w_out),
             spatial_shape=spatial_shape,
@@ -291,6 +291,7 @@ class PatchCoreKnnIndex:
             metadata=raw.get("metadata") if isinstance(raw.get("metadata"), dict) else None,
             distance_mean=raw.get("distance_mean") if isinstance(raw.get("distance_mean"), (int, float)) else None,
             distance_std=raw.get("distance_std") if isinstance(raw.get("distance_std"), (int, float)) else None,
+            distance_p99=raw.get("distance_p99") if isinstance(raw.get("distance_p99"), (int, float)) else None,
         )
 
     def _score_with_faiss(
@@ -316,7 +317,7 @@ class PatchCoreKnnIndex:
             if distances.size == 0:
                 return None
             nearest = float(distances[0])
-            anomaly_score = min(max(_calibrated_score(nearest, bank.distance_mean, bank.distance_std), 0.0), 1.0)
+            anomaly_score = min(max(_calibrated_score(nearest, bank.distance_mean, bank.distance_p99), 0.0), 1.0)
             return PatchCoreScore(
                 anomaly_score=anomaly_score,
                 nearest_distance=nearest,

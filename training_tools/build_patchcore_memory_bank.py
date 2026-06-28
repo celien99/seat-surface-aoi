@@ -131,10 +131,11 @@ def compute_calibration_stats(
     sample_count: int = 50000,
     chunk_size: int = 4096,
 ) -> dict[str, float]:
-    """对 memory bank 做 self-KNN (k=2)，计算正常样本的距离分布统计量。
+    """计算 held-out 正常样本到 bank 的距离分布，写入校准统计量。
 
-    取 k=2 中第二个最近邻距离（k=0 是自身），对采样后的距离集合
-    计算均值 (distance_mean) 和标准差 (distance_std)，写入并返回。
+    将 bank 向量随机对半分：一半做"缩减 bank"，另一半做 held-out 查询集。
+    held-out 向量不在缩减 bank 中，模拟了"测试图片不在训练集"的真实场景。
+    用 held-out 查询缩减 bank 的最近邻距离分布作为 z-score 基准。
     """
     import numpy as np
 
@@ -143,53 +144,78 @@ def compute_calibration_stats(
     vectors = np.load(str(vectors_npy), mmap_mode="r", allow_pickle=False)
     if vectors.ndim != 2 or vectors.shape[0] <= 0:
         raise ValueError(f"bank vectors 必须是二维矩阵: {vectors.shape}")
+    if vectors.shape[0] < 4:
+        raise ValueError(f"bank 向量数不足 ({vectors.shape[0]})，无法做 held-out 校准")
 
     total = vectors.shape[0]
-    sampled = min(sample_count, total)
     rng = np.random.default_rng(42)
-    indices = rng.choice(total, size=sampled, replace=False)
-    queries = np.asarray(vectors[indices], dtype=np.float32)
+    # 随机对半分：一半做缩减 bank，一半做 held-out 查询
+    perm = rng.permutation(total)
+    split = total // 2
+    reduced_indices = perm[:split]
+    heldout_indices = perm[split : split * 2]
 
-    faiss_available = faiss_index_path is not None and faiss_index_path.exists() and faiss_index_path.stat().st_size > 1
-    if faiss_available:
+    reduced_vecs = np.asarray(vectors[reduced_indices], dtype=np.float32)
+    heldout_queries = np.asarray(vectors[heldout_indices], dtype=np.float32)
+
+    # held-out 采样
+    heldout_sampled = min(sample_count, heldout_queries.shape[0])
+    if heldout_sampled < heldout_queries.shape[0]:
+        sample_idx = rng.choice(heldout_queries.shape[0], size=heldout_sampled, replace=False)
+        heldout_queries = heldout_queries[sample_idx]
+
+    # 在缩减 bank 上建临时 FAISS 索引
+    faiss_available = False
+    try:
         import faiss
-        index = faiss.read_index(str(faiss_index_path))
-        # FAISS 自查询：k=2 取第二个（k=0 是自身距离≈0）
-        distances_raw, _ = index.search(queries.astype(np.float32, copy=False), 2)
-        nearest_all = np.sqrt(np.maximum(distances_raw[:, 1].astype(np.float32), 0.0))
-    else:
-        # 无 FAISS 时用分块精确 KNN
-        bank_vecs = np.asarray(vectors, dtype=np.float32)
-        nearest_all = _self_knn_distances(queries, bank_vecs, chunk_size=chunk_size)
+        dim = int(reduced_vecs.shape[1])
+        index = faiss.IndexFlatL2(dim)
+        index.add(reduced_vecs)
+        distances_raw, _ = index.search(heldout_queries.astype(np.float32, copy=False), 1)
+        nearest_all = np.sqrt(np.maximum(distances_raw[:, 0].astype(np.float32), 0.0))
+        faiss_available = True
+    except Exception:
+        # FAISS 不可用时用分块精确 KNN
+        nearest_all = _heldout_knn_distances(heldout_queries, reduced_vecs, chunk_size=chunk_size)
 
     finite = np.isfinite(nearest_all)
     if not finite.any():
-        raise ValueError("自校准距离全为非有限值，无法计算统计量")
+        raise ValueError("校准距离全为非有限值，无法计算统计量")
 
     distance_mean = float(np.mean(nearest_all[finite]))
-    distance_std = float(np.std(nearest_all[finite]))
-    if distance_std <= 0.0:
-        distance_std = float(max(1e-6, distance_mean * 0.01))
+    # 空间 PatchCore 每张图有 H×W 个 patch（生产: 256×256=65536）。
+    # 需要对正常样本做 bootstrap 模拟，计算每张正常图的"最异常 patch 距离"的期望值，
+    # 以消除多重比较偏差。详见 patchcore.py _calibrated_score 注释。
+    _patch_grid = 256 * 256
+    _n_bootstrap = min(500, int(heldout_sampled))
+    _maxima = np.empty(_n_bootstrap, dtype=np.float32)
+    _rng = np.random.default_rng(42)
+    for _i in range(_n_bootstrap):
+        _sample = _rng.choice(nearest_all[finite], size=_patch_grid, replace=True)
+        _maxima[_i] = np.max(_sample)
+    distance_p99 = float(np.mean(_maxima))
+    distance_std = float(np.std(_maxima))  # 保留仅供诊断
 
     # 写回 bank JSON
     bank = {}
     if bank_json.exists() and bank_json.stat().st_size > 1:
         bank = json.loads(bank_json.read_text(encoding="utf-8"))
     bank["distance_mean"] = distance_mean
-    bank["distance_std"] = distance_std
+    bank["distance_p99"] = distance_p99
     bank_json.write_text(json.dumps(bank, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(
-        f"calibration_stats: sampled={sampled}/{total} "
-        f"mean={distance_mean:.4f} std={distance_std:.4f} "
+        f"calibration_stats: heldout={heldout_sampled}/{heldout_queries.shape[0]} "
+        f"reduced_bank={reduced_vecs.shape[0]} "
+        f"mean={distance_mean:.4f} p99={distance_p99:.4f} "
         f"faiss={'yes' if faiss_available else 'no'} "
         f"written_to={bank_json}"
     )
-    return {"distance_mean": distance_mean, "distance_std": distance_std}
+    return {"distance_mean": distance_mean, "distance_p99": distance_p99}
 
 
-def _self_knn_distances(queries: "np.ndarray", bank_vecs: "np.ndarray", chunk_size: int = 4096) -> "np.ndarray":
-    """分块精确 KNN：对 queries 中的每个向量，在 bank_vecs 中找最近非自身距离。"""
+def _heldout_knn_distances(queries: "np.ndarray", bank_vecs: "np.ndarray", chunk_size: int = 4096) -> "np.ndarray":
+    """分块精确 KNN：queries 对 bank_vecs 做最近邻搜索（queries 不在 bank 中）。"""
     import numpy as np
 
     result = np.empty(queries.shape[0], dtype=np.float32)
@@ -200,11 +226,8 @@ def _self_knn_distances(queries: "np.ndarray", bank_vecs: "np.ndarray", chunk_si
         query_norm = np.sum(np.square(chunk, dtype=np.float32), axis=1, keepdims=True)
         dist_sq = query_norm + bank_norm[None, :] - np.float32(2.0) * (chunk @ bank_vecs.T)
         np.maximum(dist_sq, np.float32(0.0), out=dist_sq)
-        # 分区取第二小（最小是自身，距离≈0）
-        partitioned = np.partition(dist_sq, kth=1, axis=1)[:, :2]
-        # 取第二小（索引 1）
-        second_nearest_sq = partitioned[:, 1]
-        result[start:end] = np.sqrt(second_nearest_sq)
+        nearest_sq = np.min(dist_sq, axis=1)
+        result[start:end] = np.sqrt(nearest_sq)
     return result
 
 
@@ -237,7 +260,7 @@ def main(argv: list[str] | None = None) -> int:
             faiss_index_path=args.faiss_index,
             sample_count=args.sample_count,
         )
-        print(f"distance_mean={stats['distance_mean']:.4f} distance_std={stats['distance_std']:.4f}")
+        print(f"distance_mean={stats['distance_mean']:.4f} distance_p99={stats['distance_p99']:.4f}")
         return 0
 
     if args.command is None:

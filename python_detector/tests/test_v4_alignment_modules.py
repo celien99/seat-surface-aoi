@@ -42,7 +42,7 @@ def _write_patchcore_bank(
                 "vector_count": int(vectors.shape[0]),
                 "vectors_path": vectors_path.name,
                 "distance_mean": 0.0,
-                "distance_std": 0.01,
+                "distance_p99": 0.01,
             }
         ),
         encoding="utf-8",
