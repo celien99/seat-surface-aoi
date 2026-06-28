@@ -64,15 +64,18 @@ def _calibrated_score(
     distance_mean: float,
     distance_p99: float,
 ) -> "np.ndarray | float":
-    """用训练数据 held-out 距离分位数做归一化。
+    """用训练数据 held-out 距离分位数做归一化，tanh 压缩尾部。
 
-        anomaly_score = clip((nearest - mean) / max(p99 - mean, ε), 0, 1)
+        x = (nearest - mean) / (2 * max(p99 - mean, ε))
+        anomaly_score = tanh(x)
 
+    tanh 特性：均值附近近似线性，尾部自然饱和。score=0.76 对应 p99，
+    避免 65536 patch 空间模式下正常样本尾部噪声被误判为 NG。
     distance_mean 和 distance_p99 来自 memory bank JSON。
-    分数 0 = 正常均值, 1.0 = 正常边界 (p99)。
     """
-    span = max(distance_p99 - distance_mean, 1e-6)
-    return (nearest - distance_mean) / span
+    span = 2.0 * max(distance_p99 - distance_mean, 1e-6)
+    x = (nearest - distance_mean) / span
+    return np.tanh(x)
 
 
 class PatchCoreKnnIndex:
