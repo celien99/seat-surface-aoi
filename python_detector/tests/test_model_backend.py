@@ -11,8 +11,8 @@ from python_detector.models.inference_engine import (
     ModelInferenceError,
     ModelRegistry,
     OnnxModel,
-    PatchCoreModel,
 )
+from python_detector.models.patchcore_model import PatchCoreModel
 from python_detector.models.embedding import SpatialEmbedding
 from python_detector.models.patchcore import SpatialAnomalyScore
 from python_detector.models.pca import PcaProjector

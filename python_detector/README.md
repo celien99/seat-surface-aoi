@@ -139,13 +139,16 @@ python_detector/
 │   ├── defect_filter.py        # 单一判定阈值、面积阈值和长宽比过滤
 │   └── rule_engine.py          # OK/NG/RECHECK/ERROR 规则判定
 ├── models/
-│   ├── inference_engine.py     # Fake/ONNX/PatchCore 后端统一推理入口、空间 anomaly map 校验和模型缓存
+│   ├── inference_engine.py     # Fake/ONNX 后端 + ModelRegistry + InferenceEngine 统一推理入口
+│   ├── patchcore_model.py      # PatchCore 无监督异常检测模型后端（全局嵌入 + 空间嵌入）
+│   ├── spatial_utils.py        # 缺陷候选 dataclass、anomaly_map bbox 连通域提取和坐标映射
 │   ├── onnx_runtime.py         # ONNX Runtime session、numpy 输入和统一保守错误包装
 │   ├── embedding.py            # statistical 与 onnx_wideresnet50 embedding 入口
 │   ├── pca.py                  # PCA JSON 参数加载、版本校验和投影
-│   └── patchcore.py            # PatchCore memory bank exact KNN 参考实现
+│   └── patchcore.py            # PatchCore memory bank KNN/FAISS 索引和评分
 ├── trace/
-│   └── trace_writer.py         # trace JSON、raw/ROI PNG 图、raw 原图尺寸检测 overlay PNG 写入
+│   ├── trace_writer.py         # trace JSON、raw/ROI PNG 图写入
+│   └── overlay_renderer.py     # 检测 overlay PNG 渲染：热力图平滑、形态学闭运算、色图映射
 └── tests/                      # 协议、配方、质量门禁、ROI、模型、融合、trace、IPC 安全和架构就绪度测试
 ```
 

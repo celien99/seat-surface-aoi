@@ -11,8 +11,8 @@ from python_detector.models.inference_engine import (
     ModelInferenceError,
     ModelRegistry,
     OnnxModel,
-    PatchCoreModel,
 )
+from python_detector.models.patchcore_model import PatchCoreModel
 from python_detector.models.onnx_runtime import create_onnx_session, numpy_module, run_first_input
 from python_detector.models.patchcore import PatchCoreBank, PatchCoreKnnIndex, PatchCoreScore
 from python_detector.models.pca import PcaParameters, PcaProjectionResult, PcaProjector
