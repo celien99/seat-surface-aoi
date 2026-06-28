@@ -52,7 +52,6 @@ class TraceWriter:
         self._write_json(trace_dir / "timings.json", context.get("timings", {}))
         self._write_json(trace_dir / "error.json", context.get("error", {}))
         self._write_raw_images(trace_dir, job)
-        self._write_roi_images(trace_dir, context.get("prepared_bundles", []))
         self._write_detection_overlays(trace_dir, result, context.get("prepared_bundles", []), context.get("spatial_maps", []), job)
         return trace_dir
 
@@ -81,30 +80,15 @@ class TraceWriter:
     def _write_json(self, path: Path, value: Any) -> None:
         path.write_text(json.dumps(jsonable_result(value), ensure_ascii=False, indent=2), encoding="utf-8")
 
-    def _write_roi_images(self, trace_dir: Path, prepared_bundles: Any) -> None:
-        for bundle in prepared_bundles or []:
-            for roi_name, frames in getattr(bundle, "rois", {}).items():
-                for light_id, frame in frames.items():
-                    self._write_gray_image(
-                        trace_dir
-                        / "images"
-                        / _safe_name(bundle.camera_id)
-                        / _safe_name(getattr(bundle, "pose_id", "") or bundle.camera_id)
-                        / _safe_name(roi_name)
-                        / f"{_safe_name(light_id)}.png",
-                        frame,
-                    )
-
     def _write_raw_images(self, trace_dir: Path, job: SeatInspectionJob) -> None:
         for bundle in job.camera_bundles:
             pose_id = bundle.pose_id or bundle.camera_id
             for light_id, frame in bundle.light_frames.items():
+                prefix = _safe_name(bundle.camera_id)
+                if pose_id != bundle.camera_id:
+                    prefix = f"{prefix}_{_safe_name(pose_id)}"
                 self._write_gray_image(
-                    trace_dir
-                    / "raw_images"
-                    / _safe_name(bundle.camera_id)
-                    / _safe_name(pose_id)
-                    / f"{_safe_name(light_id)}.png",
+                    trace_dir / "raw_images" / f"{prefix}_{_safe_name(light_id)}.png",
                     frame,
                 )
 
@@ -148,7 +132,10 @@ class TraceWriter:
             if raw_frame is None:
                 continue
             anomaly_entry = anomaly_maps.get(key)
-            path = overlay_dir / _safe_name(camera_id) / _safe_name(pose_id) / f"{_safe_name(roi_name)}.png"
+            overlay_name = _safe_name(camera_id)
+            if pose_id and pose_id != camera_id:
+                overlay_name = f"{overlay_name}_{_safe_name(pose_id)}"
+            path = overlay_dir / f"{overlay_name}_{_safe_name(roi_name)}.png"
             if anomaly_entry is not None:
                 self._write_heatmap_overlay_on_raw(path, raw_frame, roi_frame, result.decision, roi_defects, anomaly_entry)
             else:

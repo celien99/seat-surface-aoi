@@ -44,9 +44,8 @@ def test_trace_writer_generates_result_files(tmp_path: Path) -> None:
     assert (trace_dir / "fusion_summary.json").exists()
     assert (trace_dir / "timings.json").exists()
     assert (trace_dir / "error.json").exists()
-    assert (trace_dir / "raw_images" / "TOP_BACK" / "TOP_BACK" / "DIFFUSE.png").exists()
-    assert (trace_dir / "images" / "TOP_BACK" / "TOP_BACK" / "seat" / "DIFFUSE.png").exists()
-    assert (trace_dir / "overlays" / "TOP_BACK" / "TOP_BACK" / "seat.png").exists()
+    assert (trace_dir / "raw_images" / "TOP_BACK_DIFFUSE.png").exists()
+    assert (trace_dir / "overlays" / "TOP_BACK_seat.png").exists()
 
 
 def test_png_writer_roundtrips_multirow_gray_and_rgb(tmp_path: Path) -> None:
@@ -78,7 +77,7 @@ def test_trace_writer_generates_defect_overlay(tmp_path: Path) -> None:
 
     assert result.decision == "NG"
     assert trace_dir is not None
-    overlays = list((trace_dir / "overlays").glob("*/*/*.png"))
+    overlays = list((trace_dir / "overlays").glob("*.png"))
     assert overlays
     assert overlays[0].read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 
@@ -91,7 +90,7 @@ def test_trace_writer_overlay_drawn_on_raw_image_resolution(tmp_path: Path) -> N
     result = pipeline.process(job, recipe)
     trace_dir = TraceWriter(recipe.trace.root_dir).write(job, recipe, result, pipeline.last_context)
     assert trace_dir is not None
-    overlay_path = trace_dir / "overlays" / "TOP_BACK" / "TOP_BACK" / "seat.png"
+    overlay_path = trace_dir / "overlays" / "TOP_BACK_seat.png"
     assert overlay_path.exists()
     overlay_img = load_raster_image(overlay_path)
     # raw 帧尺寸 = 64x48（来自 make_simulated_job）
@@ -112,7 +111,7 @@ def test_trace_writer_defect_bboxes_at_raw_coordinates(tmp_path: Path) -> None:
     assert trace_dir is not None
     assert result.decision == "NG"
     # NG 结果应该产生 overlay PNG
-    overlay_path = trace_dir / "overlays" / "TOP_BACK" / "TOP_BACK" / "seat.png"
+    overlay_path = trace_dir / "overlays" / "TOP_BACK_seat.png"
     assert overlay_path.exists()
     overlay_img = load_raster_image(overlay_path)
     assert overlay_img.width == 64
@@ -149,7 +148,7 @@ def test_trace_writer_heatmap_without_defect_keeps_roi_pixels_unchanged(tmp_path
     trace_dir = TraceWriter(recipe.trace.root_dir).write(job, recipe, result, context)
 
     assert trace_dir is not None
-    overlay_img = load_raster_image(trace_dir / "overlays" / "TOP_BACK" / "TOP_BACK" / "seat.png")
+    overlay_img = load_raster_image(trace_dir / "overlays" / "TOP_BACK_seat.png")
     raw_frame = job.camera_bundles[0].light_frames[roi_frame.light_id]
     origin_x, origin_y = roi_frame.origin_xy
     cold_x = origin_x + max(1, roi_frame.width // 4)
@@ -203,7 +202,7 @@ def test_trace_writer_heatmap_only_renders_inside_defect_bbox(tmp_path: Path) ->
     trace_dir = TraceWriter(recipe.trace.root_dir).write(job, recipe, result, context)
 
     assert trace_dir is not None
-    overlay_img = load_raster_image(trace_dir / "overlays" / "TOP_BACK" / "TOP_BACK" / "seat.png")
+    overlay_img = load_raster_image(trace_dir / "overlays" / "TOP_BACK_seat.png")
     raw_frame = job.camera_bundles[0].light_frames[roi_frame.light_id]
     outside_x = min(raw_frame.width - 5, origin_x + max(8, roi_frame.width // 2))
     outside_y = min(raw_frame.height - 5, origin_y + max(8, roi_frame.height // 2))
@@ -279,8 +278,8 @@ def test_trace_writer_separates_robot_flyshot_pose_images(tmp_path: Path) -> Non
     trace_dir = TraceWriter(recipe.trace.root_dir).write(job, recipe, result, {"prepared_bundles": prepared})
 
     assert trace_dir is not None
-    assert (trace_dir / "images" / "EYE_IN_HAND" / "T1_BACKREST" / "seat" / "DIFFUSE.png").exists()
-    assert (trace_dir / "images" / "EYE_IN_HAND" / "T2_CUSHION" / "seat" / "DIFFUSE.png").exists()
+    assert (trace_dir / "raw_images" / "EYE_IN_HAND_T1_BACKREST_DIFFUSE.png").exists()
+    assert (trace_dir / "raw_images" / "EYE_IN_HAND_T2_CUSHION_DIFFUSE.png").exists()
 
 
 def test_trace_writer_uses_deterministic_ok_sampling(tmp_path: Path) -> None:
@@ -371,8 +370,7 @@ def test_pipeline_model_error_context_is_traceable(tmp_path: Path) -> None:
     assert pipeline.last_context["error"]["roi_name"] == "seat"
     assert pipeline.last_context["error"]["tensor_shape_nchw"] == [1, 3, 48, 64]
     assert trace_dir is not None
-    assert (trace_dir / "raw_images" / "TOP_BACK" / "TOP_BACK" / "DIFFUSE.png").exists()
-    assert (trace_dir / "images" / "TOP_BACK" / "TOP_BACK" / "seat" / "DIFFUSE.png").exists()
+    assert (trace_dir / "raw_images" / "TOP_BACK_DIFFUSE.png").exists()
     error = json.loads((trace_dir / "error.json").read_text(encoding="utf-8"))
     assert error["type"] == "ModelAssetUnavailableInferenceError"
     assert error["model_key"] == "fake_default"
@@ -396,8 +394,7 @@ def test_pipeline_roi_model_asset_unavailable_saves_raw_images(tmp_path: Path) -
     assert result.error_code == 13
     assert pipeline.last_context["error"]["asset"]["asset_path"] == "missing_roi.onnx"
     assert trace_dir is not None
-    assert (trace_dir / "raw_images" / "TOP_BACK" / "TOP_BACK" / "DIFFUSE.png").exists()
-    assert not (trace_dir / "images").exists()
+    assert (trace_dir / "raw_images" / "TOP_BACK_DIFFUSE.png").exists()
 
 
 def test_trace_png_is_decodable(tmp_path: Path) -> None:
@@ -407,7 +404,7 @@ def test_trace_png_is_decodable(tmp_path: Path) -> None:
     result = pipeline.process(job, recipe)
     trace_dir = TraceWriter(recipe.trace.root_dir).write(job, recipe, result, pipeline.last_context)
     assert trace_dir is not None
-    image = load_raster_image(trace_dir / "images" / "TOP_BACK" / "TOP_BACK" / "seat" / "DIFFUSE.png")
+    image = load_raster_image(trace_dir / "raw_images" / "TOP_BACK_DIFFUSE.png")
     assert image.width > 0
     assert image.height > 0
     assert image.channels == 1

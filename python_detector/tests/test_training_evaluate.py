@@ -111,9 +111,9 @@ def test_collect_trace_dataset_filter_decision(tmp_path: Path) -> None:
 
     for decision, seq_id in [("OK", 1), ("NG", 2)]:
         trace_dir = tmp_path / "trace" / f"SIM_{seq_id}_{seq_id}"
-        images_dir = trace_dir / "images" / "TOP_BACK" / "seat"
-        images_dir.mkdir(parents=True, exist_ok=True)
-        write_gray_png(images_dir / "DIFFUSE.png", 1, 1, b"\x80")
+        raw_dir = trace_dir / "raw_images"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        write_gray_png(raw_dir / "TOP_BACK_DIFFUSE.png", 1, 1, b"\x80")
         (trace_dir / "result.json").write_text(json.dumps({
             "sequence_id": seq_id,
             "seat_id": f"SIM_{seq_id}",

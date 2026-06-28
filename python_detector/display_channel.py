@@ -103,23 +103,39 @@ def _defect_event(defect: DefectResult) -> dict[str, Any]:
 
 
 def _image_assets(trace_dir: Path) -> list[dict[str, Any]]:
-    assets = _raw_image_assets(trace_dir)
-    assets.extend(_roi_image_assets(trace_dir))
-    return assets
+    return _raw_image_assets(trace_dir)
 
 
 def _raw_image_assets(trace_dir: Path) -> list[dict[str, Any]]:
+    """解析扁平化的 raw_images：{camera}[_{pose}]_{light}.png。"""
     image_root = trace_dir / "raw_images"
     if not image_root.is_dir():
         return []
     assets: list[dict[str, Any]] = []
+    _KNOWN_LIGHTS = {"DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT"}
     for path in _iter_image_files(image_root):
-        rel = path.relative_to(image_root)
-        parts = rel.parts
-        if len(parts) != 3:
+        stem = path.stem
+        light_id = ""
+        for known in sorted(_KNOWN_LIGHTS, key=len, reverse=True):
+            if stem.endswith(known):
+                light_id = known
+                break
+        if not light_id:
             continue
-        camera_id, pose_id = parts[0], parts[1]
-        light_id = Path(parts[-1]).stem
+        prefix = stem[: -len(light_id)].rstrip("_")
+        # prefix 格式: camera_id 或 camera_id_pose_id
+        # camera_id 如 TOP_BACK 含下划线，需要区分到底哪段是 camera
+        # 策略: 从已知 camera 集合匹配最长前缀
+        known_cameras = ["TOP_BACK", "TOP_CUSHION", "EYE_IN_HAND"]
+        camera_id = ""
+        for cam in sorted(known_cameras, key=len, reverse=True):
+            if prefix == cam or prefix.startswith(cam + "_"):
+                camera_id = cam
+                break
+        if not camera_id:
+            camera_id = prefix
+        pose_suffix = prefix[len(camera_id):].lstrip("_")
+        pose_id = pose_suffix if pose_suffix else camera_id
         assets.append(
             {
                 "kind": "raw_image",
@@ -133,81 +149,38 @@ def _raw_image_assets(trace_dir: Path) -> list[dict[str, Any]]:
     return assets
 
 
-def _roi_image_assets(trace_dir: Path) -> list[dict[str, Any]]:
-    image_root = trace_dir / "images"
-    if not image_root.is_dir():
-        return []
-    assets: list[dict[str, Any]] = []
-    for path in _iter_image_files(image_root):
-        rel = path.relative_to(image_root)
-        parts = rel.parts
-        if len(parts) >= 4:
-            camera_id, pose_id, roi_name = parts[0], parts[1], parts[2]
-            light_id = Path(parts[-1]).stem
-        elif len(parts) == 3:
-            camera_id, roi_name = parts[0], parts[1]
-            pose_id = camera_id
-            light_id = Path(parts[-1]).stem
-        else:
-            continue
-        assets.append(
-            {
-                "kind": "roi_image",
-                "camera_id": camera_id,
-                "pose_id": pose_id,
-                "roi_name": roi_name,
-                "light_id": light_id,
-                "path": str(path.resolve()),
-            }
-        )
-    return assets
-
-
 def _overlay_assets(trace_dir: Path, result: InspectionResult) -> list[dict[str, Any]]:
+    """解析扁平化的 overlays：{camera}[_{pose}]_{roi}.png。"""
     overlay_root = trace_dir / "overlays"
     if not overlay_root.is_dir():
         return []
     assets: list[dict[str, Any]] = []
-    defects_by_name = {
-        "_".join(
-            [
-                _safe_name(defect.defect_id),
-                _safe_name(defect.camera_id),
-                _safe_name(defect.pose_id or defect.camera_id),
-                _safe_name(defect.roi_name),
-            ]
-        ): defect
-        for defect in result.defects
-    }
+    # 从缺陷中收集已知 camera_id，按长度降序用于前缀匹配（处理含下划线的 camera_id）
+    known_cameras = sorted({d.camera_id for d in result.defects}, key=len, reverse=True)
+    if not known_cameras:
+        known_cameras = ["TOP_BACK", "TOP_CUSHION"]
     for path in _iter_image_files(overlay_root):
-        rel = path.relative_to(overlay_root)
-        parts = rel.parts
-        if len(parts) == 3:
-            camera_id, pose_id = parts[0], parts[1]
-            roi_name = Path(parts[-1]).stem
-            assets.append(
-                {
-                    "kind": "overlay",
-                    "defect_id": "",
-                    "camera_id": camera_id,
-                    "pose_id": pose_id,
-                    "roi_name": roi_name,
-                    "path": str(path.resolve()),
-                }
-            )
-            continue
-        defect = defects_by_name.get(path.stem)
-        if defect is None and len(result.defects) == 1:
-            defect = result.defects[0]
-        if defect is None:
-            continue
+        stem = path.stem
+        camera_id = ""
+        for cam in known_cameras:
+            if stem.startswith(cam) and (len(stem) == len(cam) or stem[len(cam)] == "_"):
+                camera_id = cam
+                break
+        if not camera_id:
+            camera_id = known_cameras[0]
+        suffix = stem[len(camera_id):].lstrip("_")
+        if "_" in suffix:
+            pose_id, roi_name = suffix.rsplit("_", 1)
+        else:
+            pose_id = camera_id
+            roi_name = suffix
         assets.append(
             {
                 "kind": "overlay",
-                "defect_id": defect.defect_id,
-                "camera_id": defect.camera_id,
-                "pose_id": defect.pose_id or defect.camera_id,
-                "roi_name": defect.roi_name,
+                "defect_id": "",
+                "camera_id": camera_id,
+                "pose_id": pose_id,
+                "roi_name": roi_name,
                 "path": str(path.resolve()),
             }
         )

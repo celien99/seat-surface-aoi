@@ -159,7 +159,9 @@ def _collect_trace_dir(
 
     images_dir = trace_dir / "images"
     if not images_dir.is_dir():
-        raise TraceDatasetError(f"trace 缺少 ROI 图像目录: {images_dir}")
+        images_dir = trace_dir / "raw_images"
+    if not images_dir.is_dir():
+        raise TraceDatasetError(f"trace 缺少图像目录 (images/ 或 raw_images/): {trace_dir}")
 
     sequence_id = _int_value(result.get("sequence_id", _dict_get(job, "sequence_id", 0)), "sequence_id", trace_dir)
     seat_id = str(result.get("seat_id") or _dict_get(job, "seat_id", "") or "")
@@ -231,6 +233,7 @@ def _int_value(value: Any, name: str, trace_dir: Path) -> int:
 
 def _iter_trace_images(images_dir: Path) -> list[tuple[Path, str, str, str, str]]:
     images: list[tuple[Path, str, str, str, str]] = []
+    # 旧格式：嵌套目录 images/camera/pose/roi/light.png
     for image_path in sorted(path for path in images_dir.glob("*/*/*") if path.is_file() and path.suffix.lower() in _IMAGE_SUFFIXES):
         camera_id = image_path.parent.parent.name
         pose_id = camera_id
@@ -242,6 +245,30 @@ def _iter_trace_images(images_dir: Path) -> list[tuple[Path, str, str, str, str]
         pose_id = image_path.parent.parent.name
         roi_name = image_path.parent.name
         light_id = image_path.stem
+        images.append((image_path, camera_id, pose_id, roi_name, light_id))
+    # 新格式：扁平 raw_images/{camera}[_{pose}]_{light}.png
+    _KNOWN_LIGHTS = {"DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT"}
+    for image_path in sorted(path for path in images_dir.glob("*.png") if path.is_file()):
+        stem = image_path.stem
+        light_id = ""
+        for known in sorted(_KNOWN_LIGHTS, key=len, reverse=True):
+            if stem.endswith(known):
+                light_id = known
+                break
+        if not light_id:
+            continue
+        prefix = stem[: -len(light_id)].rstrip("_")
+        known_cameras = ["TOP_BACK", "TOP_CUSHION", "EYE_IN_HAND"]
+        camera_id = ""
+        for cam in sorted(known_cameras, key=len, reverse=True):
+            if prefix == cam or prefix.startswith(cam + "_"):
+                camera_id = cam
+                break
+        if not camera_id:
+            camera_id = prefix
+        pose_suffix = prefix[len(camera_id):].lstrip("_")
+        pose_id = pose_suffix if pose_suffix else camera_id
+        roi_name = "seat"
         images.append((image_path, camera_id, pose_id, roi_name, light_id))
     return images
 

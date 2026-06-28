@@ -13,15 +13,12 @@ from training_tools.job_fixture import make_simulated_job
 
 def test_build_display_event_includes_result_and_trace_assets(tmp_path: Path) -> None:
     trace_dir = tmp_path / "trace" / "20260618" / "SIM_1_1"
-    raw_dir = trace_dir / "raw_images" / "TOP_BACK" / "TOP_BACK"
-    image_dir = trace_dir / "images" / "TOP_BACK" / "TOP_BACK" / "seat"
-    overlay_dir = trace_dir / "overlays" / "TOP_BACK" / "TOP_BACK"
+    raw_dir = trace_dir / "raw_images"
+    overlay_dir = trace_dir / "overlays"
     raw_dir.mkdir(parents=True)
-    image_dir.mkdir(parents=True)
     overlay_dir.mkdir(parents=True)
-    write_gray_png(raw_dir / "DIFFUSE.png", 1, 1, b"\x08")
-    write_gray_png(image_dir / "DIFFUSE.png", 1, 1, b"\x10")
-    write_rgb_png(overlay_dir / "seat.png", 1, 1, b"\xff\x00\x00")
+    write_gray_png(raw_dir / "TOP_BACK_DIFFUSE.png", 1, 1, b"\x08")
+    write_rgb_png(overlay_dir / "TOP_BACK_seat.png", 1, 1, b"\xff\x00\x00")
     job = make_simulated_job()
     defect = DefectResult(
         defect_id="D1",
@@ -54,8 +51,6 @@ def test_build_display_event_includes_result_and_trace_assets(tmp_path: Path) ->
     assert event["decision"] == "NG"
     assert "class_name" not in event["defects"][0]
     assert event["images"][0]["kind"] == "raw_image"
-    assert event["images"][1]["kind"] == "roi_image"
-    assert event["images"][1]["path"].endswith("DIFFUSE.png")
     assert event["overlays"][0]["path"].endswith(".png")
     assert event["overlays"][0]["camera_id"] == "TOP_BACK"
     assert event["overlays"][0]["pose_id"] == "TOP_BACK"
@@ -65,9 +60,9 @@ def test_build_display_event_includes_result_and_trace_assets(tmp_path: Path) ->
 
 def test_build_display_event_includes_ok_overlay_without_defects(tmp_path: Path) -> None:
     trace_dir = tmp_path / "trace" / "20260618" / "SIM_OK_1"
-    overlay_dir = trace_dir / "overlays" / "TOP_BACK" / "TOP_BACK"
+    overlay_dir = trace_dir / "overlays"
     overlay_dir.mkdir(parents=True)
-    write_rgb_png(overlay_dir / "seat.png", 1, 1, b"\x00\xb4\x5a")
+    write_rgb_png(overlay_dir / "TOP_BACK_seat.png", 1, 1, b"\x00\xb4\x5a")
     job = make_simulated_job()
     result = InspectionResult(
         sequence_id=job.sequence_id,
@@ -88,7 +83,7 @@ def test_build_display_event_includes_ok_overlay_without_defects(tmp_path: Path)
             "camera_id": "TOP_BACK",
             "pose_id": "TOP_BACK",
             "roi_name": "seat",
-            "path": str((overlay_dir / "seat.png").resolve()),
+            "path": str((overlay_dir / "TOP_BACK_seat.png").resolve()),
         }
     ]
 

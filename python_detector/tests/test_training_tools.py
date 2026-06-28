@@ -82,7 +82,7 @@ def test_collect_trace_dataset_fails_on_missing_images(tmp_path: Path) -> None:
     trace_dir.mkdir(parents=True)
     (trace_dir / "result.json").write_text('{"sequence_id":1,"seat_id":"SIM_1","decision":"OK"}', encoding="utf-8")
 
-    with pytest.raises(TraceDatasetError, match="trace 缺少 ROI 图像目录"):
+    with pytest.raises(TraceDatasetError, match="trace 缺少图像目录"):
         collect_trace_dataset([trace_dir], tmp_path / "dataset")
 
 
@@ -394,10 +394,10 @@ def test_simulate_capture_detection_defaults_to_lightweight_outputs(tmp_path: Pa
 
 
 def _write_trace(trace_dir: Path) -> Path:
-    image_dir = trace_dir / "images" / "TOP_BACK" / "seat"
-    image_dir.mkdir(parents=True)
+    raw_dir = trace_dir / "raw_images"
+    raw_dir.mkdir(parents=True)
     for light_id in ("DIFFUSE", "HIGH_LEFT"):
-        write_gray_png(image_dir / f"{light_id}.png", 2, 2, b"\x01\x02\x03\x04")
+        write_gray_png(raw_dir / f"TOP_BACK_{light_id}.png", 2, 2, b"\x01\x02\x03\x04")
     (trace_dir / "job.json").write_text(
         json.dumps(
             {
@@ -466,11 +466,11 @@ def _capture_image(camera_id: str, capture_light_id: str, timestamp_us: int) -> 
 
 
 def _write_robot_pose_trace(trace_dir: Path) -> Path:
+    raw_dir = trace_dir / "raw_images"
+    raw_dir.mkdir(parents=True)
     for pose_id, pixel in (("T1_BACKREST", b"\x01\x02\x03\x04"), ("T2_CUSHION", b"\x05\x06\x07\x08")):
-        image_dir = trace_dir / "images" / "EYE_IN_HAND" / pose_id / "seat"
-        image_dir.mkdir(parents=True)
         for light_id in ("DIFFUSE", "HIGH_LEFT"):
-            write_gray_png(image_dir / f"{light_id}.png", 2, 2, pixel)
+            write_gray_png(raw_dir / f"EYE_IN_HAND_{pose_id}_{light_id}.png", 2, 2, pixel)
     (trace_dir / "job.json").write_text(
         json.dumps(
             {
