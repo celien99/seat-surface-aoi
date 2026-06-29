@@ -1,11 +1,11 @@
 {
   "coreset_method": "stride",
-  "coreset_ratio": 0.1,
+  "coreset_ratio": 1.0,
   "embedding_backend": "onnx_wideresnet50",
   "embedding_count": 2752512,
   "embedding_dim": 1536,
   "embeddings_npy_path": null,
-  "faiss_index_path": "model/patchcore/seat_patchcore.faiss",
+  "faiss_index_path": "model\\patchcore\\seat_patchcore.faiss",
   "faiss_index_type": "FlatL2",
   "input_shape_summary": {
     "distinct_shapes": [
@@ -395,17 +395,17 @@
     "width_min": 1235
   },
   "intermediate_embeddings_retained": false,
-  "manifest": "datasets/seat_roi_train/dataset_manifest.jsonl",
+  "manifest": "datasets\\seat_roi_train\\dataset_manifest.jsonl",
   "memory_bank_dim": 524,
-  "memory_bank_path": "model/patchcore/seat_patchcore_bank.json",
-  "memory_bank_vectors": 275252,
-  "memory_bank_vectors_path": "model/patchcore/seat_patchcore_bank.npy",
+  "memory_bank_path": "model\\patchcore\\seat_patchcore_bank.json",
+  "memory_bank_vectors": 2752512,
+  "memory_bank_vectors_path": "model\\patchcore\\seat_patchcore_bank.npy",
   "memory_bank_version": "bank_v4_spatial256",
   "model_key": "patchcore_detector",
-  "output_dir": "model/patchcore",
+  "output_dir": "model\\patchcore",
   "pca_embeddings_npy_path": null,
   "pca_output_dim": 524,
-  "pca_path": "model/patchcore/seat_pca.json",
+  "pca_path": "model\\patchcore\\seat_pca.json",
   "recipe_id": "seat_a_black_leather_production_v1",
   "split": "train",
   "training_contract": {
@@ -418,7 +418,7 @@
       "light:POLAR_DIFFUSE",
       "light:HIGH_LEFT"
     ],
-    "manifest_path": "datasets/seat_roi_train/dataset_manifest.jsonl",
+    "manifest_path": "datasets\\seat_roi_train\\dataset_manifest.jsonl",
     "manifest_sha256": "05b9a4febfbfc71def01e4f2bf0481b1a468fb1955e6d88ab23a30a6b44116aa",
     "model_key": "patchcore_detector",
     "pca_components": 524,
