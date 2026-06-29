@@ -31,7 +31,7 @@ model/
 - `seat_wrn50_embedding.onnx`：空间 PatchCore 模式下输出 layer2+layer3 中间层特征图，当前拼接后的原始 patch embedding 为 1536 维；全局模式才输出一维 embedding，维度必须与配方 `models.<key>.embedding_dim` 一致。
 - `seat_pca.json`：包含 `version`、`mean`、`components`，版本必须与配方 `pca_version` 一致；当前生产资产使用 `pca_seat_v3`，输入维度为 1536，输出维度为 524。
 - `seat_patchcore_bank.json`：只保存 memory bank 元数据，包含 `version`、`model_family: patchcore`、`embedding_dim`、`coreset_ratio`、`pca_version`、`faiss_enabled`、`vector_count`、`vectors_path` 和 `metadata`；不再允许内嵌大体积 `vectors` JSON 数组。`metadata` 记录输入通道、空间网格、manifest hash 和 embedding ONNX hash，供 `tools.validate_model_assets` 防错。
-- `seat_patchcore_bank.npy`：PatchCore memory bank 的 `float32` 二维向量矩阵。当前生产资产为 `bank_v4_spatial256`，使用 `256×256` 空间 patch、PCA 后 524 维向量、`coreset_ratio=1.0`（全量 vector），共 2,752,512 个向量。在线 exact KNN fallback 和 FAISS 索引构建都从该文件读取向量。
+- `seat_patchcore_bank.npy`：PatchCore memory bank 的 `float32` 二维向量矩阵。当前生产资产为 `bank_v5_spatial128`，使用 `128×128` 空间 patch、PCA 后 524 维向量、`coreset_ratio=1.0`（全量 vector），共 688,128 个向量。在线 exact KNN fallback 和 FAISS 索引构建都从该文件读取向量。
 - `seat_patchcore.faiss`：可选；缺失或不可加载时在线后端回退 exact KNN，并在 trace 中记录 fallback reason。启用时维度和向量数必须与 `seat_patchcore_bank.json` / `seat_patchcore_bank.npy` 一致。
 - `embeddings.npy` / `pca_embeddings.npy`：训练过程中的中间 embedding 矩阵。`training_tools.train_patchcore_assets` 默认训练完成后删除它们，仅在显式传 `--keep-intermediate-embeddings` 做排障时保留。独立调试命令 `training_tools.extract_embeddings` 仍可输出 JSONL 明细，但生产训练链路不再依赖 JSONL。
 
@@ -86,11 +86,11 @@ uv run python -m training_tools.train_patchcore_assets `
   --split train `
   --spatial-mode `
   --spatial-layers layer2,layer3 `
-  --spatial-upsample-height 256 `
-  --spatial-upsample-width 256 `
+  --spatial-upsample-height 128 `
+  --spatial-upsample-width 128 `
   --pca-components 524 `
   --pca-version pca_seat_v3 `
-  --bank-version bank_v4_spatial256 `
+  --bank-version bank_v5_spatial128 `
   --coreset-ratio 1.0 `
   --coreset-method stride `
   --build-faiss
@@ -110,4 +110,4 @@ uv run python -m training_tools.collect_capture_dataset `
 
 `collect_capture_dataset` 默认按配方 `light_order` 将 `L1/L2/L3` 映射为 `DIFFUSE/POLAR_DIFFUSE/HIGH_LEFT`，调用 `model/roi_yolo/seat_roi_seg.onnx` 定位真实座椅 ROI，并输出 PNG 图和 `dataset_manifest.jsonl`。默认保留 segmentation 裁出的原生 ROI 尺寸，避免纹理和细小缺陷被压缩失真；只有需要与固定 PatchCore 输入尺寸对齐时，才显式传 `--roi-output-size WIDTHxHEIGHT`，缩放方式是等比例 letterbox，不做直接拉伸。
 
-当前 `model/patchcore/patchcore_training_summary.json` 记录的是基于 `datasets/seat_roi_train` 的 `256×256` 空间 patch、全量 vector（coreset_ratio=1.0）的生产训练；大模型资产文件由 `.gitignore` 忽略，不随 Git 提交。`patchcore_training_summary.json` 会记录实际进入 embedding 的 `input_shape_summary`，用于确认训练输入与在线检测裁剪策略一致。PatchCore 只能用人工确认正常样本建库；NG、RECHECK 和人工复核样本用于阈值曲线、误报和漏检分析，不进入正常样本 memory bank。
+当前 `model/patchcore/patchcore_training_summary.json` 记录的是基于 `datasets/seat_roi_train` 的 `128×128` 空间 patch、全量 vector（coreset_ratio=1.0）的生产训练；热力图渲染使用双线性插值+高斯平滑，`128×128` anomaly_map 可平滑映射到 ROI 原图分辨率，无马赛克效应。大模型资产文件由 `.gitignore` 忽略，不随 Git 提交。`patchcore_training_summary.json` 会记录实际进入 embedding 的 `input_shape_summary`，用于确认训练输入与在线检测裁剪策略一致。PatchCore 只能用人工确认正常样本建库；NG、RECHECK 和人工复核样本用于阈值曲线、误报和漏检分析，不进入正常样本 memory bank。

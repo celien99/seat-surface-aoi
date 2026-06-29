@@ -96,8 +96,8 @@ models:
     score_threshold: 0.48  # 对齐 tanh 校准：p99≈0.46，阈值设在正常边界之上
     spatial_mode: true
     spatial_layers: [layer2, layer3]
-    spatial_upsample_height: 256
-    spatial_upsample_width: 256
+    spatial_upsample_height: 128
+    spatial_upsample_width: 128
     anomaly_binarize_min_ratio: 0.5
     anomaly_binarize_relative: 0.3
 trace:

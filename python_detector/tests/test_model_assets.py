@@ -24,8 +24,8 @@ def test_production_recipe_loads_full_model_chain() -> None:
     assert recipe.roi_locator.model_path == "model/roi_yolo/seat_roi_seg.onnx"
     assert recipe.models["patchcore_detector"].backend == "patchcore_knn"
     assert recipe.models["patchcore_detector"].role == "primary"
-    assert recipe.models["patchcore_detector"].spatial_upsample_height == 256
-    assert recipe.models["patchcore_detector"].spatial_upsample_width == 256
+    assert recipe.models["patchcore_detector"].spatial_upsample_height == 128
+    assert recipe.models["patchcore_detector"].spatial_upsample_width == 128
     assert recipe.models["patchcore_detector"].anomaly_binarize_min_ratio == 0.5
     assert recipe.models["patchcore_detector"].anomaly_binarize_relative == 0.3
 
