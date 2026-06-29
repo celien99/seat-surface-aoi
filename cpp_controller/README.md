@@ -256,8 +256,8 @@ uv run python tools/run_simulated_ipc.py --replay-capture
 
 外部工控机通过 TCP 连接到 C++ 监听端口，分两步发送：
 
-1. **到位信号**: 发送 `start_command`（默认 `start\n`）→ C++ 回复 `start_ack`（默认 `start_ack\n`）
-2. **SN 条码**: 发送 `sn_prefix <barcode>`（默认 `sn ABC123456\n`）→ C++ 回复 `sn_ack`（默认 `sn_ack\n`）
+1. **到位信号**: 发送 `start_command`（默认 `start`）→ C++ 回复 `start_ack`（默认 `start_ack`）
+2. **SN 条码**: 发送 `sn_prefix <barcode>`（默认 `sn ABC123456`）→ C++ 回复 `sn_ack`（默认 `sn_ack`）
 
 两步均在 `trigger_timeout_ms` 内完成。收到条码后构造 `seat_id = station_id + "_" + barcode`，沿共享内存进入 Python 检测链路，结果中的 `seat_id` 与触发时比对一致才会放行。
 
@@ -267,20 +267,20 @@ uv run python tools/run_simulated_ipc.py --replay-capture
 signal.protocol_mode=start_sn    # single（默认）或 start_sn
 signal.start_command=start       # 到位信号命令文本
 signal.sn_prefix=sn              # SN 条码前缀（实际格式: "sn <barcode>"）
-signal.start_ack=start_ack\n     # 到位信号回复
-signal.sn_ack=sn_ack\n           # SN 接收回复
+signal.start_ack=start_ack       # 到位信号回复
+signal.sn_ack=sn_ack             # SN 接收回复
 ```
 
-`signal.terminator`、`signal.ok_response`、`signal.start_ack` 和 `signal.sn_ack` 支持 `\n`、`\r`、`\t`、`\0` 和 `\\` 转义，配置文件中的 `start_ack\n` 会按真实换行发送。
+`signal.terminator` 决定行结束标记。设为空时启用字节间超时模式（100ms），适用于外部信号不带 `\n` 终止符的场景。`signal.ok_response`、`signal.start_ack` 和 `signal.sn_ack` 支持 `\n`、`\r`、`\t`、`\0` 和 `\\` 转义。
 
 #### 组合格式 (`protocol_mode=start_sn` + `delimiter` 非空)
 
 当 `signal.delimiter` 设置为非空值（如 `|`）时，`start_sn` 协议额外支持组合格式单行触发：
 
-1. 外部工控机发送单行: `start_command + delimiter + SN`（如 `start|ABC123456\n`）
-2. C++ 直接回复 `sn_ack\n` 并构造 `seat_id = station_id + "_" + ABC123456`
+1. 外部工控机发送单行: `start_command + delimiter + SN`（如 `start|ABC123456`）
+2. C++ 直接回复 `sn_ack` 并构造 `seat_id = station_id + "_" + ABC123456`
 
-无需再发送第二步 `sn ABC123456\n`。旧两步协议仍然兼容：如果收到的行恰好是 `start_command`（不含分隔符），C++ 仍按两步协议回复 `start_ack\n` 并等待第二步 SN 条码。
+无需再发送第二步 `sn ABC123456`。旧两步协议仍然兼容：如果收到的行恰好是 `start_command`（不含分隔符），C++ 仍按两步协议回复 `start_ack` 并等待第二步 SN 条码。当 `signal.terminator` 设为空时，采用字节间超时模式判断消息边界。
 
 配置示例：
 

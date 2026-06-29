@@ -372,7 +372,30 @@ bool TcpSignalClient::read_line(std::string* line, int timeout_ms,
       break;
     }
     line->push_back(ch);
-    // 检查 terminator
+
+    // 无终止符模式：字节间短超时判断消息是否结束
+    if (terminator_.empty()) {
+      constexpr int kInterByteTimeoutMs = 100;
+      char next_ch = 0;
+      const int next_n = read_socket(&next_ch, 1, kInterByteTimeoutMs);
+      if (next_n == kReadTimeout) {
+        // 短超时内无更多数据 → 消息完整
+        return true;
+      }
+      if (next_n == 0) {
+        // 连接断开 → 消息完整
+        return true;
+      }
+      if (next_n > 0) {
+        // 还有数据，追加并继续读
+        line->push_back(next_ch);
+        continue;
+      }
+      // next_n < 0: 读取出错，跳出循环走错误处理
+      break;
+    }
+
+    // 终止符模式：检测是否收到完整行
     if (line->size() >= terminator_.size() &&
         line->compare(line->size() - terminator_.size(),
                        terminator_.size(), terminator_) == 0) {
