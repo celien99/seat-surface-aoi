@@ -23,7 +23,12 @@ param(
   [switch]$EnableDisplayManualTrigger,
   [string]$ManualTriggerHost = "127.0.0.1",
   [int]$ManualTriggerPort = 9000,
-  [int]$ManualTriggerTimeoutMs = 1000
+  [int]$ManualTriggerTimeoutMs = 1000,
+  [switch]$BuildPythonPackages,
+  [string]$PyinstallerKey = "",
+  [string]$DataRoot = "D:\seat-aoi-data",
+  [string]$ModelRoot = "D:\seat-aoi-model",
+  [switch]$CleanPythonSource
 )
 
 $ErrorActionPreference = "Stop"
@@ -244,6 +249,109 @@ function Quote-ServiceArgument {
   return $Value
 }
 
+function Initialize-DataDirectories {
+  param([string]$DataRoot, [string]$ModelRoot)
+  $dirs = @(
+    (Join-Path $DataRoot "trace"),
+    (Join-Path $DataRoot "images"),
+    (Join-Path $DataRoot "logs"),
+    (Join-Path $ModelRoot "roi_yolo"),
+    (Join-Path $ModelRoot "wideresnet50"),
+    (Join-Path $ModelRoot "patchcore")
+  )
+  foreach ($dir in $dirs) {
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+  }
+  Write-Host "Data directories created under $DataRoot and $ModelRoot"
+}
+
+function Update-ProductionConfigPaths {
+  param([string]$ConfigPath, [string]$DataRoot)
+  $content = Get-Content -LiteralPath $ConfigPath -Encoding UTF8
+  $updated = @()
+  foreach ($line in $content) {
+    if ($line -match '^\s*trace_root\s*=') {
+      $updated += "trace_root=$(Join-Path $DataRoot 'trace')"
+    } elseif ($line -match '^\s*image_save\.root_dir\s*=') {
+      $updated += "image_save.root_dir=$(Join-Path $DataRoot 'images')"
+    } else {
+      $updated += $line
+    }
+  }
+  [System.IO.File]::WriteAllLines($ConfigPath, $updated, [System.Text.UTF8Encoding]::new($false))
+  Write-Host "Production config paths updated: trace_root/image_save.root_dir -> $DataRoot"
+}
+
+function Update-RecipeModelPaths {
+  param([string]$RecipePath, [string]$ModelRoot, [string]$DataRoot)
+  $content = Get-Content -LiteralPath $RecipePath -Encoding UTF8
+  $updated = @()
+  foreach ($line in $content) {
+    if ($line -match '^\s*model_path:\s*model/roi_yolo/') {
+      $updated += "  model_path: $(Join-Path $ModelRoot 'roi_yolo\seat_roi_seg.onnx')"
+    } elseif ($line -match '^\s*embedding_model_path:\s*model/wideresnet50/') {
+      $updated += "    embedding_model_path: $(Join-Path $ModelRoot 'wideresnet50\seat_wrn50_embedding.onnx')"
+    } elseif ($line -match '^\s*pca_path:\s*model/patchcore/seat_pca\.json') {
+      $updated += "    pca_path: $(Join-Path $ModelRoot 'patchcore\seat_pca.json')"
+    } elseif ($line -match '^\s*memory_bank_path:\s*model/patchcore/seat_patchcore_bank\.json') {
+      $updated += "    memory_bank_path: $(Join-Path $ModelRoot 'patchcore\seat_patchcore_bank.json')"
+    } elseif ($line -match '^\s*faiss_index_path:\s*model/patchcore/seat_patchcore\.faiss') {
+      $updated += "    faiss_index_path: $(Join-Path $ModelRoot 'patchcore\seat_patchcore.faiss')"
+    } elseif ($line -match '^\s*root_dir:\s*trace\s*$') {
+      $updated += "  root_dir: $(Join-Path $DataRoot 'trace')"
+    } else {
+      $updated += $line
+    }
+  }
+  [System.IO.File]::WriteAllLines($RecipePath, $updated, [System.Text.UTF8Encoding]::new($false))
+  Write-Host "Recipe model paths updated: -> $ModelRoot, trace -> $DataRoot"
+}
+
+function Copy-ModelAssets {
+  param([string]$Root, [string]$ModelRoot)
+  $modelDir = Join-Path $Root "model"
+  if (-not (Test-Path -LiteralPath $modelDir)) {
+    Write-Host "Model source directory not found, skip model copy: $modelDir"
+    return
+  }
+  $copies = @(
+    @{Src="roi_yolo\seat_roi_seg.onnx"; Dst="roi_yolo\seat_roi_seg.onnx"},
+    @{Src="wideresnet50\seat_wrn50_embedding.onnx"; Dst="wideresnet50\seat_wrn50_embedding.onnx"},
+    @{Src="patchcore\seat_pca.json"; Dst="patchcore\seat_pca.json"},
+    @{Src="patchcore\seat_patchcore_bank.json"; Dst="patchcore\seat_patchcore_bank.json"},
+    @{Src="patchcore\seat_patchcore_bank.npy"; Dst="patchcore\seat_patchcore_bank.npy"},
+    @{Src="patchcore\seat_patchcore.faiss"; Dst="patchcore\seat_patchcore.faiss"}
+  )
+  foreach ($copy in $copies) {
+    $src = Join-Path $modelDir $copy.Src
+    $dst = Join-Path $ModelRoot $copy.Dst
+    if (Test-Path -LiteralPath $src) {
+      Copy-Item -LiteralPath $src -Destination $dst -Force
+      Write-Host "Model copied: $src -> $dst"
+    } else {
+      Write-Host "Model not found (placeholder?), skip: $src"
+    }
+  }
+}
+
+function Remove-PythonSources {
+  param([string]$Root)
+  Write-Host "Cleaning Python source files..."
+  $pyDirs = @(
+    (Join-Path $Root "python_detector"),
+    (Join-Path $Root "display_app"),
+    (Join-Path $Root "tools"),
+    (Join-Path $Root "training_tools")
+  )
+  foreach ($dir in $pyDirs) {
+    if (-not (Test-Path -LiteralPath $dir)) { continue }
+    Get-ChildItem -LiteralPath $dir -Recurse -Filter "*.py" | ForEach-Object {
+      Remove-Item -LiteralPath $_.FullName -Force
+    }
+  }
+  Write-Host "Python source files removed."
+}
+
 function New-DisplayShortcut {
   param(
     [string]$Root,
@@ -269,16 +377,31 @@ function New-DisplayShortcut {
     $desktop = [Environment]::GetFolderPath("Desktop")
   }
 
-  $argumentParts = @(
-    "-m",
-    "display_app.main",
-    "--trace-root",
-    (Quote-ShortcutArgument $Trace),
-    "--line-id",
-    (Quote-ShortcutArgument $Line),
-    "--grid-layout",
-    (Quote-ShortcutArgument $Grid)
-  )
+  # 判断是否为打包的 .exe（不含 python 字样）
+  $targetName = [IO.Path]::GetFileName($TargetPath)
+  $isPackagedExe = $targetName -notmatch 'python'
+
+  if ($isPackagedExe) {
+    $argumentParts = @(
+      "--trace-root",
+      (Quote-ShortcutArgument $Trace),
+      "--line-id",
+      (Quote-ShortcutArgument $Line),
+      "--grid-layout",
+      (Quote-ShortcutArgument $Grid)
+    )
+  } else {
+    $argumentParts = @(
+      "-m",
+      "display_app.main",
+      "--trace-root",
+      (Quote-ShortcutArgument $Trace),
+      "--line-id",
+      (Quote-ShortcutArgument $Line),
+      "--grid-layout",
+      (Quote-ShortcutArgument $Grid)
+    )
+  }
   if ($EnableManualTrigger) {
     $argumentParts += @(
       "--enable-manual-trigger",
@@ -340,6 +463,61 @@ try {
     throw "Production config not found: $ConfigFullPath"
   }
 
+  # ---- PyInstaller 打包 Python 进程 ----
+  $DetectorExe = Join-Path $ProjectRoot "bin\seat_aoi_detector.exe"
+  $DisplayDir = Join-Path $ProjectRoot "bin\seat_aoi_display"
+  $DisplayExe = Join-Path $DisplayDir "seat_aoi_display.exe"
+  if ($BuildPythonPackages) {
+    $pyinstallerScript = Join-Path $ProjectRoot "tools\windows\build_python_packages.ps1"
+    $pyinstallerArgs = @{
+      ProjectRoot = $ProjectRoot
+      PythonExe = $VenvPython
+      PyinstallerKey = $PyinstallerKey
+      CleanBuild = $false
+    }
+    & $pyinstallerScript @pyinstallerArgs
+    if ($LASTEXITCODE -ne 0) {
+      throw "PyInstaller build failed. Check that VC++ Build Tools are installed."
+    }
+  }
+
+  # ---- D 盘数据目录与路径注入 ----
+  if (Test-Path -LiteralPath $DataRoot) { } else {
+    New-Item -ItemType Directory -Force -Path $DataRoot | Out-Null
+  }
+  if (Test-Path -LiteralPath $ModelRoot) { } else {
+    New-Item -ItemType Directory -Force -Path $ModelRoot | Out-Null
+  }
+  Initialize-DataDirectories -DataRoot $DataRoot -ModelRoot $ModelRoot
+
+  Update-ProductionConfigPaths -ConfigPath $ConfigFullPath -DataRoot $DataRoot
+
+  $recipeDir = Join-Path $ProjectRoot "python_detector\config"
+  $recipePath = Join-Path $recipeDir "$Recipe.yaml"
+  if (Test-Path -LiteralPath $recipePath) {
+    Update-RecipeModelPaths -RecipePath $recipePath -ModelRoot $ModelRoot -DataRoot $DataRoot
+  } else {
+    Write-Host "Recipe not found, skip path update: $recipePath"
+  }
+
+  Copy-ModelAssets -Root $ProjectRoot -ModelRoot $ModelRoot
+
+  # ---- 确定服务与展示入口 ----
+  $DetectorApp = $VenvPython
+  $DetectorArgs = "-m python_detector.detector_main --config $(Quote-ServiceArgument $ConfigPath)"
+  $DisplayApp = $DisplayPython
+  $DisplayExtraArgs = @()
+
+  if ($BuildPythonPackages -and (Test-Path -LiteralPath $DetectorExe)) {
+    $DetectorApp = $DetectorExe
+    $DetectorArgs = "--config $(Quote-ServiceArgument $ConfigPath) --recipe-dir $(Quote-ServiceArgument $recipeDir)"
+  }
+  if ($BuildPythonPackages -and (Test-Path -LiteralPath $DisplayExe)) {
+    $DisplayApp = $DisplayExe
+    # display .exe 已内嵌 QML，不需要 -m display_app.main
+    $DisplayExtraArgs = @()
+  }
+
   if (-not $SkipValidation) {
     Invoke-Native $ControllerExe --config $ConfigPath --validate-config
     Invoke-Native $VenvPython -m tools.validate_protocol
@@ -351,8 +529,8 @@ try {
     -Name $DetectorServiceName `
     -DisplayName "Seat AOI Python Detector" `
     -Description "Seat Surface AOI Python detector process." `
-    -Application $VenvPython `
-    -Arguments "-m python_detector.detector_main --config $(Quote-ServiceArgument $ConfigPath)" `
+    -Application $DetectorApp `
+    -Arguments $DetectorArgs `
     -Root $ProjectRoot `
     -LogPrefix "detector"
 
@@ -369,9 +547,9 @@ try {
 
   $shortcutPath = New-DisplayShortcut `
     -Root $ProjectRoot `
-    -TargetPath $DisplayPython `
+    -TargetPath $DisplayApp `
     -Name $ShortcutName `
-    -Trace $TraceRoot `
+    -Trace (Join-Path $DataRoot 'trace') `
     -Line $LineId `
     -Grid $GridLayout `
     -EnableManualTrigger ([bool]$EnableDisplayManualTrigger) `
@@ -387,8 +565,19 @@ try {
     Invoke-Native $Nssm start $DetectorServiceName
   }
 
+  # ---- 清理 Python 源码 ----
+  if ($CleanPythonSource) {
+    if ($BuildPythonPackages) {
+      Remove-PythonSources -Root $ProjectRoot
+    } else {
+      Write-Host "WARNING: -CleanPythonSource requires -BuildPythonPackages. Skipping source cleanup."
+    }
+  }
+
   Write-Host "Seat Surface AOI station installation completed."
   Write-Host "ProjectRoot: $ProjectRoot"
+  Write-Host "DataRoot  : $DataRoot"
+  Write-Host "ModelRoot : $ModelRoot"
   Write-Host "Detector service: $DetectorServiceName"
   Write-Host "Controller service: $ControllerServiceName"
   Write-Host "Display shortcut: $shortcutPath"

@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 from python_detector.algorithm import SeatSurfaceAoiAlgorithm
+from python_detector.config.recipe_schema import RecipeManager
 from python_detector.display_channel import DisplayChannelWriter
 from python_detector.ipc.data_types import InspectionResult, SeatInspectionJob
 from python_detector.ipc.shm_client import ShmClient
@@ -54,9 +55,12 @@ class DetectorProcess:
         result_slot_size: int = DEFAULT_RESULT_SLOT_SIZE,
         display_root: str | Path = "trace",
         enable_display_channel: bool = True,
+        recipe_dir: str | Path | None = None,
     ) -> None:
         self.shm_client: ShmClient | None = None
-        self.algorithm = SeatSurfaceAoiAlgorithm()
+        self.algorithm = SeatSurfaceAoiAlgorithm(
+            recipe_manager=RecipeManager(recipe_dir) if recipe_dir is not None else RecipeManager(),
+        )
         self.display_channel = DisplayChannelWriter(display_root) if enable_display_channel else None
         self.slot_count = slot_count
         self.frame_slot_size = frame_slot_size
@@ -149,6 +153,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--result-slot-size", type=int, default=0, help="覆盖 result_slot_size")
     parser.add_argument("--display-root", default="", help="PySide6/QML 展示通道输出目录，默认使用 C++ 配置 trace_root")
     parser.add_argument("--disable-display-channel", action="store_true", help="关闭展示通道 JSON 输出")
+    parser.add_argument("--recipe-dir", default="", help="配方 YAML 目录，默认使用包内 python_detector/config")
     args = parser.parse_args(argv)
 
     slot_count, frame_slot_size, result_slot_size, trace_root = _load_runtime_config(args.config or None)
@@ -166,6 +171,7 @@ def main(argv: list[str] | None = None) -> int:
         result_slot_size=result_slot_size,
         display_root=display_root,
         enable_display_channel=not args.disable_display_channel,
+        recipe_dir=args.recipe_dir or None,
     )
     process.initialize()
     if args.once:

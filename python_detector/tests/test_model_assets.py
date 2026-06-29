@@ -21,7 +21,7 @@ def test_production_recipe_loads_full_model_chain() -> None:
         "light:HIGH_LEFT",
     )
     assert recipe.roi_locator.backend == "onnx_yolo_seg"
-    assert recipe.roi_locator.model_path == "model/roi_yolo/seat_roi_seg.onnx"
+    assert recipe.roi_locator.model_path == "D:\\seat-aoi-model\\roi_yolo\\seat_roi_seg.onnx"
     assert recipe.models["patchcore_detector"].backend == "patchcore_knn"
     assert recipe.models["patchcore_detector"].role == "primary"
     assert recipe.models["patchcore_detector"].spatial_upsample_height == 128

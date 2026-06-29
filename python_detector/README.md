@@ -108,7 +108,7 @@ python_detector/
 ├── __init__.py                 # 包级公开 API，导出算法入口、核心数据类型和 RecipeManager
 ├── algorithm.py                # SeatSurfaceAoiAlgorithm 纯算法 facade，不包含共享内存循环
 ├── detector_main.py            # 在线 Python detector 进程入口，负责 ShmClient 循环和结果发布
-├── paths.py                    # 包内配置、标定、ROI 模板路径解析，兼容仓库相对路径
+├── paths.py                    # 包内配置、标定、ROI 模板路径解析，兼容仓库相对路径和 PyInstaller frozen 环境
 ├── py.typed                    # 标记该包提供类型信息
 ├── config/
 │   ├── default_recipe.yaml     # 默认固定机位检测配方
@@ -227,7 +227,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 ### 配方与标定
 
-`RecipeManager` 默认从包内 `python_detector/config` 加载 YAML，不依赖当前工作目录。`CalibrationManager` 通过 `paths.resolve_package_path()` 同时兼容包内路径和历史仓库相对路径，例如 `python_detector/config/roi/default_roi.yaml`。
+`RecipeManager` 默认从包内 `python_detector/config` 加载 YAML，不依赖当前工作目录；可通过 `--recipe-dir` CLI 参数显式指定配方目录。`CalibrationManager` 通过 `paths.resolve_package_path()` 同时兼容包内路径和历史仓库相对路径，例如 `python_detector/config/roi/default_roi.yaml`。PyInstaller 打包后（`sys.frozen=True`），`paths.py` 自动从 `sys.executable` 推导项目根目录和配置目录，不再依赖 `__file__`。
 
 配方中的 `camera_defaults` 用于声明同一 SKU 下各检测视角共享的模型、ROI 模板、光源顺序、基准光源和 ROI 级模型映射；`cameras` 实际表示检测视角配置，只需要写差异字段，例如 `camera_id`、`pose_id` 和 `calibration_id`。固定机位模式下 `pose_id` 默认等于 `camera_id`；如果某个固定机位只配置默认视角，Python 检测层允许同一 `camera_id` 下动态 `pose_id` 的多张照片复用该机位的标定、ROI 和模型配置，并在特征、结果和 trace 中继续保留原始 `pose_id`。机器人飞拍模式下允许多个视角共享同一 `camera_id`，并用显式 `pose_id` 区分轨迹点、ROI、标定和模型配置，例如 `EYE_IN_HAND/T1_BACKREST`、`EYE_IN_HAND/T2_CUSHION`；这类显式 pose 配方不会把未知 `pose_id` fallback 到第一条配置。`cameras` 支持字典和列表两种写法；列表写法会按条目保序解析，不会再把相同 `camera_id` 的不同 `pose_id` 折叠覆盖，重复 `(camera_id, pose_id)` 会报配方校验错误。
 
