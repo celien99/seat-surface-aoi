@@ -48,18 +48,14 @@ function Test-IsAdministrator {
 }
 
 function Invoke-Native {
-  <#
-    # PS 5.1: native exe stderr triggers terminate error under Stop mode.
-    # Temporarily switch to Continue, merge stderr->stdout, then restore.
-  #>
-  param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Command)
+  param([string[]]$ArgList)
   $saved = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
   try {
-    & $Command[0] @($Command | Select-Object -Skip 1) 2>&1 | ForEach-Object { Write-Host $_ }
+    & $ArgList[0] @($ArgList | Select-Object -Skip 1) 2>&1 | ForEach-Object { Write-Host $_ }
     $exitCode = $LASTEXITCODE
     if ($exitCode -ne 0) {
-      throw "Command failed, exit=${exitCode}: $($Command -join ' ')"
+      throw "Command failed, exit=${exitCode}: $($ArgList -join ' ')"
     }
   } finally {
     $ErrorActionPreference = $saved
@@ -67,11 +63,11 @@ function Invoke-Native {
 }
 
 function Invoke-NativeOptional {
-  param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Command)
+  param([string[]]$ArgList)
   $saved = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
   try {
-    & $Command[0] @($Command | Select-Object -Skip 1) 2>&1 | Out-Null
+    & $ArgList[0] @($ArgList | Select-Object -Skip 1) 2>&1 | Out-Null
   } finally {
     $ErrorActionPreference = $saved
   }
@@ -121,28 +117,28 @@ function Install-PythonEnvironment {
 
   if (Get-Command uv -ErrorAction SilentlyContinue) {
     if (-not (Test-Path -LiteralPath $venvPython)) {
-      Invoke-Native uv venv $venvPath
+      Invoke-Native -ArgList @("uv", "venv", $venvPath)
     }
     $requirementsPath = Join-Path $env:TEMP "seat-aoi-runtime-requirements.txt"
-    Invoke-Native uv export --format requirements.txt --frozen --no-hashes --no-emit-project --no-dev --extra onnx --extra faiss --extra display --output-file $requirementsPath
-    Invoke-Native uv pip install --python $venvPython --requirement $requirementsPath
-    Invoke-Native uv pip check --python $venvPython
+    Invoke-Native -ArgList @("uv", "export", "--format", "requirements.txt", "--frozen", "--no-hashes", "--no-emit-project", "--no-dev", "--extra", "onnx", "--extra", "faiss", "--extra", "display", "--output-file", $requirementsPath)
+    Invoke-Native -ArgList @("uv", "pip", "install", "--python", $venvPython, "--requirement", $requirementsPath)
+    Invoke-Native -ArgList @("uv", "pip", "check", "--python", $venvPython)
     return
   }
 
   if (-not (Test-Path -LiteralPath $venvPython)) {
     if ($ExplicitPython) {
-      Invoke-Native $ExplicitPython -m venv $venvPath
+      Invoke-Native -ArgList @($ExplicitPython, "-m", "venv", $venvPath)
     } elseif (Get-Command py -ErrorAction SilentlyContinue) {
-      Invoke-Native py -3.10 -m venv $venvPath
+      Invoke-Native -ArgList @("py", "-3.10", "-m", "venv", $venvPath)
     } else {
-      Invoke-Native python -m venv $venvPath
+      Invoke-Native -ArgList @("python", "-m", "venv", $venvPath)
     }
   }
 
-  Invoke-Native $venvPython -m pip install --upgrade pip
-  Invoke-Native $venvPython -m pip install numpy PyYAML scipy onnxruntime faiss-cpu PySide6
-  Invoke-Native $venvPython -m pip check
+  Invoke-Native -ArgList @($venvPython, "-m", "pip", "install", "--upgrade", "pip")
+  Invoke-Native -ArgList @($venvPython, "-m", "pip", "install", "numpy", "PyYAML", "scipy", "onnxruntime", "faiss-cpu", "PySide6")
+  Invoke-Native -ArgList @($venvPython, "-m", "pip", "check")
 }
 
 function Build-Controller {
@@ -176,8 +172,8 @@ function Build-Controller {
     $args += "-DSEAT_AOI_HIKROBOT_MVS_LIBRARY=$LibraryPath"
   }
 
-  Invoke-Native cmake @args
-  Invoke-Native cmake --build $buildDir --config Release
+  Invoke-Native -ArgList (@("cmake") + $args)
+  Invoke-Native -ArgList @("cmake", "--build", $buildDir, "--config", "Release")
 
   $exe = Get-ChildItem -LiteralPath $buildDir -Recurse -Filter "seat_aoi_controller.exe" |
     Sort-Object FullName |
@@ -208,11 +204,11 @@ function Remove-ServiceIfExists {
   param([string]$Nssm, [string]$Name)
   $service = Get-Service -Name $Name -ErrorAction SilentlyContinue
   if ($null -ne $service) {
-    Invoke-NativeOptional $Nssm stop $Name
+    Invoke-NativeOptional -ArgList @($Nssm, "stop", $Name)
     if (-not (Wait-ServiceStopped -Name $Name)) {
       throw "Service did not stop within 30 seconds: $Name. Stop it manually before reinstalling."
     }
-    Invoke-Native $Nssm remove $Name confirm
+    Invoke-Native -ArgList @($Nssm, "remove", $Name, "confirm")
   }
 }
 
@@ -233,21 +229,21 @@ function Install-NssmService {
   $logDir = Join-Path $Root "logs\services"
   New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
-  Invoke-Native $Nssm install $Name $Application
-  Invoke-Native $Nssm set $Name DisplayName $DisplayName
-  Invoke-Native $Nssm set $Name Description $Description
-  Invoke-Native $Nssm set $Name AppDirectory $Root
-  Invoke-Native $Nssm set $Name AppParameters $Arguments
-  Invoke-Native $Nssm set $Name Start SERVICE_AUTO_START
-  Invoke-Native $Nssm set $Name AppRestartDelay 5000
-  Invoke-Native $Nssm set $Name AppThrottle 1500
-  Invoke-Native $Nssm set $Name AppStopMethodConsole 15000
-  Invoke-Native $Nssm set $Name AppStdout (Join-Path $logDir "$LogPrefix.stdout.log")
-  Invoke-Native $Nssm set $Name AppStderr (Join-Path $logDir "$LogPrefix.stderr.log")
-  Invoke-Native $Nssm set $Name AppRotateFiles 1
-  Invoke-Native $Nssm set $Name AppRotateOnline 1
-  Invoke-Native $Nssm set $Name AppRotateBytes 10485760
-  Invoke-Native $Nssm set $Name AppEnvironmentExtra "PYTHONUTF8=1`r`nPYTHONUNBUFFERED=1"
+  Invoke-Native -ArgList @($Nssm, "install", $Name, $Application)
+  Invoke-Native -ArgList @($Nssm, "set", $Name, "DisplayName", $DisplayName)
+  Invoke-Native -ArgList @($Nssm, "set", $Name, "Description", $Description)
+  Invoke-Native -ArgList @($Nssm, "set", $Name, "AppDirectory", $Root)
+  Invoke-Native -ArgList @($Nssm, "set", $Name, "AppParameters", $Arguments)
+  Invoke-Native -ArgList @($Nssm, "set", $Name, "Start", "SERVICE_AUTO_START")
+  Invoke-Native -ArgList @($Nssm, "set", $Name, "AppRestartDelay", "5000")
+  Invoke-Native -ArgList @($Nssm, "set", $Name, "AppThrottle", "1500")
+  Invoke-Native -ArgList @($Nssm, "set", $Name, "AppStopMethodConsole", "15000")
+  Invoke-Native -ArgList @($Nssm, "set", $Name, "AppStdout", (Join-Path $logDir "$LogPrefix.stdout.log"))
+  Invoke-Native -ArgList @($Nssm, "set", $Name, "AppStderr", (Join-Path $logDir "$LogPrefix.stderr.log"))
+  Invoke-Native -ArgList @($Nssm, "set", $Name, "AppRotateFiles", "1")
+  Invoke-Native -ArgList @($Nssm, "set", $Name, "AppRotateOnline", "1")
+  Invoke-Native -ArgList @($Nssm, "set", $Name, "AppRotateBytes", "10485760")
+  Invoke-Native -ArgList @($Nssm, "set", $Name, "AppEnvironmentExtra", "PYTHONUTF8=1`r`nPYTHONUNBUFFERED=1")
 }
 
 function Quote-ShortcutArgument {
@@ -536,9 +532,9 @@ try {
   }
 
   if (-not $SkipValidation) {
-    Invoke-Native $ControllerExe --config $ConfigPath --validate-config
-    Invoke-Native $VenvPython -m tools.validate_protocol
-    Invoke-Native $VenvPython -m tools.validate_model_assets --recipe $Recipe
+    Invoke-Native -ArgList @($ControllerExe, "--config", $ConfigPath, "--validate-config")
+    Invoke-Native -ArgList @($VenvPython, "-m", "tools.validate_protocol")
+    Invoke-Native -ArgList @($VenvPython, "-m", "tools.validate_model_assets", "--recipe", $Recipe)
   }
 
   Install-NssmService `
@@ -560,7 +556,7 @@ try {
     -Arguments "--config $(Quote-ServiceArgument $ConfigPath) --loop" `
     -Root $ProjectRoot `
     -LogPrefix "controller"
-  Invoke-Native $Nssm set $DetectorServiceName DependOnService $ControllerServiceName
+  Invoke-Native -ArgList @($Nssm, "set", $DetectorServiceName, "DependOnService", $ControllerServiceName)
 
   $shortcutPath = New-DisplayShortcut `
     -Root $ProjectRoot `
@@ -577,9 +573,9 @@ try {
     -CreateStartup ([bool]$CreateStartupShortcut)
 
   if (-not $NoStartServices) {
-    Invoke-Native $Nssm start $ControllerServiceName
+    Invoke-Native -ArgList @($Nssm, "start", $ControllerServiceName)
     Start-Sleep -Seconds 3
-    Invoke-Native $Nssm start $DetectorServiceName
+    Invoke-Native -ArgList @($Nssm, "start", $DetectorServiceName)
   }
 
   # ---- Clean Python sources ----

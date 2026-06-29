@@ -49,6 +49,7 @@ dev = [
   "PySide6>=6.6",
   "pytest>=8.0",
   "ruff>=0.8.0",
+  "pyinstaller>=6.0",
 ]
 
 [project.scripts]

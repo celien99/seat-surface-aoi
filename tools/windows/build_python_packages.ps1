@@ -11,31 +11,42 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 # ============================================================================
-# PS 5.1 compatible helpers -- native exe stderr must NOT raise terminate errors
+# PS 5.1: all functions pass arguments as flat arrays, never splatted strings.
+# ValueFromRemainingArguments + dash-prefixed tokens (-c, -m, etc.) is broken
+# on PS 5.1 when callers pass native exe args directly.
 # ============================================================================
 
-function Invoke-NativeSilent {
-  param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Command)
+function Invoke-Native {
+  <#
+    .PARAMETER ArgList
+    Flat string array: @("python.exe", "-c", "print(1)").
+    Runs the command, prints merged stdout+stderr, throws on non-zero exit.
+  #>
+  param([string[]]$ArgList)
   $saved = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
   try {
-    & $Command[0] @($Command | Select-Object -Skip 1) 2>&1 | Out-Null
-    return $LASTEXITCODE
+    & $ArgList[0] @($ArgList | Select-Object -Skip 1) 2>&1 | ForEach-Object { Write-Host $_ }
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+      throw "Command failed, exit=${exitCode}: $($ArgList -join ' ')"
+    }
   } finally {
     $ErrorActionPreference = $saved
   }
 }
 
-function Invoke-Native {
-  param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Command)
+function Invoke-NativeQuiet {
+  <#
+    Like Invoke-Native but swallows all output. Returns exit code.
+    Used for probe calls (e.g. "is PyInstaller installed?").
+  #>
+  param([string[]]$ArgList)
   $saved = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
   try {
-    & $Command[0] @($Command | Select-Object -Skip 1) 2>&1 | ForEach-Object { Write-Host $_ }
-    $exitCode = $LASTEXITCODE
-    if ($exitCode -ne 0) {
-      throw "Command failed, exit=${exitCode}: $($Command -join ' ')"
-    }
+    & $ArgList[0] @($ArgList | Select-Object -Skip 1) 2>&1 | Out-Null
+    return $LASTEXITCODE
   } finally {
     $ErrorActionPreference = $saved
   }
@@ -64,12 +75,6 @@ function Get-VenvPython {
   throw "Python not found at .venv\Scripts\python.exe. Run uv sync first."
 }
 
-function Test-PyinstallerInstalled {
-  param([string]$Python)
-  $exitCode = Invoke-NativeSilent $Python -c "import PyInstaller"
-  return ($exitCode -eq 0)
-}
-
 # ============================================================================
 # Main
 # ============================================================================
@@ -82,25 +87,9 @@ $BuildDir = Join-Path $ProjectRoot "build\pyinstaller"
 Push-Location $ProjectRoot
 try {
   # ---- ensure PyInstaller is installed ----
-  if (-not (Test-PyinstallerInstalled -Python $Python)) {
-    Write-Host "[INFO] PyInstaller not found in venv, attempting install..."
-    $installCode = Invoke-NativeSilent $Python -m pip install pyinstaller --no-input
-    if ($installCode -ne 0) {
-      Write-Host ""
-      Write-Host "============================================================" -ForegroundColor Yellow
-      Write-Host " PyInstaller install failed (offline environment?)" -ForegroundColor Yellow
-      Write-Host "============================================================" -ForegroundColor Yellow
-      Write-Host ""
-      Write-Host " To install offline:"
-      Write-Host "   1. On a networked PC: pip download pyinstaller -d pyinstaller_offline"
-      Write-Host "   2. Copy pyinstaller_offline folder to this machine"
-      Write-Host "   3. Run: $Python -m pip install --no-index --find-links pyinstaller_offline pyinstaller"
-      Write-Host "   4. Re-run this script"
-      Write-Host ""
-      Write-Host "============================================================" -ForegroundColor Yellow
-      throw "PyInstaller is not installed and cannot be downloaded (offline)."
-    }
-    Write-Host "[INFO] PyInstaller installed successfully."
+  $pyiCheck = Invoke-NativeQuiet @($Python, "-c", "import PyInstaller")
+  if ($pyiCheck -ne 0) {
+    throw "PyInstaller not found in venv. Run: uv sync --group dev"
   }
 
   # ---- clean old dist ----
@@ -119,18 +108,18 @@ try {
   New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
   New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
 
-  # ---- common PyInstaller args ----
-  $commonArgs = @(
+  # ---- common PyInstaller args (flat string arrays, no splatting) ----
+  [string[]]$commonArgs = @(
     "--noconfirm",
     "--log-level", "WARN"
   )
 
-  $keyArg = @()
+  [string[]]$keyArg = @()
   if ($PyinstallerKey) {
     $keyArg = @("--key", $PyinstallerKey)
   }
 
-  $sharedHiddenImports = @(
+  [string[]]$sharedHiddenImports = @(
     "--hidden-import", "numpy.core._methods",
     "--hidden-import", "numpy.lib.format",
     "--hidden-import", "scipy.ndimage",
@@ -146,7 +135,8 @@ try {
   # ---------------------------------------------------------------------------
   if (-not $SkipDetector) {
     Write-Host "[BUILD] seat_aoi_detector.exe (--onefile)..."
-    $detectorArgs = @(
+    [string[]]$detectorArgs = @(
+      $Python,
       "-m", "PyInstaller",
       "--onefile",
       "--name", "seat_aoi_detector",
@@ -188,7 +178,7 @@ try {
       "python_detector/detector_main.py"
     )
     $detectorArgs = $commonArgs + $keyArg + $sharedHiddenImports + $detectorArgs
-    Invoke-Native $Python @detectorArgs
+    Invoke-Native -ArgList $detectorArgs
     Write-Host "[OK] seat_aoi_detector.exe built."
   }
 
@@ -197,7 +187,8 @@ try {
   # ---------------------------------------------------------------------------
   if (-not $SkipDisplay) {
     Write-Host "[BUILD] seat_aoi_display (--onedir)..."
-    $displayArgs = @(
+    [string[]]$displayArgs = @(
+      $Python,
       "-m", "PyInstaller",
       "--onedir",
       "--name", "seat_aoi_display",
@@ -229,7 +220,7 @@ try {
       "display_app/main.py"
     )
     $displayArgs = $commonArgs + $keyArg + $displayArgs
-    Invoke-Native $Python @displayArgs
+    Invoke-Native -ArgList $displayArgs
     Write-Host "[OK] seat_aoi_display built."
   }
 
