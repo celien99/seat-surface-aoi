@@ -108,12 +108,6 @@ try {
   New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
   New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
 
-  # ---- common PyInstaller args (flat string arrays, no splatting) ----
-  [string[]]$commonArgs = @(
-    "--noconfirm",
-    "--log-level", "WARN"
-  )
-
   [string[]]$keyArg = @()
   if ($PyinstallerKey) {
     $keyArg = @("--key", $PyinstallerKey)
@@ -138,6 +132,9 @@ try {
     [string[]]$detectorArgs = @(
       $Python,
       "-m", "PyInstaller",
+      "--noconfirm",
+      "--log-level", "WARN"
+    ) + $keyArg + $sharedHiddenImports + @(
       "--onefile",
       "--name", "seat_aoi_detector",
       "--distpath", $BinDir,
@@ -177,7 +174,6 @@ try {
       "--hidden-import", "python_detector.display_channel",
       "python_detector/detector_main.py"
     )
-    $detectorArgs = $commonArgs + $keyArg + $sharedHiddenImports + $detectorArgs
     Invoke-Native -ArgList $detectorArgs
     Write-Host "[OK] seat_aoi_detector.exe built."
   }
@@ -190,6 +186,9 @@ try {
     [string[]]$displayArgs = @(
       $Python,
       "-m", "PyInstaller",
+      "--noconfirm",
+      "--log-level", "WARN"
+    ) + $keyArg + @(
       "--onedir",
       "--name", "seat_aoi_display",
       "--distpath", $BinDir,
@@ -219,7 +218,6 @@ try {
       "--add-data", "display_app/resources;display_app/resources",
       "display_app/main.py"
     )
-    $displayArgs = $commonArgs + $keyArg + $displayArgs
     Invoke-Native -ArgList $displayArgs
     Write-Host "[OK] seat_aoi_display built."
   }
