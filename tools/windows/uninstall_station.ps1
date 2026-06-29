@@ -128,5 +128,5 @@ if ($RemoveStartupShortcut) {
 
 Write-Host "Seat Surface AOI services and shortcuts were uninstalled."
 Write-Host "Project code, config: $ProjectRoot (not deleted)"
-Write-Host "Data (trace/images/logs) on D: drive (not deleted) — manually remove if needed: D:\seat-aoi-data\"
-Write-Host "Models on D: drive (not deleted) — manually remove if needed: D:\seat-aoi-model\"
+Write-Host "Data (trace/images/logs) on D: drive (not deleted) -- manually remove if needed: D:\seat-aoi-data\"
+Write-Host "Models on D: drive (not deleted) -- manually remove if needed: D:\seat-aoi-model\"

@@ -49,8 +49,8 @@ function Test-IsAdministrator {
 
 function Invoke-Native {
   <#
-    PS 5.1 兼容：原生程序 stderr 在 $ErrorActionPreference="Stop" 下会触发
-    终止错误，临时切换到 Continue 模式合并 stderr→stdout 并输出。
+    # PS 5.1: native exe stderr triggers terminate error under Stop mode.
+    # Temporarily switch to Continue, merge stderr->stdout, then restore.
   #>
   param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Command)
   $saved = $ErrorActionPreference
@@ -394,7 +394,7 @@ function New-DisplayShortcut {
     $desktop = [Environment]::GetFolderPath("Desktop")
   }
 
-  # 判断是否为打包的 .exe（不含 python 字样）
+  # Determine if this is a packaged .exe (path does not contain "python")
   $targetName = [IO.Path]::GetFileName($TargetPath)
   $isPackagedExe = $targetName -notmatch 'python'
 
@@ -480,7 +480,7 @@ try {
     throw "Production config not found: $ConfigFullPath"
   }
 
-  # ---- PyInstaller 打包 Python 进程 ----
+  # ---- PyInstaller: build Python packages ----
   $DetectorExe = Join-Path $ProjectRoot "bin\seat_aoi_detector.exe"
   $DisplayDir = Join-Path $ProjectRoot "bin\seat_aoi_display"
   $DisplayExe = Join-Path $DisplayDir "seat_aoi_display.exe"
@@ -498,7 +498,7 @@ try {
     }
   }
 
-  # ---- D 盘数据目录与路径注入 ----
+  # ---- D: drive data dirs and path injection ----
   if (Test-Path -LiteralPath $DataRoot) { } else {
     New-Item -ItemType Directory -Force -Path $DataRoot | Out-Null
   }
@@ -519,7 +519,7 @@ try {
 
   Copy-ModelAssets -Root $ProjectRoot -ModelRoot $ModelRoot
 
-  # ---- 确定服务与展示入口 ----
+  # ---- Determine service and display entry points ----
   $DetectorApp = $VenvPython
   $DetectorArgs = "-m python_detector.detector_main --config $(Quote-ServiceArgument $ConfigPath)"
   $DisplayApp = $DisplayPython
@@ -531,7 +531,7 @@ try {
   }
   if ($BuildPythonPackages -and (Test-Path -LiteralPath $DisplayExe)) {
     $DisplayApp = $DisplayExe
-    # display .exe 已内嵌 QML，不需要 -m display_app.main
+    # display .exe bundles QML internally, no -m display_app.main needed
     $DisplayExtraArgs = @()
   }
 
@@ -582,7 +582,7 @@ try {
     Invoke-Native $Nssm start $DetectorServiceName
   }
 
-  # ---- 清理 Python 源码 ----
+  # ---- Clean Python sources ----
   if ($CleanPythonSource) {
     if ($BuildPythonPackages) {
       Remove-PythonSources -Root $ProjectRoot

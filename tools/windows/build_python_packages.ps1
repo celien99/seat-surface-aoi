@@ -11,7 +11,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 # ============================================================================
-# PS 5.1 compatible helpers — native exe stderr must NOT raise terminate errors
+# PS 5.1 compatible helpers -- native exe stderr must NOT raise terminate errors
 # ============================================================================
 
 function Invoke-NativeSilent {
