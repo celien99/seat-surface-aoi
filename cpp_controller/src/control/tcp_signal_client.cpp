@@ -376,22 +376,36 @@ bool TcpSignalClient::read_line(std::string* line, int timeout_ms,
     // 无终止符模式：字节间短超时判断消息是否结束
     if (terminator_.empty()) {
       constexpr int kInterByteTimeoutMs = 100;
-      char next_ch = 0;
-      const int next_n = read_socket(&next_ch, 1, kInterByteTimeoutMs);
-      if (next_n == kReadTimeout) {
-        // 短超时内无更多数据 → 消息完整
-        return true;
+      while (true) {
+        int inter_byte_timeout = kInterByteTimeoutMs;
+        if (!infinite) {
+          const auto remaining =
+              std::chrono::duration_cast<std::chrono::milliseconds>(
+                  deadline - std::chrono::steady_clock::now()).count();
+          if (remaining <= 0) {
+            return true;
+          }
+          inter_byte_timeout =
+              std::min(kInterByteTimeoutMs, static_cast<int>(remaining));
+        }
+
+        char next_ch = 0;
+        const int next_n = read_socket(&next_ch, 1, inter_byte_timeout);
+        if (next_n == kReadTimeout) {
+          // 短超时内无更多数据 → 消息完整
+          return true;
+        }
+        if (next_n == 0) {
+          // 连接断开 → 消息完整
+          return true;
+        }
+        if (next_n > 0) {
+          line->push_back(next_ch);
+          continue;
+        }
+        // next_n < 0: 读取出错，跳出循环走错误处理
+        break;
       }
-      if (next_n == 0) {
-        // 连接断开 → 消息完整
-        return true;
-      }
-      if (next_n > 0) {
-        // 还有数据，追加并继续读
-        line->push_back(next_ch);
-        continue;
-      }
-      // next_n < 0: 读取出错，跳出循环走错误处理
       break;
     }
 
@@ -495,7 +509,9 @@ bool TcpSignalClient::initialize(const SignalClientConfig& config) {
 
   port_ = config.port > 0 ? config.port : 9000;
   delimiter_ = config.delimiter;
-  terminator_ = config.terminator.empty() ? "\n" : config.terminator;
+  // 空 terminator 是生产配置支持的有效模式：外部信号不带换行时，
+  // read_line() 通过字节间短超时判断一条 TCP 消息结束。
+  terminator_ = config.terminator;
   ok_response_ = config.ok_response.empty() ? "ok\n" : config.ok_response;
   protocol_mode_ = config.protocol_mode.empty() ? "single" : config.protocol_mode;
   start_command_ = config.start_command.empty() ? "start" : config.start_command;

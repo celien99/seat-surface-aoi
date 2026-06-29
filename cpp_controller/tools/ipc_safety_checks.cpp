@@ -1,5 +1,6 @@
 #include <array>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -8,6 +9,16 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
 
 #include "common/string_utils.hpp"
 #include "common/time_utils.hpp"
@@ -26,6 +37,182 @@
 namespace {
 
 seat_aoi::StationRuntimeConfig make_filled_production_runtime_config();
+
+#ifdef _WIN32
+using TestSocket = SOCKET;
+constexpr TestSocket kInvalidTestSocket = INVALID_SOCKET;
+
+bool ensure_test_winsock(std::string* error_message) {
+  static bool initialized = false;
+  if (initialized) {
+    return true;
+  }
+  WSADATA data{};
+  const int ret = WSAStartup(MAKEWORD(2, 2), &data);
+  if (ret != 0) {
+    if (error_message != nullptr) {
+      *error_message = "test WSAStartup failed: " + std::to_string(ret);
+    }
+    return false;
+  }
+  initialized = true;
+  return true;
+}
+
+void close_test_socket(TestSocket sock) {
+  if (sock != kInvalidTestSocket) {
+    closesocket(sock);
+  }
+}
+#else
+using TestSocket = int;
+constexpr TestSocket kInvalidTestSocket = -1;
+
+bool ensure_test_winsock(std::string* /*error_message*/) {
+  return true;
+}
+
+void close_test_socket(TestSocket sock) {
+  if (sock != kInvalidTestSocket) {
+    close(sock);
+  }
+}
+#endif
+
+bool set_test_socket_timeout(TestSocket sock, int timeout_ms, std::string* error_message) {
+#ifdef _WIN32
+  const DWORD tv = static_cast<DWORD>(timeout_ms);
+  const int recv_ret = setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO,
+                                  reinterpret_cast<const char*>(&tv), sizeof(tv));
+  const int send_ret = setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO,
+                                  reinterpret_cast<const char*>(&tv), sizeof(tv));
+#else
+  timeval tv{};
+  tv.tv_sec = timeout_ms / 1000;
+  tv.tv_usec = (timeout_ms % 1000) * 1000;
+  const int recv_ret = setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  const int send_ret = setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+#endif
+  if (recv_ret != 0 || send_ret != 0) {
+    if (error_message != nullptr) {
+      *error_message = "test socket timeout setup failed";
+    }
+    return false;
+  }
+  return true;
+}
+
+std::uint16_t reserve_tcp_test_port(std::string* error_message) {
+  if (!ensure_test_winsock(error_message)) {
+    return 0;
+  }
+  TestSocket sock =
+#ifdef _WIN32
+      socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+#else
+      socket(AF_INET, SOCK_STREAM, 0);
+#endif
+  if (sock == kInvalidTestSocket) {
+    if (error_message != nullptr) {
+      *error_message = "test socket create failed";
+    }
+    return 0;
+  }
+
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  addr.sin_port = 0;
+  if (bind(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+    close_test_socket(sock);
+    if (error_message != nullptr) {
+      *error_message = "test socket bind failed";
+    }
+    return 0;
+  }
+
+#ifdef _WIN32
+  int addr_len = sizeof(addr);
+#else
+  socklen_t addr_len = sizeof(addr);
+#endif
+  if (getsockname(sock, reinterpret_cast<sockaddr*>(&addr), &addr_len) != 0) {
+    close_test_socket(sock);
+    if (error_message != nullptr) {
+      *error_message = "test socket getsockname failed";
+    }
+    return 0;
+  }
+  const auto port = static_cast<std::uint16_t>(ntohs(addr.sin_port));
+  close_test_socket(sock);
+  return port;
+}
+
+bool send_tcp_test_payload(std::uint16_t port,
+                           const std::string& payload,
+                           std::string* response,
+                           std::string* error_message) {
+  if (!ensure_test_winsock(error_message)) {
+    return false;
+  }
+  TestSocket sock =
+#ifdef _WIN32
+      socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+#else
+      socket(AF_INET, SOCK_STREAM, 0);
+#endif
+  if (sock == kInvalidTestSocket) {
+    if (error_message != nullptr) {
+      *error_message = "test client socket create failed";
+    }
+    return false;
+  }
+  if (!set_test_socket_timeout(sock, 1000, error_message)) {
+    close_test_socket(sock);
+    return false;
+  }
+
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(port);
+  if (inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr) != 1) {
+    close_test_socket(sock);
+    if (error_message != nullptr) {
+      *error_message = "test client loopback parse failed";
+    }
+    return false;
+  }
+  if (connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+    close_test_socket(sock);
+    if (error_message != nullptr) {
+      *error_message = "test client connect failed";
+    }
+    return false;
+  }
+
+  const int sent = send(sock, payload.data(), static_cast<int>(payload.size()), 0);
+  if (sent != static_cast<int>(payload.size())) {
+    close_test_socket(sock);
+    if (error_message != nullptr) {
+      *error_message = "test client send failed";
+    }
+    return false;
+  }
+
+  char buffer[64]{};
+  const int received = recv(sock, buffer, static_cast<int>(sizeof(buffer)), 0);
+  close_test_socket(sock);
+  if (received <= 0) {
+    if (error_message != nullptr) {
+      *error_message = "test client did not receive ack";
+    }
+    return false;
+  }
+  if (response != nullptr) {
+    response->assign(buffer, buffer + received);
+  }
+  return true;
+}
 
 std::uint32_t result_header_crc(const seat_aoi::ResultSlotHeader* slot) {
   std::array<std::uint8_t, sizeof(seat_aoi::ResultSlotHeader)> bytes{};
@@ -344,6 +531,59 @@ bool test_signal_trigger_timeout_fails_closed() {
   const bool passed = !ok && !error.empty();
   if (!passed) {
     std::cerr << "signal trigger timeout did not fail closed: " << error << "\n";
+  }
+  return passed;
+}
+
+bool test_tcp_signal_empty_terminator_combined_start_sn() {
+  std::string socket_error;
+  const std::uint16_t port = reserve_tcp_test_port(&socket_error);
+  if (port == 0) {
+    std::cerr << "tcp signal test port reserve failed: " << socket_error << "\n";
+    return false;
+  }
+
+  seat_aoi::TcpSignalClient signal;
+  seat_aoi::SignalClientConfig config;
+  config.port = port;
+  config.station_id = "LINE1_AOI_TEST";
+  config.default_sku = "seat_a_black_leather";
+  config.protocol_mode = "start_sn";
+  config.delimiter = "|";
+  config.terminator = "";
+  config.start_command = "start";
+  config.sn_ack = "sn_ack";
+  if (!signal.initialize(config)) {
+    std::cerr << "tcp signal initialize failed: "
+              << signal.get_health().message << "\n";
+    return false;
+  }
+
+  seat_aoi::ExternalTrigger trigger;
+  std::string wait_error;
+  bool accepted = false;
+  std::thread waiter([&]() {
+    accepted = signal.wait_trigger(&trigger, 2000, &wait_error);
+  });
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  std::string response;
+  std::string client_error;
+  const bool client_ok = send_tcp_test_payload(port, "start|ABC1234560", &response, &client_error);
+  waiter.join();
+
+  const bool passed = client_ok && accepted && response == "sn_ack" &&
+                      trigger.trigger_id == 1 &&
+                      trigger.seat_id == "LINE1_AOI_TEST_ABC1234560" &&
+                      trigger.sku == "seat_a_black_leather";
+  if (!passed) {
+    std::cerr << "tcp signal empty terminator combined start_sn failed: "
+              << "client_ok=" << client_ok
+              << " client_error=" << client_error
+              << " accepted=" << accepted
+              << " wait_error=" << wait_error
+              << " response=" << response
+              << " seat_id=" << trigger.seat_id << "\n";
   }
   return passed;
 }
@@ -1248,6 +1488,11 @@ bool test_production_config_file_validates() {
                       config.lights[0].baud_rate == 9600 &&
                       config.lights[0].trigger_input_line == "F1" &&
                       config.max_camera_failures_before_reset == 2 &&
+                      config.signal.protocol_mode == "start_sn" &&
+                      config.signal.delimiter == "|" &&
+                      config.signal.terminator.empty() &&
+                      config.signal.start_ack == "start_ack" &&
+                      config.signal.sn_ack == "sn_ack" &&
                       config.lights[0].response_mode ==
                           seat_aoi::LightSerialResponseMode::Ack;
   if (!passed) {
@@ -1885,6 +2130,9 @@ int main() {
     return 1;
   }
   if (!test_signal_trigger_timeout_fails_closed()) {
+    return 1;
+  }
+  if (!test_tcp_signal_empty_terminator_combined_start_sn()) {
     return 1;
   }
   if (!test_light_fault_returns_recheck()) {

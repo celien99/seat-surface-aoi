@@ -26,6 +26,7 @@ flowchart LR
 - 接收外部信号：`manual_trigger`、`external_signal`、`tcp_signal`（支持 `single` 单行协议、`start_sn` 两步握手协议及组合格式 `start|SN` 单行触发），以及本地回归用 `simulated`。
 - `trigger_timeout_ms` 生产默认值为 `0`，表示无限等待外部信号；C++ 主控阻塞在 TCP/文件队列监听上，有信号才执行，无超时中断。
 - `tcp_signal` 在无限等待模式下使用固定 200ms 内部轮询周期检查 socket 可读状态，连接断开时自动重连，不会因空闲等待而产生业务记录或告警。
+- 生产 TCP 配置使用 `signal.terminator=` 空值，外部设备发送不带换行的 `start|SN` 时，C++ 会用 100ms 字节间超时判断消息结束；如果现场设备会发送 `\n`，可改为 `signal.terminator=\n`。
 - C++ 连续非空闲触发故障（如 PLC 协议错误、TCP 连接持续失败）会自动施加递增退避（前 3 次无额外延迟，之后每多一次增加 200ms，上限 5000ms），避免 Fault ↔ Ready 状态振荡和日志风暴。
 - 连接当前型号频闪控制器：`light.backend=serial_ascii`，适配 FL-ACDH。
 - 相机链路：本地回归 `simulated`，现场 `hikrobot_mvs`；真实采集对齐现场可工作的参考程序，每轮频闪前先并行 drain 所有相机 SDK 缓冲区的残留帧（arm() 改曝光参数可能在 Continuous 模式下即时产生一帧），再触发 FL-ACDH 并用 `GetImageBuffer` 读取硬触发帧；启动和相机故障重启时也会排空旧帧。当前生产、联调和采图配置统一使用 `COM1 / 9600 8N1`、30ms 相机曝光和 300/500/700us 三路频闪脉宽，FL-ACDH 触发路径只发送已在现场验证稳定的 `8/9/A/7` 命令，`9`（频闪脉宽）和 `A`（触发延时）命令均按三位十六进制数据编码（如 99us 延时 → hex `063` → 帧 `$A106361`）。单台相机连续失败后自动 stop+start 重启恢复。
@@ -48,7 +49,7 @@ uv run python tools/run_simulated_ipc.py
 
 默认模拟 IPC 会生成临时 C++ runtime config，把 trace/images 指向系统临时目录并关闭磁盘水位门禁，避免开发机磁盘余量影响本地回归；生产和测试机配置仍保留 `image_save.cleanup_min_free_ratio=0.20`。
 
-C++ 单独构建与验证：
+C++ 单独构建与验证（仅用于无硬件逻辑/IPC 回归；没有 MVS SDK 和外设的本地环境不能作为生产硬件版本验收依据）：
 
 ```powershell
 cmake -S cpp_controller -B cpp_controller/build/codex-check -DCMAKE_BUILD_TYPE=Release
@@ -176,7 +177,8 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
 - `python -m tools.validate_protocol`
 - `python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1`
 - 注册 `SeatAoiDetector` 和 `SeatAoiController` 两个自启动后台服务（指向打包 `.exe`）
-- 创建桌面快捷方式（指向打包 `seat_aoi_display.exe`）
+- 创建桌面快捷方式（指向打包 `seat_aoi_display.exe`，默认只读展示；只有传入 `-EnableDisplayManualTrigger` 才写入手动触发参数）
+- 服务 stdout/stderr 写入 `D:\seat-aoi-data\logs\services\`
 - 可选：`-CleanPythonSource` 删除 `.py` 明文源码
 
 `tools\windows\*.ps1` 交付脚本保持 ASCII 文本，兼容工控机常见的 Windows PowerShell 5.1，避免 UTF-8 无 BOM 脚本中的中文字符串被系统 ANSI 代码页误读后触发解析错误。

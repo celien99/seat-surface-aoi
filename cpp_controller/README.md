@@ -179,6 +179,8 @@ cmake -S cpp_controller -B cpp_controller/build/codex-check -DCMAKE_BUILD_TYPE=R
 cmake --build cpp_controller/build/codex-check --config Release
 ```
 
+上述 `codex-check` 构建只适合在开发机做无硬件逻辑和 IPC 回归；没有 Hikrobot MVS SDK、相机、频闪和外部信号端的环境，不能作为生产硬件版本验收依据。
+
 启用 Hikrobot MVS SDK 时显式传入 SDK 路径：
 
 ```powershell
@@ -275,7 +277,7 @@ signal.start_ack=start_ack       # 到位信号回复
 signal.sn_ack=sn_ack             # SN 接收回复
 ```
 
-`signal.terminator` 决定行结束标记。设为空时启用字节间超时模式（100ms），适用于外部信号不带 `\n` 终止符的场景。`signal.ok_response`、`signal.start_ack` 和 `signal.sn_ack` 支持 `\n`、`\r`、`\t`、`\0` 和 `\\` 转义。
+`signal.terminator` 决定行结束标记。设为空时启用字节间超时模式（100ms），适用于外部信号不带 `\n` 终止符的场景；当前生产配置就是 `signal.terminator=`，用于接收不带换行的 `start|SN`。如果外部设备会发送换行，则配置为 `signal.terminator=\n`。`signal.ok_response`、`signal.start_ack` 和 `signal.sn_ack` 支持 `\n`、`\r`、`\t`、`\0` 和 `\\` 转义。
 
 #### 组合格式 (`protocol_mode=start_sn` + `delimiter` 非空)
 
@@ -347,7 +349,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
   -GridLayout 2x1
 ```
 
-安装脚本会安装 Python 运行依赖、执行 C++ 配置校验、协议校验和模型资产校验，然后注册 `SeatAoiController` 与 `SeatAoiDetector` 自启动服务。C++ 主控先创建共享内存，Python detector 后启动并打开共享内存。服务 stdout/stderr 写入 `logs\services\`。桌面快捷方式 `Seat AOI Display` 使用 `pythonw.exe -m display_app.main` 启动，只读 `trace` 展示通道。
+安装脚本会安装 Python 运行依赖、执行 C++ 配置校验、协议校验和模型资产校验，然后注册 `SeatAoiController` 与 `SeatAoiDetector` 自启动服务。C++ 主控先创建共享内存，Python detector 后启动并打开共享内存。服务 stdout/stderr 写入 `D:\seat-aoi-data\logs\services\`（或安装时传入的 `-DataRoot` 下）。桌面快捷方式 `Seat AOI Display` 使用 `pythonw.exe -m display_app.main` 启动，默认只读 `trace` 展示通道，不会连接 C++ 手动触发端口。
 
 如果现场需要通过 display_app 手动触发全链路，安装时追加 `-EnableDisplayManualTrigger -ManualTriggerHost 127.0.0.1 -ManualTriggerPort 9000`，脚本会把 `--enable-manual-trigger` 写入桌面快捷方式参数。生产接入真实 PLC/上位机时不要同时启用该快捷方式的手动触发，除非已经确认 `tcp_signal` 连接仲裁策略。
 

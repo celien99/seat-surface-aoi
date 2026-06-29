@@ -220,13 +220,18 @@ function Install-NssmService {
     [string]$Application,
     [string]$Arguments,
     [string]$Root,
+    [string]$ServiceLogRoot,
     [string]$LogPrefix,
     [switch]$NoPythonEnv
   )
 
   Remove-ServiceIfExists -Nssm $Nssm -Name $Name
 
-  $logDir = Join-Path $Root "logs\services"
+  if ($ServiceLogRoot) {
+    $logDir = $ServiceLogRoot
+  } else {
+    $logDir = Join-Path $Root "logs\services"
+  }
   New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
   Invoke-Native -ArgList @($Nssm, "install", $Name, $Application)
@@ -505,6 +510,7 @@ try {
     New-Item -ItemType Directory -Force -Path $ModelRoot | Out-Null
   }
   Initialize-DataDirectories -DataRoot $DataRoot -ModelRoot $ModelRoot
+  $ServiceLogRoot = Join-Path $DataRoot "logs\services"
 
   Update-ProductionConfigPaths -ConfigPath $ConfigFullPath -DataRoot $DataRoot
 
@@ -545,6 +551,7 @@ try {
     -Application $DetectorApp `
     -Arguments $DetectorArgs `
     -Root $ProjectRoot `
+    -ServiceLogRoot $ServiceLogRoot `
     -LogPrefix "detector"
 
   Install-NssmService `
@@ -555,6 +562,7 @@ try {
     -Application $ControllerExe `
     -Arguments "--config $(Quote-ServiceArgument $ConfigPath) --loop" `
     -Root $ProjectRoot `
+    -ServiceLogRoot $ServiceLogRoot `
     -LogPrefix "controller" `
     -NoPythonEnv
   Invoke-Native -ArgList @($Nssm, "set", $DetectorServiceName, "DependOnService", $ControllerServiceName)
@@ -592,6 +600,8 @@ try {
   Write-Host "ProjectRoot: $ProjectRoot"
   Write-Host "DataRoot  : $DataRoot"
   Write-Host "ModelRoot : $ModelRoot"
+  Write-Host "Service logs: $ServiceLogRoot"
+  Write-Host "Display manual trigger: $([bool]$EnableDisplayManualTrigger)"
   Write-Host "Detector service: $DetectorServiceName"
   Write-Host "Controller service: $ControllerServiceName"
   Write-Host "Display shortcut: $shortcutPath"
