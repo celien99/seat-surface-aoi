@@ -609,6 +609,35 @@ bool TcpSignalClient::wait_trigger_start_sn(ExternalTrigger* out_trigger,
     }
 
     const std::string trimmed = trim(line);
+
+    // 组合格式检测: start_command + delimiter + SN（单行触发）
+    // 仅在 delimiter 非空时启用，向后兼容旧两步协议
+    if (!delimiter_.empty()) {
+      const std::string combined_prefix = start_command_ + delimiter_;
+      if (trimmed.size() > combined_prefix.size() &&
+          trimmed.compare(0, combined_prefix.size(), combined_prefix) == 0) {
+        std::string barcode = trim(trimmed.substr(combined_prefix.size()));
+        if (barcode.empty()) {
+          std::cerr << "TCP 两步协议: 收到组合格式触发行但 SN 为空 \""
+                    << trimmed << "\"" << std::endl;
+          continue;
+        }
+        // 组合格式已包含到位信号和 SN，直接回复 SN 确认
+        send_response(sn_ack_);
+
+        ExternalTrigger trigger{};
+        trigger.trigger_id = next_trigger_id_++;
+        trigger.seat_id = station_id_ + "_" + barcode;
+        trigger.sku = default_sku_;
+        *out_trigger = trigger;
+
+        std::cout << "TCP 两步协议: 收到组合格式触发 start_command+delimiter+SN="
+                  << barcode << " seat_id=" << trigger.seat_id
+                  << " trigger_id=" << trigger.trigger_id << std::endl;
+        return true;
+      }
+    }
+
     if (trimmed == start_command_) {
       break;  // 收到到位信号
     }

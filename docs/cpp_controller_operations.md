@@ -177,7 +177,7 @@ signal.backend=tcp_signal
 signal.station_id=LINE1_AOI_01
 signal.default_sku=seat_a_black_leather
 signal.port=9000
-signal.delimiter=
+signal.delimiter=|
 signal.terminator=\n
 signal.ok_response=ok\n
 signal.protocol_mode=start_sn
@@ -185,7 +185,7 @@ signal.start_command=start
 signal.sn_prefix=sn
 signal.start_ack=start_ack\n
 signal.sn_ack=sn_ack\n
-signal.result_host=192.168.1.100
+signal.result_host=192.168.10.100
 signal.result_port=9001
 signal.result_prefix=result
 signal.result_delimiter=|
@@ -195,7 +195,7 @@ signal.recheck_text=RECHECK
 signal.error_text=ERROR
 ```
 
-`signal.terminator`、`signal.ok_response`、`signal.start_ack` 和 `signal.sn_ack` 会解析 `\n` 等控制字符转义。启用 `protocol_mode=start_sn` 时，外部端或联调用 `display_app --enable-manual-trigger` 先发送 `start`，收到 `start_ack` 后发送 `sn <SN>`；C++ 构造 `seat_id=station_id + "_" + SN` 并进入完整采集检测链路。生产现场如果 PLC/外部上位机已经长连接 `signal.port`，不要同时让展示前端直接连接同一端口，除非现场已确认连接仲裁策略。
+`signal.terminator`、`signal.ok_response`、`signal.start_ack` 和 `signal.sn_ack` 会解析 `\n` 等控制字符转义。启用 `protocol_mode=start_sn` 时，当 `signal.delimiter` 非空（如 `|`），外部端可发送组合格式 `start|SN` 单行触发，C++ 直接回复 `sn_ack` 并进入检测链路；旧两步协议（先发送 `start` 收取 `start_ack`，再发送 `sn <SN>` 收取 `sn_ack`）仍然兼容。生产现场如果 PLC/外部上位机已经长连接 `signal.port`，不要同时让展示前端直接连接同一端口，除非现场已确认连接仲裁策略。
 
 ### 相机
 

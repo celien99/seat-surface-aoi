@@ -250,7 +250,7 @@ uv run python tools/run_simulated_ipc.py --replay-capture
 | 模式 | 说明 | 适用场景 |
 | --- | --- | --- |
 | `single`（默认） | 单行协议：每行 TCP 数据为一个触发信号 | 简单 PLC 直连，向后兼容 |
-| `start_sn` | 两步协议：先收到位信号，再收 SN 条码 | 外部上位机两步握手 |
+| `start_sn` | 两步协议：先收到位信号，再收 SN 条码；`delimiter` 非空时额外支持组合格式 `start\|SN` 单行触发 | 外部上位机两步握手或组合单行 |
 
 #### 两步协议 (`protocol_mode=start_sn`)
 
@@ -272,6 +272,23 @@ signal.sn_ack=sn_ack\n           # SN 接收回复
 ```
 
 `signal.terminator`、`signal.ok_response`、`signal.start_ack` 和 `signal.sn_ack` 支持 `\n`、`\r`、`\t`、`\0` 和 `\\` 转义，配置文件中的 `start_ack\n` 会按真实换行发送。
+
+#### 组合格式 (`protocol_mode=start_sn` + `delimiter` 非空)
+
+当 `signal.delimiter` 设置为非空值（如 `|`）时，`start_sn` 协议额外支持组合格式单行触发：
+
+1. 外部工控机发送单行: `start_command + delimiter + SN`（如 `start|ABC123456\n`）
+2. C++ 直接回复 `sn_ack\n` 并构造 `seat_id = station_id + "_" + ABC123456`
+
+无需再发送第二步 `sn ABC123456\n`。旧两步协议仍然兼容：如果收到的行恰好是 `start_command`（不含分隔符），C++ 仍按两步协议回复 `start_ack\n` 并等待第二步 SN 条码。
+
+配置示例：
+
+```ini
+signal.protocol_mode=start_sn
+signal.start_command=start
+signal.delimiter=|
+```
 
 `display_app` 可在联调时作为该协议的人工触发客户端：
 

@@ -23,7 +23,7 @@ flowchart LR
 
 保留的 C++ 主控能力：
 
-- 接收外部信号：`manual_trigger`、`external_signal`、`tcp_signal`（支持 `single` 单行协议和 `start_sn` 两步握手协议），以及本地回归用 `simulated`。
+- 接收外部信号：`manual_trigger`、`external_signal`、`tcp_signal`（支持 `single` 单行协议、`start_sn` 两步握手协议及组合格式 `start|SN` 单行触发），以及本地回归用 `simulated`。
 - `trigger_timeout_ms` 生产默认值为 `0`，表示无限等待外部信号；C++ 主控阻塞在 TCP/文件队列监听上，有信号才执行，无超时中断。
 - `tcp_signal` 在无限等待模式下使用固定 200ms 内部轮询周期检查 socket 可读状态，连接断开时自动重连，不会因空闲等待而产生业务记录或告警。
 - C++ 连续非空闲触发故障（如 PLC 协议错误、TCP 连接持续失败）会自动施加递增退避（前 3 次无额外延迟，之后每多一次增加 200ms，上限 5000ms），避免 Fault ↔ Ready 状态振荡和日志风暴。
