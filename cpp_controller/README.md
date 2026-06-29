@@ -277,7 +277,7 @@ signal.start_ack=start_ack       # 到位信号回复
 signal.sn_ack=sn_ack             # SN 接收回复
 ```
 
-`signal.terminator` 决定行结束标记。设为空时启用字节间超时模式（100ms），适用于外部信号不带 `\n` 终止符的场景；当前生产配置就是 `signal.terminator=`，用于接收不带换行的 `start|SN`。如果外部设备会发送换行，则配置为 `signal.terminator=\n`。`signal.ok_response`、`signal.start_ack` 和 `signal.sn_ack` 支持 `\n`、`\r`、`\t`、`\0` 和 `\\` 转义。
+`signal.terminator` 决定行结束标记。设为空时适用于外部信号不带 `\n` 终止符的场景；当前生产配置就是 `signal.terminator=`，用于接收不带换行的 `start|SN`。该模式会先用 TCP 接收缓存识别粘包中的下一条 `start|` 边界，例如 `start|SN001start|SN002` 会拆成两次触发；单条消息没有下一条边界时，再用 100ms 字节间静默作为结束兜底。如果外部设备会发送换行，则配置为 `signal.terminator=\n`。`signal.ok_response`、`signal.start_ack` 和 `signal.sn_ack` 支持 `\n`、`\r`、`\t`、`\0` 和 `\\` 转义。
 
 #### 组合格式 (`protocol_mode=start_sn` + `delimiter` 非空)
 
@@ -286,7 +286,7 @@ signal.sn_ack=sn_ack             # SN 接收回复
 1. 外部工控机发送单行: `start_command + delimiter + SN`（如 `start|ABC123456`）
 2. C++ 直接回复 `sn_ack` 并构造 `seat_id = station_id + "_" + ABC123456`
 
-无需再发送第二步 `sn ABC123456`。旧两步协议仍然兼容：如果收到的行恰好是 `start_command`（不含分隔符），C++ 仍按两步协议回复 `start_ack` 并等待第二步 SN 条码。当 `signal.terminator` 设为空时，采用字节间超时模式判断消息边界。
+无需再发送第二步 `sn ABC123456`。旧两步协议仍然兼容：如果收到的行恰好是 `start_command`（不含分隔符），C++ 仍按两步协议回复 `start_ack` 并等待第二步 SN 条码。SN 只允许字母、数字、横线、下划线和点，最长 48 个字符；包含 `|`、空白、控制字符或超长的条码会被忽略，不会写入共享内存 `seat_id`。
 
 配置示例：
 
@@ -351,7 +351,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
 
 安装脚本会安装 Python 运行依赖、执行 C++ 配置校验、协议校验和模型资产校验，然后注册 `SeatAoiController` 与 `SeatAoiDetector` 自启动服务。C++ 主控先创建共享内存，Python detector 后启动并打开共享内存。服务 stdout/stderr 写入 `D:\seat-aoi-data\logs\services\`（或安装时传入的 `-DataRoot` 下）。桌面快捷方式 `Seat AOI Display` 使用 `pythonw.exe -m display_app.main` 启动，默认只读 `trace` 展示通道，不会连接 C++ 手动触发端口。
 
-如果现场需要通过 display_app 手动触发全链路，安装时追加 `-EnableDisplayManualTrigger -ManualTriggerHost 127.0.0.1 -ManualTriggerPort 9000`，脚本会把 `--enable-manual-trigger` 写入桌面快捷方式参数。生产接入真实 PLC/上位机时不要同时启用该快捷方式的手动触发，除非已经确认 `tcp_signal` 连接仲裁策略。
+如果现场需要通过 display_app 手动触发全链路，安装时追加 `-EnableDisplayManualTrigger -ManualTriggerHost 127.0.0.1 -ManualTriggerPort 9000`，脚本会把 `--enable-manual-trigger` 写入桌面快捷方式参数。当前 `tcp_signal` 只维护一个客户端连接；生产接入真实 PLC/上位机时不要同时启用该快捷方式的手动触发，除非已经确认 `tcp_signal` 连接仲裁策略，否则 display 可能无法连接或替换真实触发连接。
 
 ### PowerShell Watchdog (简易备选)
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <string>
 
@@ -53,10 +54,15 @@ private:
   bool accept_client(int timeout_ms, std::string* error_message);
   /// 从客户端读取一行（直到 terminator）
   bool read_line(std::string* line, int timeout_ms, std::string* error_message);
+  /// 从 TCP 接收缓存中提取一条已成帧消息。
+  bool try_extract_buffered_line(std::string* line);
   /// 解析触发行 → ExternalTrigger
   bool parse_trigger_line(const std::string& line,
                           ExternalTrigger* out_trigger,
                           std::string* error_message);
+  /// 校验现场 SN，避免粘包或控制字符进入 seat_id。
+  bool validate_barcode(const std::string& barcode,
+                        std::string* error_message) const;
   /// 发送 ok_response 给客户端
   void send_ok();
   /// 发送自定义回复文本
@@ -109,6 +115,8 @@ private:
 
   socket_t listen_sock_ = kInvalidSocket;
   socket_t client_sock_ = kInvalidSocket;
+  std::string pending_rx_;
+  std::chrono::steady_clock::time_point pending_rx_updated_at_{};
 };
 
 }  // namespace seat_aoi

@@ -214,6 +214,79 @@ bool send_tcp_test_payload(std::uint16_t port,
   return true;
 }
 
+bool send_tcp_test_payload_chunks(std::uint16_t port,
+                                  const std::vector<std::string>& payloads,
+                                  int gap_ms,
+                                  std::string* response,
+                                  std::string* error_message) {
+  if (!ensure_test_winsock(error_message)) {
+    return false;
+  }
+  TestSocket sock =
+#ifdef _WIN32
+      socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+#else
+      socket(AF_INET, SOCK_STREAM, 0);
+#endif
+  if (sock == kInvalidTestSocket) {
+    if (error_message != nullptr) {
+      *error_message = "test client socket create failed";
+    }
+    return false;
+  }
+  if (!set_test_socket_timeout(sock, 1000, error_message)) {
+    close_test_socket(sock);
+    return false;
+  }
+
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(port);
+  if (inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr) != 1) {
+    close_test_socket(sock);
+    if (error_message != nullptr) {
+      *error_message = "test client loopback parse failed";
+    }
+    return false;
+  }
+  if (connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+    close_test_socket(sock);
+    if (error_message != nullptr) {
+      *error_message = "test client connect failed";
+    }
+    return false;
+  }
+
+  for (std::size_t index = 0; index < payloads.size(); ++index) {
+    const auto& payload = payloads[index];
+    const int sent = send(sock, payload.data(), static_cast<int>(payload.size()), 0);
+    if (sent != static_cast<int>(payload.size())) {
+      close_test_socket(sock);
+      if (error_message != nullptr) {
+        *error_message = "test client send failed";
+      }
+      return false;
+    }
+    if (gap_ms > 0 && index + 1 < payloads.size()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(gap_ms));
+    }
+  }
+
+  char buffer[64]{};
+  const int received = recv(sock, buffer, static_cast<int>(sizeof(buffer)), 0);
+  close_test_socket(sock);
+  if (received <= 0) {
+    if (error_message != nullptr) {
+      *error_message = "test client did not receive ack";
+    }
+    return false;
+  }
+  if (response != nullptr) {
+    response->assign(buffer, buffer + received);
+  }
+  return true;
+}
+
 std::uint32_t result_header_crc(const seat_aoi::ResultSlotHeader* slot) {
   std::array<std::uint8_t, sizeof(seat_aoi::ResultSlotHeader)> bytes{};
   std::memcpy(bytes.data(), slot, bytes.size());
@@ -584,6 +657,143 @@ bool test_tcp_signal_empty_terminator_combined_start_sn() {
               << " wait_error=" << wait_error
               << " response=" << response
               << " seat_id=" << trigger.seat_id << "\n";
+  }
+  return passed;
+}
+
+bool test_tcp_signal_empty_terminator_splits_packed_start_sn() {
+  std::string socket_error;
+  const std::uint16_t port = reserve_tcp_test_port(&socket_error);
+  if (port == 0) {
+    std::cerr << "tcp signal packed test port reserve failed: " << socket_error << "\n";
+    return false;
+  }
+
+  seat_aoi::TcpSignalClient signal;
+  seat_aoi::SignalClientConfig config;
+  config.port = port;
+  config.station_id = "LINE1_AOI_TEST";
+  config.default_sku = "seat_a_black_leather";
+  config.protocol_mode = "start_sn";
+  config.delimiter = "|";
+  config.terminator = "";
+  config.start_command = "start";
+  config.sn_ack = "sn_ack";
+  if (!signal.initialize(config)) {
+    std::cerr << "tcp signal packed initialize failed: "
+              << signal.get_health().message << "\n";
+    return false;
+  }
+
+  seat_aoi::ExternalTrigger first_trigger;
+  std::string first_wait_error;
+  bool first_accepted = false;
+  std::thread waiter([&]() {
+    first_accepted = signal.wait_trigger(&first_trigger, 2000, &first_wait_error);
+  });
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  std::string response;
+  std::string client_error;
+  const bool client_ok =
+      send_tcp_test_payload(port, "start|SN001start|SN002", &response, &client_error);
+  waiter.join();
+
+  seat_aoi::ExternalTrigger second_trigger;
+  std::string second_wait_error;
+  const auto second_started_at = std::chrono::steady_clock::now();
+  const bool second_accepted = signal.wait_trigger(&second_trigger, 200, &second_wait_error);
+  const auto second_elapsed_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - second_started_at).count();
+
+  const bool passed = client_ok && first_accepted && second_accepted &&
+                      response == "sn_ack" &&
+                      first_trigger.trigger_id == 1 &&
+                      first_trigger.seat_id == "LINE1_AOI_TEST_SN001" &&
+                      second_trigger.trigger_id == 2 &&
+                      second_trigger.seat_id == "LINE1_AOI_TEST_SN002" &&
+                      second_elapsed_ms < 50;
+  if (!passed) {
+    std::cerr << "tcp signal packed start_sn split failed: "
+              << "client_ok=" << client_ok
+              << " client_error=" << client_error
+              << " first_accepted=" << first_accepted
+              << " first_wait_error=" << first_wait_error
+              << " second_accepted=" << second_accepted
+              << " second_wait_error=" << second_wait_error
+              << " response=" << response
+              << " first_seat_id=" << first_trigger.seat_id
+              << " second_seat_id=" << second_trigger.seat_id
+              << " second_elapsed_ms=" << second_elapsed_ms << "\n";
+  }
+  return passed;
+}
+
+bool test_tcp_signal_empty_terminator_splits_quick_separate_start_sn() {
+  std::string socket_error;
+  const std::uint16_t port = reserve_tcp_test_port(&socket_error);
+  if (port == 0) {
+    std::cerr << "tcp signal quick separate test port reserve failed: "
+              << socket_error << "\n";
+    return false;
+  }
+
+  seat_aoi::TcpSignalClient signal;
+  seat_aoi::SignalClientConfig config;
+  config.port = port;
+  config.station_id = "LINE1_AOI_TEST";
+  config.default_sku = "seat_a_black_leather";
+  config.protocol_mode = "start_sn";
+  config.delimiter = "|";
+  config.terminator = "";
+  config.start_command = "start";
+  config.sn_ack = "sn_ack";
+  if (!signal.initialize(config)) {
+    std::cerr << "tcp signal quick separate initialize failed: "
+              << signal.get_health().message << "\n";
+    return false;
+  }
+
+  seat_aoi::ExternalTrigger first_trigger;
+  std::string first_wait_error;
+  bool first_accepted = false;
+  std::thread waiter([&]() {
+    first_accepted = signal.wait_trigger(&first_trigger, 2000, &first_wait_error);
+  });
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  std::string response;
+  std::string client_error;
+  const bool client_ok =
+      send_tcp_test_payload_chunks(port,
+                                   {"start|SN101", "start|SN102"},
+                                   20,
+                                   &response,
+                                   &client_error);
+  waiter.join();
+
+  seat_aoi::ExternalTrigger second_trigger;
+  std::string second_wait_error;
+  const bool second_accepted = signal.wait_trigger(&second_trigger, 200, &second_wait_error);
+
+  const bool passed = client_ok && first_accepted && second_accepted &&
+                      response == "sn_ack" &&
+                      first_trigger.trigger_id == 1 &&
+                      first_trigger.seat_id == "LINE1_AOI_TEST_SN101" &&
+                      second_trigger.trigger_id == 2 &&
+                      second_trigger.seat_id == "LINE1_AOI_TEST_SN102";
+  if (!passed) {
+    std::cerr << "tcp signal quick separate start_sn split failed: "
+              << "client_ok=" << client_ok
+              << " client_error=" << client_error
+              << " first_accepted=" << first_accepted
+              << " first_wait_error=" << first_wait_error
+              << " second_accepted=" << second_accepted
+              << " second_wait_error=" << second_wait_error
+              << " response=" << response
+              << " first_seat_id=" << first_trigger.seat_id
+              << " second_seat_id=" << second_trigger.seat_id << "\n";
   }
   return passed;
 }
@@ -2133,6 +2343,12 @@ int main() {
     return 1;
   }
   if (!test_tcp_signal_empty_terminator_combined_start_sn()) {
+    return 1;
+  }
+  if (!test_tcp_signal_empty_terminator_splits_packed_start_sn()) {
+    return 1;
+  }
+  if (!test_tcp_signal_empty_terminator_splits_quick_separate_start_sn()) {
     return 1;
   }
   if (!test_light_fault_returns_recheck()) {

@@ -26,7 +26,8 @@ flowchart LR
 - 接收外部信号：`manual_trigger`、`external_signal`、`tcp_signal`（支持 `single` 单行协议、`start_sn` 两步握手协议及组合格式 `start|SN` 单行触发），以及本地回归用 `simulated`。
 - `trigger_timeout_ms` 生产默认值为 `0`，表示无限等待外部信号；C++ 主控阻塞在 TCP/文件队列监听上，有信号才执行，无超时中断。
 - `tcp_signal` 在无限等待模式下使用固定 200ms 内部轮询周期检查 socket 可读状态，连接断开时自动重连，不会因空闲等待而产生业务记录或告警。
-- 生产 TCP 配置使用 `signal.terminator=` 空值，外部设备发送不带换行的 `start|SN` 时，C++ 会用 100ms 字节间超时判断消息结束；如果现场设备会发送 `\n`，可改为 `signal.terminator=\n`。
+- 生产 TCP 配置使用 `signal.terminator=` 空值，外部设备发送不带换行的 `start|SN` 时，C++ 会用接收缓存识别粘包中的下一条 `start|` 边界，并对单条消息保留 100ms 字节间静默兜底；如果现场设备会发送 `\n`，可改为 `signal.terminator=\n`。
+- TCP 触发 SN 只允许字母、数字、横线、下划线和点，最长 48 个字符；粘包残留、控制字符、分隔符或超长 SN 不会进入 `seat_id`。
 - C++ 连续非空闲触发故障（如 PLC 协议错误、TCP 连接持续失败）会自动施加递增退避（前 3 次无额外延迟，之后每多一次增加 200ms，上限 5000ms），避免 Fault ↔ Ready 状态振荡和日志风暴。
 - 连接当前型号频闪控制器：`light.backend=serial_ascii`，适配 FL-ACDH。
 - 相机链路：本地回归 `simulated`，现场 `hikrobot_mvs`；真实采集对齐现场可工作的参考程序，每轮频闪前先并行 drain 所有相机 SDK 缓冲区的残留帧（arm() 改曝光参数可能在 Continuous 模式下即时产生一帧），再触发 FL-ACDH 并用 `GetImageBuffer` 读取硬触发帧；启动和相机故障重启时也会排空旧帧。当前生产、联调和采图配置统一使用 `COM1 / 9600 8N1`、30ms 相机曝光和 300/500/700us 三路频闪脉宽，FL-ACDH 触发路径只发送已在现场验证稳定的 `8/9/A/7` 命令，`9`（频闪脉宽）和 `A`（触发延时）命令均按三位十六进制数据编码（如 99us 延时 → hex `063` → 帧 `$A106361`）。单台相机连续失败后自动 stop+start 重启恢复。
@@ -290,7 +291,7 @@ uv run seat-aoi-display `
   --manual-trigger-port 9000
 ```
 
-按钮提交的是控制面触发信号，不传图、不读写 Frame/Result 共享内存。C++ 收到 `start` 与 `sn <SN>` 后仍按 `StationController` 完整执行相机、频闪、共享内存检测和保守结果校验；`sn_ack` 只表示触发信号提交成功，不表示检测完成。前端会在等待同一 SN 的展示结果期间保持按钮 loading 和输入禁用，默认 30 秒超时，可用 `--manual-trigger-result-timeout-ms` 调整。生产现场如果同一个 `9000` 端口已有 PLC/外部上位机长连接，需要先确认连接仲裁策略，避免展示前端抢占真实触发连接。
+按钮提交的是控制面触发信号，不传图、不读写 Frame/Result 共享内存。C++ 收到 `start` 与 `sn <SN>` 后仍按 `StationController` 完整执行相机、频闪、共享内存检测和保守结果校验；`sn_ack` 只表示触发信号提交成功，不表示检测完成。前端会在等待同一 SN 的展示结果期间保持按钮 loading 和输入禁用，默认 30 秒超时，可用 `--manual-trigger-result-timeout-ms` 调整。当前 `tcp_signal` 只维护一个客户端连接；生产现场如果同一个 `9000` 端口已有 PLC/外部上位机长连接，展示前端手动触发可能无法连接或替换真实连接，必须先确认连接仲裁策略。
 
 ## 安全边界
 
