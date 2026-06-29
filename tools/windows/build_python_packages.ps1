@@ -151,6 +151,7 @@ try {
       "--collect-all", "onnxruntime",
       "--collect-all", "faiss",
       "--collect-all", "cv2",
+      "--add-data", "$(Join-Path $ProjectRoot 'python_detector\config');python_detector/config",
       "--hidden-import", "cv2",
       "--hidden-import", "yaml",
       "--hidden-import", "python_detector",

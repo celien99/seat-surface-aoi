@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from python_detector.detector_main import _load_runtime_ipc_layout
+from python_detector.detector_main import DetectorProcess, _load_runtime_ipc_layout
 
 
 def test_detector_main_reads_ipc_layout_from_cpp_config(tmp_path: Path) -> None:
@@ -17,3 +17,12 @@ def test_detector_main_reads_ipc_layout_from_cpp_config(tmp_path: Path) -> None:
     )
 
     assert _load_runtime_ipc_layout(str(config_path)) == (6, 67108864, 131072)
+
+
+def test_detector_process_uses_recipe_dir_for_calibration_manager() -> None:
+    config_dir = Path(__file__).resolve().parents[1] / "config"
+
+    process = DetectorProcess(recipe_dir=config_dir, enable_display_channel=False)
+
+    assert process.algorithm.recipe_manager.recipe_dir == config_dir
+    assert process.algorithm.pipeline.preprocessor.calibration_manager.base_dir == config_dir

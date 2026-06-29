@@ -2,6 +2,7 @@ import pytest
 from dataclasses import replace
 from pathlib import Path
 
+from python_detector import paths as detector_paths
 from python_detector.config.calibration_manager import CalibrationManager
 from python_detector.config.recipe_schema import RecipeManager, RecipeValidationError
 from python_detector.ipc.data_types import CameraBundle, LightFrame, SeatInspectionJob
@@ -63,6 +64,41 @@ def test_calibration_manager_default_path_is_independefect_from_cwd(monkeypatch,
 
     assert calibration.camera_id == "TOP_BACK"
     assert calibration.roi_templates["seat"].output_size == (64, 48)
+
+
+def test_calibration_manager_loads_from_config_base_dir() -> None:
+    config_dir = Path(__file__).resolve().parents[1] / "config"
+
+    calibration = CalibrationManager(config_dir).load(
+        "TOP_BACK",
+        "calib/simulated_v1",
+        "python_detector/config/roi/default_roi.yaml",
+    )
+
+    assert calibration.camera_id == "TOP_BACK"
+    assert calibration.roi_templates["seat"].output_size == (64, 48)
+
+
+def test_pyinstaller_path_resolution_prefers_installed_config(monkeypatch, tmp_path: Path) -> None:
+    installed_config = tmp_path / "python_detector" / "config"
+    installed_path = installed_config / "calibration" / "TOP_BACK" / "top_back_production_v1.yaml"
+    installed_path.parent.mkdir(parents=True)
+    installed_path.write_text("calibration_id: calib/top_back_production_v1\n", encoding="utf-8")
+    bundle_root = tmp_path / "_MEI25882"
+    bundle_path = bundle_root / "python_detector" / "config" / "calibration" / "TOP_BACK" / "top_back_production_v1.yaml"
+    bundle_path.parent.mkdir(parents=True)
+    bundle_path.write_text("calibration_id: calib/bundled\n", encoding="utf-8")
+    monkeypatch.setattr(detector_paths.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(detector_paths.sys, "_MEIPASS", str(bundle_root), raising=False)
+    monkeypatch.setattr(detector_paths, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(detector_paths, "DEFAULT_CONFIG_DIR", installed_config)
+
+    resolved = detector_paths.resolve_package_path(
+        bundle_root / "python_detector",
+        "python_detector/config/calibration/TOP_BACK/top_back_production_v1.yaml",
+    )
+
+    assert resolved == installed_path
 
 
 def test_calibration_manager_cache_is_scoped_by_roi_template_path(tmp_path: Path) -> None:

@@ -102,7 +102,7 @@ C:\seat-surface-aoi\                    # 程序与配置（运维可编辑 .con
 │   └── seat_aoi_display\               # Python 展示前端（PyInstaller --onedir）
 │       └── seat_aoi_display.exe
 ├── cpp_controller\config\              # C++ 配置文件（可编辑）
-└── python_detector\config\             # Python 配方（可编辑，源码打包后可删除）
+└── python_detector\config\             # Python 配方、标定和 ROI 模板（可编辑，源码打包后可删除）
 
 D:\seat-aoi-model\                      # 模型资产
 ├── roi_yolo\seat_roi_seg.onnx
@@ -142,7 +142,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
   -GridLayout 2x1
 ```
 
-`-BuildPythonPackages` 会在工控机本地用 PyInstaller 将 `python_detector` 和 `display_app` 分别打包为独立 `.exe`（`--onefile` / `--windowed --onedir`），避免源码直接暴露在磁盘上。打包需要 VC++ Build Tools（PyInstaller 编译引导程序），安装脚本会在缺失时提示安装。
+`-BuildPythonPackages` 会在工控机本地用 PyInstaller 将 `python_detector` 和 `display_app` 分别打包为独立 `.exe`（`--onefile` / `--windowed --onedir`），避免源码直接暴露在磁盘上。安装脚本注册 `SeatAoiDetector` 服务时会把 `--recipe-dir C:\seat-surface-aoi\python_detector\config` 传给打包后的检测进程，配方、标定和 ROI 模板优先从这个可维护目录读取；PyInstaller 同时把 `python_detector\config` 打进 `seat_aoi_detector.exe`，只作为外部配置目录缺失时的兜底资源，避免 onefile 临时 `_MEI...` 目录下找不到标定文件。打包需要 VC++ Build Tools（PyInstaller 编译引导程序），安装脚本会在缺失时提示安装。
 
 如果 C++ 主控已经构建好或者不需要打包 Python，可省略对应开关：
 
@@ -162,6 +162,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
 - `python_detector` 和 `display_app` 的 `.py` 源码被打包为独立 `.exe`（PyInstaller `--onefile` / `--onedir`）
 - `-CleanPythonSource` 追加后自动删除工控机上的 `.py` 明文源码（⚠ 不可逆：删除后无法重新 PyInstaller 打包，需恢复源码后再构建）
 - `-BuildPythonPackages` 已确保 Windows 服务使用打包后的 `.exe` 运行，不依赖 `.py` 源码；`-CleanPythonSource` 是额外的 IP 保护措施
+- `python_detector\config` 下的配方、标定和 ROI YAML 不随 `-CleanPythonSource` 删除；打包检测器运行时仍优先读取该外部目录，exe 内置配置仅作兜底
 - C++ `seat_aoi_controller.exe` 本身已是编译后的原生二进制
 - PyInstaller 的字节码加密（`--key`）自 v6.0 起已移除；如需代码保护，可使用 PyArmor 等外部工具
 - 配置文件 (`.conf`/`.yaml`) 和模型 (`.onnx`/`.npy`/`.faiss`) 保留明文（运维需要编辑/替换）
@@ -172,6 +173,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
 - `uv sync` 安装 Python 运行依赖（如果未使用 `-SkipPythonSync`）
 - cmake 构建 `seat_aoi_controller.exe`（如果使用 `-BuildController`）
 - PyInstaller 打包 `seat_aoi_detector.exe` + `seat_aoi_display\`（如果使用 `-BuildPythonPackages`）
+- `seat_aoi_detector.exe` 打包时内置 `python_detector\config` 兜底资源，服务运行时仍通过 `--recipe-dir` 指向安装目录配置
 - 创建 `D:\seat-aoi-data\` 和 `D:\seat-aoi-model\` 目录结构
 - 注入生产配置中的 `trace_root`/`image_save.root_dir` → D 盘绝对路径
 - 注入配方中的模型路径 → D 盘绝对路径

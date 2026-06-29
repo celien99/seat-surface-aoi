@@ -51,7 +51,7 @@ from python_detector.config.schema_validators import (
     _validate_roi_locator_light,
     _validate_v4_lights,
 )
-from python_detector.paths import DEFAULT_CONFIG_DIR
+from python_detector.paths import DEFAULT_CONFIG_DIR, resolve_package_path
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +61,11 @@ from python_detector.paths import DEFAULT_CONFIG_DIR
 
 class RecipeManager:
     def __init__(self, recipe_dir: str | Path | None = None) -> None:
-        self.recipe_dir = Path(recipe_dir) if recipe_dir is not None else DEFAULT_CONFIG_DIR
+        self.recipe_dir = (
+            Path(recipe_dir)
+            if recipe_dir is not None
+            else resolve_package_path(DEFAULT_CONFIG_DIR, Path("python_detector") / "config")
+        )
         self._recipes: dict[str, Recipe] = {}
         self._load_recipe_dir()
 

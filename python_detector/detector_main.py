@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 from python_detector.algorithm import SeatSurfaceAoiAlgorithm
+from python_detector.config.calibration_manager import CalibrationManager
 from python_detector.config.recipe_schema import RecipeManager
 from python_detector.display_channel import DisplayChannelWriter
 from python_detector.ipc.data_types import InspectionResult, SeatInspectionJob
@@ -15,6 +16,8 @@ from python_detector.ipc.shm_protocol import (
     DEFAULT_RESULT_SLOT_SIZE,
     DEFAULT_SLOT_COUNT,
 )
+from python_detector.pipeline.pipeline import InspectionPipeline
+from python_detector.pipeline.preprocessor import Preprocessor
 
 
 def _load_runtime_config(config_path: str | None) -> tuple[int, int, int, str]:
@@ -58,8 +61,17 @@ class DetectorProcess:
         recipe_dir: str | Path | None = None,
     ) -> None:
         self.shm_client: ShmClient | None = None
+        recipe_manager = RecipeManager(recipe_dir) if recipe_dir is not None else RecipeManager()
+        pipeline = None
+        if recipe_dir is not None:
+            pipeline = InspectionPipeline(
+                preprocessor=Preprocessor(
+                    calibration_manager=CalibrationManager(recipe_dir),
+                )
+            )
         self.algorithm = SeatSurfaceAoiAlgorithm(
-            recipe_manager=RecipeManager(recipe_dir) if recipe_dir is not None else RecipeManager(),
+            recipe_manager=recipe_manager,
+            pipeline=pipeline,
         )
         self.display_channel = DisplayChannelWriter(display_root) if enable_display_channel else None
         self.slot_count = slot_count
