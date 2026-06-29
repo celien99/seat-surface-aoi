@@ -183,10 +183,17 @@ def compute_calibration_stats(
         raise ValueError("校准距离全为非有限值，无法计算统计量")
 
     distance_mean = float(np.mean(nearest_all[finite]))
-    # 空间 PatchCore 每张图有 H×W 个 patch（生产: 256×256=65536）。
+    # 写回 bank JSON
+    bank = {}
+    if bank_json.exists() and bank_json.stat().st_size > 1:
+        bank = json.loads(bank_json.read_text(encoding="utf-8"))
+    # 空间 PatchCore 每张图有 H×W 个 patch（当前生产: 128×128=16384）。
     # 需要对正常样本做 bootstrap 模拟，计算每张正常图的"最异常 patch 距离"的期望值，
     # 以消除多重比较偏差。详见 patchcore.py _calibrated_score 注释。
-    _patch_grid = 256 * 256
+    metadata = bank.get("metadata", {}) if isinstance(bank, dict) else {}
+    spatial_h = int(metadata.get("spatial_upsample_height", 0))
+    spatial_w = int(metadata.get("spatial_upsample_width", 0))
+    _patch_grid = max(spatial_h * spatial_w, 1) if spatial_h > 0 and spatial_w > 0 else (128 * 128)
     _n_bootstrap = min(500, int(heldout_sampled))
     _maxima = np.empty(_n_bootstrap, dtype=np.float32)
     _rng = np.random.default_rng(42)
@@ -196,10 +203,6 @@ def compute_calibration_stats(
     distance_p99 = float(np.mean(_maxima))
     distance_std = float(np.std(_maxima))  # 保留仅供诊断
 
-    # 写回 bank JSON
-    bank = {}
-    if bank_json.exists() and bank_json.stat().st_size > 1:
-        bank = json.loads(bank_json.read_text(encoding="utf-8"))
     bank["distance_mean"] = distance_mean
     bank["distance_p99"] = distance_p99
     bank_json.write_text(json.dumps(bank, ensure_ascii=False, indent=2), encoding="utf-8")

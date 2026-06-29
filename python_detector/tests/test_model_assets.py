@@ -27,7 +27,8 @@ def test_production_recipe_loads_full_model_chain() -> None:
     assert recipe.models["patchcore_detector"].spatial_upsample_height == 128
     assert recipe.models["patchcore_detector"].spatial_upsample_width == 128
     assert recipe.models["patchcore_detector"].anomaly_binarize_min_ratio == 0.5
-    assert recipe.models["patchcore_detector"].anomaly_binarize_relative == 0.3
+    assert recipe.models["patchcore_detector"].anomaly_binarize_relative == 0.55
+    assert recipe.models["patchcore_detector"].score_threshold == 0.55
 
 
 def test_production_robot_recipe_uses_patchcore_primary_detector() -> None:
