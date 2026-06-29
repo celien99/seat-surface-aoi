@@ -84,8 +84,10 @@ std::string FlAcdhLightController::format_strobe_width(std::uint32_t strobe_widt
 }
 
 std::string FlAcdhLightController::format_delay(std::uint32_t trigger_delay_us) {
+  // A 命令的数据字段是 3 位大写十六进制；99us -> 063 -> $A106361。
   std::ostringstream oss;
-  oss << std::setw(3) << std::setfill('0') << trigger_delay_us;
+  oss << std::uppercase << std::hex << std::setw(3) << std::setfill('0')
+      << trigger_delay_us;
   return oss.str();
 }
 

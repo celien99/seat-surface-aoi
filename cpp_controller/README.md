@@ -162,7 +162,11 @@ image_save.save_original=true
 正式生产配置默认 `image_save.enabled=false`，避免 C++ 额外保存原图副本占满磁盘；原始图、ROI 图和检测 overlay 由 Python trace 策略写入 `trace`，供 display_app 只读展示。临时排障需要 C++ 原图副本时，先确认磁盘容量，再启用 `image_save.enabled=true`。
 
 > **FL-ACDH 已知协议命令**（来自手册）：C(联动模式)、B(触发电平)、8(触发模式)、9(频闪时间)、A(相机触发延时)、7(远程通信触发)、D(序列数)、E(同步信号 ID)。
-> 当前串口远程触发链路只发送 `8→9→A→7`。现场控制器会拒绝当前链路不需要的 `C/B` 设置命令，因此不再在每次触发时发送；`9` 命令频闪时间按三位十六进制数据发送，例如配置 `strobe_width_us=500` 时帧为 `$921F46C`。如果 `8/9/A/7` 返回 `&` 或超时，会按光源故障保守输出 `RECHECK/ERROR`。
+> 当前串口远程触发链路只发送 `8→9→A→7`。现场控制器会拒绝当前链路不需要的 `C/B` 设置命令，因此不再在每次触发时发送；`9`（频闪脉宽）和 `A`（触发延时）命令均按三位十六进制数据发送：
+> - 频闪 900us → hex `384` → 帧 `$9138413`
+> - 延时 99us → hex `063` → 帧 `$A106361`
+>
+> 如果 `8/9/A/7` 返回 `&` 或超时，会按光源故障保守输出 `RECHECK/ERROR`。
 
 `hardware_mode=production` 禁止 simulated/manual backend；`hardware_mode=lab` 可用 `manual_trigger` 做手动联调；不传 `--config` 时仍保留内置 simulated fallback，用于本地 IPC 回归。
 

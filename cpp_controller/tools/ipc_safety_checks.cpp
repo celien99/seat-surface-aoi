@@ -1433,6 +1433,22 @@ bool test_fl_acdh_strobe_width_uses_hex_payload() {
   return passed;
 }
 
+bool test_fl_acdh_delay_uses_hex_payload() {
+  const std::string value_10 = seat_aoi::FlAcdhLightController::format_delay(10);
+  const std::string value_50 = seat_aoi::FlAcdhLightController::format_delay(50);
+  const std::string value_99 = seat_aoi::FlAcdhLightController::format_delay(99);
+  const std::string frame_99 =
+      seat_aoi::FlAcdhLightController::build_protocol_frame('A', '1', value_99);
+  const bool passed = value_10 == "00A" && value_50 == "032" &&
+                      value_99 == "063" && frame_99 == "$A106361";
+  if (!passed) {
+    std::cerr << "FL-ACDH trigger delay was not encoded as 3-digit hex: "
+              << value_10 << " " << value_50 << " " << value_99 << " "
+              << frame_99 << "\n";
+  }
+  return passed;
+}
+
 bool test_invalid_health_threshold_rejected() {
   auto config = make_filled_production_runtime_config();
   config.warning_recheck_threshold = 3;
@@ -1956,6 +1972,9 @@ int main() {
     return 1;
   }
   if (!test_fl_acdh_strobe_width_uses_hex_payload()) {
+    return 1;
+  }
+  if (!test_fl_acdh_delay_uses_hex_payload()) {
     return 1;
   }
   if (!test_invalid_health_threshold_rejected()) {
