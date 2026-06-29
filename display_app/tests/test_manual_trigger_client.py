@@ -37,6 +37,20 @@ def test_manual_trigger_client_rejects_invalid_sn() -> None:
         raise AssertionError("invalid SN should fail")
 
 
+def test_manual_trigger_client_accepts_ack_with_newline() -> None:
+    """验证 display_app 兼容带 \\n 终止符的响应（向后兼容旧版 cpp 配置）。"""
+    server = _StartSnServer(newline_ack=True)
+    server.start()
+    client = ManualTriggerClient(
+        ManualTriggerConfig(host="127.0.0.1", port=server.port, timeout_ms=1000)
+    )
+
+    result = client.trigger("SN-NL")
+
+    assert result.sn == "SN-NL"
+    assert server.lines == ["start\n", "sn SN-NL\n"]
+
+
 def test_main_view_model_manual_trigger_defaults_to_read_only(tmp_path: Path) -> None:
     view_model = MainViewModel(DisplayBridge(tmp_path, CameraImageProvider()))
 
@@ -124,11 +138,12 @@ def test_main_view_model_manual_trigger_timeout_reenables_input(tmp_path: Path) 
 
 
 class _StartSnServer:
-    def __init__(self) -> None:
+    def __init__(self, newline_ack: bool = False) -> None:
         self._ready = threading.Event()
         self.done = threading.Event()
         self.lines: list[str] = []
         self.port = 0
+        self._newline_ack = newline_ack
         self._thread = threading.Thread(target=self._run, daemon=True)
 
     def start(self) -> None:
@@ -136,6 +151,7 @@ class _StartSnServer:
         assert self._ready.wait(2.0)
 
     def _run(self) -> None:
+        nl = b"\n" if self._newline_ack else b""
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
             server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             server.bind(("127.0.0.1", 0))
@@ -145,9 +161,9 @@ class _StartSnServer:
             conn, _addr = server.accept()
             with conn:
                 self.lines.append(_read_line(conn))
-                conn.sendall(b"start_ack\n")
+                conn.sendall(b"start_ack" + nl)
                 self.lines.append(_read_line(conn))
-                conn.sendall(b"sn_ack\n")
+                conn.sendall(b"sn_ack" + nl)
         self.done.set()
 
 

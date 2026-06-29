@@ -34,8 +34,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--manual-trigger-terminator", default="\\n", help="手动触发命令结尾，支持 \\\\n。")
     parser.add_argument("--manual-trigger-start-command", default="start", help="两步协议到位信号命令。")
     parser.add_argument("--manual-trigger-sn-prefix", default="sn", help="两步协议 SN 前缀。")
-    parser.add_argument("--manual-trigger-start-ack", default="start_ack\\n", help="到位信号确认文本。")
-    parser.add_argument("--manual-trigger-sn-ack", default="sn_ack\\n", help="SN 确认文本。")
+    parser.add_argument("--manual-trigger-start-ack", default="start_ack", help="到位信号确认文本（对齐生产配置不带 \\n）。")
+    parser.add_argument("--manual-trigger-sn-ack", default="sn_ack", help="SN 确认文本（对齐生产配置不带 \\n）。")
     parser.add_argument("--manual-trigger-result-timeout-ms", type=int, default=30000, help="手动触发后等待展示结果的最长时间。")
     args, qt_args = parser.parse_known_args(argv)
     args.qt_args = qt_args

@@ -22,8 +22,8 @@ class ManualTriggerConfig:
     terminator: str = "\n"
     start_command: str = "start"
     sn_prefix: str = "sn"
-    start_ack: str = "start_ack\n"
-    sn_ack: str = "sn_ack\n"
+    start_ack: str = "start_ack"
+    sn_ack: str = "sn_ack"
     max_sn_length: int = 48
 
 
@@ -116,6 +116,11 @@ class ManualTriggerClient:
         stage_name: str,
     ) -> None:
         expected_variants = _expected_variants(expected_text)
+        # 同时匹配不带 \r/\n 终止符的响应，兼容 C++ 生产配置中
+        # start_ack / sn_ack 不含 \n 的发送方式。
+        stripped = expected_text.rstrip("\r\n")
+        if stripped != expected_text:
+            expected_variants = expected_variants + (stripped.encode("utf-8"),)
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
             if any(expected in self._rx_buffer for expected in expected_variants):
