@@ -758,9 +758,12 @@ bool TcpSignalClient::publish_result(const ExternalTrigger& trigger,
     }
     std::cerr << "TCP result notify failed: " << send_error
               << " (will not block main flow)" << std::endl;
+    // 已配置独立结果通道但不可达时，不再回退到 PLC 命令通道，
+    // 避免污染 start_sn 协议状态机导致后续触发失败。
+    return true;
   }
 
-  // 回退：尝试通过已有 PLC 连接发送
+  // 回退：无独立结果通道时，尝试通过已有 PLC 连接发送
   if (client_sock_ != kInvalidSocket) {
     const std::string line = result_prefix_ + result_delimiter_ +
                              seat_id + result_delimiter_ +
