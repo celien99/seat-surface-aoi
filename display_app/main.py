@@ -78,8 +78,12 @@ def main(argv: list[str] | None = None) -> int:
 
     engine = QQmlApplicationEngine()
     engine.addImageProvider("camera", image_provider)
-    qml_root = Path(__file__).resolve().parent / "qml"
-    style_root = Path(__file__).resolve().parent / "resources" / "styles"
+    if getattr(sys, "frozen", False):
+        _base = Path(sys._MEIPASS) / "display_app"
+    else:
+        _base = Path(__file__).resolve().parent
+    qml_root = _base / "qml"
+    style_root = _base / "resources" / "styles"
     engine.addImportPath(str(qml_root))
     engine.addImportPath(str(style_root.parent))
     engine.rootContext().setContextProperty("mainViewModel", view_model)

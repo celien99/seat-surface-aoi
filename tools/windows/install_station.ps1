@@ -348,8 +348,8 @@ function Copy-ModelAssets {
 
 function Remove-PythonSources {
   param([string]$Root)
-  Write-Host "[WARNING] Removing Python source files. Rebuild will REQUIRE git restore first."
-  Write-Host "[WARNING] To restore before rebuilding, run: git -C ""$Root"" checkout -- python_detector/ display_app/ tools/ training_tools/"
+  Write-Host "[WARNING] Removing Python source files. Rebuild will REQUIRE source file restoration first."
+  Write-Host "[WARNING] To restore before rebuilding, re-clone or restore python_detector/ display_app/ tools/ training_tools/ from backup."
   Write-Host "Cleaning Python source files..."
   $pyDirs = @(
     (Join-Path $Root "python_detector"),

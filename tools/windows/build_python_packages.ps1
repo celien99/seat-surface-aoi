@@ -95,13 +95,13 @@ try {
   if (-not $SkipDetector) {
     $entryDetector = Join-Path $ProjectRoot "python_detector\detector_main.py"
     if (-not (Test-Path -LiteralPath $entryDetector)) {
-      throw "Entry script not found: $entryDetector`nSource files may have been deleted by -CleanPythonSource. Restore sources:`n  git -C ""$ProjectRoot"" checkout -- python_detector/ display_app/"
+      throw "Entry script not found: $entryDetector`nSource files may have been deleted by -CleanPythonSource. Restore source files before rebuilding."
     }
   }
   if (-not $SkipDisplay) {
     $entryDisplay = Join-Path $ProjectRoot "display_app\main.py"
     if (-not (Test-Path -LiteralPath $entryDisplay)) {
-      throw "Entry script not found: $entryDisplay`nSource files may have been deleted by -CleanPythonSource. Restore sources:`n  git -C ""$ProjectRoot"" checkout -- python_detector/ display_app/"
+      throw "Entry script not found: $entryDisplay`nSource files may have been deleted by -CleanPythonSource. Restore source files before rebuilding."
     }
   }
 
@@ -197,6 +197,7 @@ try {
       "--noconfirm",
       "--log-level", "WARN"
     ) + @(
+      "--windowed",
       "--onedir",
       "--name", "seat_aoi_display",
       "--distpath", $BinDir,
@@ -209,8 +210,6 @@ try {
       "--hidden-import", "PySide6.QtQml",
       "--hidden-import", "PySide6.QtQuick",
       "--hidden-import", "PySide6.QtQuickControls2",
-      "--hidden-import", "PySide6.QtQuickTemplates2",
-      "--hidden-import", "PySide6.QtQuickLayouts",
       "--hidden-import", "PySide6.QtNetwork",
       "--hidden-import", "display_app",
       "--hidden-import", "display_app.infrastructure",
