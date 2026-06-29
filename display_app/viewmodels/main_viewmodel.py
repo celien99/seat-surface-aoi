@@ -379,6 +379,8 @@ class MainViewModel(QObject):
                 result = client.trigger(sn)
             except ManualTriggerError as exc:
                 self.manualTriggerFinished.emit(False, str(exc), {})
+            except Exception as exc:
+                self.manualTriggerFinished.emit(False, f"手动触发异常: {exc}", {})
             else:
                 self.manualTriggerFinished.emit(
                     True,

@@ -150,6 +150,8 @@ try {
       "--specpath", $BuildDir,
       "--collect-all", "onnxruntime",
       "--collect-all", "faiss",
+      "--collect-all", "cv2",
+      "--hidden-import", "cv2",
       "--hidden-import", "yaml",
       "--hidden-import", "python_detector",
       "--hidden-import", "python_detector.config",

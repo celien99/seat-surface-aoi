@@ -142,6 +142,8 @@ class ManualTriggerClient:
         if self._sock is not None:
             try:
                 self._sock.close()
+            except OSError:
+                pass
             finally:
                 self._sock = None
                 self._rx_buffer = b""
