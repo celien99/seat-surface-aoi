@@ -156,7 +156,8 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
 
 启用 `-BuildPythonPackages` 后：
 - `python_detector` 和 `display_app` 的 `.py` 源码被打包为独立 `.exe`（PyInstaller `--onefile` / `--onedir`）
-- `-CleanPythonSource` 追加后自动删除工控机上的 `.py` 明文源码
+- `-CleanPythonSource` 追加后自动删除工控机上的 `.py` 明文源码（⚠ 不可逆：删除后无法重新 PyInstaller 打包，需 `git checkout` 恢复源码后再构建）
+- `-BuildPythonPackages` 已确保 Windows 服务使用打包后的 `.exe` 运行，不依赖 `.py` 源码；`-CleanPythonSource` 是额外的 IP 保护措施
 - C++ `seat_aoi_controller.exe` 本身已是编译后的原生二进制
 - PyInstaller 的字节码加密（`--key`）自 v6.0 起已移除；如需代码保护，可使用 PyArmor 等外部工具
 - 配置文件 (`.conf`/`.yaml`) 和模型 (`.onnx`/`.npy`/`.faiss`) 保留明文（运维需要编辑/替换）

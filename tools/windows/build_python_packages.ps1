@@ -91,6 +91,20 @@ try {
     throw "PyInstaller not found. Run: uv sync --group dev"
   }
 
+  # ---- pre-build checks ----
+  if (-not $SkipDetector) {
+    $entryDetector = Join-Path $ProjectRoot "python_detector\detector_main.py"
+    if (-not (Test-Path -LiteralPath $entryDetector)) {
+      throw "Entry script not found: $entryDetector`nSource files may have been deleted by -CleanPythonSource. Restore sources:`n  git -C ""$ProjectRoot"" checkout -- python_detector/ display_app/"
+    }
+  }
+  if (-not $SkipDisplay) {
+    $entryDisplay = Join-Path $ProjectRoot "display_app\main.py"
+    if (-not (Test-Path -LiteralPath $entryDisplay)) {
+      throw "Entry script not found: $entryDisplay`nSource files may have been deleted by -CleanPythonSource. Restore sources:`n  git -C ""$ProjectRoot"" checkout -- python_detector/ display_app/"
+    }
+  }
+
   # ---- clean old dist ----
   $detectorDist = Join-Path $BinDir "seat_aoi_detector.exe"
   $displayDist = Join-Path $BinDir "seat_aoi_display"
@@ -208,8 +222,8 @@ try {
       "--hidden-import", "display_app.services.operator_journal",
       "--hidden-import", "display_app.viewmodels",
       "--hidden-import", "display_app.viewmodels.main_viewmodel",
-      "--add-data", "display_app/qml;display_app/qml",
-      "--add-data", "display_app/resources;display_app/resources",
+      "--add-data", "$(Join-Path $ProjectRoot 'display_app\qml');display_app/qml",
+      "--add-data", "$(Join-Path $ProjectRoot 'display_app\resources');display_app/resources",
       "display_app/main.py"
     )
     Invoke-Native -ArgList $displayArgs

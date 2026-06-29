@@ -5,7 +5,7 @@ param(
   [string]$LineId = "LINE1_AOI_01",
   [ValidatePattern("^\d+x\d+$")]
   [string]$GridLayout = "2x1",
-  [string]$Recipe = "seat_a_black_leather_production_v1",
+  [string]$Recipe = "production_recipe",
   [string]$DetectorServiceName = "SeatAoiDetector",
   [string]$ControllerServiceName = "SeatAoiController",
   [string]$ShortcutName = "Seat AOI Display",
@@ -348,6 +348,8 @@ function Copy-ModelAssets {
 
 function Remove-PythonSources {
   param([string]$Root)
+  Write-Host "[WARNING] Removing Python source files. Rebuild will REQUIRE git restore first."
+  Write-Host "[WARNING] To restore before rebuilding, run: git -C ""$Root"" checkout -- python_detector/ display_app/ tools/ training_tools/"
   Write-Host "Cleaning Python source files..."
   $pyDirs = @(
     (Join-Path $Root "python_detector"),
@@ -517,7 +519,6 @@ try {
   $DetectorApp = $VenvPython
   $DetectorArgs = "-m python_detector.detector_main --config $(Quote-ServiceArgument $ConfigPath)"
   $DisplayApp = $DisplayPython
-  $DisplayExtraArgs = @()
 
   if ($BuildPythonPackages -and (Test-Path -LiteralPath $DetectorExe)) {
     $DetectorApp = $DetectorExe
@@ -525,8 +526,6 @@ try {
   }
   if ($BuildPythonPackages -and (Test-Path -LiteralPath $DisplayExe)) {
     $DisplayApp = $DisplayExe
-    # display .exe bundles QML internally, no -m display_app.main needed
-    $DisplayExtraArgs = @()
   }
 
   if (-not $SkipValidation) {
