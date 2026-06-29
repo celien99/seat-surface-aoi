@@ -26,9 +26,12 @@ function Invoke-Native {
 }
 
 function Get-VenvPython {
-  param([string]$Root)
-  if ($PythonExe -and (Test-Path -LiteralPath $PythonExe)) {
-    return $PythonExe
+  param(
+    [string]$Root,
+    [string]$PythonExeOverride = ""
+  )
+  if ($PythonExeOverride -and (Test-Path -LiteralPath $PythonExeOverride)) {
+    return $PythonExeOverride
   }
   $venvPython = Join-Path $Root ".venv\Scripts\python.exe"
   if (Test-Path -LiteralPath $venvPython) {
@@ -44,32 +47,67 @@ function Test-PyinstallerInstalled {
 }
 
 $ProjectRoot = Resolve-ProjectRoot -Value $ProjectRoot
-$Python = Get-VenvPython -Root $ProjectRoot
+$Python = Get-VenvPython -Root $ProjectRoot -PythonExeOverride $PythonExe
 $BinDir = Join-Path $ProjectRoot "bin"
 $BuildDir = Join-Path $ProjectRoot "build\pyinstaller"
 
 Push-Location $ProjectRoot
 try {
-  # 确保 PyInstaller 已安装
+  # ---- 确保 PyInstaller 已安装 ----
   if (-not (Test-PyinstallerInstalled -Python $Python)) {
     Write-Host "Installing PyInstaller..."
-    Invoke-Native $Python -m pip install pyinstaller
+    try {
+      Invoke-Native $Python -m pip install pyinstaller
+    } catch {
+      throw "PyInstaller not installed and cannot download from PyPI (offline environment).`nInstall it manually before running this script:`n  1. On a networked machine, download: pip download pyinstaller -d pyinstaller_offline`n  2. Copy the folder to this machine`n  3. Run: $Python -m pip install --no-index --find-links pyinstaller_offline pyinstaller"
+    }
   }
 
-  # 清理上一次构建产物
+  # ---- 清理上一次构建产物（避免 PyInstaller 交互式提示） ----
+  $detectorDist = Join-Path $BinDir "seat_aoi_detector.exe"
+  $displayDist = Join-Path $BinDir "seat_aoi_display"
   if ($CleanBuild) {
     if (Test-Path -LiteralPath $BuildDir) {
       Remove-Item -Recurse -Force $BuildDir
     }
   }
+  # 每次构建前清理旧 dist 目录，避免 PyInstaller 弹出 overwrite 确认
+  if (-not $SkipDetector) {
+    if (Test-Path -LiteralPath $detectorDist) {
+      Remove-Item -LiteralPath $detectorDist -Force
+    }
+  }
+  if (-not $SkipDisplay) {
+    if (Test-Path -LiteralPath $displayDist) {
+      Remove-Item -Recurse -Force $displayDist
+    }
+  }
   New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
   New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
 
-  # 构建加密密钥参数
+  # ---- 通用 PyInstaller 参数 ----
+  $commonArgs = @(
+    "--noconfirm",
+    "--log-level", "WARN"
+  )
+
+  # AES 加密密钥（空则不加密仅打包）
   $keyArg = @()
   if ($PyinstallerKey) {
     $keyArg = @("--key", $PyinstallerKey)
   }
+
+  # ---- 共享的 hidden import（numpy/scipy 内部模块） ----
+  $sharedHiddenImports = @(
+    "--hidden-import", "numpy.core._methods",
+    "--hidden-import", "numpy.lib.format",
+    "--hidden-import", "scipy.ndimage",
+    "--hidden-import", "scipy.ndimage._ni_support",
+    "--hidden-import", "scipy.ndimage._nd_image",
+    "--hidden-import", "scipy.signal",
+    "--hidden-import", "scipy.signal._sigtools",
+    "--hidden-import", "scipy.sparse.csgraph._validation"
+  )
 
   # ---------------------------------------------------------------------------
   # detector: --onefile 单文件打包
@@ -83,14 +121,8 @@ try {
       "--distpath", $BinDir,
       "--workpath", (Join-Path $BuildDir "detector"),
       "--specpath", $BuildDir,
-      "--hidden-import", "numpy.core._methods",
-      "--hidden-import", "numpy.lib.format",
-      "--hidden-import", "scipy.ndimage",
-      "--hidden-import", "scipy.ndimage._ni_support",
-      "--hidden-import", "scipy.ndimage._nd_image",
-      "--hidden-import", "scipy.signal",
-      "--hidden-import", "scipy.signal._sigtools",
-      "--hidden-import", "scipy.sparse.csgraph._validation",
+      "--collect-all", "onnxruntime",
+      "--collect-all", "faiss",
       "--hidden-import", "yaml",
       "--hidden-import", "python_detector",
       "--hidden-import", "python_detector.config",
@@ -123,7 +155,7 @@ try {
       "--hidden-import", "python_detector.display_channel",
       "python_detector/detector_main.py"
     )
-    $detectorArgs = $keyArg + $detectorArgs
+    $detectorArgs = $commonArgs + $keyArg + $sharedHiddenImports + $detectorArgs
     Invoke-Native $Python @detectorArgs
     Write-Host "seat_aoi_detector.exe built successfully."
   }
@@ -140,6 +172,7 @@ try {
       "--distpath", $BinDir,
       "--workpath", (Join-Path $BuildDir "display"),
       "--specpath", $BuildDir,
+      "--collect-all", "PySide6",
       "--hidden-import", "PySide6.QtCore",
       "--hidden-import", "PySide6.QtGui",
       "--hidden-import", "PySide6.QtWidgets",
@@ -163,7 +196,7 @@ try {
       "--add-data", "display_app/resources;display_app/resources",
       "display_app/main.py"
     )
-    $displayArgs = $keyArg + $displayArgs
+    $displayArgs = $commonArgs + $keyArg + $displayArgs
     Invoke-Native $Python @displayArgs
     Write-Host "seat_aoi_display built successfully."
   }
@@ -172,15 +205,14 @@ try {
   # 校验产物
   # ---------------------------------------------------------------------------
   if (-not $SkipDetector) {
-    $detectorExe = Join-Path $BinDir "seat_aoi_detector.exe"
-    if (-not (Test-Path -LiteralPath $detectorExe)) {
-      throw "Detector build failed: $detectorExe not found"
+    if (-not (Test-Path -LiteralPath $detectorDist)) {
+      throw "Detector build failed: $detectorDist not found"
     }
-    Write-Host "Detector: $detectorExe"
+    Write-Host "Detector: $detectorDist"
   }
 
   if (-not $SkipDisplay) {
-    $displayExe = Join-Path $BinDir "seat_aoi_display\seat_aoi_display.exe"
+    $displayExe = Join-Path $displayDist "seat_aoi_display.exe"
     if (-not (Test-Path -LiteralPath $displayExe)) {
       throw "Display build failed: $displayExe not found"
     }
