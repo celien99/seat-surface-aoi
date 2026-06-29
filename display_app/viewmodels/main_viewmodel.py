@@ -285,6 +285,11 @@ class MainViewModel(QObject):
     @Slot()
     def pollLatest(self) -> None:
         self._poll_controller_events()
+        detection_events = self._bridge.read_detection_events()
+        if detection_events:
+            for event in detection_events:
+                self._process_detection_event(event)
+            return
         event = self._bridge.read_latest()
         if event is None:
             if self._manual_trigger_pending:
@@ -304,17 +309,7 @@ class MainViewModel(QObject):
             )
             self._set_status_message("等待 Python detector 展示事件")
             return
-        if event.event_key == self._last_event_key:
-            return
-        self._last_event_key = event.event_key
-        event_identity = _display_event_identity(event)
-        should_record = (
-            event_identity not in self._seen_detection_events
-            and _display_event_is_current_session(event, self._session_started_ms)
-        )
-        self._seen_detection_events.add(event_identity)
-        camera_ids = self._bridge.publish_images(event)
-        self._apply_event(event, camera_ids, should_record=should_record)
+        self._process_detection_event(event, from_latest=True)
 
     @Slot()
     def refreshTriggerState(self) -> None:
@@ -457,11 +452,40 @@ class MainViewModel(QObject):
             self._persist_action("review_dismiss_as_ok", review)
         self._remove_review(record_id)
 
-    def _apply_event(self, event: DisplayEvent, image_camera_ids: list[str], *, should_record: bool = True) -> None:
+    def _process_detection_event(self, event: DisplayEvent, *, from_latest: bool = False) -> None:
+        if event.event_key == self._last_event_key and from_latest:
+            return
+        event_identity = _display_event_identity(event)
+        is_current = _display_event_is_current_session(event, self._session_started_ms)
+        should_record = event_identity not in self._seen_detection_events and is_current
+        if not from_latest or is_current:
+            self._seen_detection_events.add(event_identity)
+        self._last_event_key = event.event_key
+        image_report = self._bridge.publish_images_report(event)
+        self._apply_event(
+            event,
+            image_report.successful_camera_ids,
+            failed_image_camera_ids=image_report.failed_camera_ids,
+            should_record=should_record,
+            allow_operator_actions=should_record,
+        )
+
+    def _apply_event(
+        self,
+        event: DisplayEvent,
+        image_camera_ids: list[str],
+        *,
+        failed_image_camera_ids: list[str] | None = None,
+        should_record: bool = True,
+        allow_operator_actions: bool = True,
+    ) -> None:
         status = _normal_status(event.decision)
         defect = _primary_defect(event.defects)
         defect_camera_id = _display_camera_id(defect) if defect else ""
-        camera_ids = sorted(set(image_camera_ids + [_display_camera_id(item) for item in event.defects if item.camera_id]))
+        failed_image_camera_ids = failed_image_camera_ids or []
+        camera_ids = sorted(
+            set(image_camera_ids + failed_image_camera_ids + [_display_camera_id(item) for item in event.defects if item.camera_id])
+        )
         if not camera_ids and event.defects:
             camera_ids = sorted({_display_camera_id(item) for item in event.defects})
         self._ensure_cameras(camera_ids)
@@ -471,11 +495,16 @@ class MainViewModel(QObject):
 
         for entry in self._camera_list:
             camera_id = str(entry["cameraId"])
-            entry["live"] = camera_id in image_camera_ids or camera_id in camera_ids
-            entry["frameVersion"] = int(entry.get("frameVersion", 0)) + (1 if entry["live"] else 0)
+            has_new_image = camera_id in image_camera_ids
+            has_failed_image = camera_id in failed_image_camera_ids
+            entry["live"] = has_new_image
+            entry["frameVersion"] = int(entry.get("frameVersion", 0)) + (1 if has_new_image or has_failed_image else 0)
             if status == "NG" and camera_id == defect_camera_id:
                 entry["status"] = "ng"
                 entry["defectLabel"] = _defect_label(defect)
+            elif has_failed_image:
+                entry["status"] = "warn"
+                entry["defectLabel"] = "图像加载失败"
             elif is_target_issue:
                 entry["status"] = "warn"
                 entry["defectLabel"] = event.message or "未识别到目标物体"
@@ -508,7 +537,7 @@ class MainViewModel(QObject):
             trigger_error="" if (event.error_code == 0 or is_target_issue) else event.message or f"error_code={event.error_code}",
         )
 
-        if status == "NG" and defect is not None:
+        if allow_operator_actions and status == "NG" and defect is not None:
             self._show_ng_overlay(defect)
         self._complete_manual_trigger_wait(event)
 

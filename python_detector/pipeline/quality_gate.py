@@ -36,6 +36,7 @@ class ImageQualityGate:
             messages.append(f"sku mismatch: job={job.sku} recipe={recipe.sku}")
 
         required_views = recipe.required_view_keys()
+        robot_pose_required = self._job_requires_robot_pose(job, recipe)
         seen_views: set[tuple[str, str]] = set()
         for bundle in job.camera_bundles:
             pose_id = bundle.pose_id or bundle.camera_id
@@ -45,7 +46,7 @@ class ImageQualityGate:
             seen_views.add(view_key)
             if not recipe.accepts_camera_pose(bundle.camera_id, pose_id):
                 messages.append(recipe.view_not_enabled_message(bundle.camera_id, pose_id))
-            reports.extend(self._check_camera_bundle(bundle, recipe, messages))
+            reports.extend(self._check_camera_bundle(bundle, recipe, messages, robot_pose_required=robot_pose_required))
         for camera_id, pose_id in sorted(required_views):
             if (camera_id, pose_id) in seen_views:
                 continue
@@ -60,12 +61,14 @@ class ImageQualityGate:
         bundle: CameraBundle,
         recipe: Recipe,
         messages: list[str],
+        *,
+        robot_pose_required: bool,
     ) -> list[FrameQuality]:
         reports: list[FrameQuality] = []
         for light_id in recipe.quality.required_lights:
             if light_id not in bundle.light_frames:
                 messages.append(f"{bundle.camera_id}: missing required light {light_id}")
-        self._check_capture_consistency(bundle, recipe, messages)
+        self._check_capture_consistency(bundle, recipe, messages, robot_pose_required=robot_pose_required)
         for light_id, frame in bundle.light_frames.items():
             if frame.camera_id != bundle.camera_id:
                 messages.append(f"{bundle.camera_id}/{light_id}: frame camera_id mismatch {frame.camera_id}")
@@ -75,7 +78,14 @@ class ImageQualityGate:
         self._check_light_stability(bundle, recipe, reports, messages)
         return reports
 
-    def _check_capture_consistency(self, bundle: CameraBundle, recipe: Recipe, messages: list[str]) -> None:
+    def _check_capture_consistency(
+        self,
+        bundle: CameraBundle,
+        recipe: Recipe,
+        messages: list[str],
+        *,
+        robot_pose_required: bool,
+    ) -> None:
         self._check_light_sequence(bundle, recipe, messages)
         frames = [
             bundle.light_frames[light_id]
@@ -106,7 +116,7 @@ class ImageQualityGate:
         light_seq_indices = [frame.light_seq_index for frame in frames]
         if len(set(light_seq_indices)) != len(light_seq_indices):
             messages.append(f"{bundle.camera_id}: duplicate light_seq_index in required lights")
-        self._check_robot_pose_consistency(bundle, frames, recipe, messages)
+        self._check_robot_pose_consistency(bundle, frames, recipe, messages, robot_pose_required=robot_pose_required)
         self._check_required_light_capture_params(bundle, frames, recipe, messages)
 
     def _check_light_sequence(self, bundle: CameraBundle, recipe: Recipe, messages: list[str]) -> None:
@@ -133,11 +143,15 @@ class ImageQualityGate:
         frames: list[LightFrame],
         recipe: Recipe,
         messages: list[str],
+        *,
+        robot_pose_required: bool,
     ) -> None:
         label = f"{bundle.camera_id}/{bundle.pose_id}" if bundle.pose_id else bundle.camera_id
         shot_ids = [frame.shot_id for frame in frames]
         non_zero_shots = [shot_id for shot_id in shot_ids if shot_id != 0]
-        if non_zero_shots:
+        if robot_pose_required and len(non_zero_shots) != len(shot_ids):
+            messages.append(f"{label}: missing shot_id in required robot lights")
+        elif non_zero_shots:
             if len(non_zero_shots) != len(shot_ids):
                 messages.append(f"{label}: mixed empty and non-empty shot_id in required lights")
             elif len(set(shot_ids)) != 1:
@@ -145,15 +159,23 @@ class ImageQualityGate:
 
         robot_timestamps = [frame.robot_timestamp_us for frame in frames]
         non_zero_robot_timestamps = [timestamp for timestamp in robot_timestamps if timestamp != 0]
-        has_robot_pose = any(
+        pose_present_flags = [
             any(abs(value) > 1e-6 for value in frame.robot_tcp_xyz_mm + frame.robot_rpy_deg)
             for frame in frames
-        )
-        if non_zero_robot_timestamps or has_robot_pose:
+        ]
+        has_robot_pose = any(pose_present_flags)
+        if robot_pose_required and len(non_zero_robot_timestamps) != len(robot_timestamps):
+            messages.append(f"{label}: missing robot_timestamp_us in required robot lights")
+        elif non_zero_robot_timestamps:
             if len(non_zero_robot_timestamps) != len(robot_timestamps):
                 messages.append(f"{label}: mixed empty and non-empty robot_timestamp_us in required lights")
             elif len(set(robot_timestamps)) != 1:
                 messages.append(f"{label}: inconsistent robot_timestamp_us in required lights")
+        elif has_robot_pose:
+            messages.append(f"{label}: mixed empty and non-empty robot_timestamp_us in required lights")
+        if robot_pose_required and not all(pose_present_flags):
+            messages.append(f"{label}: missing robot TCP/RPY pose in required robot lights")
+        if has_robot_pose:
             reference_xyz = frames[0].robot_tcp_xyz_mm
             reference_rpy = frames[0].robot_rpy_deg
             for frame in frames[1:]:
@@ -164,6 +186,15 @@ class ImageQualityGate:
                 if not self._float_tuple_close(reference_rpy, frame.robot_rpy_deg, recipe.quality.max_pose_delta):
                     messages.append(f"{label}: inconsistent robot_rpy_deg in required lights")
                     break
+
+    def _job_requires_robot_pose(self, job: SeatInspectionJob, recipe: Recipe) -> bool:
+        if job.capture_mode not in (0, 1):
+            return True
+        for camera_id, pose_id in recipe.required_view_keys():
+            if pose_id != camera_id:
+                return True
+        camera_ids = [camera.camera_id for camera in recipe.cameras if camera.enabled]
+        return any(camera_ids.count(camera_id) > 1 for camera_id in set(camera_ids))
 
     def _check_required_light_capture_params(
         self,

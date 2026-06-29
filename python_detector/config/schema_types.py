@@ -23,6 +23,7 @@ class RoiLocatorConfig:
     max_pose_error_px: float = 4.0
     mask_threshold: float = 0.5
     min_mask_area_px: int = 1
+    min_mask_area_ratio: float = 0.0
     max_mask_area_ratio: float = 1.0
     input_width: int = 0
     input_height: int = 0

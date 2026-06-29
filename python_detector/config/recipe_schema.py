@@ -249,6 +249,7 @@ def _roi_locator_from_dict(data: dict[str, Any]) -> RoiLocatorConfig:
         ),
         mask_threshold=_ratio(data.get("mask_threshold", 0.5), "roi_locator.mask_threshold"),
         min_mask_area_px=_positive_int(data.get("min_mask_area_px", 1), "roi_locator.min_mask_area_px"),
+        min_mask_area_ratio=_ratio(data.get("min_mask_area_ratio", 0.0), "roi_locator.min_mask_area_ratio"),
         max_mask_area_ratio=_ratio(data.get("max_mask_area_ratio", 1.0), "roi_locator.max_mask_area_ratio"),
         input_width=_non_negative_int(data.get("input_width", 0), "roi_locator.input_width"),
         input_height=_non_negative_int(data.get("input_height", 0), "roi_locator.input_height"),

@@ -79,6 +79,7 @@ class SeatInspectionJob:
     recipe_id: str
     sku: str
     camera_bundles: list[CameraBundle]
+    capture_mode: int = 0
 
 
 @dataclass

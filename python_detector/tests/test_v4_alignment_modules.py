@@ -351,6 +351,39 @@ def test_dome_roi_locator_yolo_seg_rechecks_outside_safety_template() -> None:
     assert "mask boundary error" in report.message
 
 
+def test_dome_roi_locator_yolo_seg_rechecks_tiny_mask_ratio() -> None:
+    recipe = RecipeManager().load("seat_a_black_leather_v1")
+    mask = np.zeros((8, 8), dtype=np.uint8)
+    mask[3:5, 3:5] = 1
+    recipe = replace(
+        recipe,
+        roi_locator=replace(
+            recipe.roi_locator,
+            backend="onnx_yolo_seg",
+            model_path="simulated-seg.onnx",
+            output_decode="segmentation_rows",
+            min_confidence=0.5,
+            min_mask_area_px=1,
+            min_mask_area_ratio=0.25,
+            max_pose_error_px=0.0,
+        ),
+    )
+    job = make_simulated_job()
+    frame = job.camera_bundles[0].light_frames["DIFFUSE"]
+    templates = {
+        "seat": RoiTemplate(
+            roi_name="seat",
+            polygon_xy=((0, 0), (63, 0), (63, 47), (0, 47)),
+            output_size=(64, 48),
+        )
+    }
+
+    _, report = SegRoiLocator(mask).locate("TOP_BACK", {"DIFFUSE": frame}, templates, recipe)
+
+    assert report.is_pass is False
+    assert "mask area" in report.message
+
+
 def test_dome_roi_locator_missing_light_returns_error_not_ok() -> None:
     recipe = RecipeManager().load("seat_a_black_leather_v1")
     recipe = replace(recipe, roi_locator=replace(recipe.roi_locator, backend="template"))

@@ -569,11 +569,13 @@ class RoiLocator:
         )
         mask_area = self._mask_area(candidate.mask)
         scaled_area = mask_area * scale_x * scale_y
+        min_ratio_area = float(dome_frame.width * dome_frame.height) * recipe.roi_locator.min_mask_area_ratio
         max_area = float(dome_frame.width * dome_frame.height) * recipe.roi_locator.max_mask_area_ratio
-        if scaled_area < recipe.roi_locator.min_mask_area_px:
+        min_area = max(float(recipe.roi_locator.min_mask_area_px), min_ratio_area)
+        if scaled_area < min_area:
             raise ValueError(
                 f"{template.roi_name}: mask area {scaled_area:.1f}px below "
-                f"{recipe.roi_locator.min_mask_area_px}px"
+                f"{min_area:.1f}px"
             )
         if scaled_area > max_area:
             raise ValueError(

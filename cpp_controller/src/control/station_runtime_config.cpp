@@ -988,6 +988,13 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
       }
       return false;
     }
+    if (camera.buffer_count < config.light_order.size()) {
+      if (error_message != nullptr) {
+        *error_message = "camera." + std::to_string(camera.camera_index) +
+                         ".buffer_count 必须大于等于 light_order 光源数量";
+      }
+      return false;
+    }
     if (bytes_per_channel_for_pixel_format(camera.pixel_format) == 0) {
       if (error_message != nullptr) {
         *error_message = "不支持的相机 pixel_format: camera." +

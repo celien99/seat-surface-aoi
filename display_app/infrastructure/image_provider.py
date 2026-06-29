@@ -25,6 +25,15 @@ class CameraImageProvider(QQuickImageProvider):
         with self._lock:
             self._overlays[camera_id] = overlay.copy()
 
+    def clear_camera(self, camera_id: str) -> None:
+        with self._lock:
+            self._frames.pop(camera_id, None)
+            self._overlays.pop(camera_id, None)
+
+    def clear_overlay(self, camera_id: str) -> None:
+        with self._lock:
+            self._overlays.pop(camera_id, None)
+
     def requestImage(self, image_id: str, size, requested_size):  # noqa: N802
         image_id = image_id.split("?", 1)[0]
         base_id = image_id

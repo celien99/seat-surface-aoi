@@ -43,6 +43,7 @@ roi_locator:
   min_confidence: 0.50
   mask_threshold: 0.50
   min_mask_area_px: 50000
+  min_mask_area_ratio: 0.05
   max_mask_area_ratio: 0.95
   input_width: 1024
   input_height: 1024

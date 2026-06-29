@@ -237,6 +237,35 @@ def test_inconsistent_required_light_robot_pose_returns_recheck() -> None:
     )
 
 
+def test_robot_flyshot_recipe_requires_robot_metadata() -> None:
+    recipe = RecipeManager().load("seat_a_robot_flyshot_production_v1")
+    bundles: list[CameraBundle] = []
+    for pose_id in ("T1_BACKREST", "T2_CUSHION"):
+        frames = {
+            light: _frame(light, frame_index=index + 1, timestamp_us=1_000 + index * 100)
+            for index, light in enumerate(LIGHTS)
+        }
+        for frame in frames.values():
+            frame.camera_id = "EYE_IN_HAND"
+            frame.pose_id = pose_id
+        bundles.append(CameraBundle(camera_id="EYE_IN_HAND", pose_id=pose_id, light_frames=frames))
+    job = SeatInspectionJob(
+        sequence_id=11,
+        trigger_id=12,
+        seat_id="SIM_ROBOT",
+        recipe_id=recipe.recipe_id,
+        sku=recipe.sku,
+        camera_bundles=bundles,
+    )
+
+    report = ImageQualityGate().check(job, recipe)
+
+    assert report.is_pass is False
+    assert "EYE_IN_HAND/T1_BACKREST: missing shot_id in required robot lights" in report.messages
+    assert "EYE_IN_HAND/T1_BACKREST: missing robot_timestamp_us in required robot lights" in report.messages
+    assert "EYE_IN_HAND/T1_BACKREST: missing robot TCP/RPY pose in required robot lights" in report.messages
+
+
 def test_quality_gate_ignores_stride_padding_for_exposure_stats() -> None:
     width = 8
     height = 8

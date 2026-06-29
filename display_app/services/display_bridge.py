@@ -52,6 +52,12 @@ class DisplayEvent:
         return self.sequence_id, self.trigger_id, self.timestamp_ms
 
 
+@dataclass(frozen=True, slots=True)
+class ImagePublishReport:
+    successful_camera_ids: list[str]
+    failed_camera_ids: list[str]
+
+
 @dataclass(slots=True)
 class ControllerEvent:
     timestamp_us: int
@@ -80,7 +86,9 @@ class DisplayBridge:
         self.trace_root = Path(trace_root)
         self.image_provider = image_provider
         self.latest_path = self.trace_root / "display_latest.json"
+        self.events_path = self.trace_root / "display_events.jsonl"
         self.controller_events_path = self.trace_root / "cpp_controller_events.jsonl"
+        self._events_offset = 0
         self._controller_offset = 0
 
     def read_latest(self) -> DisplayEvent | None:
@@ -94,8 +102,9 @@ class DisplayBridge:
             return None
         return _event_from_payload(payload)
 
-    def publish_images(self, event: DisplayEvent) -> list[str]:
+    def publish_images_report(self, event: DisplayEvent) -> ImagePublishReport:
         camera_ids: list[str] = []
+        failed_camera_ids: list[str] = []
         for image in _select_display_images(event.images):
             camera_id = _asset_camera_id(image)
             path = image.get("path")
@@ -104,6 +113,8 @@ class DisplayBridge:
             try:
                 self.image_provider.update_frame(camera_id, load_raster_bgr(path))
             except (OSError, RasterImageError):
+                self.image_provider.clear_camera(camera_id)
+                failed_camera_ids.append(camera_id)
                 continue
             camera_ids.append(camera_id)
 
@@ -115,15 +126,52 @@ class DisplayBridge:
             try:
                 self.image_provider.update_overlay(camera_id, load_raster_bgr(path))
             except (OSError, RasterImageError):
+                self.image_provider.clear_overlay(camera_id)
+                failed_camera_ids.append(camera_id)
                 continue
             camera_ids.append(camera_id)
 
-        return sorted(set(camera_ids))
+        return ImagePublishReport(
+            successful_camera_ids=sorted(set(camera_ids)),
+            failed_camera_ids=sorted(set(failed_camera_ids) - set(camera_ids)),
+        )
+
+    def publish_images(self, event: DisplayEvent) -> list[str]:
+        return self.publish_images_report(event).successful_camera_ids
+
+    def read_detection_events(self, *, limit: int = 100) -> list[DisplayEvent]:
+        if not self.events_path.exists():
+            return []
+        try:
+            size = self.events_path.stat().st_size
+            if size < self._events_offset:
+                self._events_offset = 0
+            with self.events_path.open("r", encoding="utf-8") as handle:
+                handle.seek(self._events_offset)
+                lines = handle.readlines()
+                self._events_offset = handle.tell()
+        except OSError:
+            return []
+        events: list[DisplayEvent] = []
+        for line in lines[-limit:]:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict) and payload.get("schema") == DISPLAY_EVENT_SCHEMA:
+                events.append(_event_from_payload(payload))
+        return events
 
     def read_controller_events(self, *, limit: int = 100) -> list[ControllerEvent]:
         if not self.controller_events_path.exists():
             return []
         try:
+            size = self.controller_events_path.stat().st_size
+            if size < self._controller_offset:
+                self._controller_offset = 0
             with self.controller_events_path.open("r", encoding="utf-8") as handle:
                 handle.seek(self._controller_offset)
                 lines = handle.readlines()

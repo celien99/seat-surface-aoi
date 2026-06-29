@@ -201,7 +201,7 @@ class ShmClient:
                 recipe_id_raw,
                 view_count,
                 frame_count,
-                _capture_mode,
+                capture_mode,
                 _job_reserved,
                 _created_at_us,
             ) = job_values
@@ -249,6 +249,7 @@ class ShmClient:
                 recipe_id=decode_cstr(recipe_id_raw),
                 sku=decode_cstr(sku_raw),
                 camera_bundles=list(bundles.values()),
+                capture_mode=int(capture_mode),
             )
             if len(job.camera_bundles) != view_count:
                 raise _FrameSlotReadError("frame slot view count mismatch", ErrorCode.INVALID_PAYLOAD)

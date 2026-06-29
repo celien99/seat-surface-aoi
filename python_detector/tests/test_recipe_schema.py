@@ -316,6 +316,7 @@ def test_recipe_accepts_yolo_seg_roi_locator() -> None:
                 "output_decode": "ultralytics_yolo_seg",
                 "mask_threshold": 0.45,
                 "min_mask_area_px": 32,
+                "min_mask_area_ratio": 0.05,
                 "max_mask_area_ratio": 0.80,
                 "input_width": 1024,
                 "input_height": 1024,
@@ -336,6 +337,7 @@ def test_recipe_accepts_yolo_seg_roi_locator() -> None:
     assert recipe.roi_locator.model_path == "model/roi_yolo/seat_roi_seg.onnx"
     assert recipe.roi_locator.output_decode == "ultralytics_yolo_seg"
     assert recipe.roi_locator.min_mask_area_px == 32
+    assert recipe.roi_locator.min_mask_area_ratio == 0.05
     assert recipe.roi_locator.input_channels == 3
 
 

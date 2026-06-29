@@ -1,5 +1,7 @@
 """ECC 配准模块专项测试。"""
 
+import types
+
 import numpy as np
 
 from python_detector.ipc.data_types import LightFrame
@@ -85,6 +87,37 @@ class TestEccAlignment:
         assert m[0] == 1.0 and m[4] == 1.0 and m[8] == 1.0
         assert m[2] == 3.0
         assert m[5] == -2.0
+
+    def test_opencv_ecc_uses_returned_correlation_and_warp(self, monkeypatch):
+        """OpenCV findTransformECC 返回 (correlation, warpMatrix)，低相关性必须 RECHECK。"""
+        warp = np.array([[1.0, 0.0, 4.0], [0.0, 1.0, -2.0]], dtype=np.float32)
+
+        fake_cv2 = types.SimpleNamespace(
+            TERM_CRITERIA_EPS=1,
+            TERM_CRITERIA_COUNT=2,
+            MOTION_TRANSLATION=3,
+            error=RuntimeError,
+            findTransformECC=lambda *args: (0.25, warp),
+        )
+        monkeypatch.setitem(__import__("sys").modules, "cv2", fake_cv2)
+
+        ecc = EccRegistration()
+        frame = _make_frame("L1")
+        array = np.frombuffer(frame.image, dtype=np.uint8).reshape(frame.height, frame.width).astype(np.float32)
+
+        result = ecc._ecc_opencv(  # noqa: SLF001
+            array,
+            array,
+            "L1",
+            max_iterations=30,
+            convergence_epsilon=1e-6,
+            min_correlation=0.8,
+        )
+
+        assert result is not None
+        assert result.correlation == 0.25
+        assert result.shift_xy == (4, -2)
+        assert result.converged is False
 
 
 class TestEccExhaustive:

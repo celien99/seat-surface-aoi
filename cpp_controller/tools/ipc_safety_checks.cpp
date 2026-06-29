@@ -1754,6 +1754,19 @@ bool test_filled_production_config_validates() {
   return ok;
 }
 
+bool test_camera_buffer_count_must_cover_light_order() {
+  auto config = make_filled_production_runtime_config();
+  config.cameras[0].buffer_count = static_cast<std::uint32_t>(config.light_order.size() - 1);
+  std::string error;
+  const bool ok = seat_aoi::validate_station_runtime_config(config, &error);
+  const bool passed = !ok && error.find("buffer_count") != std::string::npos;
+  if (!passed) {
+    std::cerr << "camera buffer_count smaller than light_order was not rejected: "
+              << error << "\n";
+  }
+  return passed;
+}
+
 bool test_lab_manual_trigger_config_validates() {
   auto config = make_filled_production_runtime_config();
   config.hardware_mode = seat_aoi::HardwareMode::Lab;
@@ -2415,6 +2428,9 @@ int main() {
     return 1;
   }
   if (!test_filled_production_config_validates()) {
+    return 1;
+  }
+  if (!test_camera_buffer_count_must_cover_light_order()) {
     return 1;
   }
   if (!test_lab_manual_trigger_config_validates()) {

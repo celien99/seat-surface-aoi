@@ -30,9 +30,9 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 uv run python -m display_app.main --trace-root trace --poll-ms 300
 ```
 
-`--trace-root` 必须指向 detector 输出 `display_latest.json` 的目录。默认使用根目录 `trace/`。
+`--trace-root` 必须指向 detector 输出 `display_latest.json` / `display_events.jsonl` 的目录。默认使用根目录 `trace/`。
 
-手动触发入口收到 C++ `sn_ack` 后不会立即恢复按钮，而是继续保持加载态并等待 detector/C++ 写出同一 SN 的新版 `display_latest.json`。默认等待 30 秒，现场节拍更长时可通过 `--manual-trigger-result-timeout-ms` 调整。
+手动触发入口收到 C++ `sn_ack` 后不会立即恢复按钮，而是继续保持加载态并等待 detector/C++ 写出同一 SN 的新版展示事件。默认等待 30 秒，现场节拍更长时可通过 `--manual-trigger-result-timeout-ms` 调整。
 
 ## 工控机交付方式
 
@@ -83,7 +83,7 @@ uv run seat-aoi-display `
   --manual-trigger-port 9000
 ```
 
-手动触发客户端会向 C++ 发送 `start`，收到 `start_ack` 后发送 `sn <SN>`，收到 `sn_ack` 后界面进入"等待结果"加载态并保持 SN 输入框和按钮禁用，直到收到同一 SN 的新版 `display_latest.json` 后才恢复并自动清空 SN。等待结果阶段默认 30 秒超时，超时后解除禁用并显示触发异常，便于操作员确认链路状态后重新触发。SN 只允许字母、数字、横线、下划线和点，最大 48 个字符，避免写入共享内存 `seat_id` 时被截断。默认未加 `--enable-manual-trigger` 时按钮保持"只读展示"，不会连接 C++ 触发端口。
+手动触发客户端会向 C++ 发送 `start`，收到 `start_ack` 后发送 `sn <SN>`，收到 `sn_ack` 后界面进入"等待结果"加载态并保持 SN 输入框和按钮禁用，直到收到同一 SN 的新版 detector 展示事件后才恢复并自动清空 SN。等待结果阶段默认 30 秒超时，超时后解除禁用并显示触发异常，便于操作员确认链路状态后重新触发。SN 只允许字母、数字、横线、下划线和点，最大 48 个字符，避免写入共享内存 `seat_id` 时被截断。默认未加 `--enable-manual-trigger` 时按钮保持"只读展示"，不会连接 C++ 触发端口。
 
 如果 C++ `tcp_signal` 正在监听但没有客户端连接，或客户端尚未提交完整 `start` + `sn <SN>`，这属于外部触发空闲等待；前端不会把它显示为复检，也不会增加复检统计。只有 C++ 已收到完整触发并进入采集/检测后返回的 `RECHECK/ERROR`，才会作为业务结果展示。
 
@@ -107,7 +107,7 @@ display_app/
 ├── infrastructure/
 │   └── image_provider.py           # image://camera 图像 provider
 ├── services/
-│   ├── display_bridge.py           # 读取 display_latest.json 并更新图像 provider
+│   ├── display_bridge.py           # 读取 display_events.jsonl/display_latest.json 并更新图像 provider
 │   ├── manual_trigger_client.py     # 可选 start_sn TCP 手动触发客户端
 │   ├── operator_journal.py         # 持久化操作员日志、动作和复核队列
 │   └── image_loader.py             # 读取 trace PNG，并兼容旧 PGM/PPM 图像为 numpy BGR
@@ -121,8 +121,8 @@ display_app/
 
 展示前端读取：
 
-- `trace/display_latest.json`：最近一次 Python detector 输出，前端轮询。
-- `trace/display_events.jsonl`：Python detector 检测事件追加日志。
+- `trace/display_events.jsonl`：Python detector 检测事件追加日志，前端统计、日志、NG 弹窗和手动触发完成判定优先以它为准，避免轮询间隔内多次检测被覆盖。
+- `trace/display_latest.json`：最近一次 Python detector 输出，前端在没有新 JSONL 事件时用于启动恢复和兼容旧通道。
 - `trace/cpp_controller_events.jsonl`：C++ 主控采集、超时、设备故障和保守复检事件。
 - `trace/display_operator_events.jsonl`：前端持久化的操作员日志和动作。
 - `trace/display_review_queue.json`：前端持久化的复核队列。
@@ -130,9 +130,9 @@ display_app/
 - `trace/<date>/<seat>_<sequence>/images/**/*.png`：ROI 原图。
 - `trace/<date>/<seat>_<sequence>/overlays/<camera>/<pose>/<roi>.png`：检测叠加图；OK 件也会有绿色判定边框，NG/RECHECK/ERROR 有缺陷候选时额外显示候选框。
 
-展示桥会优先选择 raw 原始采集图，缺少 raw 图时回退到 ROI 图；同一相机/视角下优先展示 `DIFFUSE`，再回退到其它光源。检测 overlay 也以 raw 原图尺寸输出，便于前端保持原始视野。如果某次检测没有保存 trace 图像，前端仍会展示 OK/NG/RECHECK/ERROR、统计和日志；图像区域会等待下一次带图像的事件。
+展示桥会优先选择 raw 原始采集图，缺少 raw 图时回退到 ROI 图；同一相机/视角下优先展示 `DIFFUSE`，再回退到其它光源。检测 overlay 也以 raw 原图尺寸输出，便于前端保持原始视野。如果某次检测没有保存 trace 图像，前端仍会展示 OK/NG/RECHECK/ERROR、统计和日志；图像区域会等待下一次带图像的事件。若事件中的图像路径存在但解码失败，前端会清空该相机/视角当前画面并显示“图像加载失败”，不会继续展示上一件旧图。
 
-前端启动时如果 `display_latest.json` 仍是上一次运行留下的旧结果，只更新图像和状态，不计入当前会话统计、不追加新的操作员日志；收到当前会话的新 detector 事件后才开始计数。
+前端启动时如果 `display_latest.json` 仍是上一次运行留下的旧结果，只更新图像和状态，不计入当前会话统计、不追加新的操作员日志，也不会触发 NG 弹窗；收到当前会话的新 detector 事件后才开始计数。
 
 当模型资产未替换、ROI YOLO 缺失或 PatchCore/PCA 资产不可用时，Python detector 会返回 `RECHECK + CONFIGURATION_ERROR` 并在事件中标记 `sample_collection.enabled=true`。前端状态栏会显示”采样模式”，同时继续展示 raw 图，便于产线操作员确认拍摄效果并积累训练样本。
 

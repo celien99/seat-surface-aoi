@@ -32,6 +32,7 @@ flowchart LR
 - `capture_schedule=shared_light_parallel`
 - `light_order` 至少 1 路光源（生产环境 3 路）
 - 相机数量 ≥ 1：`camera.0`, `camera.1`, ... 索引从 0 连续编号
+- 每台相机 `buffer_count` 必须大于等于 `light_order` 光源数量，确保一次流水线采集的所有光源帧都能留在 SDK 缓冲中等待统一收帧。
 - 只允许 1 台光源控制器：`light.backend=serial_ascii`
 - 非模拟现场相机只保留 `camera.backend=hikrobot_mvs`
 - 在线模式才启用共享内存；采图模式不创建 Frame/Result ring
@@ -80,7 +81,7 @@ cpp_controller/
 2. `FrameAssembler` 初始化 1 台 FL-ACDH 和 2 台相机。
 3. 按光源顺序 1、2、3 分两阶段采集：
    - **阶段 A（快速连续触发）**：每路光源先并行 arm 两台相机（仅更新 ExposureTime/Gain），等待 `arm_settle_ms` 稳定后，直接向 FL-ACDH 发送 `8/9/A/7` 完整点亮序列。三路光源连续触发，中间不等待 `GetImageBuffer`，利用 Continuous+Trigger 模式下 arm 仅影响下一次触发沿的特性，将 arm 开销与上一路曝光+传输并行化。相机启动或故障重启时 `start()/cancel_wait()` 仍会排空旧帧。
-   - **阶段 B（统一收帧）**：三路光源全部触发后，按光源顺序并行调用 `GetImageBuffer` 收取两台相机共 6 帧硬触发图像。MVS SDK `buffer_count=8 ≥ 6` 帧保证不丢帧，帧按触发顺序返回无需 drain。
+   - **阶段 B（统一收帧）**：三路光源全部触发后，按光源顺序并行调用 `GetImageBuffer` 收取两台相机共 6 帧硬触发图像。每台相机 MVS SDK `buffer_count=8 ≥ 3` 路光源帧，帧按触发顺序返回无需 drain。
    海康 MV-CH120-20GC 在 Continuous+Trigger 模式下 `SetFloatValue(ExposureTime)` 不会向 SDK 缓冲区注入残留帧，因此正常采集路径不再调用 `drain_stale_frames`。
 4. 组包为 6 帧，发布到 `/seat_aoi_cpp_to_py_frames_v1`。
 5. 等待 Python detector 写回 `/seat_aoi_py_to_cpp_results_v1`。
@@ -123,6 +124,8 @@ light.backend=serial_ascii
 
 camera.0.camera_id=TOP_BACK
 camera.1.camera_id=TOP_CUSHION
+camera.0.buffer_count=8          # 必须 >= light_order 光源数量
+camera.1.buffer_count=8
 
 light.serial_port=COM1
 light.baud_rate=9600            # FL-ACDH 说明书默认 9600 8N1，现场配置固定使用该值

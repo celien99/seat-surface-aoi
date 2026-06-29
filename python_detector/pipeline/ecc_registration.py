@@ -79,13 +79,14 @@ class EccRegistration:
                 max_iterations,
                 float(convergence_epsilon),
             )
-            _warp, correlation = cv2.findTransformECC(
+            correlation, updated_warp = cv2.findTransformECC(
                 base_array, moving_array, warp_matrix,
                 cv2.MOTION_TRANSLATION, criteria,
             )
-            corr = float(np.asarray(correlation).ravel()[0])
+            corr = float(correlation)
             if not math.isfinite(corr):
                 return None
+            warp_matrix = np.asarray(updated_warp, dtype=np.float32)
             dx = int(round(float(warp_matrix[0, 2])))
             dy = int(round(float(warp_matrix[1, 2])))
             converged = corr >= float(min_correlation) and corr >= 0.0

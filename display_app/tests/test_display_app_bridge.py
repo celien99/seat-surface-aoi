@@ -122,6 +122,52 @@ def test_display_bridge_publishes_raw_image_when_roi_is_unavailable(tmp_path: Pa
     assert provider._frames["CAM_FRONT/POSE_A"][0, 0].tolist() == [9, 9, 9]
 
 
+def test_display_bridge_reads_detection_events_with_offset(tmp_path: Path) -> None:
+    _append_display_event(tmp_path, {"sequence_id": 1, "decision": "OK"})
+    _append_display_event(tmp_path, {"sequence_id": 2, "decision": "RECHECK", "message": "需要复检"})
+    bridge = DisplayBridge(tmp_path, CameraImageProvider())
+
+    events = bridge.read_detection_events()
+
+    assert [event.sequence_id for event in events] == [1, 2]
+    assert [event.decision for event in events] == ["OK", "RECHECK"]
+    assert bridge.read_detection_events() == []
+
+
+def test_display_bridge_clears_failed_image_publish(tmp_path: Path) -> None:
+    ok_path = tmp_path / "ok.png"
+    missing_path = tmp_path / "missing.png"
+    write_gray_png(ok_path, 2, 1, b"\x09\x0a")
+    _write_latest(
+        tmp_path,
+        {
+            "images": [{"camera_id": "CAM_FRONT", "pose_id": "CAM_FRONT", "path": str(ok_path)}],
+        },
+    )
+    provider = CameraImageProvider()
+    bridge = DisplayBridge(tmp_path, provider)
+    event = bridge.read_latest()
+    assert event is not None
+    assert bridge.publish_images(event) == ["CAM_FRONT"]
+    assert "CAM_FRONT" in provider._frames
+
+    _write_latest(
+        tmp_path,
+        {
+            "timestamp_ms": _now_ms() + 1,
+            "images": [{"camera_id": "CAM_FRONT", "pose_id": "CAM_FRONT", "path": str(missing_path)}],
+        },
+    )
+    event = bridge.read_latest()
+    assert event is not None
+
+    report = bridge.publish_images_report(event)
+
+    assert report.successful_camera_ids == []
+    assert report.failed_camera_ids == ["CAM_FRONT"]
+    assert "CAM_FRONT" not in provider._frames
+
+
 def test_main_view_model_updates_from_display_event(tmp_path: Path) -> None:
     image_path = tmp_path / "roi.png"
     overlay_path = tmp_path / "overlay.png"
@@ -166,6 +212,39 @@ def test_main_view_model_updates_from_display_event(tmp_path: Path) -> None:
     assert view_model.lastTriggerResult == "NG"
     assert view_model.ngOverlayVisible is True
     assert view_model.logs[0]["defect_type"] == "scratch"
+
+
+def test_main_view_model_counts_all_detection_events_between_polls(tmp_path: Path) -> None:
+    image_path = tmp_path / "roi.png"
+    write_gray_png(image_path, 2, 1, b"\x01\x02")
+    _append_display_event(
+        tmp_path,
+        {
+            "sequence_id": 1,
+            "timestamp_ms": _now_ms(),
+            "decision": "OK",
+            "images": [{"camera_id": "CAM_FRONT", "pose_id": "CAM_FRONT", "path": str(image_path)}],
+        },
+    )
+    _append_display_event(
+        tmp_path,
+        {
+            "sequence_id": 2,
+            "timestamp_ms": _now_ms() + 1,
+            "decision": "RECHECK",
+            "message": "质量门禁失败",
+            "images": [{"camera_id": "CAM_FRONT", "pose_id": "CAM_FRONT", "path": str(image_path)}],
+        },
+    )
+    view_model = MainViewModel(DisplayBridge(tmp_path, CameraImageProvider()), journal=OperatorJournal(tmp_path))
+
+    view_model.pollLatest()
+
+    assert view_model.ok == 1
+    assert view_model.recheck == 1
+    assert view_model.total == 2
+    assert len(view_model.logs) == 2
+    assert view_model.lastTriggerResult == "RECHECK"
 
 
 def test_main_view_model_marks_model_unavailable_as_sampling_mode(tmp_path: Path) -> None:
@@ -280,6 +359,40 @@ def test_main_view_model_stale_display_latest_updates_image_without_counting(tmp
     assert view_model.logs == []
 
 
+def test_main_view_model_stale_ng_latest_does_not_show_overlay(tmp_path: Path) -> None:
+    image_path = tmp_path / "roi.png"
+    write_gray_png(image_path, 2, 1, b"\x01\x02")
+    _write_latest(
+        tmp_path,
+        {
+            "timestamp_ms": 1,
+            "decision": "NG",
+            "defect_count": 1,
+            "defects": [
+                {
+                    "defect_id": "d1",
+                    "class_name": "scratch",
+                    "severity": "major",
+                    "camera_id": "CAM_FRONT",
+                    "pose_id": "CAM_FRONT",
+                    "roi_name": "seat",
+                    "score": 0.88,
+                    "decision": "NG",
+                }
+            ],
+            "images": [{"camera_id": "CAM_FRONT", "pose_id": "CAM_FRONT", "path": str(image_path)}],
+        },
+    )
+    view_model = MainViewModel(DisplayBridge(tmp_path, CameraImageProvider()), journal=OperatorJournal(tmp_path))
+
+    view_model.pollLatest()
+
+    assert view_model.lastTriggerResult == "NG"
+    assert view_model.ng == 0
+    assert view_model.logs == []
+    assert view_model.ngOverlayVisible is False
+
+
 def test_main_view_model_persists_review_actions(tmp_path: Path) -> None:
     image_path = tmp_path / "roi.png"
     write_gray_png(image_path, 2, 1, b"\x01\x02")
@@ -317,6 +430,16 @@ def test_main_view_model_persists_review_actions(tmp_path: Path) -> None:
 
 
 def _write_latest(root: Path, overrides: dict) -> None:
+    (root / "display_latest.json").write_text(json.dumps(_display_payload(overrides)), encoding="utf-8")
+
+
+def _append_display_event(root: Path, overrides: dict) -> None:
+    with (root / "display_events.jsonl").open("a", encoding="utf-8") as output:
+        output.write(json.dumps(_display_payload(overrides), ensure_ascii=False))
+        output.write("\n")
+
+
+def _display_payload(overrides: dict) -> dict:
     payload = {
         "schema": "seat_surface_aoi.display_event.v1",
         "timestamp_ms": _now_ms(),
@@ -341,7 +464,7 @@ def _write_latest(root: Path, overrides: dict) -> None:
         "overlays": [],
     }
     payload.update(overrides)
-    (root / "display_latest.json").write_text(json.dumps(payload), encoding="utf-8")
+    return payload
 
 
 def _now_ms() -> int:
