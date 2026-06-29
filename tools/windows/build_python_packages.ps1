@@ -1,7 +1,6 @@
 param(
   [string]$ProjectRoot = "",
   [string]$PythonExe = "",
-  [string]$PyinstallerKey = "",
   [switch]$SkipDetector,
   [switch]$SkipDisplay,
   [switch]$CleanBuild
@@ -108,11 +107,6 @@ try {
   New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
   New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
 
-  [string[]]$keyArg = @()
-  if ($PyinstallerKey) {
-    $keyArg = @("--key", $PyinstallerKey)
-  }
-
   [string[]]$sharedHiddenImports = @(
     "--hidden-import", "numpy.core._methods",
     "--hidden-import", "numpy.lib.format",
@@ -134,7 +128,7 @@ try {
       "-m", "PyInstaller",
       "--noconfirm",
       "--log-level", "WARN"
-    ) + $keyArg + $sharedHiddenImports + @(
+    ) + $sharedHiddenImports + @(
       "--onefile",
       "--name", "seat_aoi_detector",
       "--distpath", $BinDir,
@@ -188,7 +182,7 @@ try {
       "-m", "PyInstaller",
       "--noconfirm",
       "--log-level", "WARN"
-    ) + $keyArg + @(
+    ) + @(
       "--onedir",
       "--name", "seat_aoi_display",
       "--distpath", $BinDir,

@@ -25,7 +25,6 @@ param(
   [int]$ManualTriggerPort = 9000,
   [int]$ManualTriggerTimeoutMs = 1000,
   [switch]$BuildPythonPackages,
-  [string]$PyinstallerKey = "",
   [string]$DataRoot = "D:\seat-aoi-data",
   [string]$ModelRoot = "D:\seat-aoi-model",
   [switch]$CleanPythonSource
@@ -485,7 +484,6 @@ try {
     $pyinstallerArgs = @{
       ProjectRoot = $ProjectRoot
       PythonExe = $VenvPython
-      PyinstallerKey = $PyinstallerKey
       CleanBuild = $false
     }
     & $pyinstallerScript @pyinstallerArgs

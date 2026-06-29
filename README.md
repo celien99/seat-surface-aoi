@@ -132,16 +132,15 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
   -BuildController `
   -EnableHikrobotMvs `
   -BuildPythonPackages `
-  -PyinstallerKey “<产线AES密钥>” `
   -DataRoot D:\seat-aoi-data `
   -ModelRoot D:\seat-aoi-model `
   -LineId LINE1_AOI_01 `
   -GridLayout 2x1
 ```
 
-`-BuildPythonPackages` 会在工控机本地用 PyInstaller 将 `python_detector` 和 `display_app` 分别打包为加密 `.exe`。打包需要 VC++ Build Tools（PyInstaller 编译引导程序），安装脚本会在缺失时提示安装。
+`-BuildPythonPackages` 会在工控机本地用 PyInstaller 将 `python_detector` 和 `display_app` 分别打包为独立 `.exe`（`--onefile` / `--onedir`），避免源码直接暴露在磁盘上。打包需要 VC++ Build Tools（PyInstaller 编译引导程序），安装脚本会在缺失时提示安装。
 
-如果 C++ 主控已经构建好或者不需要加密打包，可省略对应开关：
+如果 C++ 主控已经构建好或者不需要打包 Python，可省略对应开关：
 
 ```powershell
 # 只构建 C++，不打包 Python（与之前行为一致）
@@ -155,10 +154,11 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
 
 ### 防拷贝说明
 
-启用 `-BuildPythonPackages -PyinstallerKey “<密钥>”` 后：
-- `python_detector` 和 `display_app` 的 `.py` 源码被打包为 AES-256 加密的 `.exe`
+启用 `-BuildPythonPackages` 后：
+- `python_detector` 和 `display_app` 的 `.py` 源码被打包为独立 `.exe`（PyInstaller `--onefile` / `--onedir`）
 - `-CleanPythonSource` 追加后自动删除工控机上的 `.py` 明文源码
 - C++ `seat_aoi_controller.exe` 本身已是编译后的原生二进制
+- PyInstaller 的字节码加密（`--key`）自 v6.0 起已移除；如需代码保护，可使用 PyArmor 等外部工具
 - 配置文件 (`.conf`/`.yaml`) 和模型 (`.onnx`/`.npy`/`.faiss`) 保留明文（运维需要编辑/替换）
 - 直接复制程序目录到另一台工控机无法运行（缺少 Python 环境、依赖和构建时的系统库匹配）
 
