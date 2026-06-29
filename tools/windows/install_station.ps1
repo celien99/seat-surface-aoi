@@ -220,7 +220,8 @@ function Install-NssmService {
     [string]$Application,
     [string]$Arguments,
     [string]$Root,
-    [string]$LogPrefix
+    [string]$LogPrefix,
+    [switch]$NoPythonEnv
   )
 
   Remove-ServiceIfExists -Nssm $Nssm -Name $Name
@@ -242,7 +243,9 @@ function Install-NssmService {
   Invoke-Native -ArgList @($Nssm, "set", $Name, "AppRotateFiles", "1")
   Invoke-Native -ArgList @($Nssm, "set", $Name, "AppRotateOnline", "1")
   Invoke-Native -ArgList @($Nssm, "set", $Name, "AppRotateBytes", "10485760")
-  Invoke-Native -ArgList @($Nssm, "set", $Name, "AppEnvironmentExtra", "PYTHONUTF8=1`r`nPYTHONUNBUFFERED=1")
+  if (-not $NoPythonEnv) {
+    Invoke-Native -ArgList @($Nssm, "set", $Name, "AppEnvironmentExtra", "PYTHONUTF8=1`r`nPYTHONUNBUFFERED=1")
+  }
 }
 
 function Quote-ShortcutArgument {
@@ -552,7 +555,8 @@ try {
     -Application $ControllerExe `
     -Arguments "--config $(Quote-ServiceArgument $ConfigPath) --loop" `
     -Root $ProjectRoot `
-    -LogPrefix "controller"
+    -LogPrefix "controller" `
+    -NoPythonEnv
   Invoke-Native -ArgList @($Nssm, "set", $DetectorServiceName, "DependOnService", $ControllerServiceName)
 
   $shortcutPath = New-DisplayShortcut `
