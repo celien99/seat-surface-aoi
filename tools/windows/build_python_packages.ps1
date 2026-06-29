@@ -7,7 +7,44 @@ param(
   [switch]$CleanBuild
 )
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+# ============================================================================
+# PS 5.1 兼容辅助函数
+# ============================================================================
+
+function Invoke-NativeSilent {
+  <#
+    PowerShell 5.1 中 $ErrorActionPreference="Stop" 会把原生程序的 stderr
+    输出当作终止错误，导致脚本直接崩溃。本函数临时切换到 Continue
+    模式并合并 stderr→stdout，执行完后恢复。
+  #>
+  param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Command)
+  $saved = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    & $Command[0] @($Command | Select-Object -Skip 1) 2>&1 | Out-Null
+    return $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $saved
+  }
+}
+
+function Invoke-Native {
+  param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Command)
+  $saved = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    & $Command[0] @($Command | Select-Object -Skip 1) 2>&1 | ForEach-Object { Write-Host $_ }
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+      throw "Command failed, exit=${exitCode}: $($Command -join ' ')"
+    }
+  } finally {
+    $ErrorActionPreference = $saved
+  }
+}
 
 function Resolve-ProjectRoot {
   param([string]$Value)
@@ -15,14 +52,6 @@ function Resolve-ProjectRoot {
     return (Resolve-Path -LiteralPath $Value).Path
   }
   return (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
-}
-
-function Invoke-Native {
-  param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Command)
-  & $Command[0] @($Command | Select-Object -Skip 1)
-  if ($LASTEXITCODE -ne 0) {
-    throw "Command failed, exit=${LASTEXITCODE}: $($Command -join ' ')"
-  }
 }
 
 function Get-VenvPython {
@@ -42,9 +71,13 @@ function Get-VenvPython {
 
 function Test-PyinstallerInstalled {
   param([string]$Python)
-  & $Python -c "import PyInstaller; print(PyInstaller.__version__)" 2>$null
-  return ($LASTEXITCODE -eq 0)
+  $exitCode = Invoke-NativeSilent $Python -c "import PyInstaller"
+  return ($exitCode -eq 0)
 }
+
+# ============================================================================
+# 主流程
+# ============================================================================
 
 $ProjectRoot = Resolve-ProjectRoot -Value $ProjectRoot
 $Python = Get-VenvPython -Root $ProjectRoot -PythonExeOverride $PythonExe
@@ -55,32 +88,39 @@ Push-Location $ProjectRoot
 try {
   # ---- 确保 PyInstaller 已安装 ----
   if (-not (Test-PyinstallerInstalled -Python $Python)) {
-    Write-Host "Installing PyInstaller..."
-    try {
-      Invoke-Native $Python -m pip install pyinstaller
-    } catch {
-      throw "PyInstaller not installed and cannot download from PyPI (offline environment).`nInstall it manually before running this script:`n  1. On a networked machine, download: pip download pyinstaller -d pyinstaller_offline`n  2. Copy the folder to this machine`n  3. Run: $Python -m pip install --no-index --find-links pyinstaller_offline pyinstaller"
+    Write-Host "[INFO] PyInstaller not found in venv, attempting install..."
+    $installCode = Invoke-NativeSilent $Python -m pip install pyinstaller --no-input
+    if ($installCode -ne 0) {
+      Write-Host ""
+      Write-Host "============================================================" -ForegroundColor Yellow
+      Write-Host " PyInstaller 安装失败（离线环境？）" -ForegroundColor Yellow
+      Write-Host "============================================================" -ForegroundColor Yellow
+      Write-Host ""
+      Write-Host " 在联网机器上下载离线安装包："
+      Write-Host "   pip download pyinstaller -d pyinstaller_offline"
+      Write-Host ""
+      Write-Host " 将 pyinstaller_offline 目录拷贝到本机，然后执行："
+      Write-Host "   $Python -m pip install --no-index --find-links pyinstaller_offline pyinstaller"
+      Write-Host ""
+      Write-Host " 安装完成后重新运行本脚本。"
+      Write-Host "============================================================" -ForegroundColor Yellow
+      throw "PyInstaller is not installed and cannot be downloaded offline."
     }
+    Write-Host "[INFO] PyInstaller installed successfully."
   }
 
-  # ---- 清理上一次构建产物（避免 PyInstaller 交互式提示） ----
+  # ---- 清理旧产物 ----
   $detectorDist = Join-Path $BinDir "seat_aoi_detector.exe"
   $displayDist = Join-Path $BinDir "seat_aoi_display"
-  if ($CleanBuild) {
-    if (Test-Path -LiteralPath $BuildDir) {
-      Remove-Item -Recurse -Force $BuildDir
-    }
+
+  if ($CleanBuild -and (Test-Path -LiteralPath $BuildDir)) {
+    Remove-Item -Recurse -Force $BuildDir
   }
-  # 每次构建前清理旧 dist 目录，避免 PyInstaller 弹出 overwrite 确认
-  if (-not $SkipDetector) {
-    if (Test-Path -LiteralPath $detectorDist) {
-      Remove-Item -LiteralPath $detectorDist -Force
-    }
+  if ((-not $SkipDetector) -and (Test-Path -LiteralPath $detectorDist)) {
+    Remove-Item -LiteralPath $detectorDist -Force
   }
-  if (-not $SkipDisplay) {
-    if (Test-Path -LiteralPath $displayDist) {
-      Remove-Item -Recurse -Force $displayDist
-    }
+  if ((-not $SkipDisplay) -and (Test-Path -LiteralPath $displayDist)) {
+    Remove-Item -Recurse -Force $displayDist
   }
   New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
   New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
@@ -91,13 +131,11 @@ try {
     "--log-level", "WARN"
   )
 
-  # AES 加密密钥（空则不加密仅打包）
   $keyArg = @()
   if ($PyinstallerKey) {
     $keyArg = @("--key", $PyinstallerKey)
   }
 
-  # ---- 共享的 hidden import（numpy/scipy 内部模块） ----
   $sharedHiddenImports = @(
     "--hidden-import", "numpy.core._methods",
     "--hidden-import", "numpy.lib.format",
@@ -110,10 +148,10 @@ try {
   )
 
   # ---------------------------------------------------------------------------
-  # detector: --onefile 单文件打包
+  # detector: --onefile
   # ---------------------------------------------------------------------------
   if (-not $SkipDetector) {
-    Write-Host "Building seat_aoi_detector.exe (--onefile)..."
+    Write-Host "[BUILD] seat_aoi_detector.exe (--onefile)..."
     $detectorArgs = @(
       "-m", "PyInstaller",
       "--onefile",
@@ -157,14 +195,14 @@ try {
     )
     $detectorArgs = $commonArgs + $keyArg + $sharedHiddenImports + $detectorArgs
     Invoke-Native $Python @detectorArgs
-    Write-Host "seat_aoi_detector.exe built successfully."
+    Write-Host "[OK] seat_aoi_detector.exe built."
   }
 
   # ---------------------------------------------------------------------------
-  # display: --onedir 目录打包（兼容 PySide6 QML 资源体系）
+  # display: --onedir
   # ---------------------------------------------------------------------------
   if (-not $SkipDisplay) {
-    Write-Host "Building seat_aoi_display (--onedir)..."
+    Write-Host "[BUILD] seat_aoi_display (--onedir)..."
     $displayArgs = @(
       "-m", "PyInstaller",
       "--onedir",
@@ -198,17 +236,15 @@ try {
     )
     $displayArgs = $commonArgs + $keyArg + $displayArgs
     Invoke-Native $Python @displayArgs
-    Write-Host "seat_aoi_display built successfully."
+    Write-Host "[OK] seat_aoi_display built."
   }
 
-  # ---------------------------------------------------------------------------
-  # 校验产物
-  # ---------------------------------------------------------------------------
+  # ---- 校验 ----
   if (-not $SkipDetector) {
     if (-not (Test-Path -LiteralPath $detectorDist)) {
       throw "Detector build failed: $detectorDist not found"
     }
-    Write-Host "Detector: $detectorDist"
+    Write-Host "[DONE] Detector : $detectorDist"
   }
 
   if (-not $SkipDisplay) {
@@ -216,10 +252,10 @@ try {
     if (-not (Test-Path -LiteralPath $displayExe)) {
       throw "Display build failed: $displayExe not found"
     }
-    Write-Host "Display : $displayExe"
+    Write-Host "[DONE] Display  : $displayExe"
   }
 
-  Write-Host "Python package build completed."
+  Write-Host "[DONE] Python package build completed."
 } finally {
   Pop-Location
 }

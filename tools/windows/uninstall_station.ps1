@@ -26,15 +26,28 @@ function Test-IsAdministrator {
 
 function Invoke-Native {
   param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Command)
-  & $Command[0] @($Command | Select-Object -Skip 1)
-  if ($LASTEXITCODE -ne 0) {
-    throw "Command failed, exit=${LASTEXITCODE}: $($Command -join ' ')"
+  $saved = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    & $Command[0] @($Command | Select-Object -Skip 1) 2>&1 | ForEach-Object { Write-Host $_ }
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+      throw "Command failed, exit=${exitCode}: $($Command -join ' ')"
+    }
+  } finally {
+    $ErrorActionPreference = $saved
   }
 }
 
 function Invoke-NativeOptional {
   param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Command)
-  & $Command[0] @($Command | Select-Object -Skip 1)
+  $saved = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    & $Command[0] @($Command | Select-Object -Skip 1) 2>&1 | Out-Null
+  } finally {
+    $ErrorActionPreference = $saved
+  }
 }
 
 function Resolve-Nssm {
