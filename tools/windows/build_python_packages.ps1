@@ -11,15 +11,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 # ============================================================================
-# PS 5.1 兼容辅助函数
+# PS 5.1 compatible helpers — native exe stderr must NOT raise terminate errors
 # ============================================================================
 
 function Invoke-NativeSilent {
-  <#
-    PowerShell 5.1 中 $ErrorActionPreference="Stop" 会把原生程序的 stderr
-    输出当作终止错误，导致脚本直接崩溃。本函数临时切换到 Continue
-    模式并合并 stderr→stdout，执行完后恢复。
-  #>
   param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Command)
   $saved = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
@@ -76,7 +71,7 @@ function Test-PyinstallerInstalled {
 }
 
 # ============================================================================
-# 主流程
+# Main
 # ============================================================================
 
 $ProjectRoot = Resolve-ProjectRoot -Value $ProjectRoot
@@ -86,30 +81,29 @@ $BuildDir = Join-Path $ProjectRoot "build\pyinstaller"
 
 Push-Location $ProjectRoot
 try {
-  # ---- 确保 PyInstaller 已安装 ----
+  # ---- ensure PyInstaller is installed ----
   if (-not (Test-PyinstallerInstalled -Python $Python)) {
     Write-Host "[INFO] PyInstaller not found in venv, attempting install..."
     $installCode = Invoke-NativeSilent $Python -m pip install pyinstaller --no-input
     if ($installCode -ne 0) {
       Write-Host ""
       Write-Host "============================================================" -ForegroundColor Yellow
-      Write-Host " PyInstaller 安装失败（离线环境？）" -ForegroundColor Yellow
+      Write-Host " PyInstaller install failed (offline environment?)" -ForegroundColor Yellow
       Write-Host "============================================================" -ForegroundColor Yellow
       Write-Host ""
-      Write-Host " 在联网机器上下载离线安装包："
-      Write-Host "   pip download pyinstaller -d pyinstaller_offline"
+      Write-Host " To install offline:"
+      Write-Host "   1. On a networked PC: pip download pyinstaller -d pyinstaller_offline"
+      Write-Host "   2. Copy pyinstaller_offline folder to this machine"
+      Write-Host "   3. Run: $Python -m pip install --no-index --find-links pyinstaller_offline pyinstaller"
+      Write-Host "   4. Re-run this script"
       Write-Host ""
-      Write-Host " 将 pyinstaller_offline 目录拷贝到本机，然后执行："
-      Write-Host "   $Python -m pip install --no-index --find-links pyinstaller_offline pyinstaller"
-      Write-Host ""
-      Write-Host " 安装完成后重新运行本脚本。"
       Write-Host "============================================================" -ForegroundColor Yellow
-      throw "PyInstaller is not installed and cannot be downloaded offline."
+      throw "PyInstaller is not installed and cannot be downloaded (offline)."
     }
     Write-Host "[INFO] PyInstaller installed successfully."
   }
 
-  # ---- 清理旧产物 ----
+  # ---- clean old dist ----
   $detectorDist = Join-Path $BinDir "seat_aoi_detector.exe"
   $displayDist = Join-Path $BinDir "seat_aoi_display"
 
@@ -125,7 +119,7 @@ try {
   New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
   New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
 
-  # ---- 通用 PyInstaller 参数 ----
+  # ---- common PyInstaller args ----
   $commonArgs = @(
     "--noconfirm",
     "--log-level", "WARN"
@@ -239,7 +233,7 @@ try {
     Write-Host "[OK] seat_aoi_display built."
   }
 
-  # ---- 校验 ----
+  # ---- verify ----
   if (-not $SkipDetector) {
     if (-not (Test-Path -LiteralPath $detectorDist)) {
       throw "Detector build failed: $detectorDist not found"
