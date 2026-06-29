@@ -89,7 +89,8 @@ try {
   # ---- ensure PyInstaller is installed ----
   $pyiCheck = Invoke-NativeQuiet @($Python, "-c", "import PyInstaller")
   if ($pyiCheck -ne 0) {
-    throw "PyInstaller not found in venv. Run: uv sync --group dev"
+    Write-Host "[INFO] PyInstaller not in venv, installing via pip..."
+    Invoke-Native -ArgList @($Python, "-m", "pip", "install", "pyinstaller")
   }
 
   # ---- clean old dist ----

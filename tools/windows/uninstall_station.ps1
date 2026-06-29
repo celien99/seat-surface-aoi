@@ -25,14 +25,14 @@ function Test-IsAdministrator {
 }
 
 function Invoke-Native {
-  param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Command)
+  param([string[]]$ArgList)
   $saved = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
   try {
-    & $Command[0] @($Command | Select-Object -Skip 1) 2>&1 | ForEach-Object { Write-Host $_ }
+    & $ArgList[0] @($ArgList | Select-Object -Skip 1) 2>&1 | ForEach-Object { Write-Host $_ }
     $exitCode = $LASTEXITCODE
     if ($exitCode -ne 0) {
-      throw "Command failed, exit=${exitCode}: $($Command -join ' ')"
+      throw "Command failed, exit=${exitCode}: $($ArgList -join ' ')"
     }
   } finally {
     $ErrorActionPreference = $saved
@@ -40,11 +40,11 @@ function Invoke-Native {
 }
 
 function Invoke-NativeOptional {
-  param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Command)
+  param([string[]]$ArgList)
   $saved = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
   try {
-    & $Command[0] @($Command | Select-Object -Skip 1) 2>&1 | Out-Null
+    & $ArgList[0] @($ArgList | Select-Object -Skip 1) 2>&1 | Out-Null
   } finally {
     $ErrorActionPreference = $saved
   }
@@ -85,11 +85,11 @@ function Remove-ServiceIfExists {
   param([string]$Nssm, [string]$Name)
   $service = Get-Service -Name $Name -ErrorAction SilentlyContinue
   if ($null -ne $service) {
-    Invoke-NativeOptional $Nssm stop $Name
+    Invoke-NativeOptional -ArgList @($Nssm, "stop", $Name)
     if (-not (Wait-ServiceStopped -Name $Name)) {
       throw "Service did not stop within 30 seconds: $Name. Stop it manually before uninstalling."
     }
-    Invoke-Native $Nssm remove $Name confirm
+    Invoke-Native -ArgList @($Nssm, "remove", $Name, "confirm")
     Write-Host "Removed service: $Name"
   } else {
     Write-Host "Service not found, skipped: $Name"
