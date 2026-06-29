@@ -74,7 +74,7 @@ private:
   bool set_socket_timeout(int timeout_ms);
   int read_socket(void* buffer, std::size_t size, int timeout_ms);
   socket_t connect_to(const std::string& host, std::uint32_t port,
-                      std::string* error_message);
+                      int timeout_ms, std::string* error_message);
 
   bool initialized_ = false;
   bool simulate_output_fault_ = false;

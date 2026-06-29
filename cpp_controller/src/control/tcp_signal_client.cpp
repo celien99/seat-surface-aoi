@@ -782,6 +782,7 @@ bool TcpSignalClient::publish_result(const ExternalTrigger& trigger,
 
 TcpSignalClient::socket_t TcpSignalClient::connect_to(const std::string& host,
                                                        std::uint32_t port,
+                                                       int timeout_ms,
                                                        std::string* error_message) {
 #ifdef _WIN32
   socket_t sock = static_cast<socket_t>(::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP));
@@ -803,14 +804,85 @@ TcpSignalClient::socket_t TcpSignalClient::connect_to(const std::string& host,
     return kInvalidSocket;
   }
 
-  if (::connect(static_cast<int>(sock),
-                reinterpret_cast<struct sockaddr*>(&addr),
-                sizeof(addr)) != 0) {
-    close_socket_impl(sock);
-    if (error_message != nullptr)
-      *error_message = "result notify 连接失败 " + host + ":" + std::to_string(port);
-    return kInvalidSocket;
+  // 非阻塞 connect + select/poll 实现真实超时
+#ifdef _WIN32
+  u_long nonblock = 1;
+  ::ioctlsocket(static_cast<SOCKET>(sock), FIONBIO, &nonblock);
+#else
+  int flags = ::fcntl(sock, F_GETFL, 0);
+  ::fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+#endif
+
+  int connect_ret =
+#ifdef _WIN32
+      ::connect(static_cast<SOCKET>(sock),
+                reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr));
+#else
+      ::connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr));
+#endif
+
+  if (connect_ret != 0) {
+#ifdef _WIN32
+    if (WSAGetLastError() != WSAEWOULDBLOCK)
+#else
+    if (errno != EINPROGRESS)
+#endif
+    {
+      close_socket_impl(sock);
+      if (error_message != nullptr)
+        *error_message = "result notify 连接失败 " + host + ":" + std::to_string(port);
+      return kInvalidSocket;
+    }
+
+    // 等待 socket 变为可写（连接完成或失败）
+    const int effective_timeout = timeout_ms > 0 ? timeout_ms : 200;
+#ifdef _WIN32
+    fd_set writefds;
+    FD_ZERO(&writefds);
+    FD_SET(static_cast<SOCKET>(sock), &writefds);
+    struct timeval tv{};
+    tv.tv_sec = effective_timeout / 1000;
+    tv.tv_usec = (effective_timeout % 1000) * 1000;
+    const int sel_ret = ::select(0, nullptr, &writefds, nullptr, &tv);
+#else
+    struct pollfd pfd{};
+    pfd.fd = sock;
+    pfd.events = POLLOUT;
+    const int sel_ret = ::poll(&pfd, 1, effective_timeout);
+#endif
+    if (sel_ret <= 0) {
+      close_socket_impl(sock);
+      if (error_message != nullptr)
+        *error_message = "result notify 连接超时 " + host + ":" + std::to_string(port);
+      return kInvalidSocket;
+    }
+
+    // 检查 socket 错误状态确认连接是否真的成功
+    int sock_err = 0;
+#ifdef _WIN32
+    int sock_err_len = sizeof(sock_err);
+    ::getsockopt(static_cast<SOCKET>(sock), SOL_SOCKET, SO_ERROR,
+                 reinterpret_cast<char*>(&sock_err), &sock_err_len);
+#else
+    socklen_t sock_err_len = sizeof(sock_err);
+    ::getsockopt(sock, SOL_SOCKET, SO_ERROR, &sock_err, &sock_err_len);
+#endif
+    if (sock_err != 0) {
+      close_socket_impl(sock);
+      if (error_message != nullptr)
+        *error_message = "result notify 连接失败 " + host + ":" + std::to_string(port);
+      return kInvalidSocket;
+    }
   }
+
+  // 恢复为阻塞模式
+#ifdef _WIN32
+  nonblock = 0;
+  ::ioctlsocket(static_cast<SOCKET>(sock), FIONBIO, &nonblock);
+#else
+  ::fcntl(sock, F_SETFL, flags);
+#endif
+
   return sock;
 }
 
@@ -818,7 +890,7 @@ bool TcpSignalClient::send_result_line(const std::string& seat_id,
                                         const std::string& decision_text,
                                         int timeout_ms,
                                         std::string* error_message) {
-  socket_t sock = connect_to(result_host_, result_port_, error_message);
+  socket_t sock = connect_to(result_host_, result_port_, timeout_ms, error_message);
   if (sock == kInvalidSocket) return false;
 
   const std::string line = result_prefix_ + result_delimiter_ +
