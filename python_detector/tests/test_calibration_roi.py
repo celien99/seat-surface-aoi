@@ -101,6 +101,26 @@ def test_pyinstaller_path_resolution_prefers_installed_config(monkeypatch, tmp_p
     assert resolved == installed_path
 
 
+def test_explicit_recipe_dir_does_not_fallback_to_pyinstaller_bundle(monkeypatch, tmp_path: Path) -> None:
+    external_config = tmp_path / "external_config"
+    external_config.mkdir()
+    bundle_root = tmp_path / "_MEI25882"
+    bundle_path = bundle_root / "python_detector" / "config" / "calibration" / "TOP_BACK" / "top_back_production_v1.yaml"
+    bundle_path.parent.mkdir(parents=True)
+    bundle_path.write_text("calibration_id: calib/bundled\n", encoding="utf-8")
+    monkeypatch.setattr(detector_paths.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(detector_paths.sys, "_MEIPASS", str(bundle_root), raising=False)
+
+    resolved = detector_paths.resolve_package_path(
+        external_config,
+        "python_detector/config/calibration/TOP_BACK/top_back_production_v1.yaml",
+        strict_base_dir=True,
+    )
+
+    assert str(resolved).startswith(str(external_config))
+    assert "_MEI25882" not in str(resolved)
+
+
 def test_calibration_manager_cache_is_scoped_by_roi_template_path(tmp_path: Path) -> None:
     roi_a = tmp_path / "roi_a.yaml"
     roi_b = tmp_path / "roi_b.yaml"

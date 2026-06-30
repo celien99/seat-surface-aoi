@@ -175,7 +175,7 @@ uv sync --extra onnx --extra faiss --extra display
 #    nssm.exe 放到 bin\nssm.exe、tools\nssm\nssm.exe 或系统 PATH。
 $ProjectRoot = "C:\seat-surface-aoi"
 $RepoUrl = "<REPO_URL>"
-$ModelRoot = "D:\seat-aoi-model"
+$ModelRoot = "C:\seat-aoi-model"  # 默认跟随 ProjectRoot 所在盘符，可按现场传 -ModelRoot 覆盖
 
 # 1. 首次部署：拉取项目代码
 git clone $RepoUrl $ProjectRoot

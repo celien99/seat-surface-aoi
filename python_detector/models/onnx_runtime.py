@@ -4,10 +4,11 @@ from pathlib import Path
 from typing import Any
 
 from python_detector.models.asset_errors import ModelAssetUnavailableError
+from python_detector.paths import resolve_runtime_path
 
 
 def create_onnx_session(model_path: str, purpose: str) -> Any:
-    path = Path(model_path)
+    path = resolve_runtime_path(model_path)
     if not path.exists():
         raise ModelAssetUnavailableError(
             f"{purpose} 模型文件不存在: {model_path}",

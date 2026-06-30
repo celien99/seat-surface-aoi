@@ -16,8 +16,18 @@ from python_detector.ipc.shm_protocol import (
     DEFAULT_RESULT_SLOT_SIZE,
     DEFAULT_SLOT_COUNT,
 )
+from python_detector.paths import resolve_runtime_path
 from python_detector.pipeline.pipeline import InspectionPipeline
 from python_detector.pipeline.preprocessor import Preprocessor
+
+
+def _resolve_config_path(config_path: str | None) -> Path | None:
+    if not config_path:
+        return None
+    path = Path(config_path)
+    if path.is_absolute() or path.exists():
+        return path
+    return resolve_runtime_path(config_path)
 
 
 def _load_runtime_config(config_path: str | None) -> tuple[int, int, int, str]:
@@ -25,9 +35,9 @@ def _load_runtime_config(config_path: str | None) -> tuple[int, int, int, str]:
     frame_slot_size = DEFAULT_FRAME_SLOT_SIZE
     result_slot_size = DEFAULT_RESULT_SLOT_SIZE
     trace_root = "trace"
-    if not config_path:
+    path = _resolve_config_path(config_path)
+    if path is None:
         return slot_count, frame_slot_size, result_slot_size, trace_root
-    path = Path(config_path)
     for raw_line in path.read_text(encoding="utf-8").splitlines():
         line = raw_line.split("#", 1)[0].strip()
         if not line or "=" not in line:
@@ -49,6 +59,28 @@ def _load_runtime_ipc_layout(config_path: str | None) -> tuple[int, int, int]:
     return slot_count, frame_slot_size, result_slot_size
 
 
+def validate_detector_config(config_path: str | None, recipe_dir: str | Path | None = None) -> int:
+    _slot_count, _frame_slot_size, _result_slot_size, trace_root = _load_runtime_config(config_path)
+    recipe_manager = RecipeManager(recipe_dir) if recipe_dir is not None else RecipeManager()
+    calibration_manager = CalibrationManager(recipe_dir) if recipe_dir is not None else CalibrationManager()
+    recipes = recipe_manager.all_recipes()
+    if not recipes:
+        raise RuntimeError(f"配方目录为空: {recipe_manager.recipe_dir}")
+    for recipe in recipes:
+        for camera_recipe in recipe.cameras:
+            calibration_manager.load(
+                camera_recipe.camera_id,
+                camera_recipe.calibration_id,
+                camera_recipe.roi_template,
+            )
+    print(
+        f"detector_config_valid recipe_dir={recipe_manager.recipe_dir} "
+        f"recipes={len(recipes)} config={config_path or '<default>'} trace_root={trace_root}",
+        flush=True,
+    )
+    return 0
+
+
 class DetectorProcess:
     def __init__(
         self,
@@ -59,6 +91,7 @@ class DetectorProcess:
         display_root: str | Path = "trace",
         enable_display_channel: bool = True,
         recipe_dir: str | Path | None = None,
+        trace_root_override: str | Path | None = None,
     ) -> None:
         self.shm_client: ShmClient | None = None
         recipe_manager = RecipeManager(recipe_dir) if recipe_dir is not None else RecipeManager()
@@ -72,6 +105,7 @@ class DetectorProcess:
         self.algorithm = SeatSurfaceAoiAlgorithm(
             recipe_manager=recipe_manager,
             pipeline=pipeline,
+            trace_root_override=trace_root_override,
         )
         self.display_channel = DisplayChannelWriter(display_root) if enable_display_channel else None
         self.slot_count = slot_count
@@ -166,7 +200,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--display-root", default="", help="PySide6/QML 展示通道输出目录，默认使用 C++ 配置 trace_root")
     parser.add_argument("--disable-display-channel", action="store_true", help="关闭展示通道 JSON 输出")
     parser.add_argument("--recipe-dir", default="", help="配方 YAML 目录，默认使用包内 python_detector/config")
+    parser.add_argument("--validate-config-only", action="store_true", help="只校验运行配置、配方、标定和 ROI 后退出")
     args = parser.parse_args(argv)
+
+    if args.validate_config_only:
+        return validate_detector_config(args.config or None, args.recipe_dir or None)
 
     slot_count, frame_slot_size, result_slot_size, trace_root = _load_runtime_config(args.config or None)
     if args.slot_count > 0:
@@ -184,6 +222,7 @@ def main(argv: list[str] | None = None) -> int:
         display_root=display_root,
         enable_display_channel=not args.disable_display_channel,
         recipe_dir=args.recipe_dir or None,
+        trace_root_override=trace_root,
     )
     process.initialize()
     if args.once:

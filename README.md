@@ -104,12 +104,12 @@ C:\seat-surface-aoi\                    # 程序与配置（运维可编辑 .con
 ├── cpp_controller\config\              # C++ 配置文件（可编辑）
 └── python_detector\config\             # Python 配方、标定和 ROI 模板（可编辑，源码打包后可删除）
 
-D:\seat-aoi-model\                      # 模型资产
+C:\seat-aoi-model\                      # 模型资产，默认跟随 ProjectRoot 所在盘符
 ├── roi_yolo\seat_roi_seg.onnx
 ├── wideresnet50\seat_wrn50_embedding.onnx
 └── patchcore\                          # PCA / memory bank / FAISS
 
-D:\seat-aoi-data\                       # 运行时数据
+C:\seat-aoi-data\                       # 运行时数据，默认跟随 ProjectRoot 所在盘符
 ├── trace\                              # 检测 trace、display_latest.json
 ├── images\                             # C++ 采图原图（可选）
 └── logs\                               # 服务 stdout/stderr 日志
@@ -120,7 +120,7 @@ D:\seat-aoi-data\                       # 运行时数据
 ```powershell
 # 0. 首次确认：已安装 Git、Python 3.10+、uv、CMake、VC++ Runtime/VC++ Build Tools、
 #    Hikrobot MVS SDK。nssm.exe 放到 bin\nssm.exe 或 tools\nssm\nssm.exe。
-#    真实模型文件拷贝到 D:\seat-aoi-model\ 对应子目录。
+#    真实模型文件拷贝到与 ProjectRoot 同盘的 \seat-aoi-model\ 对应子目录。
 $ProjectRoot = “C:\seat-surface-aoi”
 $RepoUrl = “<REPO_URL>”
 
@@ -131,18 +131,18 @@ Set-Location $ProjectRoot
 # 2. 配置生产环境参数：按现场确认 COM 口、相机 SN、结果回传 IP/端口
 notepad .\cpp_controller\config\station_runtime.production.conf
 
-# 3. 一键安装：Python 依赖、C++ 构建、PyInstaller 打包、D 盘数据目录、Windows 服务
+# 3. 一键安装：Python 依赖、C++ 构建、配置路径注入、PyInstaller 打包、同盘数据目录、Windows 服务
 powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
   -BuildController `
   -EnableHikrobotMvs `
   -BuildPythonPackages `
-  -DataRoot D:\seat-aoi-data `
-  -ModelRoot D:\seat-aoi-model `
   -LineId LINE1_AOI_01 `
   -GridLayout 2x1
 ```
 
-`-BuildPythonPackages` 会在工控机本地用 PyInstaller 将 `python_detector` 和 `display_app` 分别打包为独立 `.exe`（`--onefile` / `--windowed --onedir`），避免源码直接暴露在磁盘上。安装脚本注册 `SeatAoiDetector` 服务时会把 `--recipe-dir C:\seat-surface-aoi\python_detector\config` 传给打包后的检测进程，配方、标定和 ROI 模板优先从这个可维护目录读取；PyInstaller 同时把 `python_detector\config` 打进 `seat_aoi_detector.exe`，只作为外部配置目录缺失时的兜底资源，避免 onefile 临时 `_MEI...` 目录下找不到标定文件。打包需要 VC++ Build Tools（PyInstaller 编译引导程序），安装脚本会在缺失时提示安装。
+默认情况下，安装脚本把运行数据和模型目录放在 `ProjectRoot` 所在盘符根目录，例如项目在 `C:\seat-surface-aoi` 时使用 `C:\seat-aoi-data` 和 `C:\seat-aoi-model`，项目在 `E:\seat-surface-aoi` 时使用 `E:\seat-aoi-data` 和 `E:\seat-aoi-model`。如现场要求独立数据盘，可继续显式传入 `-DataRoot` 和 `-ModelRoot`。
+
+`-BuildPythonPackages` 会在工控机本地用 PyInstaller 将 `python_detector` 和 `display_app` 分别打包为独立 `.exe`（`--onefile` / `--windowed --onedir`），避免源码直接暴露在磁盘上。安装脚本会从 C++ `production.conf` 读取 active `recipe_id`，按 YAML 内容定位实际运行配方，找不到或 `-Recipe` 与 active `recipe_id` 不一致时直接失败；随后把 C++ 配置、active 生产配方中的 trace/model 路径注入为本次 `DataRoot`/`ModelRoot` 绝对路径，并断言模型路径都在当前 `ModelRoot` 下。服务注册时把 `--recipe-dir <ProjectRoot>\python_detector\config` 传给打包后的检测进程；配方、标定和 ROI 模板优先从这个可维护目录读取，外部目录缺资源时不会回退 `_MEI`。PyInstaller 同时把已注入路径后的 `python_detector\config` 打进 `seat_aoi_detector.exe`，只作为未显式传入外部配方目录时的兜底资源。打包需要 VC++ Build Tools（PyInstaller 编译引导程序）；安装脚本会在 `-BuildPythonPackages` 时自动安装 PyInstaller 到当前 venv。
 
 如果 C++ 主控已经构建好或者不需要打包 Python，可省略对应开关：
 
@@ -174,16 +174,17 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
 - cmake 构建 `seat_aoi_controller.exe`（如果使用 `-BuildController`）
 - PyInstaller 打包 `seat_aoi_detector.exe` + `seat_aoi_display\`（如果使用 `-BuildPythonPackages`）
 - `seat_aoi_detector.exe` 打包时内置 `python_detector\config` 兜底资源，服务运行时仍通过 `--recipe-dir` 指向安装目录配置
-- 创建 `D:\seat-aoi-data\` 和 `D:\seat-aoi-model\` 目录结构
-- 注入生产配置中的 `trace_root`/`image_save.root_dir` → D 盘绝对路径
-- 注入配方中的模型路径 → D 盘绝对路径
-- 复制 `model/` 下已有资产到 `D:\seat-aoi-model\`
+- 创建同盘 `\seat-aoi-data\` 和 `\seat-aoi-model\` 目录结构，或使用显式 `-DataRoot`/`-ModelRoot`
+- 注入生产配置中的 `trace_root`/`image_save.root_dir` → 当前 `DataRoot` 绝对路径；Python 算法 trace 也使用该 `trace_root`
+- 按 C++ active `recipe_id` 定位实际 YAML，注入配方中的模型路径 → 当前 `ModelRoot` 绝对路径，注入失败直接中止
+- 复制 `model/` 下已有真实资产到当前 `ModelRoot`；源文件是占位文件或目标已有真实文件时不会覆盖
 - `seat_aoi_controller.exe --validate-config`
 - `python -m tools.validate_protocol`
+- `seat_aoi_detector.exe --validate-config-only` 或 venv detector 入口，校验运行配置、配方、标定和 ROI
 - `python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1`
 - 注册 `SeatAoiDetector` 和 `SeatAoiController` 两个自启动后台服务（指向打包 `.exe`）
 - 创建桌面快捷方式（指向打包 `seat_aoi_display.exe`，默认只读展示；只有传入 `-EnableDisplayManualTrigger` 才写入手动触发参数）
-- 服务 stdout/stderr 写入 `D:\seat-aoi-data\logs\services\`
+- 服务 stdout/stderr 写入当前 `DataRoot\logs\services\`
 - 可选：`-CleanPythonSource` 删除 `.py` 明文源码
 
 `tools\windows\*.ps1` 交付脚本保持 ASCII 文本，兼容工控机常见的 Windows PowerShell 5.1，避免 UTF-8 无 BOM 脚本中的中文字符串被系统 ANSI 代码页误读后触发解析错误。
@@ -195,7 +196,7 @@ Start-Service SeatAoiController
 Start-Service SeatAoiDetector
 ```
 
-操作员从桌面双击 `Seat AOI Display` 打开展示前端。展示前端是 GUI 程序，不注册为 Windows Service；如需登录后自动打开，可安装时追加 `-CreateStartupShortcut`。后台服务日志写入 `D:\seat-aoi-data\logs\`，检测和展示事件写入 `D:\seat-aoi-data\trace\`。
+操作员从桌面双击 `Seat AOI Display` 打开展示前端。展示前端是 GUI 程序，不注册为 Windows Service；如需登录后自动打开，可安装时追加 `-CreateStartupShortcut`。后台服务日志写入当前 `DataRoot\logs\`，检测和展示事件写入当前 `DataRoot\trace\`。
 
 卸载服务和快捷方式时执行：
 
@@ -203,13 +204,13 @@ Start-Service SeatAoiDetector
 powershell -ExecutionPolicy Bypass -File .\tools\windows\uninstall_station.ps1
 ```
 
-卸载脚本只移除 `SeatAoiDetector`、`SeatAoiController` 和快捷方式，不删除项目代码、配置、模型、`trace` 或日志。D 盘数据目录 (`D:\seat-aoi-data\`、`D:\seat-aoi-model\`) 需要手动清理。
+卸载脚本只移除 `SeatAoiDetector`、`SeatAoiController` 和快捷方式，不删除项目代码、配置、模型、`trace` 或日志。默认同盘数据目录（例如 `C:\seat-aoi-data\`、`C:\seat-aoi-model\`）或显式传入的目录需要手动清理。
 
 仍可手动启动三进程做排障：
 
 ```powershell
-# 终端 1：Python detector，必须传入同一份 production.conf
-.\.venv\Scripts\python.exe -m python_detector.detector_main --config cpp_controller\config\station_runtime.production.conf
+# 终端 1：Python detector，必须传入同一份 production.conf 和安装目录配方
+.\.venv\Scripts\python.exe -m python_detector.detector_main --config cpp_controller\config\station_runtime.production.conf --recipe-dir .\python_detector\config
 
 # 终端 2：C++ 主控，持续生产循环
 .\bin\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.production.conf --loop
@@ -228,12 +229,12 @@ seat-surface-aoi/
 ├── python_detector/     # Python 检测进程、模型后端、ROI、融合和 trace
 ├── display_app/         # PySide6/QML 展示前端，可选 TCP 手动触发入口
 ├── training_tools/      # 离线样本、embedding、PCA/PatchCore/FAISS、benchmark
-├── model/               # 模型产物占位目录（产线部署时迁至 D:\seat-aoi-model\）
+├── model/               # 模型产物占位目录（产线部署时迁至当前 ModelRoot）
 ├── docs/                # 架构、协议和运维文档
 └── tools/               # 协议校验、模拟 IPC、打包、预检和 Windows 交付安装脚本
 
-D:\seat-aoi-data\        # 运行时数据（trace / images / logs）
-D:\seat-aoi-model\       # 模型资产（roi_yolo / wideresnet50 / patchcore）
+<ProjectRoot盘符>:\seat-aoi-data\   # 默认运行时数据（trace / images / logs）
+<ProjectRoot盘符>:\seat-aoi-model\  # 默认模型资产（roi_yolo / wideresnet50 / patchcore）
 ```
 
 ROI 定位模型当前只映射一个目标 ROI 名称 `seat`。训练数据应采用 YOLO segmentation 格式，导出的产物放入 `model/roi_yolo/seat_roi_seg.onnx`，并与 `python_detector/config/*recipe*.yaml` 中的 `roi_locator.class_names: [seat]`、ROI 模板和标定文件保持一致；这里的 `class_names` 只服务 ROI 定位，不代表缺陷类别。

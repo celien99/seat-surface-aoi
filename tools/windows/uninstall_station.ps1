@@ -4,6 +4,8 @@ param(
   [string]$ControllerServiceName = "SeatAoiController",
   [string]$ShortcutName = "Seat AOI Display",
   [string]$NssmPath = "",
+  [string]$DataRoot = "",
+  [string]$ModelRoot = "",
   [switch]$RemoveStartupShortcut,
   [switch]$CurrentUserShortcut
 )
@@ -16,6 +18,34 @@ function Resolve-ProjectRoot {
     return (Resolve-Path -LiteralPath $Value).Path
   }
   return (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
+}
+
+function Resolve-DefaultRootOnProjectDrive {
+  param([string]$Root, [string]$LeafName)
+  $rootPath = [System.IO.Path]::GetPathRoot($Root)
+  if (-not $rootPath) {
+    throw "Cannot determine project drive from ProjectRoot: $Root"
+  }
+  return Join-Path $rootPath $LeafName
+}
+
+function Resolve-DeploymentRoot {
+  param([string]$Value, [string]$DefaultLeafName, [string]$Root)
+  if (-not $Value) {
+    return (Resolve-DefaultRootOnProjectDrive -Root $Root -LeafName $DefaultLeafName)
+  }
+  $projectDrive = [System.IO.Path]::GetPathRoot($Root)
+  if ($Value -match '^[A-Za-z]:[^\\/]') {
+    throw "Deployment root must be fully qualified or relative to ProjectRoot, not drive-relative: $Value"
+  }
+  if ($Value -match '^[\\/][^\\/]') {
+    $rootRelative = $Value -replace '^[\\/]+', ''
+    return [System.IO.Path]::GetFullPath((Join-Path $projectDrive $rootRelative))
+  }
+  if ($Value -match '^(?:[A-Za-z]:[\\/]|\\\\)') {
+    return [System.IO.Path]::GetFullPath($Value)
+  }
+  return [System.IO.Path]::GetFullPath((Join-Path $Root $Value))
 }
 
 function Test-IsAdministrator {
@@ -109,6 +139,8 @@ if (-not (Test-IsAdministrator)) {
 }
 
 $ProjectRoot = Resolve-ProjectRoot -Value $ProjectRoot
+$DataRoot = Resolve-DeploymentRoot -Value $DataRoot -DefaultLeafName "seat-aoi-data" -Root $ProjectRoot
+$ModelRoot = Resolve-DeploymentRoot -Value $ModelRoot -DefaultLeafName "seat-aoi-model" -Root $ProjectRoot
 $Nssm = Resolve-Nssm -ExplicitPath $NssmPath -Root $ProjectRoot
 
 Remove-ServiceIfExists -Nssm $Nssm -Name $DetectorServiceName
@@ -128,5 +160,5 @@ if ($RemoveStartupShortcut) {
 
 Write-Host "Seat Surface AOI services and shortcuts were uninstalled."
 Write-Host "Project code, config: $ProjectRoot (not deleted)"
-Write-Host "Data (trace/images/logs) on D: drive (not deleted) -- manually remove if needed: D:\seat-aoi-data\"
-Write-Host "Models on D: drive (not deleted) -- manually remove if needed: D:\seat-aoi-model\"
+Write-Host "Data (trace/images/logs) not deleted -- manually remove if needed: $DataRoot"
+Write-Host "Models not deleted -- manually remove if needed: $ModelRoot"

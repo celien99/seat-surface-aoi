@@ -25,8 +25,8 @@ param(
   [int]$ManualTriggerPort = 9000,
   [int]$ManualTriggerTimeoutMs = 1000,
   [switch]$BuildPythonPackages,
-  [string]$DataRoot = "D:\seat-aoi-data",
-  [string]$ModelRoot = "D:\seat-aoi-model",
+  [string]$DataRoot = "",
+  [string]$ModelRoot = "",
   [switch]$CleanPythonSource
 )
 
@@ -38,6 +38,34 @@ function Resolve-ProjectRoot {
     return (Resolve-Path -LiteralPath $Value).Path
   }
   return (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
+}
+
+function Resolve-DefaultRootOnProjectDrive {
+  param([string]$Root, [string]$LeafName)
+  $rootPath = [System.IO.Path]::GetPathRoot($Root)
+  if (-not $rootPath) {
+    throw "Cannot determine project drive from ProjectRoot: $Root"
+  }
+  return Join-Path $rootPath $LeafName
+}
+
+function Resolve-DeploymentRoot {
+  param([string]$Value, [string]$DefaultLeafName, [string]$Root)
+  if (-not $Value) {
+    return (Resolve-DefaultRootOnProjectDrive -Root $Root -LeafName $DefaultLeafName)
+  }
+  $projectDrive = [System.IO.Path]::GetPathRoot($Root)
+  if ($Value -match '^[A-Za-z]:[^\\/]') {
+    throw "Deployment root must be fully qualified or relative to ProjectRoot, not drive-relative: $Value"
+  }
+  if ($Value -match '^[\\/][^\\/]') {
+    $rootRelative = $Value -replace '^[\\/]+', ''
+    return [System.IO.Path]::GetFullPath((Join-Path $projectDrive $rootRelative))
+  }
+  if ($Value -match '^(?:[A-Za-z]:[\\/]|\\\\)') {
+    return [System.IO.Path]::GetFullPath($Value)
+  }
+  return [System.IO.Path]::GetFullPath((Join-Path $Root $Value))
 }
 
 function Test-IsAdministrator {
@@ -109,7 +137,7 @@ function Get-DisplayPython {
 }
 
 function Install-PythonEnvironment {
-  param([string]$Root, [string]$ExplicitPython)
+  param([string]$Root, [string]$ExplicitPython, [bool]$IncludePyInstaller = $false)
 
   $venvPath = Join-Path $Root ".venv"
   $venvPython = Join-Path $venvPath "Scripts\python.exe"
@@ -121,6 +149,9 @@ function Install-PythonEnvironment {
     $requirementsPath = Join-Path $env:TEMP "seat-aoi-runtime-requirements.txt"
     Invoke-Native -ArgList @("uv", "export", "--format", "requirements.txt", "--frozen", "--no-hashes", "--no-emit-project", "--no-dev", "--extra", "onnx", "--extra", "faiss", "--extra", "display", "--output-file", $requirementsPath)
     Invoke-Native -ArgList @("uv", "pip", "install", "--python", $venvPython, "--requirement", $requirementsPath)
+    if ($IncludePyInstaller) {
+      Invoke-Native -ArgList @("uv", "pip", "install", "--python", $venvPython, "pyinstaller>=6.0")
+    }
     Invoke-Native -ArgList @("uv", "pip", "check", "--python", $venvPython)
     return
   }
@@ -136,7 +167,11 @@ function Install-PythonEnvironment {
   }
 
   Invoke-Native -ArgList @($venvPython, "-m", "pip", "install", "--upgrade", "pip")
-  Invoke-Native -ArgList @($venvPython, "-m", "pip", "install", "numpy", "PyYAML", "scipy", "onnxruntime", "faiss-cpu", "PySide6")
+  $packages = @("numpy", "PyYAML", "scipy", "onnxruntime", "faiss-cpu", "PySide6")
+  if ($IncludePyInstaller) {
+    $packages += "pyinstaller>=6.0"
+  }
+  Invoke-Native -ArgList (@($venvPython, "-m", "pip", "install") + $packages)
   Invoke-Native -ArgList @($venvPython, "-m", "pip", "check")
 }
 
@@ -302,29 +337,155 @@ function Update-ProductionConfigPaths {
   Write-Host "Production config paths updated: trace_root/image_save.root_dir -> $DataRoot"
 }
 
+function Convert-RecipeAssetPath {
+  param([string]$Value, [string]$ModelRoot)
+  $clean = $Value.Trim().Trim('"', "'")
+  $segments = @($clean -split '[\\/]+') | Where-Object { $_ -and $_ -ne "." }
+  $knownRoots = @("roi_yolo", "wideresnet50", "patchcore")
+  $suffixSegments = @()
+  for ($index = 0; $index -lt $segments.Count; $index++) {
+    if ($segments[$index] -eq "model") {
+      if ($index + 1 -ge $segments.Count) {
+        break
+      }
+      $suffixSegments = @($segments[($index + 1)..($segments.Count - 1)])
+      break
+    }
+    if ($knownRoots -contains $segments[$index]) {
+      $suffixSegments = @($segments[$index..($segments.Count - 1)])
+      break
+    }
+  }
+  if ($suffixSegments.Count -eq 0) {
+    throw "Cannot map recipe asset path to ModelRoot: $Value. Use model/<subdir>/<file> or a known model subdir."
+  }
+  $resolved = $ModelRoot
+  foreach ($segment in $suffixSegments) {
+    $resolved = Join-Path $resolved $segment
+  }
+  return $resolved
+}
+
 function Update-RecipeModelPaths {
   param([string]$RecipePath, [string]$ModelRoot, [string]$DataRoot)
   $content = Get-Content -LiteralPath $RecipePath -Encoding UTF8
   $updated = @()
   foreach ($line in $content) {
-    if ($line -match '^\s*model_path:\s*model/roi_yolo/') {
-      $updated += "  model_path: $(Join-Path $ModelRoot 'roi_yolo\seat_roi_seg.onnx')"
-    } elseif ($line -match '^\s*embedding_model_path:\s*model/wideresnet50/') {
-      $updated += "    embedding_model_path: $(Join-Path $ModelRoot 'wideresnet50\seat_wrn50_embedding.onnx')"
-    } elseif ($line -match '^\s*pca_path:\s*model/patchcore/seat_pca\.json') {
-      $updated += "    pca_path: $(Join-Path $ModelRoot 'patchcore\seat_pca.json')"
-    } elseif ($line -match '^\s*memory_bank_path:\s*model/patchcore/seat_patchcore_bank\.json') {
-      $updated += "    memory_bank_path: $(Join-Path $ModelRoot 'patchcore\seat_patchcore_bank.json')"
-    } elseif ($line -match '^\s*faiss_index_path:\s*model/patchcore/seat_patchcore\.faiss') {
-      $updated += "    faiss_index_path: $(Join-Path $ModelRoot 'patchcore\seat_patchcore.faiss')"
-    } elseif ($line -match '^\s*root_dir:\s*trace\s*$') {
-      $updated += "  root_dir: $(Join-Path $DataRoot 'trace')"
+    if ($line -match '^(\s*)(model_path|embedding_model_path|pca_path|memory_bank_path|faiss_index_path)\s*:\s*(.+?)\s*(?:#.*)?$') {
+      $indent = $matches[1]
+      $key = $matches[2]
+      $assetPath = Convert-RecipeAssetPath -Value $matches[3] -ModelRoot $ModelRoot
+      $updated += "$indent${key}: $assetPath"
+    } elseif ($line -match '^(\s*)root_dir\s*:\s*.*$') {
+      $updated += "$($matches[1])root_dir: $(Join-Path $DataRoot 'trace')"
     } else {
       $updated += $line
     }
   }
   [System.IO.File]::WriteAllLines($RecipePath, $updated, [System.Text.UTF8Encoding]::new($false))
   Write-Host "Recipe model paths updated: -> $ModelRoot, trace -> $DataRoot"
+}
+
+function Get-StationConfigValue {
+  param([string]$ConfigPath, [string]$Key)
+  foreach ($line in Get-Content -LiteralPath $ConfigPath -Encoding UTF8) {
+    $clean = ($line -split '#', 2)[0].Trim()
+    if (-not $clean -or -not $clean.Contains("=")) {
+      continue
+    }
+    $parts = $clean.Split("=", 2)
+    if ($parts[0].Trim() -eq $Key) {
+      return $parts[1].Trim()
+    }
+  }
+  return ""
+}
+
+function Get-RecipeIdFromYaml {
+  param([string]$RecipePath)
+  foreach ($line in Get-Content -LiteralPath $RecipePath -Encoding UTF8) {
+    $clean = ($line -split '#', 2)[0].Trim()
+    if ($clean -match '^recipe_id\s*:\s*(.+)$') {
+      return $matches[1].Trim().Trim('"', "'")
+    }
+  }
+  return ""
+}
+
+function Resolve-ActiveRecipePath {
+  param([string]$RecipeDir, [string]$RecipeArg, [string]$RecipeId)
+  $candidates = @()
+  if ($RecipeArg) {
+    $argPath = if ([IO.Path]::IsPathRooted($RecipeArg)) { $RecipeArg } else { Join-Path $RecipeDir $RecipeArg }
+    if ([IO.Path]::GetExtension($argPath) -eq "") {
+      $argPath = "$argPath.yaml"
+    }
+    if (Test-Path -LiteralPath $argPath) {
+      $candidates += (Resolve-Path -LiteralPath $argPath).Path
+    }
+  }
+  foreach ($candidate in Get-ChildItem -LiteralPath $RecipeDir -Filter "*.yaml") {
+    if ($candidate.Name.EndsWith(".example.yaml")) {
+      continue
+    }
+    $candidateRecipeId = Get-RecipeIdFromYaml -RecipePath $candidate.FullName
+    if ($candidateRecipeId -eq $RecipeId) {
+      $candidates += $candidate.FullName
+    }
+  }
+  $unique = @($candidates | Select-Object -Unique)
+  if ($unique.Count -eq 0) {
+    throw "Active recipe YAML not found for recipe_id=$RecipeId under $RecipeDir. Do not continue with unpatched recipe paths."
+  }
+  if ($unique.Count -gt 1) {
+    throw "Multiple recipe YAML files matched recipe_id=$RecipeId or -Recipe=$RecipeArg: $($unique -join ', ')"
+  }
+  $resolved = $unique[0]
+  $actualRecipeId = Get-RecipeIdFromYaml -RecipePath $resolved
+  if ($actualRecipeId -ne $RecipeId) {
+    throw "-Recipe points to $resolved with recipe_id=$actualRecipeId, but production config uses recipe_id=$RecipeId"
+  }
+  return $resolved
+}
+
+function Assert-RecipeDeploymentPaths {
+  param([string]$RecipePath, [string]$ModelRoot, [string]$DataRoot)
+  $content = Get-Content -LiteralPath $RecipePath -Encoding UTF8
+  $modelRootPrefix = ([System.IO.Path]::GetFullPath($ModelRoot)).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+  $traceRoot = [System.IO.Path]::GetFullPath((Join-Path $DataRoot 'trace'))
+  $pathKeys = @("model_path", "embedding_model_path", "pca_path", "memory_bank_path", "faiss_index_path")
+  foreach ($line in $content) {
+    foreach ($key in $pathKeys) {
+      if ($line -match "^\s*$key\s*:\s*(.+?)\s*(?:#.*)?$") {
+        $value = $matches[1].Trim().Trim('"', "'")
+        if ($value -notmatch '^(?:[A-Za-z]:[\\/]|\\\\)') {
+          throw "Recipe path is not absolute after injection: $RecipePath $key=$value"
+        }
+        $fullValue = [System.IO.Path]::GetFullPath($value)
+        if (-not $fullValue.StartsWith($modelRootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+          throw "Recipe path is outside ModelRoot after injection: $RecipePath $key=$value ModelRoot=$ModelRoot"
+        }
+      }
+    }
+    if ($line -match '^\s*root_dir\s*:\s*(.+?)\s*(?:#.*)?$') {
+      $value = $matches[1].Trim().Trim('"', "'")
+      if ([System.IO.Path]::GetFullPath($value) -ne $traceRoot) {
+        throw "Recipe trace root mismatch after injection: $RecipePath root_dir=$value expected=$traceRoot"
+      }
+    }
+  }
+}
+
+function Test-PlaceholderFile {
+  param([string]$Path)
+  if (-not (Test-Path -LiteralPath $Path)) {
+    return $true
+  }
+  $item = Get-Item -LiteralPath $Path
+  if ($item.Length -le 1) {
+    return $true
+  }
+  return $false
 }
 
 function Copy-ModelAssets {
@@ -346,6 +507,14 @@ function Copy-ModelAssets {
     $src = Join-Path $modelDir $copy.Src
     $dst = Join-Path $ModelRoot $copy.Dst
     if (Test-Path -LiteralPath $src) {
+      if (Test-PlaceholderFile -Path $src) {
+        Write-Host "Model source is placeholder, skip: $src"
+        continue
+      }
+      if ((Test-Path -LiteralPath $dst) -and (-not (Test-PlaceholderFile -Path $dst))) {
+        Write-Host "Model already exists, keep existing: $dst"
+        continue
+      }
       Copy-Item -LiteralPath $src -Destination $dst -Force
       Write-Host "Model copied: $src -> $dst"
     } else {
@@ -460,6 +629,8 @@ if (-not (Test-IsAdministrator)) {
 }
 
 $ProjectRoot = Resolve-ProjectRoot -Value $ProjectRoot
+$DataRoot = Resolve-DeploymentRoot -Value $DataRoot -DefaultLeafName "seat-aoi-data" -Root $ProjectRoot
+$ModelRoot = Resolve-DeploymentRoot -Value $ModelRoot -DefaultLeafName "seat-aoi-model" -Root $ProjectRoot
 $ConfigFullPath = if ([IO.Path]::IsPathRooted($ConfigPath)) { $ConfigPath } else { Join-Path $ProjectRoot $ConfigPath }
 $ControllerExe = Join-Path $ProjectRoot "bin\seat_aoi_controller.exe"
 
@@ -470,7 +641,7 @@ try {
   Remove-ServiceIfExists -Nssm $Nssm -Name $ControllerServiceName
 
   if (-not $SkipPythonSync) {
-    Install-PythonEnvironment -Root $ProjectRoot -ExplicitPython $PythonExe
+    Install-PythonEnvironment -Root $ProjectRoot -ExplicitPython $PythonExe -IncludePyInstaller ([bool]$BuildPythonPackages)
   }
   $VenvPython = Get-VenvPython -Root $ProjectRoot
   $DisplayPython = Get-DisplayPython -Root $ProjectRoot
@@ -485,10 +656,34 @@ try {
     throw "Production config not found: $ConfigFullPath"
   }
 
-  # ---- PyInstaller: build Python packages ----
   $DetectorExe = Join-Path $ProjectRoot "bin\seat_aoi_detector.exe"
   $DisplayDir = Join-Path $ProjectRoot "bin\seat_aoi_display"
   $DisplayExe = Join-Path $DisplayDir "seat_aoi_display.exe"
+
+  # ---- Data/model dirs and path injection ----
+  if (Test-Path -LiteralPath $DataRoot) { } else {
+    New-Item -ItemType Directory -Force -Path $DataRoot | Out-Null
+  }
+  if (Test-Path -LiteralPath $ModelRoot) { } else {
+    New-Item -ItemType Directory -Force -Path $ModelRoot | Out-Null
+  }
+  Initialize-DataDirectories -DataRoot $DataRoot -ModelRoot $ModelRoot
+  $ServiceLogRoot = Join-Path $DataRoot "logs\services"
+
+  Update-ProductionConfigPaths -ConfigPath $ConfigFullPath -DataRoot $DataRoot
+
+  $recipeDir = Join-Path $ProjectRoot "python_detector\config"
+  $ActiveRecipeId = Get-StationConfigValue -ConfigPath $ConfigFullPath -Key "recipe_id"
+  if (-not $ActiveRecipeId) {
+    throw "recipe_id not found in production config: $ConfigFullPath"
+  }
+  $recipePath = Resolve-ActiveRecipePath -RecipeDir $recipeDir -RecipeArg $Recipe -RecipeId $ActiveRecipeId
+  Update-RecipeModelPaths -RecipePath $recipePath -ModelRoot $ModelRoot -DataRoot $DataRoot
+  Assert-RecipeDeploymentPaths -RecipePath $recipePath -ModelRoot $ModelRoot -DataRoot $DataRoot
+
+  Copy-ModelAssets -Root $ProjectRoot -ModelRoot $ModelRoot
+
+  # ---- PyInstaller: build Python packages after config path injection ----
   if ($BuildPythonPackages) {
     $pyinstallerScript = Join-Path $ProjectRoot "tools\windows\build_python_packages.ps1"
     $pyinstallerArgs = @{
@@ -502,31 +697,9 @@ try {
     }
   }
 
-  # ---- D: drive data dirs and path injection ----
-  if (Test-Path -LiteralPath $DataRoot) { } else {
-    New-Item -ItemType Directory -Force -Path $DataRoot | Out-Null
-  }
-  if (Test-Path -LiteralPath $ModelRoot) { } else {
-    New-Item -ItemType Directory -Force -Path $ModelRoot | Out-Null
-  }
-  Initialize-DataDirectories -DataRoot $DataRoot -ModelRoot $ModelRoot
-  $ServiceLogRoot = Join-Path $DataRoot "logs\services"
-
-  Update-ProductionConfigPaths -ConfigPath $ConfigFullPath -DataRoot $DataRoot
-
-  $recipeDir = Join-Path $ProjectRoot "python_detector\config"
-  $recipePath = Join-Path $recipeDir "$Recipe.yaml"
-  if (Test-Path -LiteralPath $recipePath) {
-    Update-RecipeModelPaths -RecipePath $recipePath -ModelRoot $ModelRoot -DataRoot $DataRoot
-  } else {
-    Write-Host "Recipe not found, skip path update: $recipePath"
-  }
-
-  Copy-ModelAssets -Root $ProjectRoot -ModelRoot $ModelRoot
-
   # ---- Determine service and display entry points ----
   $DetectorApp = $VenvPython
-  $DetectorArgs = "-m python_detector.detector_main --config $(Quote-ServiceArgument $ConfigPath)"
+  $DetectorArgs = "-m python_detector.detector_main --config $(Quote-ServiceArgument $ConfigPath) --recipe-dir $(Quote-ServiceArgument $recipeDir)"
   $DisplayApp = $DisplayPython
 
   if ($BuildPythonPackages -and (Test-Path -LiteralPath $DetectorExe)) {
@@ -540,7 +713,12 @@ try {
   if (-not $SkipValidation) {
     Invoke-Native -ArgList @($ControllerExe, "--config", $ConfigPath, "--validate-config")
     Invoke-Native -ArgList @($VenvPython, "-m", "tools.validate_protocol")
-    Invoke-Native -ArgList @($VenvPython, "-m", "tools.validate_model_assets", "--recipe", $Recipe)
+    if ($BuildPythonPackages -and (Test-Path -LiteralPath $DetectorExe)) {
+      Invoke-Native -ArgList @($DetectorExe, "--config", $ConfigPath, "--recipe-dir", $recipeDir, "--validate-config-only")
+    } else {
+      Invoke-Native -ArgList @($VenvPython, "-m", "python_detector.detector_main", "--config", $ConfigPath, "--recipe-dir", $recipeDir, "--validate-config-only")
+    }
+    Invoke-Native -ArgList @($VenvPython, "-m", "tools.validate_model_assets", "--recipe", $recipePath)
   }
 
   Install-NssmService `

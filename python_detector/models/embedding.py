@@ -8,6 +8,7 @@ import numpy as np
 from python_detector.config.recipe_schema import ModelConfig
 from python_detector.models.asset_errors import ModelAssetUnavailableError
 from python_detector.models.onnx_runtime import create_onnx_session, numpy_module, run_first_input
+from python_detector.paths import resolve_runtime_path
 from python_detector.pipeline.feature_builder import FeatureGroup
 
 
@@ -78,7 +79,7 @@ class EmbeddingExtractor:
                 asset_path="",
                 reason="path_not_configured",
             )
-        path = Path(config.embedding_model_path)
+        path = resolve_runtime_path(config.embedding_model_path)
         if not path.exists():
             raise ModelAssetUnavailableError(
                 f"WideResNet50 spatial embedding 模型文件不存在: {config.embedding_model_path}",
@@ -151,7 +152,7 @@ class EmbeddingExtractor:
                 asset_path="",
                 reason="path_not_configured",
             )
-        path = Path(config.embedding_model_path)
+        path = resolve_runtime_path(config.embedding_model_path)
         if not path.exists():
             raise ModelAssetUnavailableError(
                 f"WideResNet50 embedding 模型文件不存在: {config.embedding_model_path}",

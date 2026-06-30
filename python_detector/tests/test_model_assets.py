@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 
 from tools.validate_model_assets import load_recipe_by_id_or_path, validate_recipe_model_assets
+from python_detector import paths as detector_paths
 
 
 def test_production_recipe_loads_full_model_chain() -> None:
@@ -21,7 +22,7 @@ def test_production_recipe_loads_full_model_chain() -> None:
         "light:HIGH_LEFT",
     )
     assert recipe.roi_locator.backend == "onnx_yolo_seg"
-    assert recipe.roi_locator.model_path == "D:\\seat-aoi-model\\roi_yolo\\seat_roi_seg.onnx"
+    assert recipe.roi_locator.model_path == "model/roi_yolo/seat_roi_seg.onnx"
     assert recipe.models["patchcore_detector"].backend == "patchcore_knn"
     assert recipe.models["patchcore_detector"].role == "primary"
     assert recipe.models["patchcore_detector"].spatial_upsample_height == 128
@@ -29,6 +30,17 @@ def test_production_recipe_loads_full_model_chain() -> None:
     assert recipe.models["patchcore_detector"].anomaly_binarize_min_ratio == 0.5
     assert recipe.models["patchcore_detector"].anomaly_binarize_relative == 0.55
     assert recipe.models["patchcore_detector"].score_threshold == 0.55
+
+
+def test_model_relative_paths_resolve_to_project_model_without_cwd(monkeypatch, tmp_path: Path) -> None:
+    project_root = tmp_path / "seat-surface-aoi"
+    model_path = project_root / "model" / "roi_yolo" / "seat_roi_seg.onnx"
+    model_path.parent.mkdir(parents=True)
+    model_path.write_bytes(b"onnx")
+    monkeypatch.setattr(detector_paths, "PROJECT_ROOT", project_root)
+    monkeypatch.chdir(tmp_path)
+
+    assert detector_paths.resolve_runtime_path("model/roi_yolo/seat_roi_seg.onnx") == model_path
 
 
 def test_production_robot_recipe_uses_patchcore_primary_detector() -> None:

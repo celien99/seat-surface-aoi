@@ -53,8 +53,9 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
 
 - **生产交付模式**（附加 `-BuildPythonPackages`）：快捷方式指向 PyInstaller 打包的独立 exe，不依赖 Python 环境。
   ```powershell
-  bin\seat_aoi_display\seat_aoi_display.exe --trace-root D:\seat-aoi-data\trace --line-id LINE1_AOI_01 --grid-layout 2x1
+  bin\seat_aoi_display\seat_aoi_display.exe --trace-root <ProjectRoot盘符>:\seat-aoi-data\trace --line-id LINE1_AOI_01 --grid-layout 2x1
   ```
+  默认 trace 根目录跟随 `ProjectRoot` 所在盘符；安装时显式传入 `-DataRoot` 会覆盖该路径。
   PyInstaller 使用 `--windowed --onedir` 构建，不弹出控制台窗口；打包后通过 `sys._MEIPASS` 解析 QML 和资源路径。
 
 如只希望当前用户可见，安装时追加 `-CurrentUserShortcut`；如需要登录 Windows 后自动打开展示前端，追加 `-CreateStartupShortcut`。生产快捷方式默认不启用 `--enable-manual-trigger`，避免抢占真实 PLC/上位机连接。

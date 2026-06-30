@@ -27,10 +27,12 @@ class SeatSurfaceAoiAlgorithm:
         recipe_manager: RecipeManager | None = None,
         pipeline: InspectionPipeline | None = None,
         trace_writer: TraceWriter | None = None,
+        trace_root_override: str | Path | None = None,
     ) -> None:
         self.recipe_manager = recipe_manager or RecipeManager()
         self.pipeline = pipeline or InspectionPipeline()
         self.trace_writer = trace_writer or TraceWriter()
+        self.trace_root_override = Path(trace_root_override) if trace_root_override else None
 
     def process(self, job: SeatInspectionJob, recipe_id: str | None = None, write_trace: bool = True) -> AlgorithmRun:
         recipe: Recipe | None = None
@@ -59,7 +61,7 @@ class SeatSurfaceAoiAlgorithm:
 
         if write_trace and recipe is not None:
             try:
-                self.trace_writer.root_dir = Path(recipe.trace.root_dir)
+                self.trace_writer.root_dir = self.trace_root_override or Path(recipe.trace.root_dir)
                 trace_dir = self.trace_writer.write(job, recipe, result, self.pipeline.last_context)
             except Exception as exc:
                 trace_error = {

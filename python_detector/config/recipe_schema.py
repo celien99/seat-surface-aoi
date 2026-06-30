@@ -74,6 +74,9 @@ class RecipeManager:
             return self._recipes[recipe_id]
         raise RecipeValidationError(f"配方不存在: {recipe_id}")
 
+    def all_recipes(self) -> tuple[Recipe, ...]:
+        return tuple(self._recipes.values())
+
     def _load_recipe_dir(self) -> None:
         if not self.recipe_dir.exists():
             raise RecipeValidationError(f"配方目录不存在: {self.recipe_dir}")

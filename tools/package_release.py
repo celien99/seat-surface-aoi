@@ -157,7 +157,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
 ```powershell
 # Python detector
 $env:PYTHONPATH="."
-.\.venv\Scripts\python.exe -m python_detector.detector_main --config cpp_controller\config\station_runtime.production.conf
+.\.venv\Scripts\python.exe -m python_detector.detector_main --config cpp_controller\config\station_runtime.production.conf --recipe-dir .\python_detector\config
 
 # C++ 主控
 .\bin\seat_aoi_controller.exe --config cpp_controller\config\station_runtime.production.conf --loop
@@ -269,6 +269,7 @@ def main() -> int:
         ]
         if args.config:
             detector_args[2:2] = ["--config", args.config]
+            detector_args.extend(["--recipe-dir", str(ROOT_DIR / "python_detector" / "config")])
         run(python_runner() + detector_args, env=env)
         cpp_status = cpp_process.wait()
     finally:

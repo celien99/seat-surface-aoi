@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 
 from python_detector.models.asset_errors import ModelAssetUnavailableError
+from python_detector.paths import resolve_runtime_path
 
 
 @dataclass(frozen=True)
@@ -87,7 +88,7 @@ class PcaProjector:
     def _load(self, path_value: str) -> PcaParameters:
         if path_value in self._cache:
             return self._cache[path_value]
-        path = Path(path_value)
+        path = resolve_runtime_path(path_value)
         if not path.exists():
             raise ModelAssetUnavailableError(
                 f"PCA 参数文件不存在: {path_value}",

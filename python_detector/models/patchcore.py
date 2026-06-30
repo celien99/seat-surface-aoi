@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 
 from python_detector.models.asset_errors import ModelAssetUnavailableError
+from python_detector.paths import resolve_runtime_path
 
 
 @dataclass(frozen=True)
@@ -185,7 +186,7 @@ class PatchCoreKnnIndex:
     ) -> SpatialAnomalyScore | None:
         if not faiss_index_path:
             return None
-        path = Path(faiss_index_path)
+        path = resolve_runtime_path(faiss_index_path)
         if not path.exists() or path.stat().st_size <= 1:
             return None
         try:
@@ -242,7 +243,7 @@ class PatchCoreKnnIndex:
     def _load(self, path_value: str) -> PatchCoreBank:
         if path_value in self._cache:
             return self._cache[path_value]
-        path = Path(path_value)
+        path = resolve_runtime_path(path_value)
         if not path.exists():
             raise ModelAssetUnavailableError(
                 f"PatchCore memory bank 不存在: {path_value}",
@@ -306,7 +307,7 @@ class PatchCoreKnnIndex:
     ) -> PatchCoreScore | None:
         if not faiss_index_path:
             return None
-        path = Path(faiss_index_path)
+        path = resolve_runtime_path(faiss_index_path)
         if not path.exists() or path.stat().st_size <= 1:
             return None
         try:
@@ -340,7 +341,7 @@ class PatchCoreKnnIndex:
             return None
         if not faiss_index_path:
             return "faiss_index_path_not_configured"
-        path = Path(faiss_index_path)
+        path = resolve_runtime_path(faiss_index_path)
         if not path.exists():
             return "faiss_index_missing"
         if path.stat().st_size <= 1:
