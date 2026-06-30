@@ -35,155 +35,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-function Resolve-ProjectRoot {
-  param([string]$Value)
-  if ($Value) {
-    return (Resolve-Path -LiteralPath $Value).Path
-  }
-  return (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
-}
-
-function Resolve-DefaultRootOnProjectDrive {
-  param([string]$Root, [string]$LeafName)
-  $rootPath = [System.IO.Path]::GetPathRoot($Root)
-  if (-not $rootPath) {
-    throw "Cannot determine project drive from ProjectRoot: $Root"
-  }
-  return Join-Path $rootPath $LeafName
-}
-
-function Resolve-DeploymentRoot {
-  param([string]$Value, [string]$DefaultLeafName, [string]$Root)
-  if (-not $Value) {
-    return (Resolve-DefaultRootOnProjectDrive -Root $Root -LeafName $DefaultLeafName)
-  }
-  $projectDrive = [System.IO.Path]::GetPathRoot($Root)
-  if ($Value -match '^[A-Za-z]:[^\\/]') {
-    throw "Deployment root must be fully qualified or relative to ProjectRoot, not drive-relative: $Value"
-  }
-  if ($Value -match '^[\\/][^\\/]') {
-    $rootRelative = $Value -replace '^[\\/]+', ''
-    return [System.IO.Path]::GetFullPath((Join-Path $projectDrive $rootRelative))
-  }
-  if ($Value -match '^(?:[A-Za-z]:[\\/]|\\\\)') {
-    return [System.IO.Path]::GetFullPath($Value)
-  }
-  return [System.IO.Path]::GetFullPath((Join-Path $Root $Value))
-}
-
-function Test-IsAdministrator {
-  $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-  $principal = [Security.Principal.WindowsPrincipal]::new($identity)
-  return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-}
-
-function Invoke-Native {
-  param([string[]]$ArgList)
-  $saved = $ErrorActionPreference
-  $ErrorActionPreference = "Continue"
-  try {
-    & $ArgList[0] @($ArgList | Select-Object -Skip 1) 2>&1 | ForEach-Object { Write-Host $_ }
-    $exitCode = $LASTEXITCODE
-    if ($exitCode -ne 0) {
-      throw "Command failed, exit=${exitCode}: $($ArgList -join ' ')"
-    }
-  } finally {
-    $ErrorActionPreference = $saved
-  }
-}
-
-function Invoke-NativeOptional {
-  param([string[]]$ArgList)
-  $saved = $ErrorActionPreference
-  $ErrorActionPreference = "Continue"
-  try {
-    & $ArgList[0] @($ArgList | Select-Object -Skip 1) 2>&1 | Out-Null
-  } finally {
-    $ErrorActionPreference = $saved
-  }
-}
-
-function Resolve-Nssm {
-  param([string]$ExplicitPath, [string]$Root)
-  $candidates = @()
-  if ($ExplicitPath) { $candidates += $ExplicitPath }
-  $candidates += Join-Path $Root "tools\nssm\nssm.exe"
-  $candidates += Join-Path $Root "bin\nssm.exe"
-  $fromPath = Get-Command nssm.exe -ErrorAction SilentlyContinue
-  if ($fromPath) { $candidates += $fromPath.Source }
-
-  foreach ($candidate in $candidates) {
-    if ($candidate -and (Test-Path -LiteralPath $candidate)) {
-      return (Resolve-Path -LiteralPath $candidate).Path
-    }
-  }
-
-  throw "nssm.exe not found. Put it in bin\nssm.exe or tools\nssm\nssm.exe, or pass -NssmPath."
-}
-
-function Get-VenvPython {
-  param([string]$Root)
-  $venvPython = Join-Path $Root ".venv\Scripts\python.exe"
-  if (-not (Test-Path -LiteralPath $venvPython)) {
-    throw "Python venv not found: $venvPython. Install dependencies first, or do not use -SkipPythonSync."
-  }
-  return $venvPython
-}
-
-function Get-DisplayPython {
-  param([string]$Root)
-  $pythonw = Join-Path $Root ".venv\Scripts\pythonw.exe"
-  if (Test-Path -LiteralPath $pythonw) {
-    return $pythonw
-  }
-  return (Get-VenvPython -Root $Root)
-}
-
-function Assert-PythonVersionSupported {
-  param([string]$PythonPath)
-  $versionText = (& $PythonPath -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Trim()
-  if (-not ($versionText -match '^(\d+)\.(\d+)$')) {
-    throw "Cannot read Python version: $PythonPath"
-  }
-  $major = [int]$matches[1]
-  $minor = [int]$matches[2]
-  if ($major -ne 3 -or $minor -lt 10 -or $minor -gt 12) {
-    throw "Unsupported Python version $versionText. Use Python 3.10-3.12; onnxruntime/faiss/opencv delivery wheels are validated for this range."
-  }
-}
-
-function Assert-PythonModulesAvailable {
-  param(
-    [string]$PythonPath,
-    [string[]]$Modules,
-    [string]$InstallHint
-  )
-  $moduleList = ($Modules -join ",")
-  $probe = @"
-import importlib
-import sys
-missing = []
-for name in "$moduleList".split(","):
-    try:
-        importlib.import_module(name)
-    except Exception as exc:
-        missing.append(f"{name} ({type(exc).__name__}: {exc})")
-if missing:
-    print("Missing or unloadable Python modules: " + "; ".join(missing), file=sys.stderr)
-    sys.exit(1)
-"@
-  $saved = $ErrorActionPreference
-  $ErrorActionPreference = "Continue"
-  try {
-    & $PythonPath -c $probe 2>&1 | ForEach-Object { Write-Host $_ }
-    $exitCode = $LASTEXITCODE
-  } finally {
-    $ErrorActionPreference = $saved
-  }
-  if ($exitCode -ne 0) {
-    throw "Python runtime dependencies are incomplete. $InstallHint"
-  }
-}
+Import-Module -Force "$PSScriptRoot\module\SeatAoiDeployment\SeatAoiDeployment.psd1"
 
 function Install-PythonEnvironment {
   param(
@@ -208,15 +60,8 @@ function Install-PythonEnvironment {
   if ($ExplicitPython) {
     $syncArgs += @("--python", $ExplicitPython)
   }
-  if ($PackageIndexUrl) {
-    $syncArgs += @("--index-url", $PackageIndexUrl)
-  }
-  if ($PackageFindLinks) {
-    $syncArgs += @("--find-links", $PackageFindLinks)
-  }
-  if ($PackageNoIndex) {
-    $syncArgs += "--no-index"
-  }
+  $indexArgs = Get-UvPackageIndexArguments -IndexUrl $PackageIndexUrl -FindLinks $PackageFindLinks -NoIndex ([bool]$PackageNoIndex)
+  $syncArgs += $indexArgs
 
   Invoke-Native -ArgList $syncArgs
 
@@ -224,15 +69,7 @@ function Install-PythonEnvironment {
 
   if ($IncludePyInstaller) {
     [string[]]$pyiArgs = @("uv", "pip", "install", "--python", $venvPython, "pyinstaller>=6.0")
-    if ($PackageIndexUrl) {
-      $pyiArgs += @("--index-url", $PackageIndexUrl)
-    }
-    if ($PackageFindLinks) {
-      $pyiArgs += @("--find-links", $PackageFindLinks)
-    }
-    if ($PackageNoIndex) {
-      $pyiArgs += "--no-index"
-    }
+    $pyiArgs += $indexArgs
     Invoke-Native -ArgList $pyiArgs
   }
 
@@ -285,31 +122,6 @@ function Build-Controller {
   Copy-Item -LiteralPath $exe.FullName -Destination (Join-Path $binDir "seat_aoi_controller.exe") -Force
 }
 
-function Wait-ServiceStopped {
-  param([string]$Name, [int]$TimeoutSeconds = 30)
-  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-  while ((Get-Date) -lt $deadline) {
-    $service = Get-Service -Name $Name -ErrorAction SilentlyContinue
-    if ($null -eq $service -or $service.Status -eq "Stopped") {
-      return $true
-    }
-    Start-Sleep -Milliseconds 500
-  }
-  return $false
-}
-
-function Remove-ServiceIfExists {
-  param([string]$Nssm, [string]$Name)
-  $service = Get-Service -Name $Name -ErrorAction SilentlyContinue
-  if ($null -ne $service) {
-    Invoke-NativeOptional -ArgList @($Nssm, "stop", $Name)
-    if (-not (Wait-ServiceStopped -Name $Name)) {
-      throw "Service did not stop within 30 seconds: $Name. Stop it manually before reinstalling."
-    }
-    Invoke-Native -ArgList @($Nssm, "remove", $Name, "confirm")
-  }
-}
-
 function Install-NssmService {
   param(
     [string]$Nssm,
@@ -350,22 +162,6 @@ function Install-NssmService {
   if (-not $NoPythonEnv) {
     Invoke-Native -ArgList @($Nssm, "set", $Name, "AppEnvironmentExtra", "PYTHONUTF8=1`r`nPYTHONUNBUFFERED=1")
   }
-}
-
-function Quote-ShortcutArgument {
-  param([string]$Value)
-  if ($Value -match '[\s"]') {
-    return '"' + ($Value -replace '"', '\"') + '"'
-  }
-  return $Value
-}
-
-function Quote-ServiceArgument {
-  param([string]$Value)
-  if ($Value -match '[\s"]') {
-    return '"' + ($Value -replace '"', '\"') + '"'
-  }
-  return $Value
 }
 
 function Initialize-DataDirectories {
@@ -540,18 +336,6 @@ function Assert-RecipeDeploymentPaths {
   }
 }
 
-function Test-PlaceholderFile {
-  param([string]$Path)
-  if (-not (Test-Path -LiteralPath $Path)) {
-    return $true
-  }
-  $item = Get-Item -LiteralPath $Path
-  if ($item.Length -le 1) {
-    return $true
-  }
-  return $false
-}
-
 function Copy-ModelAssets {
   param([string]$Root, [string]$ModelRoot)
   $modelDir = Join-Path $Root "model"
@@ -639,29 +423,29 @@ function New-DisplayShortcut {
   if ($isPackagedExe) {
     $argumentParts = @(
       "--trace-root",
-      (Quote-ShortcutArgument $Trace),
+      (Quote-Argument $Trace),
       "--line-id",
-      (Quote-ShortcutArgument $Line),
+      (Quote-Argument $Line),
       "--grid-layout",
-      (Quote-ShortcutArgument $Grid)
+      (Quote-Argument $Grid)
     )
   } else {
     $argumentParts = @(
       "-m",
       "display_app.main",
       "--trace-root",
-      (Quote-ShortcutArgument $Trace),
+      (Quote-Argument $Trace),
       "--line-id",
-      (Quote-ShortcutArgument $Line),
+      (Quote-Argument $Line),
       "--grid-layout",
-      (Quote-ShortcutArgument $Grid)
+      (Quote-Argument $Grid)
     )
   }
   if ($EnableManualTrigger) {
     $argumentParts += @(
       "--enable-manual-trigger",
       "--manual-trigger-host",
-      (Quote-ShortcutArgument $ManualTriggerHost),
+      (Quote-Argument $ManualTriggerHost),
       "--manual-trigger-port",
       "$ManualTriggerPort",
       "--manual-trigger-timeout-ms",
@@ -777,12 +561,12 @@ try {
 
   # ---- Determine service and display entry points ----
   $DetectorApp = $VenvPython
-  $DetectorArgs = "-m python_detector.detector_main --config $(Quote-ServiceArgument $ConfigPath) --recipe-dir $(Quote-ServiceArgument $recipeDir)"
+  $DetectorArgs = "-m python_detector.detector_main --config $(Quote-Argument $ConfigPath) --recipe-dir $(Quote-Argument $recipeDir)"
   $DisplayApp = $DisplayPython
 
   if ($BuildPythonPackages -and (Test-Path -LiteralPath $DetectorExe)) {
     $DetectorApp = $DetectorExe
-    $DetectorArgs = "--config $(Quote-ServiceArgument $ConfigPath) --recipe-dir $(Quote-ServiceArgument $recipeDir)"
+    $DetectorArgs = "--config $(Quote-Argument $ConfigPath) --recipe-dir $(Quote-Argument $recipeDir)"
   }
   if ($BuildPythonPackages -and (Test-Path -LiteralPath $DisplayExe)) {
     $DisplayApp = $DisplayExe
@@ -816,7 +600,7 @@ try {
     -DisplayName "Seat AOI C++ Controller" `
     -Description "Seat Surface AOI C++ controller process." `
     -Application $ControllerExe `
-    -Arguments "--config $(Quote-ServiceArgument $ConfigPath) --loop" `
+    -Arguments "--config $(Quote-Argument $ConfigPath) --loop" `
     -Root $ProjectRoot `
     -ServiceLogRoot $ServiceLogRoot `
     -LogPrefix "controller" `
