@@ -74,6 +74,33 @@ function Get-VenvPython {
   throw "Python not found at .venv\Scripts\python.exe. Run uv sync first."
 }
 
+function Assert-PythonModulesAvailable {
+  param(
+    [string]$PythonPath,
+    [string[]]$Modules,
+    [string]$InstallHint
+  )
+  $moduleList = ($Modules -join ",")
+  $probe = @"
+import importlib
+import sys
+missing = []
+for name in "$moduleList".split(","):
+    try:
+        importlib.import_module(name)
+    except Exception as exc:
+        missing.append(f"{name} ({type(exc).__name__}: {exc})")
+if missing:
+    print("Missing or unloadable Python modules: " + "; ".join(missing), file=sys.stderr)
+    sys.exit(1)
+"@
+  try {
+    Invoke-Native -ArgList @($PythonPath, "-c", $probe)
+  } catch {
+    throw "Python package dependencies are incomplete for PyInstaller packaging. $InstallHint"
+  }
+}
+
 # ============================================================================
 # Main
 # ============================================================================
@@ -93,12 +120,20 @@ try {
 
   # ---- pre-build checks ----
   if (-not $SkipDetector) {
+    Assert-PythonModulesAvailable `
+      -PythonPath $Python `
+      -Modules @("yaml", "numpy", "scipy", "onnxruntime", "faiss", "cv2") `
+      -InstallHint "Run install_station.ps1 without -SkipPythonSync, or install the onnx/faiss/opencv extras into the selected venv."
     $entryDetector = Join-Path $ProjectRoot "python_detector\detector_main.py"
     if (-not (Test-Path -LiteralPath $entryDetector)) {
       throw "Entry script not found: $entryDetector`nSource files may have been deleted by -CleanPythonSource. Restore source files before rebuilding."
     }
   }
   if (-not $SkipDisplay) {
+    Assert-PythonModulesAvailable `
+      -PythonPath $Python `
+      -Modules @("PySide6") `
+      -InstallHint "Run install_station.ps1 without -SkipPythonSync, or install the display extra into the selected venv."
     $entryDisplay = Join-Path $ProjectRoot "display_app\main.py"
     if (-not (Test-Path -LiteralPath $entryDisplay)) {
       throw "Entry script not found: $entryDisplay`nSource files may have been deleted by -CleanPythonSource. Restore source files before rebuilding."

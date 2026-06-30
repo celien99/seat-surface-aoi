@@ -26,17 +26,20 @@ Python 只负责检测链路，不控制 PLC、工业相机或频闪；在线图
 
 Python 层使用项目根目录的 `pyproject.toml` 和 `uv.lock` 管理依赖：
 
-- 默认运行依赖：`PyYAML`、`numpy`；`PyYAML` 用于配方、标定和 ROI YAML，`numpy` 用于在线图像质量门禁、预处理、ROI 定位、配准、特征构建和模型输入/输出数组处理。
+- 默认运行依赖：`PyYAML`、`numpy`、`scipy`；`PyYAML` 用于配方、标定和 ROI YAML，`numpy` 用于在线图像质量门禁、预处理、ROI 定位、配准、特征构建和模型输入/输出数组处理，`scipy` 用于空间缺陷连通域和 trace 热力图平滑。
 - `test` dependency group：`pytest`、`numpy`，用于单元测试和 ONNX 输出解析测试。
 - `dev` dependency group：`pytest`、`numpy`、`ruff`，用于开发验证。
 - `training` dependency group：`torch`、`torchvision`、`onnx`、`onnxscript`、`onnxruntime`、`ultralytics`、`faiss-cpu`，用于 ROI YOLO、WideResNet50 embedding、PCA/PatchCore/FAISS 资产训练和导出。
 - `onnx` extra：`numpy`、`onnxruntime`，仅在启用 YOLO ROI、WideResNet50 embedding 或可选 ONNX detection 实验后端时需要。
 - `faiss` extra：`faiss-cpu`、`numpy`，仅在 PatchCore 启用 FAISS 索引加速时需要；未安装或索引缺失时回退 exact KNN。
+- `opencv` extra：`opencv-python`、`numpy`，用于生产配方 `registration.method: ecc` 的 OpenCV ECC 加速；Windows PyInstaller 打包会显式收集 `cv2`，安装脚本必须同步安装该 extra。
+
+Windows 工控机安装脚本固定导出 `onnx`、`faiss`、`display`、`opencv` extra；使用 `-SkipPythonSync` 复用现有 `.venv` 时，仍会真实导入 `onnxruntime`、`faiss`、`cv2` 和 `PySide6`，缺包或 DLL/VC runtime 导入失败会在注册服务前停止。
 
 常用命令：
 
 ```powershell
-uv sync --group dev
+uv sync --group dev --extra opencv
 uv run pytest
 uv run python -m tools.validate_protocol
 uv run python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1

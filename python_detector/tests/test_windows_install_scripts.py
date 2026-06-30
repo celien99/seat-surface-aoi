@@ -17,6 +17,44 @@ def test_install_station_installs_pyinstaller_when_packaging() -> None:
     assert "pyinstaller>=6.0" in text
 
 
+def test_install_station_installs_opencv_for_packaged_detector() -> None:
+    install_text = _script_text("install_station.ps1")
+    build_text = _script_text("build_python_packages.ps1")
+
+    assert '"--extra", "opencv"' in install_text
+    assert '"opencv-python"' in install_text
+    assert '@("yaml", "numpy", "scipy", "onnxruntime", "faiss", "cv2")' in build_text
+    assert '@("yaml", "numpy", "scipy", "onnxruntime", "faiss", "cv2", "PySide6")' in install_text
+    assert '"--collect-all", "cv2"' in build_text
+    assert '"--hidden-import", "cv2"' in build_text
+
+
+def test_install_station_rejects_unsupported_python_versions() -> None:
+    text = _script_text("install_station.ps1")
+
+    assert "Assert-PythonVersionSupported -PythonPath $venvPython" in text
+    venv_python_index = text.index("$VenvPython = Get-VenvPython -Root $ProjectRoot")
+    version_check_index = text.index("Assert-PythonVersionSupported -PythonPath $VenvPython", venv_python_index)
+    module_check_index = text.index("Assert-PythonModulesAvailable `", version_check_index)
+
+    assert venv_python_index < version_check_index < module_check_index
+    assert "-PythonPath $VenvPython" in text[module_check_index:]
+    assert "请不要使用 -SkipPythonSync" in text
+    assert "请使用 Python 3.10-3.12" in text
+    assert '"--python", $ExplicitPython' in text
+
+
+def test_build_python_packages_fails_fast_when_packaging_dependencies_are_missing() -> None:
+    text = _script_text("build_python_packages.ps1")
+
+    assert "function Assert-PythonModulesAvailable" in text
+    assert "importlib.import_module(name)" in text
+    assert "Missing or unloadable Python modules:" in text
+    assert "Python package dependencies are incomplete for PyInstaller packaging" in text
+    assert 'Run install_station.ps1 without -SkipPythonSync, or install the onnx/faiss/opencv extras' in text
+    assert 'Run install_station.ps1 without -SkipPythonSync, or install the display extra' in text
+
+
 def test_install_station_defaults_data_and_model_roots_to_project_drive() -> None:
     text = _script_text("install_station.ps1")
 

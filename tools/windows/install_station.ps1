@@ -136,6 +136,52 @@ function Get-DisplayPython {
   return (Get-VenvPython -Root $Root)
 }
 
+function Assert-PythonVersionSupported {
+  param([string]$PythonPath)
+  $versionText = (& $PythonPath -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Trim()
+  if (-not ($versionText -match '^(\d+)\.(\d+)$')) {
+    throw "无法读取 Python 版本: $PythonPath"
+  }
+  $major = [int]$matches[1]
+  $minor = [int]$matches[2]
+  if ($major -ne 3 -or $minor -lt 10 -or $minor -gt 12) {
+    throw "不支持的 Python 版本 $versionText。请使用 Python 3.10-3.12，当前 onnxruntime/faiss/opencv 交付轮子按该范围验证。"
+  }
+}
+
+function Assert-PythonModulesAvailable {
+  param(
+    [string]$PythonPath,
+    [string[]]$Modules,
+    [string]$InstallHint
+  )
+  $moduleList = ($Modules -join ",")
+  $probe = @"
+import importlib
+import sys
+missing = []
+for name in "$moduleList".split(","):
+    try:
+        importlib.import_module(name)
+    except Exception as exc:
+        missing.append(f"{name} ({type(exc).__name__}: {exc})")
+if missing:
+    print("缺少或无法导入 Python 模块: " + "; ".join(missing), file=sys.stderr)
+    sys.exit(1)
+"@
+  $saved = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    & $PythonPath -c $probe 2>&1 | ForEach-Object { Write-Host $_ }
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $saved
+  }
+  if ($exitCode -ne 0) {
+    throw "Python 运行依赖不完整。$InstallHint"
+  }
+}
+
 function Install-PythonEnvironment {
   param([string]$Root, [string]$ExplicitPython, [bool]$IncludePyInstaller = $false)
 
@@ -144,10 +190,15 @@ function Install-PythonEnvironment {
 
   if (Get-Command uv -ErrorAction SilentlyContinue) {
     if (-not (Test-Path -LiteralPath $venvPython)) {
-      Invoke-Native -ArgList @("uv", "venv", $venvPath)
+      $venvArgs = @("uv", "venv", $venvPath)
+      if ($ExplicitPython) {
+        $venvArgs = @("uv", "venv", "--python", $ExplicitPython, $venvPath)
+      }
+      Invoke-Native -ArgList $venvArgs
     }
+    Assert-PythonVersionSupported -PythonPath $venvPython
     $requirementsPath = Join-Path $env:TEMP "seat-aoi-runtime-requirements.txt"
-    Invoke-Native -ArgList @("uv", "export", "--format", "requirements.txt", "--frozen", "--no-hashes", "--no-emit-project", "--no-dev", "--extra", "onnx", "--extra", "faiss", "--extra", "display", "--output-file", $requirementsPath)
+    Invoke-Native -ArgList @("uv", "export", "--format", "requirements.txt", "--frozen", "--no-hashes", "--no-emit-project", "--no-dev", "--extra", "onnx", "--extra", "faiss", "--extra", "display", "--extra", "opencv", "--output-file", $requirementsPath)
     Invoke-Native -ArgList @("uv", "pip", "install", "--python", $venvPython, "--requirement", $requirementsPath)
     if ($IncludePyInstaller) {
       Invoke-Native -ArgList @("uv", "pip", "install", "--python", $venvPython, "pyinstaller>=6.0")
@@ -166,8 +217,9 @@ function Install-PythonEnvironment {
     }
   }
 
+  Assert-PythonVersionSupported -PythonPath $venvPython
   Invoke-Native -ArgList @($venvPython, "-m", "pip", "install", "--upgrade", "pip")
-  $packages = @("numpy", "PyYAML", "scipy", "onnxruntime", "faiss-cpu", "PySide6")
+  $packages = @("numpy", "PyYAML", "scipy", "onnxruntime", "faiss-cpu", "PySide6", "opencv-python")
   if ($IncludePyInstaller) {
     $packages += "pyinstaller>=6.0"
   }
@@ -644,6 +696,11 @@ try {
     Install-PythonEnvironment -Root $ProjectRoot -ExplicitPython $PythonExe -IncludePyInstaller ([bool]$BuildPythonPackages)
   }
   $VenvPython = Get-VenvPython -Root $ProjectRoot
+  Assert-PythonVersionSupported -PythonPath $VenvPython
+  Assert-PythonModulesAvailable `
+    -PythonPath $VenvPython `
+    -Modules @("yaml", "numpy", "scipy", "onnxruntime", "faiss", "cv2", "PySide6") `
+    -InstallHint "请不要使用 -SkipPythonSync，或先把 onnx/faiss/display/opencv extra 安装到当前 .venv。"
   $DisplayPython = Get-DisplayPython -Root $ProjectRoot
 
   if ($BuildController) {

@@ -118,7 +118,7 @@ C:\seat-aoi-data\                       # 运行时数据，默认跟随 Project
 ### 首次部署命令
 
 ```powershell
-# 0. 首次确认：已安装 Git、Python 3.10+、uv、CMake、VC++ Runtime/VC++ Build Tools、
+# 0. 首次确认：已安装 Git、Python 3.10-3.12、uv、CMake、VC++ Runtime/VC++ Build Tools、
 #    Hikrobot MVS SDK。nssm.exe 放到 bin\nssm.exe 或 tools\nssm\nssm.exe。
 #    真实模型文件拷贝到与 ProjectRoot 同盘的 \seat-aoi-model\ 对应子目录。
 $ProjectRoot = “C:\seat-surface-aoi”
@@ -142,7 +142,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
 
 默认情况下，安装脚本把运行数据和模型目录放在 `ProjectRoot` 所在盘符根目录，例如项目在 `C:\seat-surface-aoi` 时使用 `C:\seat-aoi-data` 和 `C:\seat-aoi-model`，项目在 `E:\seat-surface-aoi` 时使用 `E:\seat-aoi-data` 和 `E:\seat-aoi-model`。如现场要求独立数据盘，可继续显式传入 `-DataRoot` 和 `-ModelRoot`。
 
-`-BuildPythonPackages` 会在工控机本地用 PyInstaller 将 `python_detector` 和 `display_app` 分别打包为独立 `.exe`（`--onefile` / `--windowed --onedir`），避免源码直接暴露在磁盘上。安装脚本会从 C++ `production.conf` 读取 active `recipe_id`，按 YAML 内容定位实际运行配方，找不到或 `-Recipe` 与 active `recipe_id` 不一致时直接失败；随后把 C++ 配置、active 生产配方中的 trace/model 路径注入为本次 `DataRoot`/`ModelRoot` 绝对路径，并断言模型路径都在当前 `ModelRoot` 下。服务注册时把 `--recipe-dir <ProjectRoot>\python_detector\config` 传给打包后的检测进程；配方、标定和 ROI 模板优先从这个可维护目录读取，外部目录缺资源时不会回退 `_MEI`。PyInstaller 同时把已注入路径后的 `python_detector\config` 打进 `seat_aoi_detector.exe`，只作为未显式传入外部配方目录时的兜底资源。打包需要 VC++ Build Tools（PyInstaller 编译引导程序）；安装脚本会在 `-BuildPythonPackages` 时自动安装 PyInstaller 到当前 venv。
+`-BuildPythonPackages` 会在工控机本地用 PyInstaller 将 `python_detector` 和 `display_app` 分别打包为独立 `.exe`（`--onefile` / `--windowed --onedir`），避免源码直接暴露在磁盘上。安装脚本会先校验 `.venv` 使用 Python 3.10-3.12，并安装 detector 打包所需的 ONNX Runtime、FAISS、PySide6 和 OpenCV（`cv2`）依赖，避免打包后缺少 ECC/OpenCV 模块；即使传入 `-SkipPythonSync`，也会对现有 venv 做 Python 版本和关键模块真实导入检查。安装脚本会从 C++ `production.conf` 读取 active `recipe_id`，按 YAML 内容定位实际运行配方，找不到或 `-Recipe` 与 active `recipe_id` 不一致时直接失败；随后把 C++ 配置、active 生产配方中的 trace/model 路径注入为本次 `DataRoot`/`ModelRoot` 绝对路径，并断言模型路径都在当前 `ModelRoot` 下。服务注册时把 `--recipe-dir <ProjectRoot>\python_detector\config` 传给打包后的检测进程；配方、标定和 ROI 模板优先从这个可维护目录读取，外部目录缺资源时不会回退 `_MEI`。PyInstaller 同时把已注入路径后的 `python_detector\config` 打进 `seat_aoi_detector.exe`，只作为未显式传入外部配方目录时的兜底资源。打包需要 VC++ Build Tools（PyInstaller 编译引导程序）；安装脚本会在 `-BuildPythonPackages` 时自动安装 PyInstaller 到当前 venv。
 
 如果 C++ 主控已经构建好或者不需要打包 Python，可省略对应开关：
 
@@ -170,7 +170,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
 
 ### 安装脚本默认执行项
 
-- `uv sync` 安装 Python 运行依赖（如果未使用 `-SkipPythonSync`）
+- `uv sync` 安装 Python 运行依赖（如果未使用 `-SkipPythonSync`），Windows 交付脚本固定导出 `onnx`、`faiss`、`display`、`opencv` extra；跳过同步时仍会检查当前 venv 能导入 `onnxruntime`、`faiss`、`cv2` 和 `PySide6`
 - cmake 构建 `seat_aoi_controller.exe`（如果使用 `-BuildController`）
 - PyInstaller 打包 `seat_aoi_detector.exe` + `seat_aoi_display\`（如果使用 `-BuildPythonPackages`）
 - `seat_aoi_detector.exe` 打包时内置 `python_detector\config` 兜底资源，服务运行时仍通过 `--recipe-dir` 指向安装目录配置
