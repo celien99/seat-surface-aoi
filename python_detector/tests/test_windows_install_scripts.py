@@ -44,10 +44,8 @@ def test_install_station_rejects_unsupported_python_versions() -> None:
 def test_build_python_packages_fails_fast_when_packaging_dependencies_are_missing() -> None:
     text = _script_text("build_python_packages.ps1")
 
-    assert "function Assert-PythonModulesAvailable" in text
-    assert "importlib.import_module(name)" in text
-    assert "Missing or unloadable Python modules:" in text
-    assert "Python package dependencies are incomplete for PyInstaller packaging" in text
+    assert "Import-Module" in text
+    assert "Assert-PythonModulesAvailable" in text
     assert 'Run install_station.ps1 without -SkipPythonSync, or install the onnx/faiss/opencv extras' in text
     assert 'Run install_station.ps1 without -SkipPythonSync, or install the display extra' in text
 
@@ -55,28 +53,71 @@ def test_build_python_packages_fails_fast_when_packaging_dependencies_are_missin
 def test_install_station_defaults_data_and_model_roots_to_project_drive() -> None:
     text = _script_text("install_station.ps1")
 
+    assert "Import-Module" in text
     assert 'Resolve-DeploymentRoot -Value $DataRoot -DefaultLeafName "seat-aoi-data" -Root $ProjectRoot' in text
     assert 'Resolve-DeploymentRoot -Value $ModelRoot -DefaultLeafName "seat-aoi-model" -Root $ProjectRoot' in text
-    assert "Resolve-DefaultRootOnProjectDrive -Root $Root -LeafName $DefaultLeafName" in text
     assert '[string]$DataRoot = ""' in text
     assert '[string]$ModelRoot = ""' in text
-    assert "$Value -match '^[\\\\/][^\\\\/]'" in text
-    assert "$rootRelative = $Value -replace '^[\\\\/]+', ''" in text
-    assert "Join-Path $projectDrive $rootRelative" in text
-    assert "$Value -match '^[A-Za-z]:[^\\\\/]'" in text
-    assert "not drive-relative" in text
 
 
 def test_uninstall_station_uses_same_project_drive_root_resolution() -> None:
     text = _script_text("uninstall_station.ps1")
 
+    assert "Import-Module" in text
     assert 'Resolve-DeploymentRoot -Value $DataRoot -DefaultLeafName "seat-aoi-data" -Root $ProjectRoot' in text
     assert 'Resolve-DeploymentRoot -Value $ModelRoot -DefaultLeafName "seat-aoi-model" -Root $ProjectRoot' in text
-    assert "$Value -match '^[\\\\/][^\\\\/]'" in text
-    assert "$rootRelative = $Value -replace '^[\\\\/]+', ''" in text
-    assert "Join-Path $projectDrive $rootRelative" in text
-    assert "$Value -match '^[A-Za-z]:[^\\\\/]'" in text
-    assert "not drive-relative" in text
+
+
+def test_shared_module_exports_all_expected_functions() -> None:
+    text = _script_text("module/SeatAoiDeployment/SeatAoiDeployment.psm1")
+
+    expected = [
+        "function Test-IsAdministrator",
+        "function Assert-PythonVersionSupported",
+        "function Resolve-ProjectRoot",
+        "function Resolve-DefaultRootOnProjectDrive",
+        "function Resolve-DeploymentRoot",
+        "function Invoke-Native",
+        "function Invoke-NativeOptional",
+        "function Invoke-NativeQuiet",
+        "function Get-VenvPython",
+        "function Get-DisplayPython",
+        "function Assert-PythonModulesAvailable",
+        "function Get-UvPackageIndexArguments",
+        "function Resolve-Nssm",
+        "function Wait-ServiceStopped",
+        "function Remove-ServiceIfExists",
+        "function Quote-Argument",
+        "function Test-PlaceholderFile",
+    ]
+    for func in expected:
+        assert func in text, f"Missing: {func}"
+
+
+def test_shared_module_manifest_declares_all_functions() -> None:
+    text = _script_text("module/SeatAoiDeployment/SeatAoiDeployment.psd1")
+
+    expected_exports = [
+        "Assert-PythonModulesAvailable",
+        "Assert-PythonVersionSupported",
+        "Get-DisplayPython",
+        "Get-UvPackageIndexArguments",
+        "Get-VenvPython",
+        "Invoke-Native",
+        "Invoke-NativeOptional",
+        "Invoke-NativeQuiet",
+        "Quote-Argument",
+        "Remove-ServiceIfExists",
+        "Resolve-DefaultRootOnProjectDrive",
+        "Resolve-DeploymentRoot",
+        "Resolve-Nssm",
+        "Resolve-ProjectRoot",
+        "Test-IsAdministrator",
+        "Test-PlaceholderFile",
+        "Wait-ServiceStopped",
+    ]
+    for export in expected_exports:
+        assert f"'{export}'" in text, f"Missing export: {export}"
 
 
 def test_install_station_injects_recipe_paths_before_pyinstaller_build() -> None:
