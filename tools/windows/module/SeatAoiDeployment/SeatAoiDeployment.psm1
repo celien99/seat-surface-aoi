@@ -233,6 +233,9 @@ function Remove-ServiceIfExists {
       throw "Service did not stop within 30 seconds: $Name. Stop it manually before $Context."
     }
     Invoke-Native -ArgList @($Nssm, "remove", $Name, "confirm")
+    Write-Host "Removed service: $Name"
+  } else {
+    Write-Host "Service not found, skipped: $Name"
   }
 }
 
