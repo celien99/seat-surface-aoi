@@ -268,6 +268,9 @@ seat-surface-aoi/
 ├── model/               # 模型产物占位目录（产线部署时迁至当前 ModelRoot）
 ├── docs/                # 架构、协议和运维文档
 └── tools/               # 协议校验、模拟 IPC、打包、预检和 Windows 交付安装脚本
+    └── windows/            # install_station.ps1, build_python_packages.ps1,
+        │                   # uninstall_station.ps1
+        └── module/         # SeatAoiDeployment 共享 PowerShell 模块
 
 <ProjectRoot盘符>:\seat-aoi-data\   # 默认运行时数据（trace / images / logs）
 <ProjectRoot盘符>:\seat-aoi-model\  # 默认模型资产（roi_yolo / wideresnet50 / patchcore）
