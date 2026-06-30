@@ -161,6 +161,20 @@ function Get-UvPackageSourceArgs {
   return $args
 }
 
+function Assert-PythonPackageSourceOptions {
+  param(
+    [string]$IndexUrl,
+    [string]$FindLinks,
+    [bool]$NoIndex
+  )
+  if ($IndexUrl -match '[<>]') {
+    throw "-PythonPackageIndexUrl contains placeholder characters '<' or '>'. Replace it with a real internal PyPI URL, or remove the option."
+  }
+  if ($NoIndex -and (-not $FindLinks)) {
+    throw "-PythonPackageNoIndex requires -PythonPackageFindLinks to point at a local wheelhouse."
+  }
+}
+
 function Get-PipPackageSourceArgs {
   param(
     [string]$IndexUrl,
@@ -241,6 +255,7 @@ function Install-PythonEnvironment {
 
   $venvPath = Join-Path $Root ".venv"
   $venvPython = Join-Path $venvPath "Scripts\python.exe"
+  Assert-PythonPackageSourceOptions -IndexUrl $PackageIndexUrl -FindLinks $PackageFindLinks -NoIndex $PackageNoIndex
   $uvSourceArgs = Get-UvPackageSourceArgs -IndexUrl $PackageIndexUrl -FindLinks $PackageFindLinks -NoIndex $PackageNoIndex
   $pipSourceArgs = Get-PipPackageSourceArgs -IndexUrl $PackageIndexUrl -FindLinks $PackageFindLinks -NoIndex $PackageNoIndex
 

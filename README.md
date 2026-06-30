@@ -147,12 +147,12 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
 如果工控机不能访问公网 PyPI，不要直接重试默认命令。可按现场网络选择以下任一方式：
 
 ```powershell
-# 方式 A：使用工厂内网 PyPI 镜像或代理
+# 方式 A：使用工厂内网 PyPI 镜像或代理；请把 URL 替换为现场真实地址
 powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
   -BuildController `
   -EnableHikrobotMvs `
   -BuildPythonPackages `
-  -PythonPackageIndexUrl https://<internal-pypi>/simple `
+  -PythonPackageIndexUrl https://pypi.example.local/simple `
   -LineId LINE1_AOI_01 `
   -GridLayout 2x1
 
