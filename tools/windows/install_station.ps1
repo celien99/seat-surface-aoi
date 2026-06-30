@@ -245,18 +245,17 @@ function Install-PythonEnvironment {
   if ($ExplicitPython) {
     $syncArgs += @("--python", $ExplicitPython)
   }
-
-  # uv sync uses environment variables for index configuration
-  $prevIndexUrl = $env:UV_INDEX_URL
-  $prevFindLinks = $env:UV_FIND_LINKS
-  try {
-    if ($PackageIndexUrl) { $env:UV_INDEX_URL = $PackageIndexUrl }
-    if ($PackageFindLinks) { $env:UV_FIND_LINKS = $PackageFindLinks }
-    Invoke-Native -ArgList $syncArgs
-  } finally {
-    $env:UV_INDEX_URL = $prevIndexUrl
-    $env:UV_FIND_LINKS = $prevFindLinks
+  if ($PackageIndexUrl) {
+    $syncArgs += @("--index-url", $PackageIndexUrl)
   }
+  if ($PackageFindLinks) {
+    $syncArgs += @("--find-links", $PackageFindLinks)
+  }
+  if ($PackageNoIndex) {
+    $syncArgs += "--no-index"
+  }
+
+  Invoke-Native -ArgList $syncArgs
 
   Assert-PythonVersionSupported -PythonPath $venvPython
 
@@ -725,6 +724,13 @@ $ProjectRoot = Resolve-ProjectRoot -Value $ProjectRoot
 $DataRoot = Resolve-DeploymentRoot -Value $DataRoot -DefaultLeafName "seat-aoi-data" -Root $ProjectRoot
 $ModelRoot = Resolve-DeploymentRoot -Value $ModelRoot -DefaultLeafName "seat-aoi-model" -Root $ProjectRoot
 $ConfigFullPath = if ([IO.Path]::IsPathRooted($ConfigPath)) { $ConfigPath } else { Join-Path $ProjectRoot $ConfigPath }
+if (-not (Test-Path -LiteralPath $ConfigFullPath)) {
+  throw "Production config not found: $ConfigFullPath"
+}
+$recipeDir = Join-Path $ProjectRoot "python_detector\config"
+if (-not (Test-Path -LiteralPath $recipeDir)) {
+  throw "Recipe config directory not found: $recipeDir. Source files may have been deleted by -CleanPythonSource. Restore source files before reinstalling."
+}
 $ControllerExe = Join-Path $ProjectRoot "bin\seat_aoi_controller.exe"
 
 Push-Location $ProjectRoot
@@ -756,9 +762,6 @@ try {
   if (-not (Test-Path -LiteralPath $ControllerExe)) {
     throw "C++ controller not found: $ControllerExe. Build it first, or rerun with -BuildController."
   }
-  if (-not (Test-Path -LiteralPath $ConfigFullPath)) {
-    throw "Production config not found: $ConfigFullPath"
-  }
 
   $DetectorExe = Join-Path $ProjectRoot "bin\seat_aoi_detector.exe"
   $DisplayDir = Join-Path $ProjectRoot "bin\seat_aoi_display"
@@ -776,7 +779,6 @@ try {
 
   Update-ProductionConfigPaths -ConfigPath $ConfigFullPath -DataRoot $DataRoot
 
-  $recipeDir = Join-Path $ProjectRoot "python_detector\config"
   $ActiveRecipeId = Get-StationConfigValue -ConfigPath $ConfigFullPath -Key "recipe_id"
   if (-not $ActiveRecipeId) {
     throw "recipe_id not found in production config: $ConfigFullPath"
