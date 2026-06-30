@@ -11,6 +11,9 @@ param(
   [string]$ShortcutName = "Seat AOI Display",
   [string]$NssmPath = "",
   [string]$PythonExe = "",
+  [string]$PythonPackageIndexUrl = "",
+  [string]$PythonPackageFindLinks = "",
+  [switch]$PythonPackageNoIndex,
   [switch]$SkipPythonSync,
   [switch]$BuildController,
   [switch]$EnableHikrobotMvs,
@@ -136,6 +139,50 @@ function Get-DisplayPython {
   return (Get-VenvPython -Root $Root)
 }
 
+function Get-UvPackageSourceArgs {
+  param(
+    [string]$IndexUrl,
+    [string]$FindLinks,
+    [bool]$NoIndex
+  )
+  $args = @()
+  if ($IndexUrl) {
+    $args += @("--default-index", $IndexUrl)
+  }
+  if ($FindLinks) {
+    $args += @("--find-links", $FindLinks)
+  }
+  if ($NoIndex) {
+    if (-not $FindLinks) {
+      throw "-PythonPackageNoIndex requires -PythonPackageFindLinks to point at a local wheelhouse."
+    }
+    $args += "--no-index"
+  }
+  return $args
+}
+
+function Get-PipPackageSourceArgs {
+  param(
+    [string]$IndexUrl,
+    [string]$FindLinks,
+    [bool]$NoIndex
+  )
+  $args = @()
+  if ($IndexUrl) {
+    $args += @("--index-url", $IndexUrl)
+  }
+  if ($FindLinks) {
+    $args += @("--find-links", $FindLinks)
+  }
+  if ($NoIndex) {
+    if (-not $FindLinks) {
+      throw "-PythonPackageNoIndex requires -PythonPackageFindLinks to point at a local wheelhouse."
+    }
+    $args += "--no-index"
+  }
+  return $args
+}
+
 function Assert-PythonVersionSupported {
   param([string]$PythonPath)
   $versionText = (& $PythonPath -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Trim()
@@ -183,10 +230,19 @@ if missing:
 }
 
 function Install-PythonEnvironment {
-  param([string]$Root, [string]$ExplicitPython, [bool]$IncludePyInstaller = $false)
+  param(
+    [string]$Root,
+    [string]$ExplicitPython,
+    [bool]$IncludePyInstaller = $false,
+    [string]$PackageIndexUrl = "",
+    [string]$PackageFindLinks = "",
+    [bool]$PackageNoIndex = $false
+  )
 
   $venvPath = Join-Path $Root ".venv"
   $venvPython = Join-Path $venvPath "Scripts\python.exe"
+  $uvSourceArgs = Get-UvPackageSourceArgs -IndexUrl $PackageIndexUrl -FindLinks $PackageFindLinks -NoIndex $PackageNoIndex
+  $pipSourceArgs = Get-PipPackageSourceArgs -IndexUrl $PackageIndexUrl -FindLinks $PackageFindLinks -NoIndex $PackageNoIndex
 
   if (Get-Command uv -ErrorAction SilentlyContinue) {
     if (-not (Test-Path -LiteralPath $venvPython)) {
@@ -199,9 +255,9 @@ function Install-PythonEnvironment {
     Assert-PythonVersionSupported -PythonPath $venvPython
     $requirementsPath = Join-Path $env:TEMP "seat-aoi-runtime-requirements.txt"
     Invoke-Native -ArgList @("uv", "export", "--format", "requirements.txt", "--frozen", "--no-hashes", "--no-emit-project", "--no-dev", "--extra", "onnx", "--extra", "faiss", "--extra", "display", "--extra", "opencv", "--output-file", $requirementsPath)
-    Invoke-Native -ArgList @("uv", "pip", "install", "--python", $venvPython, "--requirement", $requirementsPath)
+    Invoke-Native -ArgList (@("uv", "pip", "install", "--python", $venvPython, "--requirement", $requirementsPath) + $uvSourceArgs)
     if ($IncludePyInstaller) {
-      Invoke-Native -ArgList @("uv", "pip", "install", "--python", $venvPython, "pyinstaller>=6.0")
+      Invoke-Native -ArgList (@("uv", "pip", "install", "--python", $venvPython, "pyinstaller>=6.0") + $uvSourceArgs)
     }
     Invoke-Native -ArgList @("uv", "pip", "check", "--python", $venvPython)
     return
@@ -218,12 +274,16 @@ function Install-PythonEnvironment {
   }
 
   Assert-PythonVersionSupported -PythonPath $venvPython
-  Invoke-Native -ArgList @($venvPython, "-m", "pip", "install", "--upgrade", "pip")
-  $packages = @("numpy", "PyYAML", "scipy", "onnxruntime", "faiss-cpu", "PySide6", "opencv-python")
+  if ($PackageNoIndex) {
+    Write-Host "Offline package mode enabled; skip pip self-upgrade."
+  } else {
+    Invoke-Native -ArgList (@($venvPython, "-m", "pip", "install", "--upgrade", "pip") + $pipSourceArgs)
+  }
+  $packages = @("numpy", "PyYAML", "scipy", "onnxruntime", "faiss-cpu", "PySide6", "opencv-python-headless")
   if ($IncludePyInstaller) {
     $packages += "pyinstaller>=6.0"
   }
-  Invoke-Native -ArgList (@($venvPython, "-m", "pip", "install") + $packages)
+  Invoke-Native -ArgList (@($venvPython, "-m", "pip", "install") + $pipSourceArgs + $packages)
   Invoke-Native -ArgList @($venvPython, "-m", "pip", "check")
 }
 
@@ -693,7 +753,13 @@ try {
   Remove-ServiceIfExists -Nssm $Nssm -Name $ControllerServiceName
 
   if (-not $SkipPythonSync) {
-    Install-PythonEnvironment -Root $ProjectRoot -ExplicitPython $PythonExe -IncludePyInstaller ([bool]$BuildPythonPackages)
+    Install-PythonEnvironment `
+      -Root $ProjectRoot `
+      -ExplicitPython $PythonExe `
+      -IncludePyInstaller ([bool]$BuildPythonPackages) `
+      -PackageIndexUrl $PythonPackageIndexUrl `
+      -PackageFindLinks $PythonPackageFindLinks `
+      -PackageNoIndex ([bool]$PythonPackageNoIndex)
   }
   $VenvPython = Get-VenvPython -Root $ProjectRoot
   Assert-PythonVersionSupported -PythonPath $VenvPython

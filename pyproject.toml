@@ -29,7 +29,7 @@ faiss = [
 ]
 opencv = [
   "numpy>=1.24",
-  "opencv-python>=4.8,<5.0",
+  "opencv-python-headless>=4.8,<5.0",
 ]
 
 [dependency-groups]
