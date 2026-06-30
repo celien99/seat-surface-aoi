@@ -139,42 +139,6 @@ function Get-DisplayPython {
   return (Get-VenvPython -Root $Root)
 }
 
-function Get-UvPackageSourceArgs {
-  param(
-    [string]$IndexUrl,
-    [string]$FindLinks,
-    [bool]$NoIndex
-  )
-  $args = @()
-  if ($IndexUrl) {
-    $args += @("--default-index", $IndexUrl)
-  }
-  if ($FindLinks) {
-    $args += @("--find-links", $FindLinks)
-  }
-  if ($NoIndex) {
-    if (-not $FindLinks) {
-      throw "-PythonPackageNoIndex requires -PythonPackageFindLinks to point at a local wheelhouse."
-    }
-    $args += "--no-index"
-  }
-  return $args
-}
-
-function Assert-PythonPackageSourceOptions {
-  param(
-    [string]$IndexUrl,
-    [string]$FindLinks,
-    [bool]$NoIndex
-  )
-  if ($IndexUrl -match '[<>]') {
-    throw "-PythonPackageIndexUrl contains placeholder characters '<' or '>'. Replace it with a real internal PyPI URL, or remove the option."
-  }
-  if ($NoIndex -and (-not $FindLinks)) {
-    throw "-PythonPackageNoIndex requires -PythonPackageFindLinks to point at a local wheelhouse."
-  }
-}
-
 function Assert-PythonVersionSupported {
   param([string]$PythonPath)
   $versionText = (& $PythonPath -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Trim()
@@ -232,7 +196,6 @@ function Install-PythonEnvironment {
   )
 
   $venvPython = Join-Path $Root ".venv\Scripts\python.exe"
-  Assert-PythonPackageSourceOptions -IndexUrl $PackageIndexUrl -FindLinks $PackageFindLinks -NoIndex $PackageNoIndex
 
   if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     throw "uv is required for Python dependency installation. Install uv before running this script."
@@ -260,8 +223,17 @@ function Install-PythonEnvironment {
   Assert-PythonVersionSupported -PythonPath $venvPython
 
   if ($IncludePyInstaller) {
-    $uvSourceArgs = Get-UvPackageSourceArgs -IndexUrl $PackageIndexUrl -FindLinks $PackageFindLinks -NoIndex $PackageNoIndex
-    Invoke-Native -ArgList (@("uv", "pip", "install", "--python", $venvPython, "pyinstaller>=6.0") + $uvSourceArgs)
+    [string[]]$pyiArgs = @("uv", "pip", "install", "--python", $venvPython, "pyinstaller>=6.0")
+    if ($PackageIndexUrl) {
+      $pyiArgs += @("--index-url", $PackageIndexUrl)
+    }
+    if ($PackageFindLinks) {
+      $pyiArgs += @("--find-links", $PackageFindLinks)
+    }
+    if ($PackageNoIndex) {
+      $pyiArgs += "--no-index"
+    }
+    Invoke-Native -ArgList $pyiArgs
   }
 
   Invoke-Native -ArgList @("uv", "pip", "check", "--python", $venvPython)
