@@ -143,16 +143,13 @@ function Assert-PythonModulesAvailable {
   )
   $moduleList = ($Modules -join ",")
   $probe = @"
-import importlib
-import sys
+import importlib, sys
 missing = []
-for name in "$moduleList".split(","):
-    try:
-        importlib.import_module(name)
-    except Exception as exc:
-        missing.append(f"{name} ({type(exc).__name__}: {exc})")
+for name in '$moduleList'.split(','):
+    try: importlib.import_module(name)
+    except Exception as exc: missing.append(f'{name} ({type(exc).__name__}: {exc})')
 if missing:
-    print("Missing or unloadable Python modules: " + "; ".join(missing), file=sys.stderr)
+    print('Missing or unloadable Python modules: ' + '; '.join(missing), file=sys.stderr)
     sys.exit(1)
 "@
   try {
