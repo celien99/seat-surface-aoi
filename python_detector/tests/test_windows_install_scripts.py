@@ -31,7 +31,6 @@ def test_install_station_installs_opencv_for_packaged_detector() -> None:
 def test_install_station_rejects_unsupported_python_versions() -> None:
     text = _script_text("install_station.ps1")
 
-    assert "Assert-PythonVersionSupported -PythonPath $venvPython" in text
     venv_python_index = text.index("$VenvPython = Get-VenvPython -Root $ProjectRoot")
     version_check_index = text.index("Assert-PythonVersionSupported -PythonPath $VenvPython", venv_python_index)
     module_check_index = text.index("Assert-PythonModulesAvailable `", version_check_index)

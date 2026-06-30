@@ -49,26 +49,25 @@ function Install-PythonEnvironment {
 
   $venvPython = Join-Path $Root ".venv\Scripts\python.exe"
 
-  if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-    throw "uv is required for Python dependency installation. Install uv before running this script."
+  if (-not (Test-Path -LiteralPath $venvPython)) {
+    if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+      throw "uv is required for Python dependency installation. Install uv before running this script."
+    }
+    [string[]]$syncArgs = @(
+      "uv", "sync", "--frozen", "--no-dev",
+      "--extra", "onnx", "--extra", "faiss", "--extra", "display", "--extra", "opencv"
+    )
+    if ($ExplicitPython) {
+      $syncArgs += @("--python", $ExplicitPython)
+    }
+    $indexArgs = Get-UvPackageIndexArguments -IndexUrl $PackageIndexUrl -FindLinks $PackageFindLinks -NoIndex ([bool]$PackageNoIndex)
+    $syncArgs += $indexArgs
+    Invoke-Native -ArgList $syncArgs
   }
-
-  [string[]]$syncArgs = @(
-    "uv", "sync", "--frozen", "--no-dev",
-    "--extra", "onnx", "--extra", "faiss", "--extra", "display", "--extra", "opencv"
-  )
-  if ($ExplicitPython) {
-    $syncArgs += @("--python", $ExplicitPython)
-  }
-  $indexArgs = Get-UvPackageIndexArguments -IndexUrl $PackageIndexUrl -FindLinks $PackageFindLinks -NoIndex ([bool]$PackageNoIndex)
-  $syncArgs += $indexArgs
-
-  Invoke-Native -ArgList $syncArgs
-
-  Assert-PythonVersionSupported -PythonPath $venvPython
 
   if ($IncludePyInstaller) {
     [string[]]$pyiArgs = @("uv", "pip", "install", "--python", $venvPython, "pyinstaller>=6.0")
+    $indexArgs = Get-UvPackageIndexArguments -IndexUrl $PackageIndexUrl -FindLinks $PackageFindLinks -NoIndex ([bool]$PackageNoIndex)
     $pyiArgs += $indexArgs
     Invoke-Native -ArgList $pyiArgs
   }
