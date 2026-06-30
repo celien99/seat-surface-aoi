@@ -206,7 +206,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
 
 ### 安装脚本默认执行项
 
-- `uv` 安装 Python 运行依赖（如果未使用 `-SkipPythonSync`），Windows 交付脚本固定导出 `onnx`、`faiss`、`display`、`opencv` extra；跳过同步时仍会检查当前 venv 能导入 `onnxruntime`、`faiss`、`cv2` 和 `PySide6`
+- `uv sync` 安装 Python 运行依赖（如果未使用 `-SkipPythonSync`），安装脚本固定同步 `onnx`、`faiss`、`display`、`opencv` extra；跳过同步时仍会检查当前 venv 能导入 `onnxruntime`、`faiss`、`cv2` 和 `PySide6`
 - cmake 构建 `seat_aoi_controller.exe`（如果使用 `-BuildController`）
 - PyInstaller 打包 `seat_aoi_detector.exe` + `seat_aoi_display\`（如果使用 `-BuildPythonPackages`）
 - `seat_aoi_detector.exe` 打包时内置 `python_detector\config` 兜底资源，服务运行时仍通过 `--recipe-dir` 指向安装目录配置
