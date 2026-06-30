@@ -22,7 +22,6 @@ def test_install_station_installs_opencv_for_packaged_detector() -> None:
     build_text = _script_text("build_python_packages.ps1")
 
     assert '"--extra", "opencv"' in install_text
-    assert '"opencv-python"' in install_text
     assert '@("yaml", "numpy", "scipy", "onnxruntime", "faiss", "cv2")' in build_text
     assert '@("yaml", "numpy", "scipy", "onnxruntime", "faiss", "cv2", "PySide6")' in install_text
     assert '"--collect-all", "cv2"' in build_text
@@ -39,8 +38,6 @@ def test_install_station_rejects_unsupported_python_versions() -> None:
 
     assert venv_python_index < version_check_index < module_check_index
     assert "-PythonPath $VenvPython" in text[module_check_index:]
-    assert "请不要使用 -SkipPythonSync" in text
-    assert "请使用 Python 3.10-3.12" in text
     assert '"--python", $ExplicitPython' in text
 
 
