@@ -174,7 +174,7 @@ function Get-UvPackageIndexArguments {
   )
   $extra = @()
   if ($IndexUrl) {
-    $extra += @("--index-url", $IndexUrl)
+    $extra += @("--default-index", $IndexUrl)
   }
   if ($FindLinks) {
     $extra += @("--find-links", $FindLinks)
