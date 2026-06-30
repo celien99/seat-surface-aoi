@@ -34,7 +34,7 @@ function Resolve-ProjectRoot {
   if ($Value) {
     return (Resolve-Path -LiteralPath $Value).Path
   }
-  return (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
+  return (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..\..\..")).Path
 }
 
 function Resolve-DefaultRootOnProjectDrive {

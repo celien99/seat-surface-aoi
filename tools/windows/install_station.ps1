@@ -35,7 +35,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-Import-Module -Force "$PSScriptRoot\module\SeatAoiDeployment\SeatAoiDeployment.psd1"
+Import-Module -Force "$PSScriptRoot\module\SeatAoiDeployment\SeatAoiDeployment.psd1" -WarningAction SilentlyContinue
 
 function Install-PythonEnvironment {
   param(
