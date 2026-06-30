@@ -140,12 +140,12 @@ function Assert-PythonVersionSupported {
   param([string]$PythonPath)
   $versionText = (& $PythonPath -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Trim()
   if (-not ($versionText -match '^(\d+)\.(\d+)$')) {
-    throw "无法读取 Python 版本: $PythonPath"
+    throw "Cannot read Python version: $PythonPath"
   }
   $major = [int]$matches[1]
   $minor = [int]$matches[2]
   if ($major -ne 3 -or $minor -lt 10 -or $minor -gt 12) {
-    throw "不支持的 Python 版本 $versionText。请使用 Python 3.10-3.12，当前 onnxruntime/faiss/opencv 交付轮子按该范围验证。"
+    throw "Unsupported Python version $versionText. Use Python 3.10-3.12; onnxruntime/faiss/opencv delivery wheels are validated for this range."
   }
 }
 
@@ -166,7 +166,7 @@ for name in "$moduleList".split(","):
     except Exception as exc:
         missing.append(f"{name} ({type(exc).__name__}: {exc})")
 if missing:
-    print("缺少或无法导入 Python 模块: " + "; ".join(missing), file=sys.stderr)
+    print("Missing or unloadable Python modules: " + "; ".join(missing), file=sys.stderr)
     sys.exit(1)
 "@
   $saved = $ErrorActionPreference
@@ -178,7 +178,7 @@ if missing:
     $ErrorActionPreference = $saved
   }
   if ($exitCode -ne 0) {
-    throw "Python 运行依赖不完整。$InstallHint"
+    throw "Python runtime dependencies are incomplete. $InstallHint"
   }
 }
 
@@ -490,7 +490,7 @@ function Resolve-ActiveRecipePath {
     throw "Active recipe YAML not found for recipe_id=$RecipeId under $RecipeDir. Do not continue with unpatched recipe paths."
   }
   if ($unique.Count -gt 1) {
-    throw "Multiple recipe YAML files matched recipe_id=$RecipeId or -Recipe=$RecipeArg: $($unique -join ', ')"
+    throw "Multiple recipe YAML files matched recipe_id=$RecipeId or -Recipe=${RecipeArg}: $($unique -join ', ')"
   }
   $resolved = $unique[0]
   $actualRecipeId = Get-RecipeIdFromYaml -RecipePath $resolved
@@ -700,7 +700,7 @@ try {
   Assert-PythonModulesAvailable `
     -PythonPath $VenvPython `
     -Modules @("yaml", "numpy", "scipy", "onnxruntime", "faiss", "cv2", "PySide6") `
-    -InstallHint "请不要使用 -SkipPythonSync，或先把 onnx/faiss/display/opencv extra 安装到当前 .venv。"
+    -InstallHint "Do not use -SkipPythonSync, or install onnx/faiss/display/opencv extras into the current .venv first."
   $DisplayPython = Get-DisplayPython -Root $ProjectRoot
 
   if ($BuildController) {

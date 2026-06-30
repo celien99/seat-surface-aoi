@@ -187,7 +187,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
 - 服务 stdout/stderr 写入当前 `DataRoot\logs\services\`
 - 可选：`-CleanPythonSource` 删除 `.py` 明文源码
 
-`tools\windows\*.ps1` 交付脚本保持 ASCII 文本，兼容工控机常见的 Windows PowerShell 5.1，避免 UTF-8 无 BOM 脚本中的中文字符串被系统 ANSI 代码页误读后触发解析错误。
+`tools\windows\*.ps1` 交付脚本保持 ASCII 文本，兼容工控机常见的 Windows PowerShell 5.1，避免 UTF-8 无 BOM 脚本中的中文字符串被系统 ANSI 代码页误读后触发解析错误。修改交付脚本后应至少运行 PowerShell Parser 校验，确认 `install_station.ps1`、`build_python_packages.ps1` 和 `uninstall_station.ps1` 均可解析。
 
 ### 日常运行
 
