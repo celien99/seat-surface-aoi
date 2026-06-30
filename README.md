@@ -128,10 +128,13 @@ $RepoUrl = “<REPO_URL>”
 git clone $RepoUrl $ProjectRoot
 Set-Location $ProjectRoot
 
-# 2. 配置生产环境参数：按现场确认 COM 口、相机 SN、结果回传 IP/端口
+# 2. 安装 Python 运行时依赖（一次性，不在构建脚本中重复执行）
+uv sync --frozen --no-dev --extra onnx --extra faiss --extra display --extra opencv
+
+# 3. 配置生产环境参数：按现场确认 COM 口、相机 SN、结果回传 IP/端口
 notepad .\cpp_controller\config\station_runtime.production.conf
 
-# 3. 一键安装：Python 依赖、C++ 构建、配置路径注入、PyInstaller 打包、同盘数据目录、Windows 服务
+# 4. 一键安装：C++ 构建、配置路径注入、PyInstaller 打包、同盘数据目录、Windows 服务
 powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
   -BuildController `
   -EnableHikrobotMvs `
@@ -142,32 +145,21 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
 
 默认情况下，安装脚本把运行数据和模型目录放在 `ProjectRoot` 所在盘符根目录，例如项目在 `C:\seat-surface-aoi` 时使用 `C:\seat-aoi-data` 和 `C:\seat-aoi-model`，项目在 `E:\seat-surface-aoi` 时使用 `E:\seat-aoi-data` 和 `E:\seat-aoi-model`。如现场要求独立数据盘，可继续显式传入 `-DataRoot` 和 `-ModelRoot`。
 
-`-BuildPythonPackages` 会在工控机本地用 PyInstaller 将 `python_detector` 和 `display_app` 分别打包为独立 `.exe`（`--onefile` / `--windowed --onedir`），避免源码直接暴露在磁盘上。安装脚本会先校验 `.venv` 使用 Python 3.10-3.12，并安装 detector 打包所需的 ONNX Runtime、FAISS、PySide6 和 OpenCV headless（提供 `cv2`）依赖，避免打包后缺少 ECC/OpenCV 模块；即使传入 `-SkipPythonSync`，也会对现有 venv 做 Python 版本和关键模块真实导入检查。安装脚本会从 C++ `production.conf` 读取 active `recipe_id`，按 YAML 内容定位实际运行配方，找不到或 `-Recipe` 与 active `recipe_id` 不一致时直接失败；随后把 C++ 配置、active 生产配方中的 trace/model 路径注入为本次 `DataRoot`/`ModelRoot` 绝对路径，并断言模型路径都在当前 `ModelRoot` 下。服务注册时把 `--recipe-dir <ProjectRoot>\python_detector\config` 传给打包后的检测进程；配方、标定和 ROI 模板优先从这个可维护目录读取，外部目录缺资源时不会回退 `_MEI`。PyInstaller 同时把已注入路径后的 `python_detector\config` 打进 `seat_aoi_detector.exe`，只作为未显式传入外部配方目录时的兜底资源。打包需要 VC++ Build Tools（PyInstaller 编译引导程序）；安装脚本会在 `-BuildPythonPackages` 时自动安装 PyInstaller 到当前 venv。
+`-BuildPythonPackages` 会在工控机本地用 PyInstaller 将 `python_detector` 和 `display_app` 分别打包为独立 `.exe`。构建脚本不负责下载 Python 依赖——依赖安装是一次性手动操作（`uv sync`），构建脚本只做校验。脚本会检查 venv 中存在 Python 3.10-3.12 且能真实导入 `yaml`、`numpy`、`scipy`、`onnxruntime`、`faiss`、`cv2`、`PySide6`；缺少 pyinstaller 时自动补装。
 
-如果工控机不能访问公网 PyPI，不要直接重试默认命令。可按现场网络选择以下任一方式：
+如果工控机不能访问公网 PyPI，在 `uv sync` 步骤指定内网镜像或离线 wheelhouse：
 
 ```powershell
-# 方式 A：使用工厂内网 PyPI 镜像或代理；请把 URL 替换为现场真实地址
-powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
-  -BuildController `
-  -EnableHikrobotMvs `
-  -BuildPythonPackages `
-  -PythonPackageIndexUrl https://pypi.example.local/simple `
-  -LineId LINE1_AOI_01 `
-  -GridLayout 2x1
+# 内网镜像
+uv sync --frozen --no-dev --extra onnx --extra faiss --extra display --extra opencv `
+  --default-index https://pypi.example.local/simple
 
-# 方式 B：完全离线，提前把 wheelhouse 拷到项目目录
-powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
-  -BuildController `
-  -EnableHikrobotMvs `
-  -BuildPythonPackages `
-  -PythonPackageFindLinks .\wheelhouse `
-  -PythonPackageNoIndex `
-  -LineId LINE1_AOI_01 `
-  -GridLayout 2x1
+# 离线 wheelhouse（在同架构机器、同 Python 版本上提前准备）
+uv sync --frozen --no-dev --extra onnx --extra faiss --extra display --extra opencv `
+  --find-links .\wheelhouse --no-index
 ```
 
-离线 wheelhouse 必须在同架构 Windows 机器、同 Python 小版本上准备，并包含 runtime 依赖和 `pyinstaller>=6.0`。参考命令：
+离线 wheelhouse 参考命令：
 
 ```powershell
 New-Item -ItemType Directory -Force wheelhouse | Out-Null
@@ -177,7 +169,6 @@ uv export --format requirements.txt --frozen --no-hashes --no-emit-project --no-
 python -m pip download --only-binary=:all: `
   -r wheelhouse\seat-aoi-runtime-requirements.txt `
   -d wheelhouse
-python -m pip download --only-binary=:all: "pyinstaller>=6.0" -d wheelhouse
 ```
 
 如果 C++ 主控已经构建好或者不需要打包 Python，可省略对应开关：
@@ -206,7 +197,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
 
 ### 安装脚本默认执行项
 
-- `uv sync` 安装 Python 运行依赖（如果未使用 `-SkipPythonSync`），安装脚本固定同步 `onnx`、`faiss`、`display`、`opencv` extra；跳过同步时仍会检查当前 venv 能导入 `onnxruntime`、`faiss`、`cv2` 和 `PySide6`
+- 校验 venv 中 Python 版本和关键模块可用性（除非 `-SkipPythonSync`）；不再在脚本内执行 `uv sync`
 - cmake 构建 `seat_aoi_controller.exe`（如果使用 `-BuildController`）
 - PyInstaller 打包 `seat_aoi_detector.exe` + `seat_aoi_display\`（如果使用 `-BuildPythonPackages`）
 - `seat_aoi_detector.exe` 打包时内置 `python_detector\config` 兜底资源，服务运行时仍通过 `--recipe-dir` 指向安装目录配置

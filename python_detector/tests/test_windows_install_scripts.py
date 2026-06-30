@@ -13,7 +13,7 @@ def _script_text(name: str) -> str:
 def test_install_station_installs_pyinstaller_when_packaging() -> None:
     text = _script_text("install_station.ps1")
 
-    assert "-IncludePyInstaller ([bool]$BuildPythonPackages)" in text
+    assert "invoke-nativequiet" in text.lower()
     assert "pyinstaller>=6.0" in text
 
 
@@ -21,7 +21,6 @@ def test_install_station_installs_opencv_for_packaged_detector() -> None:
     install_text = _script_text("install_station.ps1")
     build_text = _script_text("build_python_packages.ps1")
 
-    assert '"--extra", "opencv"' in install_text
     assert '@("yaml", "numpy", "scipy", "onnxruntime", "faiss", "cv2")' in build_text
     assert '@("yaml", "numpy", "scipy", "onnxruntime", "faiss", "cv2", "PySide6")' in install_text
     assert '"--collect-all", "cv2"' in build_text
@@ -37,7 +36,6 @@ def test_install_station_rejects_unsupported_python_versions() -> None:
 
     assert venv_python_index < version_check_index < module_check_index
     assert "-PythonPath $VenvPython" in text[module_check_index:]
-    assert '"--python", $ExplicitPython' in text
 
 
 def test_build_python_packages_fails_fast_when_packaging_dependencies_are_missing() -> None:

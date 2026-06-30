@@ -11,9 +11,6 @@ param(
   [string]$ShortcutName = "Seat AOI Display",
   [string]$NssmPath = "",
   [string]$PythonExe = "",
-  [string]$PythonPackageIndexUrl = "",
-  [string]$PythonPackageFindLinks = "",
-  [switch]$PythonPackageNoIndex,
   [switch]$SkipPythonSync,
   [switch]$BuildController,
   [switch]$EnableHikrobotMvs,
@@ -36,44 +33,6 @@ param(
 $ErrorActionPreference = "Stop"
 
 Import-Module -Force "$PSScriptRoot\module\SeatAoiDeployment\SeatAoiDeployment.psd1" -WarningAction SilentlyContinue
-
-function Install-PythonEnvironment {
-  param(
-    [string]$Root,
-    [string]$ExplicitPython,
-    [bool]$IncludePyInstaller = $false,
-    [string]$PackageIndexUrl = "",
-    [string]$PackageFindLinks = "",
-    [bool]$PackageNoIndex = $false
-  )
-
-  $venvPython = Join-Path $Root ".venv\Scripts\python.exe"
-
-  if (-not (Test-Path -LiteralPath $venvPython)) {
-    if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-      throw "uv is required for Python dependency installation. Install uv before running this script."
-    }
-    [string[]]$syncArgs = @(
-      "uv", "sync", "--frozen", "--no-dev",
-      "--extra", "onnx", "--extra", "faiss", "--extra", "display", "--extra", "opencv"
-    )
-    if ($ExplicitPython) {
-      $syncArgs += @("--python", $ExplicitPython)
-    }
-    $indexArgs = Get-UvPackageIndexArguments -IndexUrl $PackageIndexUrl -FindLinks $PackageFindLinks -NoIndex ([bool]$PackageNoIndex)
-    $syncArgs += $indexArgs
-    Invoke-Native -ArgList $syncArgs
-  }
-
-  if ($IncludePyInstaller) {
-    [string[]]$pyiArgs = @("uv", "pip", "install", "--python", $venvPython, "pyinstaller>=6.0")
-    $indexArgs = Get-UvPackageIndexArguments -IndexUrl $PackageIndexUrl -FindLinks $PackageFindLinks -NoIndex ([bool]$PackageNoIndex)
-    $pyiArgs += $indexArgs
-    Invoke-Native -ArgList $pyiArgs
-  }
-
-  Invoke-Native -ArgList @("uv", "pip", "check", "--python", $venvPython)
-}
 
 function Build-Controller {
   param(
@@ -494,21 +453,14 @@ try {
   Remove-ServiceIfExists -Nssm $Nssm -Name $DetectorServiceName
   Remove-ServiceIfExists -Nssm $Nssm -Name $ControllerServiceName
 
-  if (-not $SkipPythonSync) {
-    Install-PythonEnvironment `
-      -Root $ProjectRoot `
-      -ExplicitPython $PythonExe `
-      -IncludePyInstaller ([bool]$BuildPythonPackages) `
-      -PackageIndexUrl $PythonPackageIndexUrl `
-      -PackageFindLinks $PythonPackageFindLinks `
-      -PackageNoIndex ([bool]$PythonPackageNoIndex)
-  }
   $VenvPython = Get-VenvPython -Root $ProjectRoot
-  Assert-PythonVersionSupported -PythonPath $VenvPython
-  Assert-PythonModulesAvailable `
-    -PythonPath $VenvPython `
-    -Modules @("yaml", "numpy", "scipy", "onnxruntime", "faiss", "cv2", "PySide6") `
-    -InstallHint "Do not use -SkipPythonSync, or install onnx/faiss/display/opencv extras into the current .venv first."
+  if (-not $SkipPythonSync) {
+    Assert-PythonVersionSupported -PythonPath $VenvPython
+    Assert-PythonModulesAvailable `
+      -PythonPath $VenvPython `
+      -Modules @("yaml", "numpy", "scipy", "onnxruntime", "faiss", "cv2", "PySide6") `
+      -InstallHint "Run uv sync first, or do not use -SkipPythonSync."
+  }
   $DisplayPython = Get-DisplayPython -Root $ProjectRoot
 
   if ($BuildController) {
@@ -546,6 +498,10 @@ try {
 
   # ---- PyInstaller: build Python packages after config path injection ----
   if ($BuildPythonPackages) {
+    $pyiCheck = Invoke-NativeQuiet @($VenvPython, "-c", "import PyInstaller")
+    if ($pyiCheck -ne 0) {
+      Invoke-Native -ArgList @("uv", "pip", "install", "--python", $VenvPython, "pyinstaller>=6.0")
+    }
     $pyinstallerScript = Join-Path $ProjectRoot "tools\windows\build_python_packages.ps1"
     $pyinstallerArgs = @{
       ProjectRoot = $ProjectRoot

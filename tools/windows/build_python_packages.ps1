@@ -25,7 +25,7 @@ try {
   # ---- ensure PyInstaller is installed ----
   $pyiCheck = Invoke-NativeQuiet @($Python, "-c", "import PyInstaller")
   if ($pyiCheck -ne 0) {
-    throw "PyInstaller not found. Run install_station.ps1 without -SkipPythonSync, or install pyinstaller>=6.0 into the selected venv."
+    throw "PyInstaller not found. Install it into the venv: uv pip install --python .venv\Scripts\python.exe pyinstaller>=6.0"
   }
 
   # ---- pre-build checks ----
