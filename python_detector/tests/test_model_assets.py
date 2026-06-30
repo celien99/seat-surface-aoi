@@ -149,6 +149,48 @@ models:
     assert validate_recipe_model_assets(recipe) == []
 
 
+def test_validate_model_assets_rejects_uncalibrated_patchcore_bank(tmp_path: Path) -> None:
+    bank_path = tmp_path / "bank.json"
+    _write_patchcore_bank(
+        bank_path,
+        np.asarray([[0.0, 0.0], [1.0, 1.0]], dtype=np.float32),
+        pca_version=None,
+        include_calibration=False,
+    )
+    recipe_path = tmp_path / "recipe.yaml"
+    recipe_path.write_text(
+        f"""
+recipe_id: asset_uncalibrated_bank
+sku: sku
+light_order: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT]
+cameras:
+  TOP:
+    model_key: patchcore
+decision_threshold:
+  ng_score: 0.55
+  recheck_score: 0.20
+  min_area_px: 1
+models:
+  default:
+    backend: fake
+    role: primary
+  patchcore:
+    backend: patchcore_knn
+    model_family: patchcore
+    role: primary
+    embedding_backend: statistical
+    embedding_dim: 2
+    memory_bank_path: {bank_path}
+""",
+        encoding="utf-8",
+    )
+    recipe = load_recipe_by_id_or_path(str(recipe_path))
+
+    messages = [issue.message for issue in validate_recipe_model_assets(recipe)]
+
+    assert any("PatchCore memory bank 缺少 distance_mean/distance_p99 校准统计量" in message for message in messages)
+
+
 def test_validate_model_assets_rejects_patchcore_dimension_mismatch(tmp_path: Path) -> None:
     pca_path = tmp_path / "pca.json"
     pca_path.write_text(
@@ -263,6 +305,7 @@ def _write_patchcore_bank(
     *,
     pca_version: str | None,
     metadata: dict | None = None,
+    include_calibration: bool = True,
 ) -> None:
     vectors_path = bank_path.with_suffix(".npy")
     np.save(vectors_path, np.asarray(vectors, dtype=np.float32))
@@ -276,6 +319,9 @@ def _write_patchcore_bank(
         "vector_count": int(vectors.shape[0]),
         "vectors_path": vectors_path.name,
     }
+    if include_calibration:
+        payload["distance_mean"] = 0.0
+        payload["distance_p99"] = 1.0
     if metadata is not None:
         payload["metadata"] = metadata
     bank_path.write_text(json.dumps(payload), encoding="utf-8")

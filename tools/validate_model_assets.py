@@ -115,6 +115,14 @@ def _validate_memory_bank(path_value: str, location: str, expected_pca_version: 
         return [AssetIssue("ERROR", location, f"PatchCore memory bank 无效: {exc}")]
     if expected_pca_version is not None and bank.pca_version not in (None, expected_pca_version):
         return [AssetIssue("ERROR", location, f"PatchCore memory bank PCA 版本不匹配: {bank.pca_version} != {expected_pca_version}")]
+    if bank.distance_mean is None or bank.distance_p99 is None:
+        return [
+            AssetIssue(
+                "ERROR",
+                location,
+                "PatchCore memory bank 缺少 distance_mean/distance_p99 校准统计量，请运行 training_tools.build_patchcore_memory_bank calibrate",
+            )
+        ]
     return []
 
 
