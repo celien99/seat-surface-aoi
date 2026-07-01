@@ -159,7 +159,4 @@ def test_install_station_model_copy_overwrites_stale_deployed_assets() -> None:
 
     assert "Test-PlaceholderFile -Path $src" in text
     assert "Model source is placeholder, skip" in text
-    assert "Test-SamePath -Left $src -Right $dst" in text
-    assert "Model source and destination are identical, skip" in text
     assert "Copy-Item -LiteralPath $src -Destination $dst -Force" in text
-    assert "Get-FileHash" not in text

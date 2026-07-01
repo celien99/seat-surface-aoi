@@ -294,18 +294,6 @@ function Assert-RecipeDeploymentPaths {
   }
 }
 
-function Get-NormalizedFullPath {
-  param([string]$Path)
-  return [System.IO.Path]::GetFullPath($Path)
-}
-
-function Test-SamePath {
-  param([string]$Left, [string]$Right)
-  $leftFull = Get-NormalizedFullPath -Path $Left
-  $rightFull = Get-NormalizedFullPath -Path $Right
-  return [string]::Equals($leftFull, $rightFull, [System.StringComparison]::OrdinalIgnoreCase)
-}
-
 function Copy-ModelAssets {
   param([string]$Root, [string]$ModelRoot)
   $modelDir = Join-Path $Root "model"
@@ -327,10 +315,6 @@ function Copy-ModelAssets {
     if (Test-Path -LiteralPath $src) {
       if (Test-PlaceholderFile -Path $src) {
         Write-Host "Model source is placeholder, skip: $src"
-        continue
-      }
-      if (Test-SamePath -Left $src -Right $dst) {
-        Write-Host "Model source and destination are identical, skip: $dst"
         continue
       }
       New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
