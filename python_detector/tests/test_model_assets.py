@@ -29,7 +29,7 @@ def test_production_recipe_loads_full_model_chain() -> None:
     assert recipe.models["patchcore_detector"].spatial_upsample_width == 128
     assert recipe.models["patchcore_detector"].anomaly_binarize_min_ratio == 0.5
     assert recipe.models["patchcore_detector"].anomaly_binarize_relative == 0.55
-    assert recipe.models["patchcore_detector"].score_threshold == 0.55
+    assert recipe.models["patchcore_detector"].score_threshold == 0.0
 
 
 def test_model_relative_paths_resolve_to_project_model_without_cwd(monkeypatch, tmp_path: Path) -> None:
@@ -191,6 +191,46 @@ models:
     assert any("PatchCore memory bank 缺少 distance_mean/distance_p99 校准统计量" in message for message in messages)
 
 
+def test_validate_model_assets_rejects_patchcore_bank_without_thresholds(tmp_path: Path) -> None:
+    bank_path = tmp_path / "bank.json"
+    _write_patchcore_bank(
+        bank_path,
+        np.asarray([[0.0, 0.0], [1.0, 1.0]], dtype=np.float32),
+        pca_version=None,
+    )
+    payload = json.loads(bank_path.read_text(encoding="utf-8"))
+    payload.pop("thresholds")
+    bank_path.write_text(json.dumps(payload), encoding="utf-8")
+    recipe_path = tmp_path / "recipe.yaml"
+    recipe_path.write_text(
+        f"""
+recipe_id: asset_no_thresholds
+sku: sku
+light_order: [DIFFUSE, POLAR_DIFFUSE, HIGH_LEFT]
+cameras:
+  TOP:
+    model_key: patchcore
+models:
+  default:
+    backend: fake
+    role: primary
+  patchcore:
+    backend: patchcore_knn
+    model_family: patchcore
+    role: primary
+    embedding_backend: statistical
+    embedding_dim: 2
+    memory_bank_path: {bank_path}
+""",
+        encoding="utf-8",
+    )
+    recipe = load_recipe_by_id_or_path(str(recipe_path))
+
+    messages = [issue.message for issue in validate_recipe_model_assets(recipe)]
+
+    assert any("PatchCore memory bank 缺少 thresholds 判定阈值" in message for message in messages)
+
+
 def test_validate_model_assets_rejects_patchcore_dimension_mismatch(tmp_path: Path) -> None:
     pca_path = tmp_path / "pca.json"
     pca_path.write_text(
@@ -322,6 +362,11 @@ def _write_patchcore_bank(
     if include_calibration:
         payload["distance_mean"] = 0.0
         payload["distance_p99"] = 1.0
+        payload["thresholds"] = {
+            "source": "normal_bootstrap_quantile",
+            "recheck_score": 0.2,
+            "ng_score": 0.5,
+        }
     if metadata is not None:
         payload["metadata"] = metadata
     bank_path.write_text(json.dumps(payload), encoding="utf-8")

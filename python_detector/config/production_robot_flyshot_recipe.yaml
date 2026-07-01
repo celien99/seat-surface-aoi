@@ -98,7 +98,7 @@ models:
     faiss_index_path: model/patchcore/seat_patchcore.faiss
     coreset_ratio: 1.0
     knn_k: 1
-    score_threshold: 0.55  # 对齐 128×128 spatial 校准：正常件 max≈0.49，阈值设在正常边界之上
+    score_threshold: 0.0  # PatchCore 生产判定阈值来自 memory bank thresholds 训练产物
     spatial_mode: true
     spatial_layers: [layer2, layer3]
     spatial_upsample_height: 128

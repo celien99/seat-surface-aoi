@@ -123,6 +123,14 @@ def _validate_memory_bank(path_value: str, location: str, expected_pca_version: 
                 "PatchCore memory bank 缺少 distance_mean/distance_p99 校准统计量，请运行 training_tools.build_patchcore_memory_bank calibrate",
             )
         ]
+    if bank.thresholds is None:
+        return [
+            AssetIssue(
+                "ERROR",
+                location,
+                "PatchCore memory bank 缺少 thresholds 判定阈值，请重新运行 training_tools.build_patchcore_memory_bank calibrate",
+            )
+        ]
     return []
 
 

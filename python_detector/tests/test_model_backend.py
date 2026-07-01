@@ -14,7 +14,7 @@ from python_detector.models.inference_engine import (
 )
 from python_detector.models.patchcore_model import PatchCoreModel
 from python_detector.models.embedding import SpatialEmbedding
-from python_detector.models.patchcore import SpatialAnomalyScore
+from python_detector.models.patchcore import PatchCoreThresholds, SpatialAnomalyScore
 from python_detector.models.pca import PcaProjector
 from python_detector.models.yolo_decode import decode_yolo_rows, decode_yolo_segmentation
 from python_detector.pipeline.feature_builder import FeatureGroup
@@ -97,6 +97,7 @@ class _SpatialKnn:
             embedding_dim=2,
             backend="exact_knn",
             version="bank_v1",
+            thresholds=PatchCoreThresholds(recheck_score=0.1, ng_score=0.5),
             faiss_index_path=None,
             fallback_reason=None,
         )
@@ -528,6 +529,30 @@ def test_patchcore_spatial_uses_numpy_max_for_2d_anomaly_map() -> None:
     assert candidates
     assert candidates[0].score == pytest.approx(0.9)
     assert model.config.spatial_mode is True
+
+
+def test_patchcore_spatial_uses_bank_thresholds_instead_of_model_config() -> None:
+    model = PatchCoreModel(
+        ModelConfig(
+            backend="patchcore_knn",
+            model_family="patchcore",
+            embedding_backend="onnx_wideresnet50",
+            embedding_model_path="unused.onnx",
+            memory_bank_path="unused_bank.json",
+            score_threshold=0.95,
+            spatial_mode=True,
+            spatial_layers=("layer2",),
+        ),
+        embedding_extractor=_SpatialExtractor(),  # type: ignore[arg-type]
+        knn_index=_SpatialKnn([[0.0, 0.6]]),  # type: ignore[arg-type]
+    )
+
+    candidates = model.run(_feature_group())
+
+    assert len(candidates) == 1
+    assert candidates[0].score == pytest.approx(0.6)
+    assert candidates[0].recheck_score == pytest.approx(0.1)
+    assert candidates[0].ng_score == pytest.approx(0.5)
 
 
 def test_pca_project_batch_accepts_numpy_matrix_without_truth_value_error(tmp_path) -> None:

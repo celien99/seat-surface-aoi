@@ -12,6 +12,17 @@ from python_detector.paths import resolve_runtime_path
 
 
 @dataclass(frozen=True)
+class PatchCoreThresholds:
+    """PatchCore 判定阈值，来自训练/校准产物而不是在线配方。"""
+
+    recheck_score: float
+    ng_score: float
+    source: str = "normal_bootstrap_quantile"
+    normal_quantile_recheck: float | None = None
+    normal_quantile_ng: float | None = None
+
+
+@dataclass(frozen=True)
 class PatchCoreBank:
     version: str
     model_family: str
@@ -26,6 +37,7 @@ class PatchCoreBank:
     distance_std: float | None = None
     distance_p99: float | None = None
     """held-out 正常样本到 bank 最近邻距离的 p99 分位数"""
+    thresholds: PatchCoreThresholds | None = None
 
 
 
@@ -39,6 +51,7 @@ class PatchCoreScore:
     embedding_dim: int
     backend: str
     version: str
+    thresholds: PatchCoreThresholds
     faiss_index_path: str | None = None
     fallback_reason: str | None = None
 
@@ -54,6 +67,7 @@ class SpatialAnomalyScore:
     embedding_dim: int
     backend: str
     version: str
+    thresholds: PatchCoreThresholds
     faiss_index_path: str | None = None
     fallback_reason: str | None = None
 
@@ -77,6 +91,17 @@ def _calibrated_score(
     span = 2.0 * max(distance_p99 - distance_mean, 1e-6)
     x = (nearest - distance_mean) / span
     return np.tanh(x)
+
+
+def _require_thresholds(bank: PatchCoreBank, memory_bank_path: str) -> PatchCoreThresholds:
+    if bank.thresholds is None:
+        raise ModelAssetUnavailableError(
+            "PatchCore memory bank 缺少 thresholds 判定阈值，请重新运行训练/校准工具",
+            asset_kind="patchcore_thresholds",
+            asset_path=memory_bank_path,
+            reason="thresholds_missing",
+        )
+    return bank.thresholds
 
 
 class PatchCoreKnnIndex:
@@ -106,12 +131,14 @@ class PatchCoreKnnIndex:
             raise RuntimeError(f"PatchCore memory bank PCA 版本不匹配: {bank.pca_version} != {expected_pca_version}")
         if bank.distance_mean is None or bank.distance_p99 is None:
             raise RuntimeError("PatchCore memory bank 缺少 distance_mean/distance_p99 校准统计量，请运行 calibrate 子命令")
+        thresholds = _require_thresholds(bank, memory_bank_path)
         k = min(knn_k, len(bank.vectors))
         if k <= 0:
             raise RuntimeError("PatchCore memory bank 为空")
         faiss_score = self._score_with_faiss(
             embedding,
             bank,
+            thresholds,
             k,
             faiss_index_path,
         )
@@ -129,6 +156,7 @@ class PatchCoreKnnIndex:
             embedding_dim=bank.embedding_dim,
             backend="exact_knn",
             version=bank.version,
+            thresholds=thresholds,
             faiss_index_path=faiss_index_path,
             fallback_reason=fallback_reason,
         )
@@ -156,6 +184,7 @@ class PatchCoreKnnIndex:
             raise RuntimeError(f"PatchCore memory bank PCA 版本不匹配: {bank.pca_version} != {expected_pca_version}")
         if bank.distance_mean is None or bank.distance_p99 is None:
             raise RuntimeError("PatchCore memory bank 缺少 distance_mean/distance_p99 校准统计量，请运行 calibrate 子命令")
+        thresholds = _require_thresholds(bank, memory_bank_path)
         k = min(knn_k, len(bank.vectors))
         if k <= 0:
             raise RuntimeError("PatchCore memory bank 为空")
@@ -165,13 +194,21 @@ class PatchCoreKnnIndex:
             raise RuntimeError(f"patch_embeddings 数量 ({patch_embeddings.shape[0]}) 与 spatial_shape {spatial_shape} 不匹配")
 
         faiss_result = self._score_spatial_faiss(
-            patch_embeddings, spatial_shape, bank, k, faiss_index_path
+            patch_embeddings, spatial_shape, bank, thresholds, k, faiss_index_path
         )
         if faiss_result is not None:
             return faiss_result
 
         fallback_reason = self._faiss_fallback_reason(bank, faiss_index_path)
-        return self._score_spatial_exact(patch_embeddings, spatial_shape, bank, k, faiss_index_path, fallback_reason)
+        return self._score_spatial_exact(
+            patch_embeddings,
+            spatial_shape,
+            bank,
+            thresholds,
+            k,
+            faiss_index_path,
+            fallback_reason,
+        )
 
     def load(self, path_value: str) -> PatchCoreBank:
         return self._load(path_value)
@@ -181,6 +218,7 @@ class PatchCoreKnnIndex:
         patch_embeddings: "np.ndarray",
         spatial_shape: tuple[int, int],
         bank: PatchCoreBank,
+        thresholds: PatchCoreThresholds,
         knn_k: int,
         faiss_index_path: str | None,
     ) -> SpatialAnomalyScore | None:
@@ -209,6 +247,7 @@ class PatchCoreKnnIndex:
                 embedding_dim=bank.embedding_dim,
                 backend="faiss",
                 version=bank.version,
+                thresholds=thresholds,
                 faiss_index_path=faiss_index_path,
                 fallback_reason=None,
             )
@@ -220,6 +259,7 @@ class PatchCoreKnnIndex:
         patch_embeddings: "np.ndarray",
         spatial_shape: tuple[int, int],
         bank: PatchCoreBank,
+        thresholds: PatchCoreThresholds,
         knn_k: int,
         faiss_index_path: str | None,
         fallback_reason: str | None,
@@ -236,6 +276,7 @@ class PatchCoreKnnIndex:
             embedding_dim=bank.embedding_dim,
             backend="exact_knn",
             version=bank.version,
+            thresholds=thresholds,
             faiss_index_path=faiss_index_path,
             fallback_reason=fallback_reason,
         )
@@ -296,12 +337,14 @@ class PatchCoreKnnIndex:
             distance_mean=raw.get("distance_mean") if isinstance(raw.get("distance_mean"), (int, float)) else None,
             distance_std=raw.get("distance_std") if isinstance(raw.get("distance_std"), (int, float)) else None,
             distance_p99=raw.get("distance_p99") if isinstance(raw.get("distance_p99"), (int, float)) else None,
+            thresholds=_parse_thresholds(raw.get("thresholds"), source),
         )
 
     def _score_with_faiss(
         self,
         embedding: tuple[float, ...],
         bank: PatchCoreBank,
+        thresholds: PatchCoreThresholds,
         knn_k: int,
         faiss_index_path: str | None,
     ) -> PatchCoreScore | None:
@@ -330,6 +373,7 @@ class PatchCoreKnnIndex:
                 embedding_dim=bank.embedding_dim,
                 backend="faiss",
                 version=bank.version,
+                thresholds=thresholds,
                 faiss_index_path=faiss_index_path,
                 fallback_reason=None,
             )
@@ -390,6 +434,44 @@ def _resolve_vectors_path(path_value: str, bank_dir: Path) -> Path:
     if path.is_absolute():
         return path
     return bank_dir / path
+
+
+def _parse_thresholds(raw: Any, source: Path) -> PatchCoreThresholds | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise RuntimeError(f"PatchCore thresholds 必须是 JSON object: {source}")
+    recheck_score = _threshold_ratio(raw.get("recheck_score"), "thresholds.recheck_score", source)
+    ng_score = _threshold_ratio(raw.get("ng_score"), "thresholds.ng_score", source)
+    if recheck_score > ng_score:
+        raise RuntimeError(
+            f"PatchCore thresholds.recheck_score 不能大于 ng_score: {recheck_score} > {ng_score}"
+        )
+    source_name = raw.get("source", "normal_bootstrap_quantile")
+    if not isinstance(source_name, str) or not source_name:
+        raise RuntimeError(f"PatchCore thresholds.source 必须是非空字符串: {source}")
+    return PatchCoreThresholds(
+        recheck_score=recheck_score,
+        ng_score=ng_score,
+        source=source_name,
+        normal_quantile_recheck=_optional_threshold_ratio(raw.get("normal_quantile_recheck"), source),
+        normal_quantile_ng=_optional_threshold_ratio(raw.get("normal_quantile_ng"), source),
+    )
+
+
+def _threshold_ratio(value: Any, name: str, source: Path) -> float:
+    if not isinstance(value, (int, float)):
+        raise RuntimeError(f"PatchCore {name} 必须是 [0, 1] 数字: {source}")
+    result = float(value)
+    if result < 0.0 or result > 1.0 or not np.isfinite(result):
+        raise RuntimeError(f"PatchCore {name} 必须是 [0, 1] 有限数字: {result}")
+    return result
+
+
+def _optional_threshold_ratio(value: Any, source: Path) -> float | None:
+    if value is None:
+        return None
+    return _threshold_ratio(value, "thresholds.normal_quantile", source)
 
 
 def _load_vectors_npy(path: Path, expected_dim: int) -> np.ndarray:

@@ -8,6 +8,10 @@ from pathlib import Path
 from typing import Any
 
 
+DEFAULT_RECHECK_QUANTILE = 0.99
+DEFAULT_NG_QUANTILE = 0.999
+
+
 def build_memory_bank(
     input_path: Path,
     output_path: Path,
@@ -130,6 +134,8 @@ def compute_calibration_stats(
     faiss_index_path: Path | None = None,
     sample_count: int = 50000,
     chunk_size: int = 4096,
+    recheck_quantile: float = DEFAULT_RECHECK_QUANTILE,
+    ng_quantile: float = DEFAULT_NG_QUANTILE,
 ) -> dict[str, float]:
     """计算 held-out 正常样本到 bank 的距离分布，写入校准统计量。
 
@@ -141,6 +147,8 @@ def compute_calibration_stats(
 
     if not vectors_npy.exists():
         raise ValueError(f"bank vectors .npy 不存在: {vectors_npy}")
+    if not 0.0 < recheck_quantile <= ng_quantile < 1.0:
+        raise ValueError("阈值分位数必须满足 0 < recheck_quantile <= ng_quantile < 1")
     vectors = np.load(str(vectors_npy), mmap_mode="r", allow_pickle=False)
     if vectors.ndim != 2 or vectors.shape[0] <= 0:
         raise ValueError(f"bank vectors 必须是二维矩阵: {vectors.shape}")
@@ -202,19 +210,40 @@ def compute_calibration_stats(
         _maxima[_i] = np.max(_sample)
     distance_p99 = float(np.mean(_maxima))
     distance_std = float(np.std(_maxima))  # 保留仅供诊断
+    maxima_scores = _calibrated_scores(_maxima, distance_mean, distance_p99)
+    recheck_score = float(np.quantile(maxima_scores, recheck_quantile))
+    ng_score = float(np.quantile(maxima_scores, ng_quantile))
+    # 避免浮点抖动导致 NG 低于 RECHECK；阈值仍来自正常样本 bootstrap 分布。
+    ng_score = max(ng_score, recheck_score)
 
     bank["distance_mean"] = distance_mean
     bank["distance_p99"] = distance_p99
+    bank["thresholds"] = {
+        "source": "normal_bootstrap_quantile",
+        "recheck_score": recheck_score,
+        "ng_score": ng_score,
+        "normal_quantile_recheck": recheck_quantile,
+        "normal_quantile_ng": ng_quantile,
+        "bootstrap_image_count": int(_n_bootstrap),
+        "patches_per_image": int(_patch_grid),
+    }
     bank_json.write_text(json.dumps(bank, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(
         f"calibration_stats: heldout={heldout_sampled}/{heldout_queries.shape[0]} "
         f"reduced_bank={reduced_vecs.shape[0]} "
         f"mean={distance_mean:.4f} p99={distance_p99:.4f} "
+        f"recheck={recheck_score:.4f}@q{recheck_quantile:g} "
+        f"ng={ng_score:.4f}@q{ng_quantile:g} "
         f"faiss={'yes' if faiss_available else 'no'} "
         f"written_to={bank_json}"
     )
-    return {"distance_mean": distance_mean, "distance_p99": distance_p99}
+    return {
+        "distance_mean": distance_mean,
+        "distance_p99": distance_p99,
+        "recheck_score": recheck_score,
+        "ng_score": ng_score,
+    }
 
 
 def _heldout_knn_distances(queries: "np.ndarray", bank_vecs: "np.ndarray", chunk_size: int = 4096) -> "np.ndarray":
@@ -232,6 +261,13 @@ def _heldout_knn_distances(queries: "np.ndarray", bank_vecs: "np.ndarray", chunk
         nearest_sq = np.min(dist_sq, axis=1)
         result[start:end] = np.sqrt(nearest_sq)
     return result
+
+
+def _calibrated_scores(nearest, distance_mean: float, distance_p99: float):
+    import numpy as np
+
+    span = 2.0 * max(distance_p99 - distance_mean, 1e-6)
+    return np.clip(np.tanh((nearest - distance_mean) / span), 0.0, 1.0)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -254,6 +290,10 @@ def main(argv: list[str] | None = None) -> int:
     calib_parser.add_argument("--bank", required=True, type=Path, help="memory bank JSON 路径（原位更新）")
     calib_parser.add_argument("--faiss-index", type=Path, default=None, help="FAISS 索引路径（可选，加速计算）")
     calib_parser.add_argument("--sample-count", type=int, default=50000, help="自校准采样数，默认 50000")
+    calib_parser.add_argument("--recheck-quantile", type=float, default=DEFAULT_RECHECK_QUANTILE,
+                              help="正常 bootstrap 最大异常分布的 RECHECK 分位数，默认 0.99")
+    calib_parser.add_argument("--ng-quantile", type=float, default=DEFAULT_NG_QUANTILE,
+                              help="正常 bootstrap 最大异常分布的 NG 分位数，默认 0.999")
 
     args = parser.parse_args(argv)
     if args.command == "calibrate":
@@ -262,8 +302,15 @@ def main(argv: list[str] | None = None) -> int:
             bank_json=args.bank,
             faiss_index_path=args.faiss_index,
             sample_count=args.sample_count,
+            recheck_quantile=args.recheck_quantile,
+            ng_quantile=args.ng_quantile,
         )
-        print(f"distance_mean={stats['distance_mean']:.4f} distance_p99={stats['distance_p99']:.4f}")
+        print(
+            f"distance_mean={stats['distance_mean']:.4f} "
+            f"distance_p99={stats['distance_p99']:.4f} "
+            f"recheck_score={stats['recheck_score']:.4f} "
+            f"ng_score={stats['ng_score']:.4f}"
+        )
         return 0
 
     if args.command is None:

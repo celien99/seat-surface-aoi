@@ -53,9 +53,9 @@ uv run python -m python_detector.detector_main `
   --once --timeout-ms 8000
 ```
 
-`tools.validate_model_assets` 会校验 ONNX/PCA/bank/FAISS 是否存在且不是占位文件，并检查当前 PatchCore 链路的维度一致性：配方 `embedding_dim`、PCA 输入维度、PCA 输出维度、memory bank 维度、FAISS 维度/向量数以及 bank `distance_mean`/`distance_p99` 自校准统计量必须对齐和齐备。
+`tools.validate_model_assets` 会校验 ONNX/PCA/bank/FAISS 是否存在且不是占位文件，并检查当前 PatchCore 链路的维度一致性：配方 `embedding_dim`、PCA 输入维度、PCA 输出维度、memory bank 维度、FAISS 维度/向量数以及 bank `distance_mean`/`distance_p99` 自校准统计量和 `thresholds` 判定阈值产物必须对齐和齐备。
 
-Windows `install_station.ps1` 在注入 active recipe 到 `ModelRoot` 后，只负责把项目根目录 `model/` 下已存在的真实模型资产复制到当前 `ModelRoot`。源文件是占位文件时跳过；目标已有同名资产时直接覆盖，避免 `D:\seat-aoi-model` 保留缺少 `distance_mean/distance_p99` 的旧 PatchCore bank 后导致安装期模型验证失败。
+Windows `install_station.ps1` 在注入 active recipe 到 `ModelRoot` 后，只负责把项目根目录 `model/` 下已存在的真实模型资产复制到当前 `ModelRoot`。源文件是占位文件时跳过；目标已有同名资产时直接覆盖，避免 `D:\seat-aoi-model` 保留缺少 `distance_mean/distance_p99` 或 `thresholds` 的旧 PatchCore bank 后导致安装期模型验证失败。
 
 端到端模拟使用 `uv run python tools/run_simulated_ipc.py`。该入口会先启动 C++ 主控，再启动 detector 读取共享内存任务并写回结果。带 `--config` 运行时，脚本会把同一份 C++ 运行配置传给 detector，detector 会读取 `slot_count`、`frame_slot_size` 和 `result_slot_size`，确保 4096 x 3072 固定机位高分辨率图像不会因为 Python 仍使用默认 16 MB slot 而布局不匹配。`--replay-capture` 或 `--config cpp_controller/config/station_runtime.replay_capture.conf` 会走 `images_capture` 真实 PNG 共享内存回放：C++ simulated camera 随机抽完整两机位三光源样本写入 Frame SHM，Python detector 从 SHM 读取并按生产配方检测。该回放不是 Python-only 离线模拟；文件名时间戳只用于 C++ 分组排序，Python 看到的是本次在线模拟采集 metadata。若当前 PNG 内容触发质量门禁或模型保守规则，结果仍会返回 `RECHECK/ERROR`；OK 件 trace 是否落盘由生产配方 `trace.save_ok_ratio` 决定。`python_detector/tests/test_run_simulated_ipc_tool.py` 固化了 Windows 入口的生成器选择、直接编译回退参数、配置超时传递、replay 快捷入口，以及仓库搬迁后旧 CMake 缓存的定向清理行为，避免 CMake 默认选中缺失的 `nmake.exe` 或复用旧绝对路径后提前失败。
 
@@ -251,7 +251,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 - `camera_defaults` 与每个 `cameras` 视角合并后的模型、ROI 模板、标定和光源字段合法性。
 - ROI 定位、配准基准光源和 fallback 光源合法性。
 - 模型引用存在，且 primary / safety_net 角色不能混用。
-- 模型输入通道、单一 `decision_threshold`、bbox 格式和输出 decode 规则。
+- 模型输入通道、监督/模拟模型的 `decision_threshold`、bbox 格式和输出 decode 规则；PatchCore 生产主模型的判定阈值来自 memory bank `thresholds` 训练产物。
 - PatchCore `faiss_index_path` 可选；真实产物放在根目录 `model/`，上线前用 `tools.validate_model_assets` 检查占位文件是否已替换。
 
 ### IPC 与协议
@@ -299,9 +299,9 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 2. **小缺陷召回率提升**：Global Average Pooling 不再淹没小面积缺陷信号。
 3. **检测 overlay**：TraceWriter 自动将 ROI 空间的 anomaly_map 映射回 raw 原图坐标。热力图生成管线使用**双线性插值**（替代最近邻）将 anomaly_map 上采样到 ROI 分辨率以消除块状马赛克效应，叠加**高斯平滑**消除特征提取残余的栅格感，经**形态学闭运算**填补二值掩码内部小孔洞后，仅在最终缺陷候选 bbox 内叠加达到 PatchCore 二值化阈值的黄/红热色，低分正常 ROI 保持灰度原图，同时绘制判定框和缺陷 bbox。`feature_summary.json` 仍保留原始 anomaly_map 数值，overlay 是唯一落盘的检测可视化 PNG。
 
-空间模式要求：`embedding_backend=onnx_wideresnet50`、`spatial_layers` 非空（如 `[layer2, layer3]`），并使用 `--spatial-mode` 重新导出 ONNX 模型和重新训练记忆库。**生产配方默认启用 `spatial_mode: true`**，当前生产配方显式使用 `128×128` 空间 patch 网格，layer2+layer3 原始 patch embedding 为 1536 维，在线先用 `seat_pca.json`（v3, 524维, 95%累积方差）投影，再进入 PatchCore bank/FAISS 评分并生成像素级 anomaly_map 热力图；热力图渲染使用双线性插值+高斯平滑，`128×128` 网格可平滑映射到 ROI 原图分辨率，无马赛克效应。若需回退到全局嵌入路径（整个 ROI → 1 个向量 → 标量分数），在配方中设置 `spatial_mode: false`。anomaly_map 二值化阈值可通过 `anomaly_binarize_min_ratio`（默认 0.5）和 `anomaly_binarize_relative`（默认 0.3）配置，阈值公式为 `max(score_threshold × min_ratio, max_anomaly × relative)`。
+空间模式要求：`embedding_backend=onnx_wideresnet50`、`spatial_layers` 非空（如 `[layer2, layer3]`），并使用 `--spatial-mode` 重新导出 ONNX 模型和重新训练记忆库。**生产配方默认启用 `spatial_mode: true`**，当前生产配方显式使用 `128×128` 空间 patch 网格，layer2+layer3 原始 patch embedding 为 1536 维，在线先用 `seat_pca.json`（v3, 524维, 95%累积方差）投影，再进入 PatchCore bank/FAISS 评分并生成像素级 anomaly_map 热力图；热力图渲染使用双线性插值+高斯平滑，`128×128` 网格可平滑映射到 ROI 原图分辨率，无马赛克效应。若需回退到全局嵌入路径（整个 ROI → 1 个向量 → 标量分数），在配方中设置 `spatial_mode: false`。anomaly_map 二值化阈值可通过 `anomaly_binarize_min_ratio`（默认 0.5）和 `anomaly_binarize_relative`（默认 0.3）配置，阈值公式为 `max(bank.thresholds.recheck_score × min_ratio, max_anomaly × relative)`。
 
-**异常分数自校准**：KNN 距离到异常分数采用训练数据 held-out 分位数归一化。训练阶段将 bank 向量分半：一半做缩减 bank，一半做 held-out 查询，自动计算正常样本的距离均值 `distance_mean` 和 p99 分位数 `distance_p99`，写入 `seat_patchcore_bank.json`。推理时评分公式为 `anomaly_score = clip((nearest - distance_mean) / max(distance_p99 - distance_mean, ε), 0, 1)`。校准统计量可在训练完成后单独补充：`python -m training_tools.build_patchcore_memory_bank calibrate --vectors ... --bank ... --faiss-index ...`；`tools.validate_model_assets` 会在安装和预检阶段拦截缺少这两个字段的旧 bank。
+**异常分数自校准和训练阈值**：KNN 距离到异常分数采用训练数据 held-out 分位数归一化。训练阶段将 bank 向量分半：一半做缩减 bank，一半做 held-out 查询，自动计算正常样本的距离均值 `distance_mean` 和 p99 代表距离 `distance_p99`，写入 `seat_patchcore_bank.json`。推理时评分公式为 `anomaly_score = tanh((nearest - distance_mean) / (2 * max(distance_p99 - distance_mean, ε)))`。校准工具还会对正常样本 bootstrap 最大异常分布取分位数，写入 `thresholds.recheck_score` 和 `thresholds.ng_score`；在线 PatchCore 主模型只使用 bank thresholds 判定候选和 `RECHECK/NG`，不再使用生产 YAML 中手工 `score_threshold/ng_score/recheck_score`。校准统计量和 thresholds 可在训练完成后单独补充：`python -m training_tools.build_patchcore_memory_bank calibrate --vectors ... --bank ... --faiss-index ... --recheck-quantile 0.99 --ng-quantile 0.999`；`tools.validate_model_assets` 会在安装和预检阶段拦截缺少这些字段的旧 bank。
 
 模型资产缺失、占位文件未替换、后端依赖缺失、PCA 参数或 PatchCore memory bank 未就绪会抛出 `ModelAssetUnavailableError`，由 pipeline 转成 `RECHECK` + `CONFIGURATION_ERROR`，并写入 `sample_collection.reason=model_asset_unavailable`。模型已经加载但输出为空、bbox 越界、class id 错误、维度不匹配、空间 anomaly map 非二维或非有限，仍按模型运行异常处理，不能静默降级为 `OK`。
 
@@ -319,7 +319,7 @@ uv run seat-aoi-display --trace-root trace --line-id AOI-1
 
 ### 融合、规则和追溯
 
-`FusionEngine` 对同一 camera/pose/ROI 执行 IoU NMS，合并 evidence lights，并限制每个 ROI 候选数。NMS 抑制数和候选容量溢出数分开统计；如果容量溢出隐藏了候选且规则原本会输出 `OK`，`RuleEngine` 会改为 `RECHECK` 并写入 `CONFIGURATION_ERROR`，避免用 `OK` 掩盖算法不确定性。`DefectFilter` 和 `RuleEngine` 根据单一 `decision_threshold`、面积阈值、长宽比阈值和候选分数输出 `OK`、`NG`、`RECHECK` 或 `ERROR`。长宽比过滤（`min_aspect_ratio` / `max_aspect_ratio`）用于排除长条形噪声，不通过的 NG 候选降级为 RECHECK。缺陷结果不携带缺陷类别字段，只表达位置、分数、证据光源和处置判定。
+`FusionEngine` 对同一 camera/pose/ROI 执行 IoU NMS，合并 evidence lights，并限制每个 ROI 候选数。NMS 抑制数和候选容量溢出数分开统计；如果容量溢出隐藏了候选且规则原本会输出 `OK`，`RuleEngine` 会改为 `RECHECK` 并写入 `CONFIGURATION_ERROR`，避免用 `OK` 掩盖算法不确定性。`DefectFilter` 和 `RuleEngine` 对 PatchCore 候选优先使用候选携带的 bank thresholds 判定 `NG/RECHECK`，对 fake/ONNX 等非 PatchCore 候选继续使用配方 `decision_threshold`；面积阈值和长宽比阈值仍来自配方。长宽比过滤（`min_aspect_ratio` / `max_aspect_ratio`）用于排除长条形噪声，不通过的 NG 候选降级为 RECHECK。缺陷结果不携带缺陷类别字段，只表达位置、分数、证据光源和处置判定。
 
 `TraceWriter` 按配方 trace 策略保存：
 

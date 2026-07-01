@@ -43,6 +43,11 @@ def _write_patchcore_bank(
                 "vectors_path": vectors_path.name,
                 "distance_mean": 0.0,
                 "distance_p99": 0.01,
+                "thresholds": {
+                    "source": "normal_bootstrap_quantile",
+                    "recheck_score": 0.01,
+                    "ng_score": 0.5,
+                },
             }
         ),
         encoding="utf-8",

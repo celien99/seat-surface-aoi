@@ -18,14 +18,16 @@ class DefectFilter:
         filtered: list[FilteredCandidate] = []
         threshold = recipe.decision_threshold
         for candidate in candidates:
-            if candidate.score >= threshold.ng_score and candidate.area_px >= threshold.min_area_px:
+            recheck_score = threshold.recheck_score if candidate.recheck_score is None else candidate.recheck_score
+            ng_score = threshold.ng_score if candidate.ng_score is None else candidate.ng_score
+            if candidate.score >= ng_score and candidate.area_px >= threshold.min_area_px:
                 if self._aspect_ratio_ok(candidate.bbox_xyxy_pixel, threshold):
                     filtered.append(FilteredCandidate(candidate=candidate, decision="NG", severity="critical"))
                     continue
                 # 长宽比不通过则降级为 RECHECK
-                if candidate.score >= threshold.recheck_score:
+                if candidate.score >= recheck_score:
                     filtered.append(FilteredCandidate(candidate=candidate, decision="RECHECK", severity="suspect"))
-            elif candidate.score >= threshold.recheck_score:
+            elif candidate.score >= recheck_score:
                 filtered.append(FilteredCandidate(candidate=candidate, decision="RECHECK", severity="suspect"))
         return filtered
 

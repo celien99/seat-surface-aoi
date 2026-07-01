@@ -24,6 +24,9 @@ class DefectCandidate:
     area_px: int
     evidence_lights: list[str]
     pose_id: str = ""
+    recheck_score: float | None = None
+    ng_score: float | None = None
+    threshold_source: str = ""
 
 
 def _map_roi_bbox_to_source(
@@ -64,7 +67,7 @@ def _map_roi_bbox_to_source(
 def _anomaly_map_bboxes(
     anomaly_map: "np.ndarray",
     spatial_shape: tuple[int, int],
-    score_threshold: float,
+    recheck_score: float,
     feature_group: FeatureGroup,
     *,
     binarize_min_ratio: float = 0.5,
@@ -75,7 +78,7 @@ def _anomaly_map_bboxes(
     返回 [(bbox_xyxy_source, max_score), ...]，坐标已映射到原图空间。
     使用 scipy.ndimage 进行向量化连通域分析，避免原生 Python BFS。
 
-    binarize_min_ratio: 二值化阈值 = max(score_threshold * min_ratio, max_anomaly * relative)
+    binarize_min_ratio: 二值化阈值 = max(recheck_score * min_ratio, max_anomaly * relative)
     binarize_relative: 相对峰值系数，控制异常区域检测的敏感度
     """
     from scipy import ndimage
@@ -87,7 +90,7 @@ def _anomaly_map_bboxes(
         return []
 
     max_anomaly = float(anomaly_map.max())
-    threshold = max(score_threshold * binarize_min_ratio, max_anomaly * binarize_relative)
+    threshold = max(recheck_score * binarize_min_ratio, max_anomaly * binarize_relative)
 
     # 向量化二值掩码
     binary = anomaly_map >= threshold

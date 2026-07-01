@@ -84,6 +84,9 @@ class FusionEngine:
             bbox_xyxy_pixel=union_bbox,
             area_px=union_area,
             evidence_lights=evidence_lights,
+            recheck_score=keeper.recheck_score,
+            ng_score=keeper.ng_score,
+            threshold_source=keeper.threshold_source,
         )
 
     def _iou(self, bbox_a: tuple[int, int, int, int], bbox_b: tuple[int, int, int, int]) -> float:

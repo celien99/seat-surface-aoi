@@ -79,14 +79,17 @@ class PatchCoreModel:
             "backend": score.backend,
             "faiss_index_path": score.faiss_index_path,
             "fallback_reason": score.fallback_reason,
-            "score_threshold": float(self.config.score_threshold),
+            "score_threshold": float(score.thresholds.recheck_score),
             "anomaly_score": score.anomaly_score,
             "nearest_distance": score.nearest_distance,
             "knn_distances": list(score.knn_distances),
             "memory_bank_size": score.memory_bank_size,
             "embedding_dim": score.embedding_dim,
+            "threshold_source": score.thresholds.source,
+            "recheck_score": score.thresholds.recheck_score,
+            "ng_score": score.thresholds.ng_score,
         }
-        if score.anomaly_score < self.config.score_threshold:
+        if score.anomaly_score < score.thresholds.recheck_score:
             return []
         bbox = feature_group.roi_bbox_xyxy_pixel
         area_px = max(bbox[2] - bbox[0] + 1, 0) * max(bbox[3] - bbox[1] + 1, 0)
@@ -103,6 +106,9 @@ class PatchCoreModel:
                 bbox_xyxy_pixel=bbox,
                 area_px=area_px,
                 evidence_lights=feature_group.evidence_lights(),
+                recheck_score=score.thresholds.recheck_score,
+                ng_score=score.thresholds.ng_score,
+                threshold_source=score.thresholds.source,
             )
         ]
 
@@ -161,18 +167,21 @@ class PatchCoreModel:
             "memory_bank_size": score.memory_bank_size,
             "embedding_dim": score.embedding_dim,
             "max_anomaly": max_anomaly,
-            "score_threshold": float(self.config.score_threshold),
+            "score_threshold": float(score.thresholds.recheck_score),
             "anomaly_binarize_min_ratio": float(self.config.anomaly_binarize_min_ratio),
             "anomaly_binarize_relative": float(self.config.anomaly_binarize_relative),
+            "threshold_source": score.thresholds.source,
+            "recheck_score": score.thresholds.recheck_score,
+            "ng_score": score.thresholds.ng_score,
         }
 
-        if max_anomaly < self.config.score_threshold:
+        if max_anomaly < score.thresholds.recheck_score:
             return []
 
         bboxes = _anomaly_map_bboxes(
             anomaly_map,
             score.spatial_shape,
-            self.config.score_threshold,
+            score.thresholds.recheck_score,
             feature_group,
             binarize_min_ratio=self.config.anomaly_binarize_min_ratio,
             binarize_relative=self.config.anomaly_binarize_relative,
@@ -194,6 +203,9 @@ class PatchCoreModel:
                     bbox_xyxy_pixel=bbox_xyxy,
                     area_px=area_px,
                     evidence_lights=feature_group.evidence_lights(),
+                    recheck_score=score.thresholds.recheck_score,
+                    ng_score=score.thresholds.ng_score,
+                    threshold_source=score.thresholds.source,
                 )
             )
         return candidates
