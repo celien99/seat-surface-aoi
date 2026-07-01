@@ -55,6 +55,8 @@ uv run python -m python_detector.detector_main `
 
 `tools.validate_model_assets` 会校验 ONNX/PCA/bank/FAISS 是否存在且不是占位文件，并检查当前 PatchCore 链路的维度一致性：配方 `embedding_dim`、PCA 输入维度、PCA 输出维度、memory bank 维度、FAISS 维度/向量数以及 bank `distance_mean`/`distance_p99` 自校准统计量必须对齐和齐备。
 
+Windows `install_station.ps1` 在注入 active recipe 到 `ModelRoot` 后，会把项目根目录 `model/` 下的真实模型资产同步到当前 `ModelRoot`。源文件是占位文件时跳过；目标已有同名旧资产时会直接用当前 `model/` 文件覆盖，避免 `D:\seat-aoi-model` 保留缺少 `distance_mean/distance_p99` 的旧 PatchCore bank 后导致安装期模型验证失败。
+
 端到端模拟使用 `uv run python tools/run_simulated_ipc.py`。该入口会先启动 C++ 主控，再启动 detector 读取共享内存任务并写回结果。带 `--config` 运行时，脚本会把同一份 C++ 运行配置传给 detector，detector 会读取 `slot_count`、`frame_slot_size` 和 `result_slot_size`，确保 4096 x 3072 固定机位高分辨率图像不会因为 Python 仍使用默认 16 MB slot 而布局不匹配。`--replay-capture` 或 `--config cpp_controller/config/station_runtime.replay_capture.conf` 会走 `images_capture` 真实 PNG 共享内存回放：C++ simulated camera 随机抽完整两机位三光源样本写入 Frame SHM，Python detector 从 SHM 读取并按生产配方检测。该回放不是 Python-only 离线模拟；文件名时间戳只用于 C++ 分组排序，Python 看到的是本次在线模拟采集 metadata。若当前 PNG 内容触发质量门禁或模型保守规则，结果仍会返回 `RECHECK/ERROR`；OK 件 trace 是否落盘由生产配方 `trace.save_ok_ratio` 决定。`python_detector/tests/test_run_simulated_ipc_tool.py` 固化了 Windows 入口的生成器选择、直接编译回退参数、配置超时传递、replay 快捷入口，以及仓库搬迁后旧 CMake 缓存的定向清理行为，避免 CMake 默认选中缺失的 `nmake.exe` 或复用旧绝对路径后提前失败。
 
 ## 部署打包

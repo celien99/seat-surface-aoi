@@ -204,11 +204,11 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
 - 创建同盘 `\seat-aoi-data\` 和 `\seat-aoi-model\` 目录结构，或使用显式 `-DataRoot`/`-ModelRoot`
 - 注入生产配置中的 `trace_root`/`image_save.root_dir` → 当前 `DataRoot` 绝对路径；Python 算法 trace 也使用该 `trace_root`
 - 按 C++ active `recipe_id` 定位实际 YAML，注入配方中的模型路径 → 当前 `ModelRoot` 绝对路径，注入失败直接中止
-- 复制 `model/` 下已有真实资产到当前 `ModelRoot`；源文件是占位文件或目标已有真实文件时不会覆盖
+- 同步 `model/` 下已有真实资产到当前 `ModelRoot`；源文件是占位文件时跳过，目标已有同名文件时也会用当前 `model/` 下的文件覆盖
 - `seat_aoi_controller.exe --validate-config`
 - `python -m tools.validate_protocol`
 - `seat_aoi_detector.exe --validate-config-only` 或 venv detector 入口，校验运行配置、配方、标定和 ROI
-- `python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1`，同时校验 PatchCore memory bank 的 `distance_mean`/`distance_p99` 自校准统计量；若部署 `ModelRoot` 中保留旧 bank，需要先运行 `training_tools.build_patchcore_memory_bank calibrate` 或手动替换目标模型文件后再启动服务。
+- `python -m tools.validate_model_assets --recipe seat_a_black_leather_production_v1`，同时校验 PatchCore memory bank 的 `distance_mean`/`distance_p99` 自校准统计量；安装脚本会用当前 `model/` 下的同名资产覆盖 `ModelRoot` 中的旧 bank，若项目 `model/` 没有可同步的新资产，才需要运行 `training_tools.build_patchcore_memory_bank calibrate` 或手动替换目标模型文件后再启动服务。
 - 注册 `SeatAoiDetector` 和 `SeatAoiController` 两个自启动后台服务（指向打包 `.exe`）
 - 创建桌面快捷方式（指向打包 `seat_aoi_display.exe`，默认只读展示；只有传入 `-EnableDisplayManualTrigger` 才写入手动触发参数）
 - 服务 stdout/stderr 写入当前 `DataRoot\logs\services\`

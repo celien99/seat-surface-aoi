@@ -154,9 +154,12 @@ def test_install_station_recipe_path_injection_is_generic_and_asserted() -> None
     assert "Recipe trace root mismatch after injection" in text
 
 
-def test_install_station_model_copy_does_not_overwrite_real_deployed_assets() -> None:
+def test_install_station_model_copy_overwrites_stale_deployed_assets() -> None:
     text = _script_text("install_station.ps1")
 
     assert "Test-PlaceholderFile -Path $src" in text
     assert "Model source is placeholder, skip" in text
-    assert "Model already exists, keep existing" in text
+    assert "Test-SamePath -Left $src -Right $dst" in text
+    assert "Model source and destination are identical, skip" in text
+    assert "Copy-Item -LiteralPath $src -Destination $dst -Force" in text
+    assert "Get-FileHash" not in text
