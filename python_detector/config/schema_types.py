@@ -125,7 +125,7 @@ class ModelConfig:
     output_decode: str = "none"
     bbox_format: str = "xyxy_pixel"
     score_threshold: float = 0.0
-    """ONNX detection rows 置信度阈值；PatchCore 配方不得显式配置该字段。"""
+    """ONNX detection rows 置信度阈值；PatchCore 会忽略该字段。"""
     embedding_backend: str = "none"
     embedding_model_path: str | None = None
     embedding_version: str = "none"
