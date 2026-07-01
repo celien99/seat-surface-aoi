@@ -66,8 +66,6 @@ fusion:
   iou_threshold: 0.5
   max_candidates_per_roi: 16
 decision_threshold:
-  ng_score: 0.55
-  recheck_score: 0.20
   min_area_px: 1
 models:
   default:
@@ -89,14 +87,17 @@ models:
     embedding_dim: 1536
     embedding_layers: [layer2, layer3]
     pca_path: model/patchcore/seat_pca.json
-    pca_version: pca_seat_v2
+    pca_version: pca_seat_v3
     memory_bank_path: model/patchcore/seat_patchcore_bank.json
     faiss_index_path: model/patchcore/seat_patchcore.faiss
     coreset_ratio: 1.0
     knn_k: 1
-    score_threshold: 0.20
     spatial_mode: true
     spatial_layers: [layer2, layer3]
+    spatial_upsample_height: 128
+    spatial_upsample_width: 128
+    anomaly_binarize_min_ratio: 0.5
+    anomaly_binarize_relative: 0.55
 trace:
   enabled: true
   root_dir: trace

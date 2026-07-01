@@ -82,7 +82,6 @@ models:
     fake_mode: ok
     model_family: patchcore
     role: safety_net
-    score_threshold: 0.20
     embedding_backend: statistical
     embedding_version: simulated_stat_v1
     embedding_dim: 10

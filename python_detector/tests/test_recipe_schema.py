@@ -696,6 +696,28 @@ def test_recipe_rejects_invalid_model_score_threshold() -> None:
         )
 
 
+def test_recipe_rejects_patchcore_model_score_threshold() -> None:
+    with pytest.raises(RecipeValidationError, match="PatchCore 判定阈值必须来自 memory bank thresholds"):
+        recipe_from_dict(
+            {
+                "recipe_id": "bad_patchcore_score_threshold",
+                "sku": "sku",
+                "light_order": ["DIFFUSE", "POLAR_DIFFUSE", "HIGH_LEFT"],
+                "cameras": {"TOP": {"model_key": "patchcore"}},
+                "models": {
+                    "patchcore": {
+                        "backend": "patchcore_knn",
+                        "model_family": "patchcore",
+                        "role": "primary",
+                        "embedding_backend": "statistical",
+                        "memory_bank_path": "model/patchcore/seat_patchcore_bank.json",
+                        "score_threshold": 0.1,
+                    }
+                },
+            }
+        )
+
+
 def test_recipe_rejects_unsafe_model_io_config() -> None:
     with pytest.raises(RecipeValidationError, match="models.detector.input_channels 存在重复项"):
         recipe_from_dict(

@@ -38,6 +38,7 @@ model/patchcore/embeddings.jsonl
 model/patchcore/pca_embeddings.jsonl
 model/patchcore/embeddings.npy
 model/patchcore/pca_embeddings.npy
+model/patchcore/patchcore_training_summary.json
 model/patchcore/seat_patchcore_bank.json
 model/patchcore/seat_patchcore_bank.npy
 model/patchcore/seat_patchcore.faiss

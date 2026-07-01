@@ -66,8 +66,6 @@ fusion:
   iou_threshold: 0.5
   max_candidates_per_roi: 16
 decision_threshold:
-  ng_score: 0.55
-  recheck_score: 0.20
   min_area_px: 1
 models:
   default:
@@ -94,7 +92,6 @@ models:
     faiss_index_path: model/patchcore/seat_patchcore.faiss
     coreset_ratio: 1.0
     knn_k: 1
-    score_threshold: 0.0  # PatchCore 生产判定阈值来自 memory bank thresholds 训练产物
     spatial_mode: true
     spatial_layers: [layer2, layer3]
     spatial_upsample_height: 128

@@ -96,8 +96,11 @@ class CameraDefaults:
 @dataclass(frozen=True)
 class DecisionThresholdConfig:
     ng_score: float = 0.35
+    """非 PatchCore 候选的 NG 兜底阈值；PatchCore 候选优先使用 bank thresholds。"""
     recheck_score: float = 0.20
+    """非 PatchCore 候选的 RECHECK 兜底阈值；PatchCore 候选优先使用 bank thresholds。"""
     min_area_px: int = 1
+    """所有候选共用的最小面积过滤阈值。"""
     min_aspect_ratio: float = 0.0
     """bbox 允许的最小长宽比 (w/h)，0 表示不限制。用于过滤长条形噪声。"""
     max_aspect_ratio: float = 0.0
@@ -122,6 +125,7 @@ class ModelConfig:
     output_decode: str = "none"
     bbox_format: str = "xyxy_pixel"
     score_threshold: float = 0.0
+    """ONNX detection rows 置信度阈值；PatchCore 配方不得显式配置该字段。"""
     embedding_backend: str = "none"
     embedding_model_path: str | None = None
     embedding_version: str = "none"

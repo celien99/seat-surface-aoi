@@ -449,6 +449,10 @@ def _models_from_dict(data: dict[str, Any], light_order: tuple[str, ...]) -> dic
         model_family = _str(raw.get("model_family", "supervised"), f"models.{model_key}.model_family")
         if model_family not in {"supervised", "patchcore", "efficientad", "yolo_seg"}:
             raise RecipeValidationError(f"不支持的模型家族: {model_family}")
+        if backend == "patchcore_knn" and "score_threshold" in raw:
+            raise RecipeValidationError(
+                f"models.{model_key}.score_threshold 已移除；PatchCore 判定阈值必须来自 memory bank thresholds"
+            )
         role = _str(raw.get("role", "primary"), f"models.{model_key}.role")
         if role not in {"primary", "safety_net"}:
             raise RecipeValidationError(f"模型角色必须是 primary 或 safety_net: {model_key}")

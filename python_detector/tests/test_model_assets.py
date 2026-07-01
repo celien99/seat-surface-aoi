@@ -29,7 +29,8 @@ def test_production_recipe_loads_full_model_chain() -> None:
     assert recipe.models["patchcore_detector"].spatial_upsample_width == 128
     assert recipe.models["patchcore_detector"].anomaly_binarize_min_ratio == 0.5
     assert recipe.models["patchcore_detector"].anomaly_binarize_relative == 0.55
-    assert recipe.models["patchcore_detector"].score_threshold == 0.0
+    assert recipe.decision_threshold.ng_score == 0.35
+    assert recipe.decision_threshold.recheck_score == 0.20
 
 
 def test_model_relative_paths_resolve_to_project_model_without_cwd(monkeypatch, tmp_path: Path) -> None:
