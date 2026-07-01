@@ -29,7 +29,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--ng-popup-seconds", type=int, default=30, help="NG 弹窗自动确认倒计时。")
     parser.add_argument("--enable-manual-trigger", action="store_true", help="启用首页手动触发按钮。")
     parser.add_argument("--manual-trigger-host", default="127.0.0.1", help="C++ tcp_signal 监听地址。")
-    parser.add_argument("--manual-trigger-port", type=int, default=9000, help="C++ tcp_signal 监听端口。")
+    parser.add_argument("--manual-trigger-port", type=int, default=9002, help="C++ display_manual_trigger 独立监听端口。")
     parser.add_argument("--manual-trigger-timeout-ms", type=int, default=1000, help="手动触发 TCP 超时。")
     parser.add_argument("--manual-trigger-terminator", default="\\n", help="手动触发命令结尾，支持 \\\\n。")
     parser.add_argument("--manual-trigger-start-command", default="start", help="两步协议到位信号命令。")

@@ -35,7 +35,7 @@ flowchart LR
 - C++ 配置校验要求每台相机 `buffer_count >= light_order` 光源数量，避免流水线快速频闪后 SDK 缓冲不足造成缺帧或旧帧混入。
 - 当前现场接线：工控机通过 RS232/USB 转串口连接 FL-ACDH；FL-ACDH 同步输出 `F1~F3` 已短接合成一根触发线，并联到两台相机黄色 `Line0`；FL-ACDH `GND` 与相机 IO `GND` 共地；相机 `Line1` 仅保留为调试输出。
 - 在线模式使用共享内存和 Python detector；采图模式不启用共享内存，只采图保存原图并向外部信号回传 `RECHECK`。
-- `display_app` 默认仍是只读展示；显式加 `--enable-manual-trigger` 后，首页 SN 输入框和”手动触发”按钮会按 C++ `tcp_signal` 的 `start_sn` 两步协议发送 `start` 与 `sn <SN>`，只模拟外部信号源，不直接控制相机、频闪或共享内存。手动触发提交中按钮显示”提交中”，收到 `sn_ack` 后切换为”等待结果”加载态并继续禁用输入框，直到同一 SN 的新版 `display_latest.json` 刷新后才恢复并清空输入。
+- `display_app` 默认仍是只读展示；显式加 `--enable-manual-trigger` 后，首页 SN 输入框和”手动触发”按钮会连接 C++ `display_manual_trigger` 独立端口（生产默认 9002），按 `start_sn` 两步协议发送 `start` 与 `sn <SN>`，只模拟外部信号源，不直接控制相机、频闪或共享内存。外部 PLC/上位机自动触发继续使用 `signal.port=9000`，两个入口不共享 TCP 连接；C++ 主控收到完整触发后串行进入同一检测链路。手动触发提交中按钮显示”提交中”，收到 `sn_ack` 后切换为”等待结果”加载态并继续禁用输入框，直到同一 SN（或 C++ 加站点前缀后的 seat_id）的新版 `display_latest.json` 刷新后才恢复并清空输入。
 - Python detector 返回的 `RECHECK/ERROR` 中，若消息匹配 ROI 未识别到目标物体模式（如”未识别到目标”），前端展示为信息性黄色提示而非告警/复检红色错误，不触发 `trigger_error`。
 - `display_app` 统计和日志优先读取 `trace/display_events.jsonl` 追加事件，`display_latest.json` 仅作为启动恢复和无 JSONL 时的兼容来源；旧 NG latest 不会触发弹窗或污染当前会话统计。图片解码失败会清空该相机画面并显示“图像加载失败”，不会复用上一件旧图。
 
@@ -88,7 +88,7 @@ cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --config cpp_co
 
 ## 工控机部署顺序
 
-当前正式交付按”两个后台服务 + 一个展示快捷方式”执行：`SeatAoiController` 后台服务先启动并创建共享内存，`SeatAoiDetector` 后台服务随后打开共享内存并等待任务，桌面快捷方式启动 `display_app` 并只读消费 `trace` 展示通道。生产现场不要启用 display_app 手动触发按钮，除非已经确认不会抢占真实 PLC/上位机的 `tcp_signal` 连接。
+当前正式交付按”两个后台服务 + 一个展示快捷方式”执行：`SeatAoiController` 后台服务先启动并创建共享内存，`SeatAoiDetector` 后台服务随后打开共享内存并等待任务，桌面快捷方式启动 `display_app` 并只读消费 `trace` 展示通道。生产现场如需启用 display_app 手动触发，应使用 C++ `display_manual_trigger.port` 独立端口（默认 9002），不要改连 PLC/上位机使用的 `signal.port=9000`。
 
 构建、依赖安装和模型拷贝都可以在工控机交付安装阶段完成；交付成功后的长期运行阶段不要求网络连接。以下命令在工控机管理员 PowerShell 中按顺序执行。
 
@@ -323,10 +323,10 @@ uv run seat-aoi-display `
   --line-id AOI-1 `
   --enable-manual-trigger `
   --manual-trigger-host 127.0.0.1 `
-  --manual-trigger-port 9000
+  --manual-trigger-port 9002
 ```
 
-按钮提交的是控制面触发信号，不传图、不读写 Frame/Result 共享内存。C++ 收到 `start` 与 `sn <SN>` 后仍按 `StationController` 完整执行相机、频闪、共享内存检测和保守结果校验；`sn_ack` 只表示触发信号提交成功，不表示检测完成。前端会在等待同一 SN 的展示结果期间保持按钮 loading 和输入禁用，默认 30 秒超时，可用 `--manual-trigger-result-timeout-ms` 调整。当前 `tcp_signal` 只维护一个客户端连接；生产现场如果同一个 `9000` 端口已有 PLC/外部上位机长连接，展示前端手动触发可能无法连接或替换真实连接，必须先确认连接仲裁策略。
+按钮提交的是控制面触发信号，不传图、不读写 Frame/Result 共享内存。C++ 收到 `start` 与 `sn <SN>` 后仍按 `StationController` 完整执行相机、频闪、共享内存检测和保守结果校验；`sn_ack` 只表示触发信号提交成功，不表示检测完成。前端会在等待同一 SN 或 `LINE1_AOI_01_<SN>` 这类站点前缀 seat_id 的展示结果期间保持按钮 loading 和输入禁用，默认 30 秒超时，可用 `--manual-trigger-result-timeout-ms` 调整。生产配置中自动触发端口 `signal.port=9000` 和展示手动触发端口 `display_manual_trigger.port=9002` 独立监听，手动按钮不再抢占真实 PLC/上位机连接。
 
 ## 安全边界
 

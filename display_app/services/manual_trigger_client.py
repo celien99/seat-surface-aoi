@@ -17,7 +17,7 @@ class ManualTriggerError(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class ManualTriggerConfig:
     host: str = "127.0.0.1"
-    port: int = 9000
+    port: int = 9002
     timeout_ms: int = 1000
     terminator: str = "\n"
     start_command: str = "start"

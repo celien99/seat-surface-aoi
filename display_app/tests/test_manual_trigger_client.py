@@ -115,6 +115,32 @@ def test_main_view_model_manual_trigger_unlocks_after_matching_display_result(tm
     assert view_model.lastTriggerResult == "OK"
 
 
+def test_main_view_model_manual_trigger_unlocks_after_prefixed_display_result(tmp_path: Path) -> None:
+    _ensure_qt_app()
+    server = _StartSnServer()
+    server.start()
+    client = ManualTriggerClient(
+        ManualTriggerConfig(host="127.0.0.1", port=server.port, timeout_ms=1000)
+    )
+    view_model = MainViewModel(
+        DisplayBridge(tmp_path, CameraImageProvider()),
+        manual_trigger_client=client,
+    )
+
+    view_model.submitManualTrigger("SN-201")
+    assert server.done.wait(2.0)
+    _wait_until(lambda: view_model.manualTriggerStage == "waiting_result")
+
+    _write_latest(tmp_path, seat_id="LINE1_AOI_01_SN-201", decision="OK")
+    view_model.pollLatest()
+
+    assert view_model.manualTriggerPending is False
+    assert view_model.manualTriggerStage == "idle"
+    assert view_model.triggerEnabled is True
+    assert view_model.manualSn == ""
+    assert view_model.lastTriggerResult == "OK"
+
+
 def test_main_view_model_manual_trigger_timeout_reenables_input(tmp_path: Path) -> None:
     _ensure_qt_app()
     server = _StartSnServer()

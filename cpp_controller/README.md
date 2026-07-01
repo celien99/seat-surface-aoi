@@ -7,6 +7,7 @@
 ```mermaid
 flowchart LR
   Signal["外部信号\nmanual/external/tcp"] --> Station["StationController"]
+  DisplayManual["display_app 手动触发\n独立 tcp 端口"] --> Station
   Station --> Assembler["FrameAssembler"]
   Assembler --> Strobe["FL-ACDH\nserial_ascii"]
   Strobe --> L1["光源 1"]
@@ -77,7 +78,7 @@ cpp_controller/
 
 在线模式 `controller_mode=online`：
 
-1. 等待外部信号，生成 `ExternalTrigger`。`trigger_timeout_ms=0`（默认）表示无限等待，TCP 客户端未连接/无数据时阻塞监听，不浪费 CPU 也不产生超时日志。
+1. 等待外部信号，生成 `ExternalTrigger`。`trigger_timeout_ms=0`（默认）表示无限等待，TCP 客户端未连接/无数据时阻塞监听，不浪费 CPU 也不产生超时日志。启用 `display_manual_trigger.enabled=true` 后，主控会同时轮询 display_app 独立手动触发端口；两类触发合流到同一个 `StationController`，但采集/检测仍串行执行。
 2. `FrameAssembler` 初始化 1 台 FL-ACDH 和 2 台相机。
 3. 按光源顺序 1、2、3 分两阶段采集：
    - **阶段 A（快速连续触发）**：每路光源先并行 arm 两台相机（仅更新 ExposureTime/Gain），等待 `arm_settle_ms` 稳定后，直接向 FL-ACDH 发送 `8/9/A/7` 完整点亮序列。三路光源连续触发，中间不等待 `GetImageBuffer`，利用 Continuous+Trigger 模式下 arm 仅影响下一次触发沿的特性，将 arm 开销与上一路曝光+传输并行化。相机启动或故障重启时 `start()/cancel_wait()` 仍会排空旧帧。
@@ -119,6 +120,8 @@ capture_schedule=shared_light_parallel
 light_order=1,2,3
 
 signal.backend=tcp_signal       # production 常用；lab 可用 manual_trigger
+display_manual_trigger.enabled=true
+display_manual_trigger.port=9002 # display_app 手动触发独立端口，不能等于 signal.port
 camera.backend=hikrobot_mvs
 light.backend=serial_ascii
 
@@ -299,13 +302,13 @@ signal.start_command=start
 signal.delimiter=|
 ```
 
-`display_app` 可在联调时作为该协议的人工触发客户端：
+`display_app` 可在联调时作为该协议的人工触发客户端。生产配置默认使用独立的 `display_manual_trigger.port=9002`，不占用 PLC/上位机自动触发的 `signal.port=9000`：
 
 ```powershell
-uv run seat-aoi-display --trace-root trace --enable-manual-trigger --manual-trigger-port 9000
+uv run seat-aoi-display --trace-root trace --enable-manual-trigger --manual-trigger-port 9002
 ```
 
-该按钮只模拟外部到位信号和 SN 条码，不直接控制相机、频闪或共享内存。生产现场如果真实 PLC/外部工控机已连接同一个 TCP 端口，需要先确认不会被手动触发客户端抢占。
+该按钮只模拟外部到位信号和 SN 条码，不直接控制相机、频闪或共享内存。C++ 会拒绝 `display_manual_trigger.port` 与 `signal.port` 相同的配置；手动触发结果通过 detector trace 展示通道回到前端，不向 PLC/上位机自动触发连接写入结果。
 
 错误处理：未收到完整到位/SN 触发时仅继续等待，不进入采集检测，也不输出复检结果；命令不匹配或条码为空会关闭当前客户端连接并在下一轮重新等待接入。
 
@@ -354,7 +357,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
 
 安装脚本会安装 Python 运行依赖、按 C++ `production.conf` 中的 active `recipe_id` 定位实际 YAML 并注入模型/trace 路径，执行 C++ 配置校验、协议校验、detector 配方/标定/ROI smoke 校验和模型资产校验，然后注册 `SeatAoiController` 与 `SeatAoiDetector` 自启动服务。C++ 主控先创建共享内存，Python detector 后启动并打开共享内存。默认 `DataRoot`/`ModelRoot` 跟随 `ProjectRoot` 所在盘符，例如项目在 `E:\seat-surface-aoi` 时写入 `E:\seat-aoi-data` 和 `E:\seat-aoi-model`；也可安装时显式传入 `-DataRoot`/`-ModelRoot`。服务 stdout/stderr 写入当前 `DataRoot\logs\services\`。桌面快捷方式 `Seat AOI Display` 使用 `pythonw.exe -m display_app.main` 或打包 exe 启动，默认只读 `trace` 展示通道，不会连接 C++ 手动触发端口。
 
-如果现场需要通过 display_app 手动触发全链路，安装时追加 `-EnableDisplayManualTrigger -ManualTriggerHost 127.0.0.1 -ManualTriggerPort 9000`，脚本会把 `--enable-manual-trigger` 写入桌面快捷方式参数。当前 `tcp_signal` 只维护一个客户端连接；生产接入真实 PLC/上位机时不要同时启用该快捷方式的手动触发，除非已经确认 `tcp_signal` 连接仲裁策略，否则 display 可能无法连接或替换真实触发连接。
+如果现场需要通过 display_app 手动触发全链路，安装时追加 `-EnableDisplayManualTrigger -ManualTriggerHost 127.0.0.1 -ManualTriggerPort 9002`，脚本会把 `--enable-manual-trigger` 写入桌面快捷方式参数。该端口对应 C++ `display_manual_trigger` 独立监听，不会替换或抢占真实 PLC/上位机的 `signal.port=9000` 连接。
 
 ### PowerShell Watchdog (简易备选)
 

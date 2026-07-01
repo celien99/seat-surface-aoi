@@ -86,6 +86,7 @@ void TcpSignalClient::close_socket() {
   }
   pending_rx_.clear();
   pending_rx_updated_at_ = std::chrono::steady_clock::time_point{};
+  awaiting_sn_ = false;
   if (listen_sock_ != kInvalidSocket) {
     close_socket_impl(listen_sock_);
     listen_sock_ = kInvalidSocket;
@@ -137,6 +138,7 @@ void TcpSignalClient::close_socket() {
   }
   pending_rx_.clear();
   pending_rx_updated_at_ = std::chrono::steady_clock::time_point{};
+  awaiting_sn_ = false;
   if (listen_sock_ != kInvalidSocket) {
     close_socket_impl(listen_sock_);
     listen_sock_ = kInvalidSocket;
@@ -319,6 +321,7 @@ bool TcpSignalClient::accept_client(int timeout_ms,
     client_sock_ = client;
     pending_rx_.clear();
     pending_rx_updated_at_ = std::chrono::steady_clock::time_point{};
+    awaiting_sn_ = false;
 
     char ip_str[INET_ADDRSTRLEN]{};
     inet_ntop(AF_INET, &client_addr.sin_addr, ip_str, sizeof(ip_str));
@@ -328,7 +331,11 @@ bool TcpSignalClient::accept_client(int timeout_ms,
   }
 
   if (error_message != nullptr) {
-    *error_message = "TCP 等待客户端连接超时";
+    if (infinite) {
+      *error_message = "TCP 等待客户端连接超时";
+    } else {
+      error_message->clear();
+    }
   }
   return false;
 }
@@ -434,7 +441,11 @@ bool TcpSignalClient::read_line(std::string* line, int timeout_ms,
   if (line->empty()) {
     if (error_message != nullptr) {
       if (timed_out) {
-        *error_message = "TCP 等待触发行超时";
+        if (infinite) {
+          *error_message = "TCP 等待触发行超时";
+        } else {
+          error_message->clear();
+        }
       } else if (disconnected) {
         *error_message = "TCP 客户端连接断开";
       } else {
@@ -615,6 +626,7 @@ bool TcpSignalClient::initialize(const SignalClientConfig& config) {
   ng_text_ = config.ng_text.empty() ? "NG" : config.ng_text;
   recheck_text_ = config.recheck_text.empty() ? "RECHECK" : config.recheck_text;
   error_text_ = config.error_text.empty() ? "ERROR" : config.error_text;
+  publish_results_on_command_channel_ = config.publish_results_on_command_channel;
   station_id_ = config.station_id.empty() ? "TCP_AOI" : config.station_id;
   default_seat_id_ = config.default_seat_id.empty() ? "EXTERNAL_SEAT"
                                                      : config.default_seat_id;
@@ -623,6 +635,7 @@ bool TcpSignalClient::initialize(const SignalClientConfig& config) {
   simulate_output_fault_ = config.simulate_output_fault;
   simulate_trigger_timeout_ = config.simulate_trigger_timeout;
   next_trigger_id_ = 1;
+  awaiting_sn_ = false;
 
   std::string listen_error;
   if (!start_listen(static_cast<int>(port_), &listen_error)) {
@@ -699,7 +712,7 @@ bool TcpSignalClient::wait_trigger(ExternalTrigger* out_trigger,
         continue;
       }
       // 有限超时模式下保留 socket 供下次复用
-      if (!infinite && error_message != nullptr && *error_message == "TCP 等待触发行超时") {
+      if (!infinite && error_message != nullptr && error_message->empty()) {
         return false;
       }
       close_socket_impl(client_sock_);
@@ -727,82 +740,103 @@ bool TcpSignalClient::wait_trigger_start_sn(ExternalTrigger* out_trigger,
                                              std::string* error_message) {
   const bool infinite = (timeout_ms <= 0);
 
-  // 步骤 1: 等待到位信号 (start_command)
-  // 循环忽略不匹配的行，直到收到 start_command 或连接断开
-  while (true) {
-    std::string line;
-    if (!read_line(&line, timeout_ms, error_message)) {
-      // 无限模式：read_line 只在连接断开/错误时返回 false
-      if (client_sock_ != kInvalidSocket) {
-        close_socket_impl(client_sock_);
-        client_sock_ = kInvalidSocket;
-        pending_rx_.clear();
-        pending_rx_updated_at_ = std::chrono::steady_clock::time_point{};
+  if (!awaiting_sn_) {
+    // 步骤 1: 等待到位信号 (start_command)
+    // 循环忽略不匹配的行，直到收到 start_command 或连接断开
+    while (true) {
+      std::string line;
+      if (!read_line(&line, timeout_ms, error_message)) {
+        if (!infinite && error_message != nullptr && error_message->empty()) {
+          return false;
+        }
+        // 无限模式：read_line 只在连接断开/错误时返回 false
+        if (client_sock_ != kInvalidSocket) {
+          close_socket_impl(client_sock_);
+          client_sock_ = kInvalidSocket;
+          pending_rx_.clear();
+          pending_rx_updated_at_ = std::chrono::steady_clock::time_point{};
+          awaiting_sn_ = false;
+        }
+        return false;
+      }
+
+      const std::string trimmed = trim(line);
+
+      // 组合格式检测: start_command + delimiter + SN（单行触发）
+      // 仅在 delimiter 非空时启用，向后兼容旧两步协议
+      if (!delimiter_.empty()) {
+        const std::string combined_prefix = start_command_ + delimiter_;
+        if (trimmed.size() > combined_prefix.size() &&
+            trimmed.compare(0, combined_prefix.size(), combined_prefix) == 0) {
+          std::string barcode = trim(trimmed.substr(combined_prefix.size()));
+          if (barcode.empty()) {
+            std::cerr << "TCP 两步协议: 收到组合格式触发行但 SN 为空 \""
+                      << trimmed << "\"" << std::endl;
+            continue;
+          }
+          std::string barcode_error;
+          if (!validate_barcode(barcode, &barcode_error)) {
+            std::cerr << "TCP 两步协议: 忽略非法组合格式 SN: "
+                      << barcode_error << std::endl;
+            continue;
+          }
+          // 组合格式已包含到位信号和 SN，直接回复 SN 确认
+          send_response(sn_ack_);
+
+          ExternalTrigger trigger{};
+          trigger.trigger_id = next_trigger_id_++;
+          trigger.seat_id = station_id_ + "_" + barcode;
+          trigger.sku = default_sku_;
+          *out_trigger = trigger;
+
+          std::cout << "TCP 两步协议: 收到组合格式触发 start_command+delimiter+SN="
+                    << barcode << " seat_id=" << trigger.seat_id
+                    << " trigger_id=" << trigger.trigger_id << std::endl;
+          return true;
+        }
+      }
+
+      if (trimmed == start_command_) {
+        break;  // 收到到位信号
+      }
+      // 非到位信号的行 → 忽略，继续等待
+      std::cerr << "TCP 两步协议: 忽略非到位信号行 \"" << trimmed << "\"" << std::endl;
+    }
+
+    // 回复到位确认
+    send_response(start_ack_);
+    awaiting_sn_ = true;
+    std::cout << "TCP 两步协议: 收到到位信号 (" << start_command_
+              << "), 已回复确认" << std::endl;
+    if (!infinite) {
+      if (error_message != nullptr) {
+        error_message->clear();
       }
       return false;
     }
-
-    const std::string trimmed = trim(line);
-
-    // 组合格式检测: start_command + delimiter + SN（单行触发）
-    // 仅在 delimiter 非空时启用，向后兼容旧两步协议
-    if (!delimiter_.empty()) {
-      const std::string combined_prefix = start_command_ + delimiter_;
-      if (trimmed.size() > combined_prefix.size() &&
-          trimmed.compare(0, combined_prefix.size(), combined_prefix) == 0) {
-        std::string barcode = trim(trimmed.substr(combined_prefix.size()));
-        if (barcode.empty()) {
-          std::cerr << "TCP 两步协议: 收到组合格式触发行但 SN 为空 \""
-                    << trimmed << "\"" << std::endl;
-          continue;
-        }
-        std::string barcode_error;
-        if (!validate_barcode(barcode, &barcode_error)) {
-          std::cerr << "TCP 两步协议: 忽略非法组合格式 SN: "
-                    << barcode_error << std::endl;
-          continue;
-        }
-        // 组合格式已包含到位信号和 SN，直接回复 SN 确认
-        send_response(sn_ack_);
-
-        ExternalTrigger trigger{};
-        trigger.trigger_id = next_trigger_id_++;
-        trigger.seat_id = station_id_ + "_" + barcode;
-        trigger.sku = default_sku_;
-        *out_trigger = trigger;
-
-        std::cout << "TCP 两步协议: 收到组合格式触发 start_command+delimiter+SN="
-                  << barcode << " seat_id=" << trigger.seat_id
-                  << " trigger_id=" << trigger.trigger_id << std::endl;
-        return true;
-      }
-    }
-
-    if (trimmed == start_command_) {
-      break;  // 收到到位信号
-    }
-    // 非到位信号的行 → 忽略，继续等待
-    std::cerr << "TCP 两步协议: 忽略非到位信号行 \"" << trimmed << "\"" << std::endl;
   }
-
-  // 回复到位确认
-  send_response(start_ack_);
-  std::cout << "TCP 两步协议: 收到到位信号 (" << start_command_
-            << "), 已回复确认" << std::endl;
 
   // 步骤 2: 等待 SN 条码
   // 循环忽略非法格式，直到收到合法 SN 或连接断开
   while (true) {
     std::string sn_line;
     if (!read_line(&sn_line, timeout_ms, error_message)) {
+      if (!infinite && error_message != nullptr && error_message->empty()) {
+        return false;
+      }
       if (client_sock_ != kInvalidSocket) {
         close_socket_impl(client_sock_);
         client_sock_ = kInvalidSocket;
         pending_rx_.clear();
         pending_rx_updated_at_ = std::chrono::steady_clock::time_point{};
+        awaiting_sn_ = false;
       }
       if (error_message != nullptr && *error_message == "TCP 等待触发行超时") {
-        *error_message = "TCP 两步协议等待 SN 条码超时";
+        if (infinite) {
+          *error_message = "TCP 两步协议等待 SN 条码超时";
+        } else {
+          error_message->clear();
+        }
       }
       return false;
     }
@@ -829,6 +863,7 @@ bool TcpSignalClient::wait_trigger_start_sn(ExternalTrigger* out_trigger,
 
     // 回复 SN 确认
     send_response(sn_ack_);
+    awaiting_sn_ = false;
 
     ExternalTrigger trigger{};
     trigger.trigger_id = next_trigger_id_++;
@@ -889,7 +924,7 @@ bool TcpSignalClient::publish_result(const ExternalTrigger& trigger,
   }
 
   // 回退：无独立结果通道时，尝试通过已有 PLC 连接发送
-  if (client_sock_ != kInvalidSocket) {
+  if (publish_results_on_command_channel_ && client_sock_ != kInvalidSocket) {
     const std::string line = result_prefix_ + result_delimiter_ +
                              seat_id + result_delimiter_ +
                              decision_text + terminator_;

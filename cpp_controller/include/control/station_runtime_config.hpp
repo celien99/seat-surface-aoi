@@ -100,8 +100,30 @@ struct RuntimeSignalConfig {
   std::string ng_text = "NG";
   std::string recheck_text = "RECHECK";
   std::string error_text = "ERROR";
+  bool publish_results_on_command_channel = true;
   bool simulate_output_fault = false;
   bool simulate_trigger_timeout = false;
+};
+
+struct RuntimeDisplayManualTriggerConfig {
+  bool enabled = false;
+  RuntimeSignalConfig signal;
+
+  RuntimeDisplayManualTriggerConfig() {
+    signal.backend = HardwareBackend::TcpSignal;
+    signal.port = 9002;
+    signal.protocol_mode = "start_sn";
+    signal.start_command = "start";
+    signal.sn_prefix = "sn";
+    signal.start_ack = "start_ack";
+    signal.sn_ack = "sn_ack";
+    signal.terminator = "\n";
+    signal.ok_response = "ok\n";
+    signal.delimiter.clear();
+    signal.result_host.clear();
+    signal.result_port = 0;
+    signal.publish_results_on_command_channel = false;
+  }
 };
 
 struct ImageSaveConfig {
@@ -148,6 +170,7 @@ struct StationRuntimeConfig {
       RuntimeLightChannelConfig{0, 3, 3, 800, 800, 10, 1.0F, 55.0F, LightAcquisitionMode::Strobe},
   };
   RuntimeSignalConfig signal;
+  RuntimeDisplayManualTriggerConfig display_manual_trigger;
   ImageSaveConfig image_save;
 };
 

@@ -155,6 +155,8 @@ inline SignalClientConfig make_signal_client_config(const RuntimeSignalConfig& c
   client_config.ng_text = config.ng_text;
   client_config.recheck_text = config.recheck_text;
   client_config.error_text = config.error_text;
+  client_config.publish_results_on_command_channel =
+      config.publish_results_on_command_channel;
   client_config.simulate_output_fault = config.simulate_output_fault;
   client_config.simulate_trigger_timeout = config.simulate_trigger_timeout;
   return client_config;

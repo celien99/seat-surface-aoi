@@ -39,6 +39,7 @@ StationConfig to_station_config(const StationRuntimeConfig& config) {
   out.lights = config.lights;
   out.light_channels = config.light_channels;
   out.signal = config.signal;
+  out.display_manual_trigger = config.display_manual_trigger;
   out.simulate_light_fault = !config.lights.empty() && config.lights[0].simulate_fault;
   out.simulate_trigger_timeout = config.signal.simulate_trigger_timeout;
   out.simulate_signal_result_fault = config.signal.simulate_output_fault;
@@ -114,6 +115,7 @@ bool StationController::initialize(const StationConfig& config) {
       config.lights.empty() ? std::vector<RuntimeLightConfig>{config.light} : config.lights;
   runtime_config.light_channels = config.light_channels;
   runtime_config.signal = config.signal;
+  runtime_config.display_manual_trigger = config.display_manual_trigger;
   runtime_config.image_save = config.image_save;
   // 传播 CLI 模拟标志到运行时配置
   if (runtime_config.lights.empty()) {
@@ -150,6 +152,27 @@ bool StationController::initialize(const StationConfig& config) {
                         ErrorCode::DeviceFault,
                         signal_client_->get_health().message);
     return false;
+  }
+  display_manual_signal_client_.reset();
+  if (config.display_manual_trigger.enabled) {
+    display_manual_signal_client_ =
+        create_signal_client(config.display_manual_trigger.signal.backend);
+    if (!display_manual_signal_client_->initialize(
+            make_signal_client_config(runtime_config.display_manual_trigger.signal))) {
+      std::cerr << "display manual trigger client initialize failed: "
+                << display_manual_signal_client_->get_health().message << std::endl;
+      health_.record_fault(ErrorCode::DeviceFault,
+                           display_manual_signal_client_->get_health().message);
+      health_.transition_to(StationState::Fault,
+                            display_manual_signal_client_->get_health().message);
+      record_system_event("station_initialize_failed",
+                          ErrorCode::DeviceFault,
+                          display_manual_signal_client_->get_health().message);
+      return false;
+    }
+    record_system_event("display_manual_trigger_ready",
+                        ErrorCode::None,
+                        display_manual_signal_client_->get_health().message);
   }
 
   shared_memory_initialized_ = false;
@@ -197,7 +220,28 @@ bool StationController::wait_for_trigger(ExternalTrigger* out_trigger, std::stri
   std::string local_error;
   std::string* wait_error = error_message != nullptr ? error_message : &local_error;
   wait_error->clear();
-  if (!signal_client_->wait_trigger(out_trigger, config_.trigger_timeout_ms, wait_error)) {
+  if (display_manual_signal_client_ != nullptr) {
+    ExternalTrigger manual_trigger;
+    std::string manual_error;
+    if (display_manual_signal_client_->wait_trigger(&manual_trigger, 20, &manual_error)) {
+      manual_trigger.source = TriggerSource::DisplayManual;
+      manual_trigger.trigger_id += manual_trigger_id_offset_;
+      *out_trigger = manual_trigger;
+      consecutive_trigger_faults_ = 0;
+      health_.transition_to(StationState::Running, "display manual trigger accepted");
+      return true;
+    }
+    if (!manual_error.empty()) {
+      record_system_event("display_manual_trigger_ignored",
+                          ErrorCode::DeviceFault,
+                          manual_error);
+    }
+  }
+  const int trigger_wait_ms =
+      display_manual_signal_client_ != nullptr && config_.trigger_timeout_ms <= 0
+          ? 50
+          : config_.trigger_timeout_ms;
+  if (!signal_client_->wait_trigger(out_trigger, trigger_wait_ms, wait_error)) {
     const std::string message = *wait_error;
     if (message.empty()) {
       health_.transition_to(StationState::Ready, "station ready");
@@ -215,6 +259,7 @@ bool StationController::wait_for_trigger(ExternalTrigger* out_trigger, std::stri
     }
     return false;
   }
+  out_trigger->source = TriggerSource::External;
   consecutive_trigger_faults_ = 0;
   health_.transition_to(StationState::Running, "trigger accepted");
   return true;
@@ -279,11 +324,15 @@ InspectionResultPayload StationController::inspect_one_seat(const ExternalTrigge
     const std::string message =
         "capture_only saved images; shared memory and detector bypassed";
     auto result = make_recheck_result(trigger, sequence_id, ErrorCode::None, message);
-    if (!signal_client_->publish_result(trigger,
-                                        sequence_id,
-                                        InspectionDecision::Recheck,
-                                        200,
-                                        &error)) {
+    ISignalClient* result_signal =
+        trigger.source == TriggerSource::DisplayManual && display_manual_signal_client_ != nullptr
+            ? display_manual_signal_client_.get()
+            : signal_client_.get();
+    if (!result_signal->publish_result(trigger,
+                                       sequence_id,
+                                       InspectionDecision::Recheck,
+                                       200,
+                                       &error)) {
       result.meta.error_code = static_cast<std::uint32_t>(ErrorCode::DeviceFault);
       record_result_health(result, message + "; publish_error=" + error);
       record_event("capture_only_result_publish_failed",
@@ -332,7 +381,11 @@ InspectionResultPayload StationController::inspect_one_seat(const ExternalTrigge
   const auto decision = static_cast<InspectionDecision>(result.meta.decision);
   const InspectionDecision published_decision =
       decision == InspectionDecision::Error ? InspectionDecision::Recheck : decision;
-  if (!signal_client_->publish_result(trigger, sequence_id, published_decision, 200, &error)) {
+  ISignalClient* result_signal =
+      trigger.source == TriggerSource::DisplayManual && display_manual_signal_client_ != nullptr
+          ? display_manual_signal_client_.get()
+          : signal_client_.get();
+  if (!result_signal->publish_result(trigger, sequence_id, published_decision, 200, &error)) {
     auto recheck = make_recheck_result(trigger, sequence_id, ErrorCode::DeviceFault, error);
     record_result_health(recheck, error);
     record_event("signal_result_publish_failed",
@@ -405,7 +458,11 @@ InspectionResultPayload StationController::make_and_send_recheck_result(
     const std::string& message) {
   auto result = make_recheck_result(trigger, sequence_id, error_code, message);
   std::string publish_error;
-  if (!signal_client_->publish_result(
+  ISignalClient* result_signal =
+      trigger.source == TriggerSource::DisplayManual && display_manual_signal_client_ != nullptr
+          ? display_manual_signal_client_.get()
+          : signal_client_.get();
+  if (!result_signal->publish_result(
           trigger, sequence_id, InspectionDecision::Recheck, 200, &publish_error)) {
     result.meta.error_code = static_cast<std::uint32_t>(ErrorCode::DeviceFault);
     record_result_health(result, message + "; publish_error=" + publish_error);

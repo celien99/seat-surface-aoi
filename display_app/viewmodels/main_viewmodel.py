@@ -741,7 +741,11 @@ class MainViewModel(QObject):
             or event.timestamp_ms <= 0
             or event.timestamp_ms >= self._manual_trigger_wait_started_ms
         )
-        event_matches_sn = not self._pending_manual_sn or event.seat_id == self._pending_manual_sn
+        event_matches_sn = (
+            not self._pending_manual_sn
+            or event.seat_id == self._pending_manual_sn
+            or event.seat_id.endswith("_" + self._pending_manual_sn)
+        )
         if not event_after_submit or not event_matches_sn:
             return
         status = _normal_status(event.decision)

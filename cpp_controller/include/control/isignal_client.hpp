@@ -33,6 +33,7 @@ struct SignalClientConfig {
   std::string ng_text = "NG";
   std::string recheck_text = "RECHECK";
   std::string error_text = "ERROR";
+  bool publish_results_on_command_channel = true;
   bool simulate_output_fault = false;
   bool simulate_trigger_timeout = false;
 };

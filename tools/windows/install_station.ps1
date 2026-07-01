@@ -22,7 +22,7 @@ param(
   [switch]$CreateStartupShortcut,
   [switch]$EnableDisplayManualTrigger,
   [string]$ManualTriggerHost = "127.0.0.1",
-  [int]$ManualTriggerPort = 9000,
+  [int]$ManualTriggerPort = 9002,
   [int]$ManualTriggerTimeoutMs = 1000,
   [switch]$BuildPythonPackages,
   [string]$DataRoot = "",

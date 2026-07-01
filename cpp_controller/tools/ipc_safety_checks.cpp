@@ -287,6 +287,95 @@ bool send_tcp_test_payload_chunks(std::uint16_t port,
   return true;
 }
 
+bool send_tcp_start_sn_test_handshake(std::uint16_t port,
+                                      const std::string& sn,
+                                      std::string* start_response,
+                                      std::string* sn_response,
+                                      std::string* error_message) {
+  if (!ensure_test_winsock(error_message)) {
+    return false;
+  }
+  TestSocket sock =
+#ifdef _WIN32
+      socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+#else
+      socket(AF_INET, SOCK_STREAM, 0);
+#endif
+  if (sock == kInvalidTestSocket) {
+    if (error_message != nullptr) {
+      *error_message = "test client socket create failed";
+    }
+    return false;
+  }
+  if (!set_test_socket_timeout(sock, 2000, error_message)) {
+    close_test_socket(sock);
+    return false;
+  }
+
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(port);
+  if (inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr) != 1) {
+    close_test_socket(sock);
+    if (error_message != nullptr) {
+      *error_message = "test client loopback parse failed";
+    }
+    return false;
+  }
+  if (connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+    close_test_socket(sock);
+    if (error_message != nullptr) {
+      *error_message = "test client connect failed";
+    }
+    return false;
+  }
+
+  const std::string start = "start\n";
+  if (send(sock, start.data(), static_cast<int>(start.size()), 0) !=
+      static_cast<int>(start.size())) {
+    close_test_socket(sock);
+    if (error_message != nullptr) {
+      *error_message = "test client start send failed";
+    }
+    return false;
+  }
+  char start_buffer[64]{};
+  const int start_received = recv(sock, start_buffer, static_cast<int>(sizeof(start_buffer)), 0);
+  if (start_received <= 0) {
+    close_test_socket(sock);
+    if (error_message != nullptr) {
+      *error_message = "test client did not receive start ack";
+    }
+    return false;
+  }
+  if (start_response != nullptr) {
+    start_response->assign(start_buffer, start_buffer + start_received);
+  }
+
+  const std::string sn_line = "sn " + sn + "\n";
+  if (send(sock, sn_line.data(), static_cast<int>(sn_line.size()), 0) !=
+      static_cast<int>(sn_line.size())) {
+    close_test_socket(sock);
+    if (error_message != nullptr) {
+      *error_message = "test client sn send failed";
+    }
+    return false;
+  }
+  char sn_buffer[64]{};
+  const int sn_received = recv(sock, sn_buffer, static_cast<int>(sizeof(sn_buffer)), 0);
+  close_test_socket(sock);
+  if (sn_received <= 0) {
+    if (error_message != nullptr) {
+      *error_message = "test client did not receive sn ack";
+    }
+    return false;
+  }
+  if (sn_response != nullptr) {
+    sn_response->assign(sn_buffer, sn_buffer + sn_received);
+  }
+  return true;
+}
+
 std::uint32_t result_header_crc(const seat_aoi::ResultSlotHeader* slot) {
   std::array<std::uint8_t, sizeof(seat_aoi::ResultSlotHeader)> bytes{};
   std::memcpy(bytes.data(), slot, bytes.size());
@@ -1703,10 +1792,33 @@ bool test_production_config_file_validates() {
                       config.signal.terminator.empty() &&
                       config.signal.start_ack == "start_ack" &&
                       config.signal.sn_ack == "sn_ack" &&
+                      config.display_manual_trigger.enabled &&
+                      config.display_manual_trigger.signal.port == 9002 &&
+                      config.display_manual_trigger.signal.protocol_mode == "start_sn" &&
+                      config.display_manual_trigger.signal.terminator == "\n" &&
                       config.lights[0].response_mode ==
                           seat_aoi::LightSerialResponseMode::Ack;
   if (!passed) {
     std::cerr << "production config did not validate expected fixed-camera strobe setup: "
+              << error << "\n";
+  }
+  return passed;
+}
+
+bool test_display_manual_trigger_port_must_not_match_signal_port() {
+  auto config = make_filled_production_runtime_config();
+  config.signal.backend = seat_aoi::HardwareBackend::TcpSignal;
+  config.signal.port = 9000;
+  config.signal.protocol_mode = "start_sn";
+  config.display_manual_trigger.enabled = true;
+  config.display_manual_trigger.signal.station_id = "LINE1_AOI_01";
+  config.display_manual_trigger.signal.default_sku = "seat_a_black_leather";
+  config.display_manual_trigger.signal.port = 9000;
+  std::string error;
+  const bool ok = seat_aoi::validate_station_runtime_config(config, &error);
+  const bool passed = !ok && error.find("display_manual_trigger.port") != std::string::npos;
+  if (!passed) {
+    std::cerr << "display manual trigger accepted the external signal port: "
               << error << "\n";
   }
   return passed;
@@ -2092,6 +2204,111 @@ bool test_idle_trigger_wait_does_not_fault_station() {
   return passed;
 }
 
+bool test_display_manual_trigger_is_independent_from_external_signal_wait() {
+  std::string socket_error;
+  const std::uint16_t manual_port = reserve_tcp_test_port(&socket_error);
+  if (manual_port == 0) {
+    std::cerr << "display manual trigger test port reserve failed: "
+              << socket_error << "\n";
+    return false;
+  }
+
+  seat_aoi::StationConfig config;
+  config.reset_shared_memory = true;
+  config.slot_count = 1;
+  config.frame_slot_size = 8192;
+  config.result_slot_size = 4096;
+  config.publish_timeout_ms = 5;
+  config.detector_timeout_ms = 5;
+  config.trigger_timeout_ms = 0;
+  config.camera_timeout_ms = 5;
+  config.light_timeout_ms = 5;
+  config.recipe_id = "seat_a_black_leather_v1";
+  config.light_order = {1};
+  config.signal.backend = seat_aoi::HardwareBackend::ExternalSignal;
+  config.signal.station_id = "LINE1_AOI_01";
+  config.signal.default_sku = "seat_a_black_leather";
+  config.display_manual_trigger.enabled = true;
+  config.display_manual_trigger.signal.backend = seat_aoi::HardwareBackend::TcpSignal;
+  config.display_manual_trigger.signal.station_id = "LINE1_AOI_01";
+  config.display_manual_trigger.signal.default_sku = "seat_a_black_leather";
+  config.display_manual_trigger.signal.port = manual_port;
+  config.display_manual_trigger.signal.protocol_mode = "start_sn";
+  config.display_manual_trigger.signal.terminator = "\n";
+  config.display_manual_trigger.signal.start_ack = "start_ack";
+  config.display_manual_trigger.signal.sn_ack = "sn_ack";
+  config.light_channels = {
+      seat_aoi::RuntimeLightChannelConfig{0, 1, 1, 800, 800, 10, 1.0F, 60.0F},
+  };
+  const auto storage_root =
+      std::filesystem::temp_directory_path() /
+      ("seat_aoi_display_manual_trigger_" + std::to_string(seat_aoi::now_us()));
+  config.trace_root = (storage_root / "trace").string();
+  config.signal.trigger_queue_path = (storage_root / "external_triggers.csv").string();
+  config.image_save.enabled = false;
+  config.image_save.root_dir = (storage_root / "images").string();
+  config.image_save.cleanup_enabled = false;
+  config.image_save.cleanup_min_free_ratio = 0.0F;
+
+  seat_aoi::StationController station;
+  if (!station.initialize(config)) {
+    std::cerr << "display manual trigger station initialize failed\n";
+    return false;
+  }
+
+  seat_aoi::ExternalTrigger trigger;
+  std::string wait_error;
+  bool accepted = false;
+  std::thread waiter([&]() {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < deadline && !accepted) {
+      accepted = station.wait_for_trigger(&trigger, &wait_error);
+      if (!accepted && !wait_error.empty()) {
+        break;
+      }
+    }
+  });
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  std::string start_response;
+  std::string sn_response;
+  std::string client_error;
+  const bool client_ok =
+      send_tcp_start_sn_test_handshake(manual_port,
+                                       "SN-MANUAL",
+                                       &start_response,
+                                       &sn_response,
+                                       &client_error);
+  waiter.join();
+  const auto snapshot = station.health_snapshot();
+  station.cleanup_shared_memory();
+
+  const bool passed =
+      client_ok &&
+      accepted &&
+      wait_error.empty() &&
+      start_response == "start_ack" &&
+      sn_response == "sn_ack" &&
+      trigger.trigger_id == 1'000'001 &&
+      trigger.seat_id == "LINE1_AOI_01_SN-MANUAL" &&
+      trigger.source == seat_aoi::TriggerSource::DisplayManual &&
+      snapshot.device_fault_count == 0;
+  if (!passed) {
+    std::cerr << "display manual trigger did not stay independent from external wait: "
+              << "client_ok=" << client_ok
+              << " client_error=" << client_error
+              << " accepted=" << accepted
+              << " wait_error=" << wait_error
+              << " start_response=" << start_response
+              << " sn_response=" << sn_response
+              << " trigger_id=" << trigger.trigger_id
+              << " seat_id=" << trigger.seat_id
+              << " device_fault_count=" << snapshot.device_fault_count
+              << "\n";
+  }
+  return passed;
+}
+
 bool write_detector_result_slot(std::uint64_t sequence_id,
                                 std::uint64_t trigger_id,
                                 const std::string& seat_id,
@@ -2433,6 +2650,9 @@ int main() {
   if (!test_camera_buffer_count_must_cover_light_order()) {
     return 1;
   }
+  if (!test_display_manual_trigger_port_must_not_match_signal_port()) {
+    return 1;
+  }
   if (!test_lab_manual_trigger_config_validates()) {
     return 1;
   }
@@ -2470,6 +2690,9 @@ int main() {
     return 1;
   }
   if (!test_idle_trigger_wait_does_not_fault_station()) {
+    return 1;
+  }
+  if (!test_display_manual_trigger_is_independent_from_external_signal_wait()) {
     return 1;
   }
   if (!test_detector_ng_with_quality_failure_is_rechecked()) {

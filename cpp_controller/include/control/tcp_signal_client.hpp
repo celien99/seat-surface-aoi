@@ -110,6 +110,7 @@ private:
   std::string ng_text_ = "NG";
   std::string recheck_text_ = "RECHECK";
   std::string error_text_ = "ERROR";
+  bool publish_results_on_command_channel_ = true;
 
   std::uint64_t next_trigger_id_ = 1;
 
@@ -117,6 +118,7 @@ private:
   socket_t client_sock_ = kInvalidSocket;
   std::string pending_rx_;
   std::chrono::steady_clock::time_point pending_rx_updated_at_{};
+  bool awaiting_sn_ = false;
 };
 
 }  // namespace seat_aoi

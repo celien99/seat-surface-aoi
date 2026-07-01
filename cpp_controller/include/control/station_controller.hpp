@@ -51,6 +51,7 @@ struct StationConfig {
       RuntimeLightChannelConfig{0, 3, 3, 800, 800, 10, 1.0F, 55.0F},
   };
   RuntimeSignalConfig signal;
+  RuntimeDisplayManualTriggerConfig display_manual_trigger;
   bool simulate_light_fault = false;
   bool simulate_signal_result_fault = false;
   bool simulate_trigger_timeout = false;
@@ -101,11 +102,13 @@ private:
   ResultRingBuffer result_ring_;
   FrameAssembler frame_assembler_;
   std::unique_ptr<ISignalClient> signal_client_;
+  std::unique_ptr<ISignalClient> display_manual_signal_client_;
   ProductionEventLog event_log_;
   StationHealthMonitor health_;
   std::uint64_t next_sequence_id_ = 1;
   bool shared_memory_initialized_ = false;
   int consecutive_trigger_faults_ = 0;
+  std::uint64_t manual_trigger_id_offset_ = 1'000'000;
 };
 
 }  // namespace seat_aoi

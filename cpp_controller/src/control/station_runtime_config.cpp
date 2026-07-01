@@ -398,6 +398,101 @@ bool apply_camera_value(RuntimeCameraConfig* camera,
   return true;
 }
 
+bool parse_signal_port_field(const std::string& field_name,
+                             const std::string& value,
+                             std::uint32_t* out_port,
+                             std::string* error_message) {
+  if (!parse_uint32_field(field_name, value, false, out_port, error_message)) {
+    return false;
+  }
+  if (*out_port > 65535) {
+    if (error_message != nullptr) {
+      *error_message = field_name + " 端口号必须在 1-65535: " + value;
+    }
+    return false;
+  }
+  return true;
+}
+
+bool apply_signal_value(RuntimeSignalConfig* signal,
+                        const std::string& field_name,
+                        const std::string& value,
+                        std::string* error_message) {
+  if (field_name == "backend") {
+    return parse_hardware_backend(value, &signal->backend, error_message);
+  }
+  if (field_name == "station_id") {
+    signal->station_id = value;
+  } else if (field_name == "default_seat_id") {
+    signal->default_seat_id = value;
+  } else if (field_name == "default_sku") {
+    signal->default_sku = value;
+  } else if (field_name == "trigger_queue_path" || field_name == "trigger_queue") {
+    signal->trigger_queue_path = value;
+  } else if (field_name == "result_queue_path" || field_name == "result_queue") {
+    signal->result_queue_path = value;
+  } else if (field_name == "port") {
+    return parse_signal_port_field("signal.port", value, &signal->port, error_message);
+  } else if (field_name == "delimiter") {
+    signal->delimiter = value;
+  } else if (field_name == "terminator") {
+    signal->terminator = decode_control_text(value);
+  } else if (field_name == "ok_response") {
+    signal->ok_response = decode_control_text(value);
+  } else if (field_name == "protocol_mode") {
+    signal->protocol_mode = value;
+  } else if (field_name == "start_command") {
+    signal->start_command = value;
+  } else if (field_name == "sn_prefix") {
+    signal->sn_prefix = value;
+  } else if (field_name == "start_ack") {
+    signal->start_ack = decode_control_text(value);
+  } else if (field_name == "sn_ack") {
+    signal->sn_ack = decode_control_text(value);
+  } else if (field_name == "result_host") {
+    signal->result_host = value;
+  } else if (field_name == "result_port") {
+    return parse_uint32_field("signal.result_port",
+                              value,
+                              true,
+                              &signal->result_port,
+                              error_message);
+  } else if (field_name == "result_prefix") {
+    signal->result_prefix = value;
+  } else if (field_name == "result_delimiter") {
+    signal->result_delimiter = value;
+  } else if (field_name == "ok_text") {
+    signal->ok_text = value;
+  } else if (field_name == "ng_text") {
+    signal->ng_text = value;
+  } else if (field_name == "recheck_text") {
+    signal->recheck_text = value;
+  } else if (field_name == "error_text") {
+    signal->error_text = value;
+  } else if (field_name == "publish_results_on_command_channel") {
+    return parse_bool_field("signal.publish_results_on_command_channel",
+                            value,
+                            &signal->publish_results_on_command_channel,
+                            error_message);
+  } else if (field_name == "simulate_output_fault") {
+    return parse_bool_field("signal.simulate_output_fault",
+                            value,
+                            &signal->simulate_output_fault,
+                            error_message);
+  } else if (field_name == "simulate_trigger_timeout") {
+    return parse_bool_field("signal.simulate_trigger_timeout",
+                            value,
+                            &signal->simulate_trigger_timeout,
+                            error_message);
+  } else {
+    if (error_message != nullptr) {
+      *error_message = "未知信号字段: signal." + field_name;
+    }
+    return false;
+  }
+  return true;
+}
+
 std::uint32_t bytes_per_channel_for_pixel_format(const std::string& pixel_format) {
   if (pixel_format == "Mono8" || pixel_format == "BGR8" || pixel_format == "RGB8" ||
       pixel_format == "BayerRG8") {
@@ -501,6 +596,31 @@ std::uint64_t estimated_payload_size(const StationRuntimeConfig& config) {
                     config.light_order.size();
   }
   return payload_size;
+}
+
+bool validate_tcp_signal_config(const RuntimeSignalConfig& signal,
+                                const std::string& prefix,
+                                std::string* error_message) {
+  if (signal.port == 0 || signal.port > 65535) {
+    if (error_message != nullptr) {
+      *error_message = prefix + ".port 必须配置 (1-65535)";
+    }
+    return false;
+  }
+  if (signal.station_id.empty()) {
+    if (error_message != nullptr) {
+      *error_message = prefix + ".station_id 不能为空";
+    }
+    return false;
+  }
+  if (signal.protocol_mode != "single" && signal.protocol_mode != "start_sn") {
+    if (error_message != nullptr) {
+      *error_message = prefix + ".protocol_mode 只能是 single 或 start_sn: " +
+                       signal.protocol_mode;
+    }
+    return false;
+  }
+  return true;
 }
 
 }  // namespace
@@ -625,69 +745,70 @@ bool load_station_runtime_config(const std::string& path,
     } else if (key == "controller_mode") {
       if (!parse_controller_mode(value, &config.controller_mode, error_message)) return false;
     } else if (key == "signal.backend" || key == "plc.backend") {
-      if (!parse_hardware_backend(value, &config.signal.backend, error_message)) return false;
+      if (!apply_signal_value(&config.signal, "backend", value, error_message)) return false;
     } else if (key == "camera_backend" || key == "camera.backend") {
       if (!parse_hardware_backend(value, &config.camera_backend, error_message)) return false;
     } else if (key == "light.backend") {
       if (!parse_hardware_backend(value, &config.lights[0].backend, error_message)) return false;
     } else if (key == "signal.station_id" || key == "plc.station_id") {
-      config.signal.station_id = value;
+      if (!apply_signal_value(&config.signal, "station_id", value, error_message)) return false;
     } else if (key == "signal.default_seat_id") {
-      config.signal.default_seat_id = value;
+      if (!apply_signal_value(&config.signal, "default_seat_id", value, error_message)) return false;
     } else if (key == "signal.default_sku" || key == "plc.sku_source") {
-      config.signal.default_sku = value;
+      if (!apply_signal_value(&config.signal, "default_sku", value, error_message)) return false;
     } else if (key == "signal.trigger_queue_path" || key == "signal.trigger_queue") {
-      config.signal.trigger_queue_path = value;
+      if (!apply_signal_value(&config.signal, "trigger_queue_path", value, error_message)) return false;
     } else if (key == "signal.result_queue_path" || key == "signal.result_queue") {
-      config.signal.result_queue_path = value;
+      if (!apply_signal_value(&config.signal, "result_queue_path", value, error_message)) return false;
     } else if (key == "signal.port" || key == "plc.port") {
-      if (!parse_uint32_field("signal.port", value, false, &config.signal.port, error_message)) {
+      if (!apply_signal_value(&config.signal, "port", value, error_message)) return false;
+    } else if (key == "signal.delimiter" || key == "plc.delimiter") {
+      if (!apply_signal_value(&config.signal, "delimiter", value, error_message)) return false;
+    } else if (key == "signal.terminator") {
+      if (!apply_signal_value(&config.signal, "terminator", value, error_message)) return false;
+    } else if (key == "signal.ok_response") {
+      if (!apply_signal_value(&config.signal, "ok_response", value, error_message)) return false;
+    } else if (key == "signal.protocol_mode") {
+      if (!apply_signal_value(&config.signal, "protocol_mode", value, error_message)) return false;
+    } else if (key == "signal.start_command") {
+      if (!apply_signal_value(&config.signal, "start_command", value, error_message)) return false;
+    } else if (key == "signal.sn_prefix") {
+      if (!apply_signal_value(&config.signal, "sn_prefix", value, error_message)) return false;
+    } else if (key == "signal.start_ack") {
+      if (!apply_signal_value(&config.signal, "start_ack", value, error_message)) return false;
+    } else if (key == "signal.sn_ack") {
+      if (!apply_signal_value(&config.signal, "sn_ack", value, error_message)) return false;
+    } else if (key == "signal.result_host") {
+      if (!apply_signal_value(&config.signal, "result_host", value, error_message)) return false;
+    } else if (key == "signal.result_port") {
+      if (!apply_signal_value(&config.signal, "result_port", value, error_message)) return false;
+    } else if (key == "signal.result_prefix") {
+      if (!apply_signal_value(&config.signal, "result_prefix", value, error_message)) return false;
+    } else if (key == "signal.result_delimiter") {
+      if (!apply_signal_value(&config.signal, "result_delimiter", value, error_message)) return false;
+    } else if (key == "signal.ok_text") {
+      if (!apply_signal_value(&config.signal, "ok_text", value, error_message)) return false;
+    } else if (key == "signal.ng_text") {
+      if (!apply_signal_value(&config.signal, "ng_text", value, error_message)) return false;
+    } else if (key == "signal.recheck_text") {
+      if (!apply_signal_value(&config.signal, "recheck_text", value, error_message)) return false;
+    } else if (key == "signal.error_text") {
+      if (!apply_signal_value(&config.signal, "error_text", value, error_message)) return false;
+    } else if (key == "display_manual_trigger.enabled") {
+      if (!parse_bool_field(key, value, &config.display_manual_trigger.enabled, error_message)) {
         return false;
       }
-      if (config.signal.port > 65535) {
+    } else if (key.rfind("display_manual_trigger.", 0) == 0) {
+      const std::string field = key.substr(std::string("display_manual_trigger.").size());
+      if (!apply_signal_value(&config.display_manual_trigger.signal,
+                              field,
+                              value,
+                              error_message)) {
         if (error_message != nullptr) {
-          *error_message = "signal.port 端口号必须在 1-65535: " + value;
+          *error_message = "display_manual_trigger." + *error_message;
         }
         return false;
       }
-    } else if (key == "signal.delimiter" || key == "plc.delimiter") {
-      config.signal.delimiter = value;
-    } else if (key == "signal.terminator") {
-      config.signal.terminator = decode_control_text(value);
-    } else if (key == "signal.ok_response") {
-      config.signal.ok_response = decode_control_text(value);
-    } else if (key == "signal.protocol_mode") {
-      config.signal.protocol_mode = value;
-    } else if (key == "signal.start_command") {
-      config.signal.start_command = value;
-    } else if (key == "signal.sn_prefix") {
-      config.signal.sn_prefix = value;
-    } else if (key == "signal.start_ack") {
-      config.signal.start_ack = decode_control_text(value);
-    } else if (key == "signal.sn_ack") {
-      config.signal.sn_ack = decode_control_text(value);
-    } else if (key == "signal.result_host") {
-      config.signal.result_host = value;
-    } else if (key == "signal.result_port") {
-      if (!parse_uint32_field("signal.result_port",
-                              value,
-                              false,
-                              &config.signal.result_port,
-                              error_message)) {
-        return false;
-      }
-    } else if (key == "signal.result_prefix") {
-      config.signal.result_prefix = value;
-    } else if (key == "signal.result_delimiter") {
-      config.signal.result_delimiter = value;
-    } else if (key == "signal.ok_text") {
-      config.signal.ok_text = value;
-    } else if (key == "signal.ng_text") {
-      config.signal.ng_text = value;
-    } else if (key == "signal.recheck_text") {
-      config.signal.recheck_text = value;
-    } else if (key == "signal.error_text") {
-      config.signal.error_text = value;
     } else if (key == "light.device_id") {
       config.lights[0].device_id = value;
     } else if (key == "light.host") {
@@ -1167,6 +1288,25 @@ bool validate_station_runtime_config(const StationRuntimeConfig& config,
       *error_message = "controller_mode=capture_only 必须启用 image_save.enabled/save_original";
     }
     return false;
+  }
+  if (config.display_manual_trigger.enabled) {
+    const auto& manual = config.display_manual_trigger.signal;
+    if (manual.backend != HardwareBackend::TcpSignal) {
+      if (error_message != nullptr) {
+        *error_message = "display_manual_trigger.backend 只能是 tcp_signal";
+      }
+      return false;
+    }
+    if (!validate_tcp_signal_config(manual, "display_manual_trigger", error_message)) {
+      return false;
+    }
+    if (signal_is_tcp && manual.port == config.signal.port) {
+      if (error_message != nullptr) {
+        *error_message =
+            "display_manual_trigger.port 不能与 signal.port 使用同一个 TCP 端口";
+      }
+      return false;
+    }
   }
   return true;
 }

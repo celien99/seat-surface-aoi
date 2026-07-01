@@ -58,7 +58,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
   默认 trace 根目录跟随 `ProjectRoot` 所在盘符；安装时显式传入 `-DataRoot` 会覆盖该路径。
   PyInstaller 使用 `--windowed --onedir` 构建，不弹出控制台窗口；打包后通过 `sys._MEIPASS` 解析 QML 和资源路径。
 
-如只希望当前用户可见，安装时追加 `-CurrentUserShortcut`；如需要登录 Windows 后自动打开展示前端，追加 `-CreateStartupShortcut`。生产快捷方式默认不启用 `--enable-manual-trigger`，避免抢占真实 PLC/上位机连接。
+如只希望当前用户可见，安装时追加 `-CurrentUserShortcut`；如需要登录 Windows 后自动打开展示前端，追加 `-CreateStartupShortcut`。生产快捷方式默认不启用 `--enable-manual-trigger`；启用后应连接 C++ `display_manual_trigger.port` 独立手动端口，不能改连 PLC/上位机使用的 `signal.port`。
 
 需要让桌面快捷方式支持手动触发全链路时，安装时显式追加：
 
@@ -66,12 +66,12 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
 powershell -ExecutionPolicy Bypass -File .\tools\windows\install_station.ps1 `
   -EnableDisplayManualTrigger `
   -ManualTriggerHost 127.0.0.1 `
-  -ManualTriggerPort 9000 `
+  -ManualTriggerPort 9002 `
   -LineId LINE1_AOI_01 `
   -GridLayout 2x1
 ```
 
-该快捷方式会把 `--enable-manual-trigger`、`--manual-trigger-host` 和 `--manual-trigger-port` 写入启动参数；按钮仍只发送控制面触发信号，不直接控制相机、频闪或共享内存。
+该快捷方式会把 `--enable-manual-trigger`、`--manual-trigger-host` 和 `--manual-trigger-port` 写入启动参数；按钮仍只发送控制面触发信号，不直接控制相机、频闪或共享内存。生产配置默认 `display_manual_trigger.port=9002`，外部自动触发仍使用 `signal.port=9000`。
 
 联调时可显式启用首页手动触发按钮：
 
@@ -81,10 +81,10 @@ uv run seat-aoi-display `
   --line-id AOI-1 `
   --enable-manual-trigger `
   --manual-trigger-host 127.0.0.1 `
-  --manual-trigger-port 9000
+  --manual-trigger-port 9002
 ```
 
-手动触发客户端会向 C++ 发送 `start`，收到 `start_ack` 后发送 `sn <SN>`，收到 `sn_ack` 后界面进入"等待结果"加载态并保持 SN 输入框和按钮禁用，直到收到同一 SN 的新版 detector 展示事件后才恢复并自动清空 SN。等待结果阶段默认 30 秒超时，超时后解除禁用并显示触发异常，便于操作员确认链路状态后重新触发。SN 只允许字母、数字、横线、下划线和点，最大 48 个字符，避免写入共享内存 `seat_id` 时被截断。默认未加 `--enable-manual-trigger` 时按钮保持"只读展示"，不会连接 C++ 触发端口。
+手动触发客户端会向 C++ 独立手动端口发送 `start`，收到 `start_ack` 后发送 `sn <SN>`，收到 `sn_ack` 后界面进入"等待结果"加载态并保持 SN 输入框和按钮禁用，直到收到同一 SN 或 C++ 加站点前缀后的 seat_id 的新版 detector 展示事件后才恢复并自动清空 SN。等待结果阶段默认 30 秒超时，超时后解除禁用并显示触发异常，便于操作员确认链路状态后重新触发。SN 只允许字母、数字、横线、下划线和点，最大 48 个字符，避免写入共享内存 `seat_id` 时被截断。默认未加 `--enable-manual-trigger` 时按钮保持"只读展示"，不会连接 C++ 触发端口。
 
 如果 C++ `tcp_signal` 正在监听但没有客户端连接，或客户端尚未提交完整 `start` + `sn <SN>`，这属于外部触发空闲等待；前端不会把它显示为复检，也不会增加复检统计。只有 C++ 已收到完整触发并进入采集/检测后返回的 `RECHECK/ERROR`，才会作为业务结果展示。
 
@@ -143,5 +143,5 @@ display_app/
 
 - 手动触发只提交控制面信号，不传输图像，也不绕过 C++ 的采集、检测等待和结果保守校验。
 - 手动触发提交中按钮显示"提交中"并禁用输入控件；收到 C++ 确认后切换为"等待结果"加载态，直到对应 SN 的检测展示事件刷新后才恢复并清空输入框，避免操作员重复点击或重复扫码。
-- 生产配置当前 `tcp_signal` 只维护一个客户端连接；如果 PLC/外部工控机已占用同一端口，不应在同一时间直接启用展示前端手动触发，除非现场已确认连接仲裁方案。
+- 生产配置中 `display_manual_trigger` 独立监听手动端口，默认 9002；PLC/外部工控机自动触发继续使用 `signal.port`，默认 9000。两个端口不能配置成同一个值。
 - 完整触发进入采集/检测后，C++ 缺帧、设备故障、共享内存错误、Python detector 超时或质量门禁失败仍只能返回 `RECHECK` 或 `ERROR`，前端按钮不会改变判定规则。
