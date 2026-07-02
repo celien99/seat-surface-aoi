@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 import threading
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QObject, Property, Signal, Slot
@@ -105,6 +106,7 @@ class MainViewModel(QObject):
         self._camera_list: list[dict[str, Any]] = []
         self._camera_index: dict[str, dict[str, Any]] = {}
         self._last_event_key: tuple[int, int, int] | None = None
+        self._last_image_signature: tuple[tuple[tuple[Any, ...], ...], tuple[tuple[Any, ...], ...]] | None = None
         self._last_controller_event_key: tuple[int, int, int] | None = None
         self._session_started_ms = int(time.time() * 1000)
         self._seen_detection_events: set[tuple[str, int, int, str, int]] = set()
@@ -471,8 +473,12 @@ class MainViewModel(QObject):
         self._remove_review(record_id)
 
     def _process_detection_event(self, event: DisplayEvent, *, from_latest: bool = False) -> None:
+        image_signature = _display_image_signature(event)
         if event.event_key == self._last_event_key and from_latest:
+            if image_signature == self._last_image_signature:
+                return
             image_report = self._bridge.publish_images_report(event)
+            self._last_image_signature = image_signature
             if image_report.successful_camera_ids or image_report.failed_camera_ids:
                 self._apply_event(
                     event,
@@ -489,6 +495,7 @@ class MainViewModel(QObject):
             self._seen_detection_events.add(event_identity)
         self._last_event_key = event.event_key
         image_report = self._bridge.publish_images_report(event)
+        self._last_image_signature = image_signature
         self._apply_event(
             event,
             image_report.successful_camera_ids,
@@ -964,6 +971,36 @@ def _display_event_identity(event: DisplayEvent) -> tuple[str, int, int, str, in
         event.seat_id,
         int(event.timestamp_ms),
     )
+
+
+def _display_image_signature(event: DisplayEvent) -> tuple[tuple[tuple[Any, ...], ...], tuple[tuple[Any, ...], ...]]:
+    return _asset_signature(event.images), _asset_signature(event.overlays)
+
+
+def _asset_signature(assets: list[dict[str, Any]]) -> tuple[tuple[Any, ...], ...]:
+    return tuple(
+        sorted(
+            (
+                str(asset.get("kind", "")),
+                str(asset.get("camera_id", "")),
+                str(asset.get("pose_id", "")),
+                str(asset.get("roi_name", "")),
+                str(asset.get("light_id", "")),
+                str(asset.get("path", "")),
+                _asset_mtime_ns(asset.get("path")),
+            )
+            for asset in assets
+        )
+    )
+
+
+def _asset_mtime_ns(path: object) -> int:
+    if not path:
+        return 0
+    try:
+        return Path(str(path)).stat().st_mtime_ns
+    except OSError:
+        return -1
 
 
 def _detection_identity_from_log(item: dict[str, Any]) -> tuple[str, int, int, str, int]:

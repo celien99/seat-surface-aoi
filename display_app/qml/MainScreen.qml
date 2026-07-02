@@ -294,17 +294,6 @@ Rectangle {
         onDismissFalseAlarm: { if (viewModel) viewModel.dismissFalseAlarm(); }
     }
 
-    Timer {
-        interval: 1000
-        running: true
-        repeat: true
-        onTriggered: {
-            if (viewModel) {
-                viewModel.refreshTriggerState()
-            }
-        }
-    }
-
     function connectedCameraCount(items) {
         var count = 0
         for (var i = 0; i < items.length; i++) {

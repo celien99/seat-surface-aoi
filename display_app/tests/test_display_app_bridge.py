@@ -86,6 +86,14 @@ def test_display_bridge_reads_latest_and_publishes_images(tmp_path: Path) -> Non
     assert provider._frames["CAM_FRONT/POSE_A"][0, 0].tolist() == [9, 9, 9]
 
 
+def test_camera_image_provider_reports_missing_image_as_error() -> None:
+    provider = CameraImageProvider()
+
+    image = provider.requestImage("CAM_FRONT/POSE_A_original", None, None)
+
+    assert image.isNull()
+
+
 def test_display_bridge_publishes_raw_image_when_roi_is_unavailable(tmp_path: Path) -> None:
     raw_path = tmp_path / "raw.png"
     write_gray_png(raw_path, 2, 1, b"\x09\x0a")
@@ -446,6 +454,28 @@ def test_main_view_model_same_latest_refreshes_images_without_counting(tmp_path:
     assert view_model.ok == 1
     assert view_model.cameraList[0]["frameVersion"] == 2
     assert provider._frames["CAM_FRONT"][0, 0].tolist() == [11, 11, 11]
+
+
+def test_main_view_model_same_latest_does_not_redecode_unchanged_images(tmp_path: Path) -> None:
+    image_path = tmp_path / "image.png"
+    write_gray_png(image_path, 2, 1, b"\x09\x0a")
+    timestamp_ms = _now_ms()
+    _write_latest(
+        tmp_path,
+        {
+            "timestamp_ms": timestamp_ms,
+            "decision": "OK",
+            "images": [{"camera_id": "CAM_FRONT", "pose_id": "CAM_FRONT", "path": str(image_path)}],
+        },
+    )
+    view_model = MainViewModel(DisplayBridge(tmp_path, CameraImageProvider()), journal=OperatorJournal(tmp_path))
+
+    view_model.pollLatest()
+    view_model.pollLatest()
+
+    assert view_model.total == 1
+    assert view_model.ok == 1
+    assert view_model.cameraList[0]["frameVersion"] == 1
 
 
 def test_main_view_model_stale_ng_latest_does_not_show_overlay(tmp_path: Path) -> None:

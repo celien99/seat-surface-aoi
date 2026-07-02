@@ -53,9 +53,7 @@ class CameraImageProvider(QQuickImageProvider):
         if frame is None and overlay is not None:
             return self._bgr_to_qimage(overlay)
         if frame is None:
-            empty = QImage(1, 1, QImage.Format.Format_RGB32)
-            empty.fill(0)
-            return empty
+            return QImage()
         return self._bgr_to_qimage(frame)
 
     def _bgr_to_qimage(self, frame: np.ndarray) -> QImage:

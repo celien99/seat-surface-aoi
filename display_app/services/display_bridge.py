@@ -127,9 +127,7 @@ class DisplayBridge:
                 self.image_provider.update_overlay(camera_id, load_raster_bgr(path))
             except (OSError, RasterImageError):
                 self.image_provider.clear_overlay(camera_id)
-                failed_camera_ids.append(camera_id)
                 continue
-            camera_ids.append(camera_id)
 
         return ImagePublishReport(
             successful_camera_ids=sorted(set(camera_ids)),
