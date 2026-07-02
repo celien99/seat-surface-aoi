@@ -78,7 +78,7 @@ cpp_controller/
 
 在线模式 `controller_mode=online`：
 
-1. 等待外部信号，生成 `ExternalTrigger`。`trigger_timeout_ms=0`（默认）表示无限等待，TCP 客户端未连接/无数据时阻塞监听，不浪费 CPU 也不产生超时日志。启用 `display_manual_trigger.enabled=true` 后，主控会同时轮询 display_app 独立手动触发端口；两类触发合流到同一个 `StationController`，但采集/检测仍串行执行。
+1. 等待外部信号，生成 `ExternalTrigger`。`trigger_timeout_ms=0`（默认）表示无限等待，TCP 客户端未连接/无数据时阻塞监听，不浪费 CPU 也不产生超时日志。启用 `display_manual_trigger.enabled=true` 后，主控会同时轮询 display_app 独立手动触发端口；两类触发合流到同一个 `StationController`，但采集/检测仍串行执行。生产 `tcp_signal` 可选启用 JK-LRD RS485 位移到位门禁：收到合法 `start|SN` 后先等待距离稳定进入阈值，再进入采集检测。
 2. `FrameAssembler` 初始化 1 台 FL-ACDH 和 2 台相机。
 3. 按光源顺序 1、2、3 分两阶段采集：
    - **阶段 A（快速连续触发）**：每路光源先并行 arm 两台相机（仅更新 ExposureTime/Gain），等待 `arm_settle_ms` 稳定后，直接向 FL-ACDH 发送 `8/9/A/7` 完整点亮序列。三路光源连续触发，中间不等待 `GetImageBuffer`，利用 Continuous+Trigger 模式下 arm 仅影响下一次触发沿的特性，将 arm 开销与上一路曝光+传输并行化。相机启动或故障重启时 `start()/cancel_wait()` 仍会排空旧帧。
@@ -153,6 +153,19 @@ light.3.exposure_us=30000
 light.3.strobe_width_us=999
 light.3.current_percent=80
 light.3.gain=1.0
+
+# JK-LRD 位移传感器到位门禁。当前屏显 0.256m = 256mm，
+# 初始阈值可先用 230~280mm，联调后按真实波动收窄。
+signal.jklrd_gate.enabled=false
+signal.jklrd_gate.dll_path=E:\JK-LRD_Driver_DLL_release\jklrd_driver.dll
+signal.jklrd_gate.port=COM3
+signal.jklrd_gate.baud_rate=9600
+signal.jklrd_gate.slave_addr=1
+signal.jklrd_gate.lower_mm=230
+signal.jklrd_gate.upper_mm=280
+signal.jklrd_gate.stable_ms=300
+signal.jklrd_gate.poll_interval_ms=100
+signal.jklrd_gate.timeout_ms=5000
 
 # 超时配置（毫秒）
 camera_timeout_ms=5000
@@ -293,6 +306,8 @@ signal.sn_ack=sn_ack             # SN 接收回复
 2. C++ 直接回复 `sn_ack` 并构造 `seat_id = station_id + "_" + ABC123456`
 
 无需再发送第二步 `sn ABC123456`。旧两步协议仍然兼容：如果收到的行恰好是 `start_command`（不含分隔符），C++ 仍按两步协议回复 `start_ack` 并等待第二步 SN 条码。SN 只允许字母、数字、横线、下划线和点，最长 48 个字符；包含 `|`、空白、控制字符或超长的条码会被忽略，不会写入共享内存 `seat_id`。
+
+启用 `signal.jklrd_gate.enabled=true` 后，`start|SN` 或两步协议中的 SN 到达后不会立刻进入采集；C++ 会通过 JK-LRD DLL 读取 RS485 距离，等待读数在 `lower_mm..upper_mm` 内连续保持 `stable_ms`。等待成功后才回复 `sn_ack/ok` 并启动检测，等待超时或串口/DLL 失败则保持 fail closed，不发布 Frame SHM。
 
 配置示例：
 

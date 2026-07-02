@@ -24,6 +24,7 @@ flowchart LR
 保留的 C++ 主控能力：
 
 - 接收外部信号：`manual_trigger`、`external_signal`、`tcp_signal`（支持 `single` 单行协议、`start_sn` 两步握手协议及组合格式 `start|SN` 单行触发），以及本地回归用 `simulated`。
+- `tcp_signal` 可选启用 JK-LRD RS485 位移传感器到位门禁：外部工控机发送 `start|SN` 后，C++ 先通过 `jklrd_driver.dll` 读取距离，确认读数稳定进入配置阈值后才进入相机/频闪/共享内存检测；门禁超时或 DLL/串口失败不会启动采集。
 - `trigger_timeout_ms` 生产默认值为 `0`，表示无限等待外部信号；C++ 主控阻塞在 TCP/文件队列监听上，有信号才执行，无超时中断。
 - `tcp_signal` 在无限等待模式下使用固定 200ms 内部轮询周期检查 socket 可读状态，连接断开时自动重连，不会因空闲等待而产生业务记录或告警。
 - 生产 TCP 配置使用 `signal.terminator=` 空值，外部设备发送不带换行的 `start|SN` 时，C++ 会用接收缓存识别粘包中的下一条 `start|` 边界，并对单条消息保留 100ms 字节间静默兜底；如果现场设备会发送 `\n`，可改为 `signal.terminator=\n`。
@@ -87,6 +88,8 @@ cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --config cpp_co
 
 - `online`：初始化 Frame/Result 共享内存，采图后发布给 Python detector，等待检测结果并回传外部信号。
 - `capture_only`：不初始化共享内存，不等待 Python detector；采图保存到 `image_save.root_dir/YYYYMMDD/<seat_id>/`，完成后回传 `RECHECK`。
+
+生产配置可通过 `signal.jklrd_gate.*` 打开 JK-LRD 到位门禁。当前现场传感器屏显 `0.256m` 对应 `256mm`，初始可先配置 `lower_mm=230`、`upper_mm=280`，确认真实波动后再收窄。该门禁只作用于外部自动触发 `signal.backend=tcp_signal`，不改变 `display_manual_trigger` 的联调语义。
 
 ## 工控机部署顺序
 

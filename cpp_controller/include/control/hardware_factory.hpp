@@ -159,6 +159,7 @@ inline SignalClientConfig make_signal_client_config(const RuntimeSignalConfig& c
       config.publish_results_on_command_channel;
   client_config.simulate_output_fault = config.simulate_output_fault;
   client_config.simulate_trigger_timeout = config.simulate_trigger_timeout;
+  client_config.jklrd_gate = config.jklrd_gate;
   return client_config;
 }
 

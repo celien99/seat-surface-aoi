@@ -421,7 +421,58 @@ bool apply_signal_value(RuntimeSignalConfig* signal,
   if (field_name == "backend") {
     return parse_hardware_backend(value, &signal->backend, error_message);
   }
-  if (field_name == "station_id") {
+  if (field_name == "jklrd_gate.enabled") {
+    return parse_bool_field("signal.jklrd_gate.enabled",
+                            value,
+                            &signal->jklrd_gate.enabled,
+                            error_message);
+  } else if (field_name == "jklrd_gate.dll_path") {
+    signal->jklrd_gate.dll_path = value;
+  } else if (field_name == "jklrd_gate.port") {
+    signal->jklrd_gate.port = value;
+  } else if (field_name == "jklrd_gate.baud_rate") {
+    return parse_int_field("signal.jklrd_gate.baud_rate",
+                           value,
+                           false,
+                           &signal->jklrd_gate.baud_rate,
+                           error_message);
+  } else if (field_name == "jklrd_gate.slave_addr") {
+    return parse_int_field("signal.jklrd_gate.slave_addr",
+                           value,
+                           false,
+                           &signal->jklrd_gate.slave_addr,
+                           error_message);
+  } else if (field_name == "jklrd_gate.lower_mm") {
+    return parse_int_field("signal.jklrd_gate.lower_mm",
+                           value,
+                           true,
+                           &signal->jklrd_gate.lower_mm,
+                           error_message);
+  } else if (field_name == "jklrd_gate.upper_mm") {
+    return parse_int_field("signal.jklrd_gate.upper_mm",
+                           value,
+                           true,
+                           &signal->jklrd_gate.upper_mm,
+                           error_message);
+  } else if (field_name == "jklrd_gate.stable_ms") {
+    return parse_int_field("signal.jklrd_gate.stable_ms",
+                           value,
+                           true,
+                           &signal->jklrd_gate.stable_ms,
+                           error_message);
+  } else if (field_name == "jklrd_gate.poll_interval_ms") {
+    return parse_int_field("signal.jklrd_gate.poll_interval_ms",
+                           value,
+                           false,
+                           &signal->jklrd_gate.poll_interval_ms,
+                           error_message);
+  } else if (field_name == "jklrd_gate.timeout_ms") {
+    return parse_int_field("signal.jklrd_gate.timeout_ms",
+                           value,
+                           false,
+                           &signal->jklrd_gate.timeout_ms,
+                           error_message);
+  } else if (field_name == "station_id") {
     signal->station_id = value;
   } else if (field_name == "default_seat_id") {
     signal->default_seat_id = value;
@@ -620,6 +671,32 @@ bool validate_tcp_signal_config(const RuntimeSignalConfig& signal,
     }
     return false;
   }
+  if (signal.jklrd_gate.enabled) {
+    if (signal.jklrd_gate.dll_path.empty() || signal.jklrd_gate.port.empty()) {
+      if (error_message != nullptr) {
+        *error_message = prefix + ".jklrd_gate 启用时必须配置 dll_path 和 port";
+      }
+      return false;
+    }
+    if (signal.jklrd_gate.slave_addr < 1 || signal.jklrd_gate.slave_addr > 247) {
+      if (error_message != nullptr) {
+        *error_message = prefix + ".jklrd_gate.slave_addr 必须在 1-247";
+      }
+      return false;
+    }
+    if (signal.jklrd_gate.lower_mm == signal.jklrd_gate.upper_mm) {
+      if (error_message != nullptr) {
+        *error_message = prefix + ".jklrd_gate 上下限不能相同";
+      }
+      return false;
+    }
+    if (signal.jklrd_gate.timeout_ms <= 0 || signal.jklrd_gate.poll_interval_ms <= 0) {
+      if (error_message != nullptr) {
+        *error_message = prefix + ".jklrd_gate timeout_ms/poll_interval_ms 必须大于 0";
+      }
+      return false;
+    }
+  }
   return true;
 }
 
@@ -794,6 +871,9 @@ bool load_station_runtime_config(const std::string& path,
       if (!apply_signal_value(&config.signal, "recheck_text", value, error_message)) return false;
     } else if (key == "signal.error_text") {
       if (!apply_signal_value(&config.signal, "error_text", value, error_message)) return false;
+    } else if (key.rfind("signal.jklrd_gate.", 0) == 0) {
+      const std::string field = key.substr(std::string("signal.").size());
+      if (!apply_signal_value(&config.signal, field, value, error_message)) return false;
     } else if (key == "display_manual_trigger.enabled") {
       if (!parse_bool_field(key, value, &config.display_manual_trigger.enabled, error_message)) {
         return false;

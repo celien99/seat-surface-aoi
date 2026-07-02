@@ -197,6 +197,23 @@ signal.error_text=ERROR
 
 `signal.terminator`、`signal.ok_response`、`signal.start_ack` 和 `signal.sn_ack` 会解析 `\n` 等控制字符转义。启用 `protocol_mode=start_sn` 时，当 `signal.delimiter` 非空（如 `|`），外部端可发送组合格式 `start|SN` 单行触发，C++ 直接回复 `sn_ack` 并进入检测链路；旧两步协议（先发送 `start` 收取 `start_ack`，再发送 `sn <SN>` 收取 `sn_ack`）仍然兼容。生产现场如果 PLC/外部上位机已经长连接 `signal.port`，不要同时让展示前端直接连接同一端口，除非现场已确认连接仲裁策略。
 
+JK-LRD 激光位移传感器接入时，仍保持外部工控机发送 `start|SN`，但 C++ 可在 `tcp_signal` 内启用 RS485 到位门禁：
+
+```ini
+signal.jklrd_gate.enabled=true
+signal.jklrd_gate.dll_path=E:\JK-LRD_Driver_DLL_release\jklrd_driver.dll
+signal.jklrd_gate.port=COM3
+signal.jklrd_gate.baud_rate=9600
+signal.jklrd_gate.slave_addr=1
+signal.jklrd_gate.lower_mm=230
+signal.jklrd_gate.upper_mm=280
+signal.jklrd_gate.stable_ms=300
+signal.jklrd_gate.poll_interval_ms=100
+signal.jklrd_gate.timeout_ms=5000
+```
+
+当前传感器屏显 `0.256m` 对应 `256mm`。现场先用 `E:\JK-LRD_Driver_DLL_release\test_jklrd.py` 验证 COM 口、波特率、地址和距离读数；确认到位距离稳定后，再把 `port/lower_mm/upper_mm` 写入生产配置并开启门禁。门禁超时、串口失败或 DLL 加载失败都不会启动相机/频闪采集。
+
 ### 相机
 
 | 参数 | 用途 |

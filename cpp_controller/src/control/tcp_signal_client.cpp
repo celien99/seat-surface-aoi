@@ -600,6 +600,17 @@ void TcpSignalClient::send_response(const std::string& response) {
          response.size(), 0);
 }
 
+bool TcpSignalClient::wait_presence_gate(std::string* error_message) {
+  int distance_mm = 0;
+  if (!presence_gate_.wait_until_present(&distance_mm, error_message)) {
+    return false;
+  }
+  if (presence_gate_.enabled()) {
+    std::cout << "JK-LRD 位移到位 distance_mm=" << distance_mm << std::endl;
+  }
+  return true;
+}
+
 // ============================================================================
 // ISignalClient 接口实现
 // ============================================================================
@@ -636,6 +647,12 @@ bool TcpSignalClient::initialize(const SignalClientConfig& config) {
   simulate_trigger_timeout_ = config.simulate_trigger_timeout;
   next_trigger_id_ = 1;
   awaiting_sn_ = false;
+
+  std::string gate_error;
+  if (!presence_gate_.initialize(config.jklrd_gate, &gate_error)) {
+    std::cerr << gate_error << std::endl;
+    return false;
+  }
 
   std::string listen_error;
   if (!start_listen(static_cast<int>(port_), &listen_error)) {
@@ -726,6 +743,9 @@ bool TcpSignalClient::wait_trigger(ExternalTrigger* out_trigger,
     ExternalTrigger trigger{};
     std::string parse_error;
     if (parse_trigger_line(line, &trigger, &parse_error)) {
+      if (!wait_presence_gate(error_message)) {
+        return false;
+      }
       send_ok();
       *out_trigger = trigger;
       return true;
@@ -779,6 +799,9 @@ bool TcpSignalClient::wait_trigger_start_sn(ExternalTrigger* out_trigger,
             std::cerr << "TCP 两步协议: 忽略非法组合格式 SN: "
                       << barcode_error << std::endl;
             continue;
+          }
+          if (!wait_presence_gate(error_message)) {
+            return false;
           }
           // 组合格式已包含到位信号和 SN，直接回复 SN 确认
           send_response(sn_ack_);
@@ -859,6 +882,9 @@ bool TcpSignalClient::wait_trigger_start_sn(ExternalTrigger* out_trigger,
       std::cerr << "TCP 两步协议: 忽略非法 SN: "
                 << barcode_error << std::endl;
       continue;
+    }
+    if (!wait_presence_gate(error_message)) {
+      return false;
     }
 
     // 回复 SN 确认
@@ -1101,6 +1127,7 @@ SignalHealth TcpSignalClient::get_health() const {
 
 void TcpSignalClient::close() {
   initialized_ = false;
+  presence_gate_.close();
   close_socket();
 }
 

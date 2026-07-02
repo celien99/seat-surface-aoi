@@ -42,6 +42,7 @@ add_library(seat_aoi_control
   src/camera/replay_capture.cpp
   src/control/hardware_backend.cpp
   src/control/fl_acdh_light_controller.cpp
+  src/control/jklrd_presence_gate.cpp
   src/control/light_controller.cpp
   src/control/signal_client.cpp
   src/control/tcp_signal_client.cpp

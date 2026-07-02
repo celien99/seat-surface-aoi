@@ -5,6 +5,7 @@
 
 #include "common/inspection_types.hpp"
 #include "control/external_trigger.hpp"
+#include "control/jklrd_presence_gate.hpp"
 
 namespace seat_aoi {
 
@@ -36,6 +37,7 @@ struct SignalClientConfig {
   bool publish_results_on_command_channel = true;
   bool simulate_output_fault = false;
   bool simulate_trigger_timeout = false;
+  JkLrdPresenceGateConfig jklrd_gate;
 };
 
 struct SignalHealth {

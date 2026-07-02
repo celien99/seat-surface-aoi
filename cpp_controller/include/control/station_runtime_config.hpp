@@ -6,6 +6,7 @@
 
 #include "control/hardware_backend.hpp"
 #include "control/ilight_controller.hpp"
+#include "control/jklrd_presence_gate.hpp"
 #include "ipc/shm_protocol.hpp"
 
 namespace seat_aoi {
@@ -103,6 +104,7 @@ struct RuntimeSignalConfig {
   bool publish_results_on_command_channel = true;
   bool simulate_output_fault = false;
   bool simulate_trigger_timeout = false;
+  JkLrdPresenceGateConfig jklrd_gate;
 };
 
 struct RuntimeDisplayManualTriggerConfig {

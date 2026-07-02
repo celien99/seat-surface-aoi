@@ -5,6 +5,7 @@
 #include <string>
 
 #include "control/isignal_client.hpp"
+#include "control/jklrd_presence_gate.hpp"
 
 namespace seat_aoi {
 
@@ -67,6 +68,8 @@ private:
   void send_ok();
   /// 发送自定义回复文本
   void send_response(const std::string& response);
+  /// 等待 JK-LRD 位移传感器确认到位。未启用时直接通过。
+  bool wait_presence_gate(std::string* error_message);
   /// start_sn 两步协议: 等待 start 命令 → ack → 等待 sn <barcode> → ack
   bool wait_trigger_start_sn(ExternalTrigger* out_trigger,
                               int timeout_ms,
@@ -111,6 +114,7 @@ private:
   std::string recheck_text_ = "RECHECK";
   std::string error_text_ = "ERROR";
   bool publish_results_on_command_channel_ = true;
+  JkLrdPresenceGate presence_gate_;
 
   std::uint64_t next_trigger_id_ = 1;
 
