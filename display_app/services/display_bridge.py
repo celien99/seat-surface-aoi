@@ -91,6 +91,10 @@ class DisplayBridge:
         self._events_offset = 0
         self._controller_offset = 0
 
+    def skip_existing_events(self) -> None:
+        self._events_offset = _file_size(self.events_path)
+        self._controller_offset = _file_size(self.controller_events_path)
+
     def read_latest(self) -> DisplayEvent | None:
         if not self.latest_path.exists():
             return None
@@ -227,6 +231,13 @@ def _event_from_payload(payload: dict[str, Any]) -> DisplayEvent:
         asset_unavailable=_asset_unavailable(payload),
         sample_collection=_sample_collection_enabled(payload),
     )
+
+
+def _file_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
 
 
 def _controller_event_from_payload(payload: dict[str, Any]) -> ControllerEvent:

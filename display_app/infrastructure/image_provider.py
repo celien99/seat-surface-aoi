@@ -13,17 +13,17 @@ class CameraImageProvider(QQuickImageProvider):
 
     def __init__(self) -> None:
         super().__init__(QQuickImageProvider.ImageType.Image)
-        self._frames: Dict[str, np.ndarray] = {}
-        self._overlays: Dict[str, np.ndarray] = {}
+        self._frames: Dict[str, QImage] = {}
+        self._overlays: Dict[str, QImage] = {}
         self._lock = threading.Lock()
 
     def update_frame(self, camera_id: str, frame: np.ndarray) -> None:
         with self._lock:
-            self._frames[camera_id] = frame.copy()
+            self._frames[camera_id] = self._bgr_to_qimage(frame)
 
     def update_overlay(self, camera_id: str, overlay: np.ndarray) -> None:
         with self._lock:
-            self._overlays[camera_id] = overlay.copy()
+            self._overlays[camera_id] = self._bgr_to_qimage(overlay)
 
     def clear_camera(self, camera_id: str) -> None:
         with self._lock:
@@ -48,13 +48,15 @@ class CameraImageProvider(QQuickImageProvider):
             frame = self._frames.get(base_id)
             overlay = self._overlays.get(base_id)
 
-        if suffix in {"_overlay", "_heatmap"} and overlay is not None:
-            return self._bgr_to_qimage(overlay)
-        if frame is None and overlay is not None:
-            return self._bgr_to_qimage(overlay)
-        if frame is None:
-            return QImage()
-        return self._bgr_to_qimage(frame)
+        if suffix in {"_overlay", "_heatmap"}:
+            return overlay if overlay is not None else QImage()
+        if suffix == "_original":
+            return frame if frame is not None else QImage()
+        if frame is not None:
+            return frame
+        if overlay is not None:
+            return overlay
+        return QImage()
 
     def _bgr_to_qimage(self, frame: np.ndarray) -> QImage:
         if frame.ndim == 2:

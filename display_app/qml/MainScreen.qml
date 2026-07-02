@@ -286,6 +286,7 @@ Rectangle {
         affectedCameras: viewModel ? viewModel.ngAffectedCameras : ""
         defectCount: viewModel ? viewModel.ngDefectCount : 0
         cameraCount: viewModel ? viewModel.ngCameraCount : 0
+        cameraItems: viewModel ? viewModel.ngCameraItems : []
         countdown: viewModel ? viewModel.remainingSeconds : 0
         imageVersion: viewModel ? viewModel.ngImageVersion : 0
 

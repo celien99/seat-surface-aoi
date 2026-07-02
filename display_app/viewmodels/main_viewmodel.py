@@ -38,6 +38,7 @@ class MainViewModel(QObject):
     ngAffectedCamerasChanged = Signal()
     ngDefectCountChanged = Signal()
     ngCameraCountChanged = Signal()
+    ngCameraItemsChanged = Signal()
     ngImageVersionChanged = Signal()
     cameraListChanged = Signal()
     remainingSecondsChanged = Signal()
@@ -90,6 +91,7 @@ class MainViewModel(QObject):
         self._ng_affected_cameras = ""
         self._ng_defect_count = 0
         self._ng_camera_count = 0
+        self._ng_camera_items: list[dict[str, Any]] = []
         self._ng_image_version = 0
         self._remaining_seconds = 0
         self._line_status = "waiting"
@@ -177,6 +179,9 @@ class MainViewModel(QObject):
 
     def _get_ng_camera_count(self) -> int:
         return self._ng_camera_count
+
+    def _get_ng_camera_items(self) -> list:
+        return self._ng_camera_items
 
     def _get_ng_image_version(self) -> int:
         return self._ng_image_version
@@ -275,6 +280,7 @@ class MainViewModel(QObject):
     ngAffectedCameras = Property(str, _get_ng_affected_cameras, notify=ngAffectedCamerasChanged)
     ngDefectCount = Property(int, _get_ng_defect_count, notify=ngDefectCountChanged)
     ngCameraCount = Property(int, _get_ng_camera_count, notify=ngCameraCountChanged)
+    ngCameraItems = Property(list, _get_ng_camera_items, notify=ngCameraItemsChanged)
     ngImageVersion = Property(int, _get_ng_image_version, notify=ngImageVersionChanged)
     cameraList = Property(list, _get_camera_list, notify=cameraListChanged)
     remainingSeconds = Property(int, _get_remaining_seconds, notify=remainingSecondsChanged)
@@ -705,6 +711,7 @@ class MainViewModel(QObject):
         self._ng_affected_cameras = _camera_summary(defects_by_camera, fallback=defect)
         self._ng_defect_count = sum(len(items) for items in defects_by_camera.values())
         self._ng_camera_count = len(defects_by_camera)
+        self._ng_camera_items = _ng_camera_items(defects_by_camera, fallback=defect)
         self._ng_image_version += 1
         self._ng_visible = True
         self._ng_started_at = time.time()
@@ -715,6 +722,7 @@ class MainViewModel(QObject):
         self.ngAffectedCamerasChanged.emit()
         self.ngDefectCountChanged.emit()
         self.ngCameraCountChanged.emit()
+        self.ngCameraItemsChanged.emit()
         self.ngImageVersionChanged.emit()
         self.ngOverlayVisibleChanged.emit()
         self.remainingSecondsChanged.emit()
@@ -933,6 +941,31 @@ def _camera_summary(defects_by_camera: dict[str, list[DisplayDefect]], *, fallba
         count = len(defects_by_camera[camera_id])
         parts.append(f"{camera_id}({count})")
     return ", ".join(parts)
+
+
+def _ng_camera_items(defects_by_camera: dict[str, list[DisplayDefect]], *, fallback: DisplayDefect | None) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for camera_id in sorted(defects_by_camera):
+        defects = defects_by_camera[camera_id]
+        primary = _primary_defect(defects)
+        items.append(
+            {
+                "cameraId": camera_id,
+                "defectLabel": _camera_defect_label(primary, len(defects)),
+                "defectCount": len(defects),
+                "confidence": float(primary.score if primary else 0.0),
+            }
+        )
+    if not items and fallback is not None:
+        items.append(
+            {
+                "cameraId": _display_camera_id(fallback),
+                "defectLabel": _defect_label(fallback),
+                "defectCount": 1,
+                "confidence": float(fallback.score),
+            }
+        )
+    return items
 
 
 def _display_camera_id(defect: DisplayDefect | None) -> str:

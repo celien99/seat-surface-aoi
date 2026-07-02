@@ -12,6 +12,7 @@ Rectangle {
     property string affectedCameras: ""
     property int defectCount: 0
     property int cameraCount: 0
+    property var cameraItems: []
     property int countdown: 30
     property int imageVersion: 0
 
@@ -90,102 +91,94 @@ Rectangle {
             }
         }
 
-        // ── Body: images side by side ──
-        RowLayout {
+        // ── Body: NG cameras ──
+        GridLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: Theme.spacingMD
+            columns: Math.max(1, Math.min(2, cameraItems.length))
+            rowSpacing: Theme.spacingMD
+            columnSpacing: Theme.spacingMD
 
-            // Original image
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                color: Theme.bgCard
-                radius: Theme.radiusMD
-                border { width: 1; color: Theme.borderDefault }
+            Repeater {
+                model: cameraItems
 
-                ColumnLayout {
-                    anchors.fill: parent
-                    spacing: 0
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 32
-                        color: Theme.bgTertiary
-                        radius: Theme.radiusMD
-                        Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: parent.radius; color: parent.color }
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    color: Theme.bgCard
+                    radius: Theme.radiusMD
+                    border { width: 1; color: Theme.borderDefault }
+                    clip: true
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 0
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 36
+                            color: Theme.bgTertiary
+                            radius: Theme.radiusMD
+                            Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: parent.radius; color: parent.color }
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: Theme.spacingSM
+                                anchors.rightMargin: Theme.spacingSM
+                                spacing: Theme.spacingSM
+
+                                Text {
+                                    text: modelData.cameraId || "--"
+                                    color: Theme.textPrimary
+                                    font.pixelSize: Theme.fontSizeXS
+                                    font.bold: true
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
+                                }
+                                StatusBadge {
+                                    badgeText: qsTr("NG ") + String(modelData.defectCount || 1)
+                                    badgeStatus: "ng"
+                                    maxBadgeWidth: 72
+                                }
+                                Text {
+                                    text: Number(modelData.confidence || 0).toFixed(3)
+                                    color: Theme.textSecondary
+                                    font.pixelSize: Theme.fontSizeXS
+                                }
+                            }
+                        }
+
+                        Image {
+                            id: ngCameraImage
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            Layout.margins: 4
+                            visible: modelData.cameraId !== "" && status !== Image.Error
+                            source: "image://camera/" + modelData.cameraId + "_overlay?v=" + imageVersion
+                            fillMode: Image.PreserveAspectFit
+                            cache: false
+                        }
+
+                        EmptyState {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            Layout.margins: 4
+                            visible: ngCameraImage.status === Image.Error || modelData.cameraId === ""
+                            title: qsTr("检测图不可用")
+                            message: qsTr("该 NG 机位未收到可显示检测图。")
+                            badgeText: qsTr("OVERLAY")
+                            accentColor: Theme.statusWarning
+                        }
+
                         Text {
-                            anchors.centerIn: parent
-                            text: qsTr("原图  ") + cameraId
+                            Layout.fillWidth: true
+                            Layout.leftMargin: Theme.spacingSM
+                            Layout.rightMargin: Theme.spacingSM
+                            Layout.bottomMargin: Theme.spacingXS
+                            text: modelData.defectLabel || "--"
                             color: Theme.textSecondary
                             font.pixelSize: Theme.fontSizeXS
+                            elide: Text.ElideRight
                         }
-                    }
-                    Image {
-                        id: originalImage
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        Layout.margins: 4
-                        visible: cameraId !== "" && status !== Image.Error
-                        source: "image://camera/" + cameraId + "_original?v=" + imageVersion
-                        fillMode: Image.PreserveAspectFit
-                        cache: false
-                    }
-                    EmptyState {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        Layout.margins: 4
-                        visible: originalImage.status === Image.Error || cameraId === ""
-                        title: qsTr("原图不可用")
-                        message: qsTr("未收到该相机的告警原图。")
-                        badgeText: qsTr("IMAGE")
-                        accentColor: Theme.statusWarning
-                    }
-                }
-            }
-
-            // Detection overlay
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                color: Theme.bgCard
-                radius: Theme.radiusMD
-                border { width: 1; color: Theme.borderDefault }
-
-                ColumnLayout {
-                    anchors.fill: parent
-                    spacing: 0
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 32
-                        color: Theme.bgTertiary
-                        radius: Theme.radiusMD
-                        Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: parent.radius; color: parent.color }
-                        Text {
-                            anchors.centerIn: parent
-                            text: qsTr("检测图  分数: ") + confidence.toFixed(4)
-                            color: Theme.textSecondary
-                            font.pixelSize: Theme.fontSizeXS
-                        }
-                    }
-                    Image {
-                        id: overlayImage
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        Layout.margins: 4
-                        visible: cameraId !== "" && status !== Image.Error
-                        source: "image://camera/" + cameraId + "_overlay?v=" + imageVersion
-                        fillMode: Image.PreserveAspectFit
-                        cache: false
-                    }
-                    EmptyState {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        Layout.margins: 4
-                        visible: overlayImage.status === Image.Error || cameraId === ""
-                        title: qsTr("检测图不可用")
-                        message: qsTr("可先按当前缺陷信息处理，随后在日志中复核该记录。")
-                        badgeText: qsTr("OVERLAY")
-                        accentColor: Theme.statusWarning
                     }
                 }
             }

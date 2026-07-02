@@ -83,7 +83,8 @@ def test_display_bridge_reads_latest_and_publishes_images(tmp_path: Path) -> Non
     assert event.decision == "NG"
     assert event.defects[0].class_name == "scratch"
     assert bridge.publish_images(event) == ["CAM_FRONT/POSE_A"]
-    assert provider._frames["CAM_FRONT/POSE_A"][0, 0].tolist() == [9, 9, 9]
+    assert provider.requestImage("CAM_FRONT/POSE_A_original", None, None).pixelColor(0, 0).red() == 9
+    assert provider.requestImage("CAM_FRONT/POSE_A_overlay", None, None).pixelColor(0, 0).red() == 255
 
 
 def test_camera_image_provider_reports_missing_image_as_error() -> None:
@@ -127,7 +128,7 @@ def test_display_bridge_publishes_raw_image_when_roi_is_unavailable(tmp_path: Pa
     assert event.asset_unavailable is True
     assert event.sample_collection is True
     assert bridge.publish_images(event) == ["CAM_FRONT/POSE_A"]
-    assert provider._frames["CAM_FRONT/POSE_A"][0, 0].tolist() == [9, 9, 9]
+    assert provider.requestImage("CAM_FRONT/POSE_A_original", None, None).pixelColor(0, 0).red() == 9
 
 
 def test_display_bridge_reads_detection_events_with_offset(tmp_path: Path) -> None:
@@ -140,6 +141,17 @@ def test_display_bridge_reads_detection_events_with_offset(tmp_path: Path) -> No
     assert [event.sequence_id for event in events] == [1, 2]
     assert [event.decision for event in events] == ["OK", "RECHECK"]
     assert bridge.read_detection_events() == []
+
+
+def test_display_bridge_can_skip_existing_detection_events(tmp_path: Path) -> None:
+    _append_display_event(tmp_path, {"sequence_id": 1, "decision": "OK"})
+    bridge = DisplayBridge(tmp_path, CameraImageProvider())
+    bridge.skip_existing_events()
+    _append_display_event(tmp_path, {"sequence_id": 2, "decision": "NG"})
+
+    events = bridge.read_detection_events()
+
+    assert [event.sequence_id for event in events] == [2]
 
 
 def test_display_bridge_clears_failed_image_publish(tmp_path: Path) -> None:
@@ -273,6 +285,20 @@ def test_main_view_model_marks_all_ng_cameras_from_same_event(tmp_path: Path) ->
     assert view_model.ngCameraId == "TOP_BACK"
     assert view_model.ngCameraCount == 2
     assert view_model.ngDefectCount == 2
+    assert view_model.ngCameraItems == [
+        {
+            "cameraId": "TOP_BACK",
+            "defectLabel": "scratch",
+            "defectCount": 1,
+            "confidence": 0.72,
+        },
+        {
+            "cameraId": "TOP_CUSHION",
+            "defectLabel": "dent",
+            "defectCount": 1,
+            "confidence": 0.68,
+        },
+    ]
     assert "TOP_BACK(1)" in view_model.ngAffectedCameras
     assert "TOP_CUSHION(1)" in view_model.ngAffectedCameras
 
@@ -453,7 +479,7 @@ def test_main_view_model_same_latest_refreshes_images_without_counting(tmp_path:
     assert view_model.total == 1
     assert view_model.ok == 1
     assert view_model.cameraList[0]["frameVersion"] == 2
-    assert provider._frames["CAM_FRONT"][0, 0].tolist() == [11, 11, 11]
+    assert provider.requestImage("CAM_FRONT_original", None, None).pixelColor(0, 0).red() == 11
 
 
 def test_main_view_model_same_latest_does_not_redecode_unchanged_images(tmp_path: Path) -> None:

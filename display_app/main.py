@@ -49,6 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     app = QGuiApplication([sys.argv[0], *args.qt_args])
     image_provider = CameraImageProvider()
     bridge = DisplayBridge(args.trace_root, image_provider)
+    bridge.skip_existing_events()
     journal = OperatorJournal(args.trace_root)
     manual_trigger_client = (
         ManualTriggerClient(
