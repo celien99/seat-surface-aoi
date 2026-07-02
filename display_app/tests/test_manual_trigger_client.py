@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import socket
 import threading
 from pathlib import Path
@@ -60,7 +61,7 @@ def test_main_view_model_manual_trigger_defaults_to_read_only(tmp_path: Path) ->
     assert "未启用" in view_model.triggerError
 
 
-def test_main_view_model_submits_manual_trigger_and_persists_action(tmp_path: Path) -> None:
+def test_main_view_model_generates_timestamp_sn_and_persists_action(tmp_path: Path) -> None:
     _ensure_qt_app()
     server = _StartSnServer()
     server.start()
@@ -74,19 +75,21 @@ def test_main_view_model_submits_manual_trigger_and_persists_action(tmp_path: Pa
         manual_trigger_client=client,
     )
 
-    view_model.submitManualTrigger("SN-100")
+    view_model.manualTrigger()
     assert server.done.wait(2.0)
     _wait_until(lambda: view_model.manualTriggerStage == "waiting_result")
+    generated_sn = _server_sn(server)
 
     assert view_model.triggerEnabled is False
     assert view_model.manualTriggerPending is True
     assert view_model.manualTriggerStage == "waiting_result"
-    assert view_model.manualSn == "SN-100"
+    assert re.fullmatch(r"MANUAL_\d{20}", generated_sn)
+    assert view_model.manualSn == generated_sn
     assert view_model.triggerError == ""
-    assert server.lines == ["start\n", "sn SN-100\n"]
+    assert server.lines == ["start\n", f"sn {generated_sn}\n"]
     journal_text = (tmp_path / "display_operator_events.jsonl").read_text(encoding="utf-8")
     assert "manual_trigger" in journal_text
-    assert "SN-100" in journal_text
+    assert generated_sn in journal_text
 
 
 def test_main_view_model_manual_trigger_unlocks_after_matching_display_result(tmp_path: Path) -> None:
@@ -101,11 +104,12 @@ def test_main_view_model_manual_trigger_unlocks_after_matching_display_result(tm
         manual_trigger_client=client,
     )
 
-    view_model.submitManualTrigger("SN-200")
+    view_model.manualTrigger()
     assert server.done.wait(2.0)
     _wait_until(lambda: view_model.manualTriggerStage == "waiting_result")
+    generated_sn = _server_sn(server)
 
-    _write_latest(tmp_path, seat_id="SN-200", decision="OK")
+    _write_latest(tmp_path, seat_id=generated_sn, decision="OK")
     view_model.pollLatest()
 
     assert view_model.manualTriggerPending is False
@@ -127,11 +131,12 @@ def test_main_view_model_manual_trigger_unlocks_after_prefixed_display_result(tm
         manual_trigger_client=client,
     )
 
-    view_model.submitManualTrigger("SN-201")
+    view_model.manualTrigger()
     assert server.done.wait(2.0)
     _wait_until(lambda: view_model.manualTriggerStage == "waiting_result")
+    generated_sn = _server_sn(server)
 
-    _write_latest(tmp_path, seat_id="LINE1_AOI_01_SN-201", decision="OK")
+    _write_latest(tmp_path, seat_id=f"LINE1_AOI_01_{generated_sn}", decision="OK")
     view_model.pollLatest()
 
     assert view_model.manualTriggerPending is False
@@ -153,11 +158,12 @@ def test_main_view_model_manual_trigger_unlocks_after_compact_trace_result(tmp_p
         manual_trigger_client=client,
     )
 
-    view_model.submitManualTrigger("SN-202")
+    view_model.manualTrigger()
     assert server.done.wait(2.0)
     _wait_until(lambda: view_model.manualTriggerStage == "waiting_result")
+    generated_sn = _server_sn(server)
 
-    _write_latest(tmp_path, seat_id="SN-202_153012248123", decision="OK")
+    _write_latest(tmp_path, seat_id=f"{generated_sn}_153012248123", decision="OK")
     view_model.pollLatest()
 
     assert view_model.manualTriggerPending is False
@@ -167,7 +173,7 @@ def test_main_view_model_manual_trigger_unlocks_after_compact_trace_result(tmp_p
     assert view_model.lastTriggerResult == "OK"
 
 
-def test_main_view_model_manual_trigger_timeout_reenables_input(tmp_path: Path) -> None:
+def test_main_view_model_manual_trigger_timeout_reenables_button(tmp_path: Path) -> None:
     _ensure_qt_app()
     server = _StartSnServer()
     server.start()
@@ -180,12 +186,13 @@ def test_main_view_model_manual_trigger_timeout_reenables_input(tmp_path: Path) 
         manual_trigger_result_timeout_ms=1000,
     )
 
-    view_model.submitManualTrigger("SN-300")
+    view_model.manualTrigger()
     assert server.done.wait(2.0)
     _wait_until(lambda: view_model.manualTriggerStage == "waiting_result")
     _wait_until(lambda: _refresh_and_check(view_model, lambda: not view_model.manualTriggerPending), timeout_s=2.0)
 
     assert view_model.triggerEnabled is True
+    assert view_model.manualSn == ""
     assert "等待检测结果超时" in view_model.triggerError
 
 
@@ -227,6 +234,14 @@ def _read_line(conn: socket.socket) -> str:
             break
         data += chunk
     return data.decode("utf-8")
+
+
+def _server_sn(server: _StartSnServer) -> str:
+    assert len(server.lines) >= 2
+    prefix = "sn "
+    line = server.lines[1]
+    assert line.startswith(prefix)
+    return line.removeprefix(prefix).strip()
 
 
 def _ensure_qt_app() -> None:

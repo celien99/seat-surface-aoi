@@ -125,45 +125,6 @@ Rectangle {
 
                 }
 
-                Rectangle {
-                    Layout.preferredWidth: 196
-                    Layout.preferredHeight: 32
-                    radius: Theme.radiusSM
-                    color: Theme.bgTertiary
-                    border {
-                        width: manualSnInput.activeFocus ? 2 : 1
-                        color: manualSnInput.activeFocus ? Theme.accent : Theme.borderDefault
-                    }
-                    clip: true
-
-                    TextInput {
-                        id: manualSnInput
-                        anchors.fill: parent
-                        anchors.leftMargin: Theme.spacingSM
-                        anchors.rightMargin: Theme.spacingSM
-                        verticalAlignment: TextInput.AlignVCenter
-                        text: viewModel ? viewModel.manualSn : ""
-                        color: Theme.textPrimary
-                        selectionColor: Theme.accentDim
-                        selectedTextColor: Theme.textPrimary
-                        font.pixelSize: Theme.fontSizeSM
-                        enabled: viewModel && viewModel.triggerEnabled
-                        maximumLength: 48
-                        selectByMouse: true
-                        inputMethodHints: Qt.ImhPreferUppercase | Qt.ImhNoPredictiveText
-                        onTextEdited: if (viewModel) viewModel.setManualSn(text)
-                        onAccepted: if (viewModel && viewModel.triggerEnabled) viewModel.submitManualTrigger(text)
-
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: qsTr("输入 SN")
-                            color: Theme.textMuted
-                            font.pixelSize: Theme.fontSizeSM
-                            visible: manualSnInput.text.length === 0
-                        }
-                    }
-                }
-
                 ActionButton {
                     buttonText: {
                         if (!viewModel || !viewModel.triggerEnabled && !viewModel.manualTriggerPending) return qsTr("只读展示")

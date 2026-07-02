@@ -368,18 +368,16 @@ class MainViewModel(QObject):
         if self._manual_trigger_client is None:
             self._set_trigger_error("当前展示程序只读检测结果，手动触发未启用")
             return
-        self.submitManualTrigger(self._manual_sn)
+        self._submit_manual_trigger(_manual_timestamp_sn())
 
-    @Slot(str)
-    def setManualSn(self, value: str) -> None:
+    def _set_manual_sn(self, value: str) -> None:
         if self._manual_sn == value:
             return
         self._manual_sn = value
         self.manualSnChanged.emit()
 
-    @Slot(str)
-    def submitManualTrigger(self, sn: str) -> None:
-        self.setManualSn(sn)
+    def _submit_manual_trigger(self, sn: str) -> None:
+        self._set_manual_sn(sn)
         if self._manual_trigger_client is None:
             self._set_trigger_error("当前展示程序只读检测结果，手动触发未启用")
             return
@@ -441,6 +439,7 @@ class MainViewModel(QObject):
             self._pending_manual_sn = ""
             self._manual_trigger_wait_started_at = 0.0
             self._manual_trigger_wait_started_ms = 0
+            self._set_manual_sn("")
             self._set_manual_trigger_state(pending=False, stage="idle")
 
     @Slot()
@@ -786,6 +785,7 @@ class MainViewModel(QObject):
         self._pending_manual_sn = ""
         self._manual_trigger_wait_started_at = 0.0
         self._manual_trigger_wait_started_ms = 0
+        self._set_manual_sn("")
         self._set_manual_trigger_state(pending=False, stage="idle")
 
     def _complete_manual_trigger_wait(self, event: DisplayEvent) -> None:
@@ -809,10 +809,7 @@ class MainViewModel(QObject):
         self._manual_trigger_wait_started_at = 0.0
         self._manual_trigger_wait_started_ms = 0
         self._set_manual_trigger_state(pending=False, stage="idle")
-        # 收到对应检测结果后再清空 SN，避免操作者在等待期间误以为可以扫下一件。
-        if self._manual_sn:
-            self._manual_sn = ""
-            self.manualSnChanged.emit()
+        self._set_manual_sn("")
         self._set_status_message(f"手动触发完成，检测结果 {status}")
 
     def _set_runtime_state(
@@ -896,6 +893,13 @@ def _normal_status(decision: str) -> str:
     if status in {"OK", "NG", "ERROR"}:
         return status
     return "RECHECK"
+
+
+def _manual_timestamp_sn() -> str:
+    now_ns = time.time_ns()
+    seconds = now_ns // 1_000_000_000
+    micros = (now_ns // 1_000) % 1_000_000
+    return time.strftime("MANUAL_%Y%m%d%H%M%S", time.localtime(seconds)) + f"{micros:06d}"
 
 
 def _primary_defect(defects: list[DisplayDefect]) -> DisplayDefect | None:

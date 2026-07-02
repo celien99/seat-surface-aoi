@@ -323,7 +323,7 @@ signal.delimiter=|
 uv run seat-aoi-display --trace-root trace --enable-manual-trigger --manual-trigger-port 9002
 ```
 
-该按钮只模拟外部到位信号和 SN 条码，不直接控制相机、频闪或共享内存。C++ 会拒绝 `display_manual_trigger.port` 与 `signal.port` 相同的配置；手动触发结果通过 detector trace 展示通道回到前端，不向 PLC/上位机自动触发连接写入结果。
+该按钮只模拟外部到位信号并由 display_app 自动生成 `MANUAL_yyyyMMddHHmmssffffff` 时间戳 SN，不直接控制相机、频闪或共享内存。C++ 会拒绝 `display_manual_trigger.port` 与 `signal.port` 相同的配置；手动触发结果通过 detector trace 展示通道回到前端，不向 PLC/上位机自动触发连接写入结果。
 
 错误处理：未收到完整到位/SN 触发时仅继续等待，不进入采集检测，也不输出复检结果；命令不匹配或条码为空会关闭当前客户端连接并在下一轮重新等待接入。
 

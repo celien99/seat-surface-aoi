@@ -2,7 +2,7 @@
 
 `display_app/` 是从 `/Users/yyh/code/online-detection-app` 迁移出的产线展示层，默认只负责读取当前项目 Python detector 与 C++ 主控生成的只读事件文件，显示线上检测、采样和复核状态。
 
-它不会初始化相机、PLC、频闪、机器人或 `seat_defect_core`，也不会直接读写 C++/Python 在线共享内存。显式启用手动触发后，首页按钮只作为 C++ `tcp_signal` 的外部信号模拟源，按 `start_sn` 协议发送到位信号和 SN 条码；后续采集、频闪、共享内存和检测结果校验仍全部由 C++ 主控与 Python detector 完成。在线主链路仍然是：
+它不会初始化相机、PLC、频闪、机器人或 `seat_defect_core`，也不会直接读写 C++/Python 在线共享内存。显式启用手动触发后，首页按钮只作为 C++ `tcp_signal` 的外部信号模拟源，点击时自动生成 `MANUAL_yyyyMMddHHmmssffffff` 时间戳 SN，并按 `start_sn` 协议发送到位信号和 SN；后续采集、频闪、共享内存和检测结果校验仍全部由 C++ 主控与 Python detector 完成。在线主链路仍然是：
 
 ```text
 C++ 主控 -> 共享内存 Frame Ring -> Python detector -> 共享内存 Result Ring -> C++ 主控
@@ -32,7 +32,7 @@ uv run python -m display_app.main --trace-root trace --poll-ms 300
 
 `--trace-root` 必须指向 detector 输出 `display_latest.json` / `display_events.jsonl` 的目录。默认使用根目录 `trace/`。
 
-手动触发入口收到 C++ `sn_ack` 后不会立即恢复按钮，而是继续保持加载态并等待 detector/C++ 写出同一 SN 的新版展示事件。默认等待 30 秒，现场节拍更长时可通过 `--manual-trigger-result-timeout-ms` 调整。
+手动触发入口收到 C++ `sn_ack` 后不会立即恢复按钮，而是继续保持加载态并等待 detector/C++ 写出同一自动 SN 的新版展示事件。默认等待 30 秒，现场节拍更长时可通过 `--manual-trigger-result-timeout-ms` 调整。
 
 ## 工控机交付方式
 
@@ -84,13 +84,13 @@ uv run seat-aoi-display `
   --manual-trigger-port 9002
 ```
 
-手动触发客户端会向 C++ 独立手动端口发送 `start`，收到 `start_ack` 后发送 `sn <SN>`，收到 `sn_ack` 后界面进入"等待结果"加载态并保持 SN 输入框和按钮禁用，直到收到同一 SN、`SN_HHMMSSffffff` 或兼容旧站点前缀 seat_id 的新版 detector 展示事件后才恢复并自动清空 SN。等待结果阶段默认 30 秒超时，超时后解除禁用并显示触发异常，便于操作员确认链路状态后重新触发。SN 只允许字母、数字、横线、下划线和点，最大 48 个字符，避免写入共享内存 `seat_id` 时被截断。默认未加 `--enable-manual-trigger` 时按钮保持"只读展示"，不会连接 C++ 触发端口。
+手动触发客户端会向 C++ 独立手动端口发送 `start`，收到 `start_ack` 后用当前时间自动生成 `MANUAL_yyyyMMddHHmmssffffff`，再发送 `sn <SN>`；收到 `sn_ack` 后界面进入"等待结果"加载态并保持按钮禁用，直到收到同一 SN、`SN_HHMMSSffffff` 或兼容旧站点前缀 seat_id 的新版 detector 展示事件后才恢复。等待结果阶段默认 30 秒超时，超时后解除禁用并显示触发异常，便于操作员确认链路状态后重新触发。自动 SN 只包含字母、数字和下划线，长度固定小于 48 个字符，避免写入共享内存 `seat_id` 时被截断。默认未加 `--enable-manual-trigger` 时按钮保持"只读展示"，不会连接 C++ 触发端口。
 
 如果 C++ `tcp_signal` 正在监听但没有客户端连接，或客户端尚未提交完整 `start` + `sn <SN>`，这属于外部触发空闲等待；前端不会把它显示为复检，也不会增加复检统计。只有 C++ 已收到完整触发并进入采集/检测后返回的 `RECHECK/ERROR`，才会作为业务结果展示。
 
 ## 当前页面
 
-- 监控：复用迁移的 `MainScreen.qml`、`CameraGrid.qml`、`CameraTile.qml`、`NGOverlay.qml` 和 `StatusBar.qml`，展示相机/视角图像、OK/NG/复检/异常计数、当前运行模式、状态原因和 NG 弹窗；启用手动触发时额外显示 SN 输入框和触发按钮。
+- 监控：复用迁移的 `MainScreen.qml`、`CameraGrid.qml`、`CameraTile.qml`、`NGOverlay.qml` 和 `StatusBar.qml`，展示相机/视角图像、OK/NG/复检/异常计数、当前运行模式、状态原因和 NG 弹窗；启用手动触发时额外显示触发按钮，SN 由前端按时间戳自动生成。
 - 统计：展示当前前端会话收到的 OK、NG、复检、异常、总数和缺陷分布；历史 `display_operator_events.jsonl` 保留在磁盘中，但不会在重启后污染当前班次统计。
 - 日志：展示当前会话的 Python detector 检测事件和 C++ 主控告警事件；`station_ready`、`inspection_start` 等主控状态事件不会作为复检日志显示。
 - 复核：操作员在 NG 弹窗中选择“标记待复核”后进入队列，确认/忽略动作会写入操作员事件日志。
@@ -146,6 +146,6 @@ display_app/
 ## 手动触发边界
 
 - 手动触发只提交控制面信号，不传输图像，也不绕过 C++ 的采集、检测等待和结果保守校验。
-- 手动触发提交中按钮显示"提交中"并禁用输入控件；收到 C++ 确认后切换为"等待结果"加载态，直到对应 SN 的检测展示事件刷新后才恢复并清空输入框，避免操作员重复点击或重复扫码。
+- 手动触发提交中按钮显示"提交中"并禁用按钮；收到 C++ 确认后切换为"等待结果"加载态，直到对应自动 SN 的检测展示事件刷新后才恢复，避免操作员重复点击。
 - 生产配置中 `display_manual_trigger` 独立监听手动端口，默认 9002；PLC/外部工控机自动触发继续使用 `signal.port`，默认 9000。两个端口不能配置成同一个值。
 - 完整触发进入采集/检测后，C++ 缺帧、设备故障、共享内存错误、Python detector 超时或质量门禁失败仍只能返回 `RECHECK` 或 `ERROR`，前端按钮不会改变判定规则。
