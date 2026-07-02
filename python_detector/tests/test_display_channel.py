@@ -109,3 +109,32 @@ def test_display_channel_writer_updates_latest_atomically(tmp_path: Path) -> Non
     events = (tmp_path / "display_events.jsonl").read_text(encoding="utf-8").splitlines()
     assert latest["sequence_id"] == 2
     assert len(events) == 2
+
+
+def test_display_channel_update_latest_refreshes_assets_without_new_event(tmp_path: Path) -> None:
+    job = make_simulated_job()
+    writer = DisplayChannelWriter(tmp_path)
+    result = InspectionResult(
+        sequence_id=job.sequence_id,
+        trigger_id=job.trigger_id,
+        seat_id=job.seat_id,
+        decision="OK",
+        quality_pass=True,
+    )
+    trace_dir = tmp_path / "trace" / "20260702" / "SIM_1_1"
+    raw_dir = trace_dir / "raw_images"
+    raw_dir.mkdir(parents=True)
+    write_gray_png(raw_dir / "TOP_BACK_DIFFUSE.png", 1, 1, b"\x08")
+
+    event = writer.write(job, AlgorithmRun(result=result, context={}, trace_dir=None))
+    assert writer.update_latest(
+        job,
+        AlgorithmRun(result=result, context={}, trace_dir=trace_dir),
+        timestamp_ms=event["timestamp_ms"],
+    )
+
+    latest = json.loads((tmp_path / "display_latest.json").read_text(encoding="utf-8"))
+    events = (tmp_path / "display_events.jsonl").read_text(encoding="utf-8").splitlines()
+    assert latest["trace_dir"] == str(trace_dir.resolve())
+    assert latest["images"]
+    assert len(events) == 1

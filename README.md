@@ -37,6 +37,7 @@ flowchart LR
 - 在线模式使用共享内存和 Python detector；采图模式不启用共享内存，只采图保存原图并向外部信号回传 `RECHECK`。
 - `display_app` 默认仍是只读展示；显式加 `--enable-manual-trigger` 后，首页 SN 输入框和”手动触发”按钮会连接 C++ `display_manual_trigger` 独立端口（生产默认 9002），按 `start_sn` 两步协议发送 `start` 与 `sn <SN>`，只模拟外部信号源，不直接控制相机、频闪或共享内存。外部 PLC/上位机自动触发继续使用 `signal.port=9000`，两个入口不共享 TCP 连接；C++ 主控收到完整触发后串行进入同一检测链路。手动触发提交中按钮显示”提交中”，收到 `sn_ack` 后切换为”等待结果”加载态并继续禁用输入框，直到同一 SN（或 C++ 加站点前缀后的 seat_id）的新版 `display_latest.json` 刷新后才恢复并清空输入。
 - Python detector 返回的 `RECHECK/ERROR` 中，若消息匹配 ROI 未识别到目标物体模式（如”未识别到目标”），前端展示为信息性黄色提示而非告警/复检红色错误，不触发 `trigger_error`。
+- Python detector 在线发布结果前只同步写入扁平 `result.json`，随后立即写回共享内存结果；raw PNG 和检测 overlay 由后台补齐，`display_latest.json` 会在图片就绪后刷新同一事件，不重复计数或重复弹窗。
 - `display_app` 统计和日志优先读取 `trace/display_events.jsonl` 追加事件，`display_latest.json` 仅作为启动恢复和无 JSONL 时的兼容来源；旧 NG latest 不会触发弹窗或污染当前会话统计。图片解码失败会清空该相机画面并显示“图像加载失败”，不会复用上一件旧图。
 - `display_app` 对同一检测事件内的 NG 缺陷按机位聚合：监控面板会把所有存在 NG 缺陷的机位都标记为 NG，NG 弹窗保留最高分缺陷作为预览图，同时显示全部 NG 机位和总缺陷数，避免双机位 NG 时只展示一个机位造成误判。
 
@@ -290,7 +291,7 @@ uv run python -m training_tools.collect_capture_dataset `
 
 Python 检测层性能优化历程和量化数据见 [docs/python_detector_performance_report.md](docs/python_detector_performance_report.md)（2026-06 向量化重构：6 轮优化，23× 算法加速，PCA 精度 38.5%→95.0%）。
 
-生产配方的亮度质量门禁采用比例阈值：单帧过曝像素比例 `max_saturation_ratio` 和过暗像素比例 `max_dark_ratio` 当前均为 `0.40`；Python 检测层对亮度统计、过曝/欠曝比例、Laplacian 锐度、运动梯度、ROI 裁剪/透视展开、Dome ROI 输入 letterbox、YOLO 候选/mask decode（含非有限输出保守失败校验）、seg mask 统计/腐蚀、ECC 相关性/重采样、特征通道、NCHW tensor、空间 embedding 拼接、PCA 投影、PatchCore KNN 评分与 anomaly map 形状校验、trace PNG scanline 构造和 raw overlay/heatmap 渲染使用 `numpy` 批量处理，避免高分辨率原图和 patch 向量在 Python 层逐像素/逐维度循环；256x256 anomaly map 连通域分析仍作为小图控制流保留。生产 ROI segmentation 同时使用 `min_mask_area_px` 和 `min_mask_area_ratio`，小块误分割即使置信度足够也会保守复检。OpenCV ECC 配准读取 `findTransformECC` 返回的真实相关系数和更新矩阵，低相关性不会被误判为通过。机器人飞拍显式 pose 配方要求每个必需光源都携带非零 `shot_id`、`robot_timestamp_us` 和 TCP/RPY 位姿元数据。缺帧、时序、曝光/增益一致性、机器人元数据缺失、锐度、运动梯度、配准失败、模型非有限输出等不确定状态仍会输出 `RECHECK` 或 `ERROR`。
+生产配方的亮度质量门禁采用比例阈值：单帧过曝像素比例 `max_saturation_ratio` 和过暗像素比例 `max_dark_ratio` 当前均为 `0.40`；Python 检测层对亮度统计、过曝/欠曝比例、Laplacian 锐度、运动梯度、ROI 裁剪/透视展开、Dome ROI 输入 letterbox、YOLO 候选/mask decode（含非有限输出保守失败校验）、seg mask 统计/腐蚀、ECC 相关性/重采样、特征通道、NCHW tensor、空间 embedding 拼接、PCA float32 投影、PatchCore KNN 评分与 anomaly map 形状校验、trace PNG scanline 构造和 raw overlay/heatmap 渲染使用 `numpy` 批量处理，ONNX Runtime session 启用图优化，避免高分辨率原图和 patch 向量在 Python 层逐像素/逐维度循环；256x256 anomaly map 连通域分析仍作为小图控制流保留。生产 ROI segmentation 同时使用 `min_mask_area_px` 和 `min_mask_area_ratio`，小块误分割即使置信度足够也会保守复检。OpenCV ECC 配准读取 `findTransformECC` 返回的真实相关系数和更新矩阵，低相关性不会被误判为通过。机器人飞拍显式 pose 配方要求每个必需光源都携带非零 `shot_id`、`robot_timestamp_us` 和 TCP/RPY 位姿元数据。缺帧、时序、曝光/增益一致性、机器人元数据缺失、锐度、运动梯度、配准失败、模型非有限输出等不确定状态仍会输出 `RECHECK` 或 `ERROR`。
 
 从 `images_capture/` 抽取一组两机位样本做完整链路模拟并生成检测图：
 

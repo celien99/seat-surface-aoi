@@ -33,7 +33,9 @@ def create_onnx_session(model_path: str, purpose: str) -> Any:
             reason="dependency_missing",
         ) from exc
     try:
-        return ort.InferenceSession(str(path))
+        options = ort.SessionOptions()
+        options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        return ort.InferenceSession(str(path), sess_options=options)
     except Exception as exc:
         raise ModelAssetUnavailableError(
             f"{purpose} ONNX session 创建失败: {exc}",

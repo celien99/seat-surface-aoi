@@ -37,12 +37,12 @@ class PcaProjector:
             raise RuntimeError(f"PCA 版本不匹配: {params.version} != {expected_version}")
         if len(embedding) != len(params.mean):
             raise RuntimeError(f"PCA 输入维度不匹配: {len(embedding)} != {len(params.mean)}")
-        mean = np.asarray(params.mean, dtype=np.float64)
-        components = np.asarray(params.components, dtype=np.float64)
+        mean = np.asarray(params.mean, dtype=np.float32)
+        components = np.asarray(params.components, dtype=np.float32)
         if components.ndim != 2 or components.shape[1] != mean.size:
             actual_dim = int(components.shape[1]) if components.ndim == 2 else 0
             raise RuntimeError(f"PCA component 维度不匹配: {actual_dim} != {mean.size}")
-        projected = (np.asarray(embedding, dtype=np.float64) - mean) @ components.T
+        projected = (np.asarray(embedding, dtype=np.float32) - mean) @ components.T
         return PcaProjectionResult(
             values=tuple(float(value) for value in projected.tolist()),
             version=params.version,
@@ -65,7 +65,7 @@ class PcaProjector:
         if expected_version is not None and params.version != expected_version:
             raise RuntimeError(f"PCA 版本不匹配: {params.version} != {expected_version}")
         try:
-            matrix = np.asarray(embeddings, dtype=np.float64)
+            matrix = np.asarray(embeddings, dtype=np.float32)
         except ValueError as exc:
             raise RuntimeError("PCA 批量输入维度不一致") from exc
         if matrix.size == 0:
@@ -75,11 +75,11 @@ class PcaProjector:
         input_dim = int(matrix.shape[1])
         if input_dim != len(params.mean):
             raise RuntimeError(f"PCA 输入维度不匹配: {input_dim} != {len(params.mean)}")
-        components = np.asarray(params.components, dtype=np.float64)
+        components = np.asarray(params.components, dtype=np.float32)
         if components.ndim != 2 or components.shape[1] != input_dim:
             actual_dim = int(components.shape[1]) if components.ndim == 2 else 0
             raise RuntimeError(f"PCA component 维度不匹配: {actual_dim} != {input_dim}")
-        projected = (matrix - np.asarray(params.mean, dtype=np.float64)) @ components.T
+        projected = (matrix - np.asarray(params.mean, dtype=np.float32)) @ components.T
         return projected, params.version, input_dim, int(components.shape[0])
 
     def load(self, path_value: str) -> PcaParameters:

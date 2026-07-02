@@ -414,6 +414,40 @@ def test_main_view_model_stale_display_latest_updates_image_without_counting(tmp
     assert view_model.logs == []
 
 
+def test_main_view_model_same_latest_refreshes_images_without_counting(tmp_path: Path) -> None:
+    first_path = tmp_path / "first.png"
+    second_path = tmp_path / "second.png"
+    write_gray_png(first_path, 2, 1, b"\x09\x0a")
+    write_gray_png(second_path, 2, 1, b"\x0b\x0c")
+    timestamp_ms = _now_ms()
+    _write_latest(
+        tmp_path,
+        {
+            "timestamp_ms": timestamp_ms,
+            "decision": "OK",
+            "images": [{"camera_id": "CAM_FRONT", "pose_id": "CAM_FRONT", "path": str(first_path)}],
+        },
+    )
+    provider = CameraImageProvider()
+    view_model = MainViewModel(DisplayBridge(tmp_path, provider), journal=OperatorJournal(tmp_path))
+
+    view_model.pollLatest()
+    _write_latest(
+        tmp_path,
+        {
+            "timestamp_ms": timestamp_ms,
+            "decision": "OK",
+            "images": [{"camera_id": "CAM_FRONT", "pose_id": "CAM_FRONT", "path": str(second_path)}],
+        },
+    )
+    view_model.pollLatest()
+
+    assert view_model.total == 1
+    assert view_model.ok == 1
+    assert view_model.cameraList[0]["frameVersion"] == 2
+    assert provider._frames["CAM_FRONT"][0, 0].tolist() == [11, 11, 11]
+
+
 def test_main_view_model_stale_ng_latest_does_not_show_overlay(tmp_path: Path) -> None:
     image_path = tmp_path / "roi.png"
     write_gray_png(image_path, 2, 1, b"\x01\x02")

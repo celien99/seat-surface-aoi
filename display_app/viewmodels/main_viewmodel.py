@@ -472,6 +472,15 @@ class MainViewModel(QObject):
 
     def _process_detection_event(self, event: DisplayEvent, *, from_latest: bool = False) -> None:
         if event.event_key == self._last_event_key and from_latest:
+            image_report = self._bridge.publish_images_report(event)
+            if image_report.successful_camera_ids or image_report.failed_camera_ids:
+                self._apply_event(
+                    event,
+                    image_report.successful_camera_ids,
+                    failed_image_camera_ids=image_report.failed_camera_ids,
+                    should_record=False,
+                    allow_operator_actions=False,
+                )
             return
         event_identity = _display_event_identity(event)
         is_current = _display_event_is_current_session(event, self._session_started_ms)

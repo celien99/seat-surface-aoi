@@ -3,22 +3,26 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from dataclasses import replace
+from threading import Thread
 from pathlib import Path
 
-from python_detector.algorithm import SeatSurfaceAoiAlgorithm
+from python_detector.algorithm import AlgorithmRun, SeatSurfaceAoiAlgorithm
 from python_detector.config.calibration_manager import CalibrationManager
-from python_detector.config.recipe_schema import RecipeManager
+from python_detector.config.recipe_schema import Recipe, RecipeManager
 from python_detector.display_channel import DisplayChannelWriter
-from python_detector.ipc.data_types import InspectionResult, SeatInspectionJob
+from python_detector.ipc.data_types import CameraBundle, InspectionResult, LightFrame, SeatInspectionJob
 from python_detector.ipc.shm_client import ShmClient
 from python_detector.ipc.shm_protocol import (
     DEFAULT_FRAME_SLOT_SIZE,
     DEFAULT_RESULT_SLOT_SIZE,
     DEFAULT_SLOT_COUNT,
+    ErrorCode,
 )
 from python_detector.paths import resolve_runtime_path
 from python_detector.pipeline.pipeline import InspectionPipeline
 from python_detector.pipeline.preprocessor import Preprocessor
+from python_detector.trace.trace_writer import TraceWriter
 
 
 def _resolve_config_path(config_path: str | None) -> Path | None:
@@ -107,10 +111,13 @@ class DetectorProcess:
             pipeline=pipeline,
             trace_root_override=trace_root_override,
         )
+        if trace_root_override is not None:
+            self.algorithm.trace_writer.root_dir = Path(trace_root_override)
         self.display_channel = DisplayChannelWriter(display_root) if enable_display_channel else None
         self.slot_count = slot_count
         self.frame_slot_size = frame_slot_size
         self.result_slot_size = result_slot_size
+        self._trace_threads: list[Thread] = []
 
     def __enter__(self) -> "DetectorProcess":
         self.initialize()
@@ -128,6 +135,7 @@ class DetectorProcess:
 
     def shutdown(self) -> None:
         """释放共享内存映射等系统资源。可重复调用，多次调用无副作用。"""
+        self.wait_for_trace_writes()
         if self.shm_client is not None:
             try:
                 self.shm_client.close()
@@ -135,6 +143,16 @@ class DetectorProcess:
                 pass
             finally:
                 self.shm_client = None
+
+    def wait_for_trace_writes(self, timeout_s: float | None = None) -> None:
+        deadline = None if timeout_s is None else time.monotonic() + max(0.0, timeout_s)
+        alive: list[Thread] = []
+        for thread in self._trace_threads:
+            remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+            thread.join(remaining)
+            if thread.is_alive():
+                alive.append(thread)
+        self._trace_threads = alive
 
     def run_forever(self) -> None:
         if self.shm_client is None:
@@ -169,8 +187,13 @@ class DetectorProcess:
     def _process_and_publish(self, job: SeatInspectionJob) -> InspectionResult:
         if self.shm_client is None:
             raise RuntimeError("检测进程尚未初始化")
-        run = self.algorithm.process(job)
+        run = self.algorithm.process(job, write_trace=False)
         result = run.result
+        trace_dir, recipe = self._write_result_trace(job, run)
+        if trace_dir is not None:
+            run = AlgorithmRun(result=result, context=run.context, trace_dir=trace_dir)
+            snapshot_job = _snapshot_job_images(job)
+        display_timestamp_ms: int | None = None
         try:
             self.shm_client.publish_result(result)
         except Exception:
@@ -178,7 +201,8 @@ class DetectorProcess:
             raise
         if self.display_channel is not None:
             try:
-                self.display_channel.write(job, run)
+                display_event = self.display_channel.write(job, run)
+                display_timestamp_ms = int(display_event.get("timestamp_ms", 0) or 0)
             except Exception as exc:
                 print(
                     f"display_channel_write_failed sequence_id={result.sequence_id} "
@@ -186,7 +210,96 @@ class DetectorProcess:
                     file=sys.stderr,
                     flush=True,
                 )
+        if trace_dir is not None and recipe is not None:
+            self._start_trace_completion(run, trace_dir, snapshot_job, recipe, display_timestamp_ms)
         return result
+
+    def _write_result_trace(self, job: SeatInspectionJob, run: AlgorithmRun) -> tuple[Path | None, Recipe | None]:
+        try:
+            recipe = self.algorithm.recipe_manager.load(job.recipe_id)
+            writer = self._active_trace_writer(recipe.trace.root_dir)
+            return writer.write_result_only(job, recipe, run.result), recipe
+        except Exception as exc:
+            trace_error = {
+                "type": exc.__class__.__name__,
+                "message": str(exc),
+            }
+            run.context.setdefault("trace_error", trace_error)
+            run.result.decision = "RECHECK"
+            run.result.quality_pass = False
+            run.result.error_code = ErrorCode.DEVICE_FAULT
+            return None, None
+
+    def _start_trace_completion(
+        self,
+        run: AlgorithmRun,
+        trace_dir: Path,
+        snapshot_job: SeatInspectionJob,
+        recipe: Recipe,
+        display_timestamp_ms: int | None,
+    ) -> None:
+        def worker() -> None:
+            try:
+                TraceWriter(trace_dir.parent.parent).complete(
+                    trace_dir,
+                    snapshot_job,
+                    recipe,
+                    run.result,
+                    run.context,
+                    write_diagnostics=False,
+                )
+                if self.display_channel is not None and display_timestamp_ms is not None:
+                    self.display_channel.update_latest(
+                        snapshot_job,
+                        run,
+                        timestamp_ms=display_timestamp_ms,
+                    )
+            except Exception as exc:
+                print(
+                    f"trace_complete_failed sequence_id={run.result.sequence_id} "
+                    f"trigger_id={run.result.trigger_id} error={exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+
+        thread = Thread(
+            target=worker,
+            name=f"trace-writer-{run.result.sequence_id}",
+            daemon=True,
+        )
+        thread.start()
+        self._trace_threads.append(thread)
+
+    def _active_trace_writer(self, recipe_trace_root: str) -> TraceWriter:
+        writer = self.algorithm.trace_writer
+        writer.root_dir = self.algorithm.trace_root_override or Path(recipe_trace_root)
+        return writer
+
+
+def _snapshot_job_images(job: SeatInspectionJob) -> SeatInspectionJob:
+    return SeatInspectionJob(
+        sequence_id=job.sequence_id,
+        trigger_id=job.trigger_id,
+        seat_id=job.seat_id,
+        recipe_id=job.recipe_id,
+        sku=job.sku,
+        capture_mode=job.capture_mode,
+        camera_bundles=[
+            CameraBundle(
+                camera_id=bundle.camera_id,
+                pose_id=bundle.pose_id,
+                light_frames={
+                    light_id: _snapshot_light_frame(frame)
+                    for light_id, frame in bundle.light_frames.items()
+                },
+            )
+            for bundle in job.camera_bundles
+        ],
+    )
+
+
+def _snapshot_light_frame(frame: LightFrame) -> LightFrame:
+    return replace(frame, image=memoryview(bytes(frame.image)))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -225,10 +338,13 @@ def main(argv: list[str] | None = None) -> int:
         trace_root_override=trace_root,
     )
     process.initialize()
-    if args.once:
-        return 0 if process.run_once(args.timeout_ms) else 2
-    process.run_forever()
-    return 0
+    try:
+        if args.once:
+            return 0 if process.run_once(args.timeout_ms) else 2
+        process.run_forever()
+        return 0
+    finally:
+        process.shutdown()
 
 
 if __name__ == "__main__":

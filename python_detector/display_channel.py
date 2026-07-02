@@ -38,6 +38,25 @@ class DisplayChannelWriter:
         self._write_latest(event)
         return event
 
+    def update_latest(
+        self,
+        job: SeatInspectionJob,
+        run: AlgorithmRun,
+        *,
+        timestamp_ms: int,
+    ) -> bool:
+        self.root_dir.mkdir(parents=True, exist_ok=True)
+        event = build_display_event(job, run, timestamp_ms=timestamp_ms)
+        if self.latest_path.exists():
+            try:
+                current = json.loads(self.latest_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                current = {}
+            if not _same_event_identity(current, event):
+                return False
+        self._write_latest(event)
+        return True
+
     def _write_latest(self, event: dict[str, Any]) -> None:
         payload = json.dumps(event, ensure_ascii=False, indent=2)
         fd, tmp_name = tempfile.mkstemp(
@@ -57,14 +76,14 @@ class DisplayChannelWriter:
                 tmp_path.unlink()
 
 
-def build_display_event(job: SeatInspectionJob, run: AlgorithmRun) -> dict[str, Any]:
+def build_display_event(job: SeatInspectionJob, run: AlgorithmRun, *, timestamp_ms: int | None = None) -> dict[str, Any]:
     result = run.result
     trace_dir = run.trace_dir.resolve() if run.trace_dir is not None else None
     quality_messages = _quality_messages(run.context.get("quality_report"))
     error = run.context.get("error", {})
     return {
         "schema": DISPLAY_EVENT_SCHEMA,
-        "timestamp_ms": int(time.time() * 1000),
+        "timestamp_ms": int(time.time() * 1000) if timestamp_ms is None else int(timestamp_ms),
         "source": "python_detector",
         "sequence_id": result.sequence_id,
         "trigger_id": result.trigger_id,
@@ -206,3 +225,11 @@ def _message(quality_messages: list[str], error: dict) -> str:
 
 def _safe_name(value: str) -> str:
     return "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in str(value))
+
+
+def _same_event_identity(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    return (
+        int(left.get("sequence_id", 0) or 0) == int(right.get("sequence_id", 0) or 0)
+        and int(left.get("trigger_id", 0) or 0) == int(right.get("trigger_id", 0) or 0)
+        and int(left.get("timestamp_ms", 0) or 0) == int(right.get("timestamp_ms", 0) or 0)
+    )

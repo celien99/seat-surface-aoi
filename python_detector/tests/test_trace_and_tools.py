@@ -48,6 +48,28 @@ def test_trace_writer_generates_result_files(tmp_path: Path) -> None:
     assert (trace_dir / "overlays" / "TOP_BACK_seat.png").exists()
 
 
+def test_trace_writer_result_only_then_complete_keeps_json_flat(tmp_path: Path) -> None:
+    recipe = _recipe(tmp_path, save_ok_ratio=1.0)
+    pipeline = InspectionPipeline()
+    job = make_simulated_job()
+    result = pipeline.process(job, recipe)
+    writer = TraceWriter(recipe.trace.root_dir)
+
+    trace_dir = writer.write_result_only(job, recipe, result)
+
+    assert trace_dir is not None
+    assert sorted(path.name for path in trace_dir.iterdir()) == ["result.json"]
+
+    writer.complete(trace_dir, job, recipe, result, pipeline.last_context)
+
+    assert (trace_dir / "result.json").exists()
+    assert not (trace_dir / "job.json").exists()
+    assert not (trace_dir / "feature_summary.json").exists()
+    assert not (trace_dir / "timings.json").exists()
+    assert (trace_dir / "raw_images" / "TOP_BACK_DIFFUSE.png").exists()
+    assert (trace_dir / "overlays" / "TOP_BACK_seat.png").exists()
+
+
 def test_png_writer_roundtrips_multirow_gray_and_rgb(tmp_path: Path) -> None:
     gray_pixels = bytes(range(12))
     gray_path = tmp_path / "gray.png"

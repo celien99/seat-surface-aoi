@@ -33,27 +33,73 @@ class TraceWriter:
         result: InspectionResult,
         context: dict[str, Any],
     ) -> Path | None:
+        trace_dir = self.write_result_only(job, recipe, result)
+        if trace_dir is None:
+            return None
+        self.complete(
+            trace_dir,
+            job,
+            recipe,
+            result,
+            context,
+            write_diagnostics=True,
+        )
+        return trace_dir
+
+    def write_result_only(
+        self,
+        job: SeatInspectionJob,
+        recipe: Recipe,
+        result: InspectionResult,
+    ) -> Path | None:
+        """写入在线链路最小 trace：仅 `result.json`。
+
+        C++ 等待的是共享内存结果，不应被 raw/overlay PNG 编码和大 JSON 审计文件阻塞。
+        """
         if not self._should_write(job, recipe, result):
             return None
+        trace_dir = self.trace_dir_for(job)
+        trace_dir.mkdir(parents=True, exist_ok=True)
+        self._write_json(trace_dir / "result.json", result)
+        return trace_dir
 
+    def complete(
+        self,
+        trace_dir: Path,
+        job: SeatInspectionJob,
+        recipe: Recipe,
+        result: InspectionResult,
+        context: dict[str, Any],
+        *,
+        write_diagnostics: bool = False,
+    ) -> None:
+        """补齐 trace 图像；可选写入离线排障 JSON。
+
+        在线 detector 默认只补 raw/overlay，避免产生一组嵌套 JSON 文件拖慢展示链路。
+        """
+        if write_diagnostics:
+            self._write_json(trace_dir / "job.json", job)
+            self._write_json(trace_dir / "recipe_summary.json", {"recipe_id": recipe.recipe_id, "sku": recipe.sku})
+            self._write_json(trace_dir / "quality_report.json", context.get("quality_report"))
+            self._write_json(trace_dir / "roi_location_report.json", context.get("roi_location_reports", []))
+            self._write_json(trace_dir / "registration_report.json", context.get("registration_reports", []))
+            self._write_json(trace_dir / "feature_summary.json", context.get("feature_summary", []))
+            self._write_json(trace_dir / "fusion_summary.json", context.get("fusion_summary", {}))
+            self._write_json(trace_dir / "timings.json", context.get("timings", {}))
+            self._write_json(trace_dir / "error.json", context.get("error", {}))
+        self._write_raw_images(trace_dir, job)
+        self._write_detection_overlays(
+            trace_dir,
+            result,
+            context.get("prepared_bundles", []),
+            context.get("spatial_maps", []),
+            job,
+        )
+
+    def trace_dir_for(self, job: SeatInspectionJob) -> Path:
         day = datetime.now().strftime("%Y%m%d")
         safe_seat_id = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in job.seat_id)
-        trace_dir = self.root_dir / day / f"{safe_seat_id}_{job.sequence_id}"
-        trace_dir.mkdir(parents=True, exist_ok=True)
-
-        self._write_json(trace_dir / "job.json", job)
-        self._write_json(trace_dir / "result.json", result)
-        self._write_json(trace_dir / "recipe_summary.json", {"recipe_id": recipe.recipe_id, "sku": recipe.sku})
-        self._write_json(trace_dir / "quality_report.json", context.get("quality_report"))
-        self._write_json(trace_dir / "roi_location_report.json", context.get("roi_location_reports", []))
-        self._write_json(trace_dir / "registration_report.json", context.get("registration_reports", []))
-        self._write_json(trace_dir / "feature_summary.json", context.get("feature_summary", []))
-        self._write_json(trace_dir / "fusion_summary.json", context.get("fusion_summary", {}))
-        self._write_json(trace_dir / "timings.json", context.get("timings", {}))
-        self._write_json(trace_dir / "error.json", context.get("error", {}))
-        self._write_raw_images(trace_dir, job)
-        self._write_detection_overlays(trace_dir, result, context.get("prepared_bundles", []), context.get("spatial_maps", []), job)
-        return trace_dir
+        return self.root_dir / day / f"{safe_seat_id}_{job.sequence_id}"
 
     def _should_write(self, job: SeatInspectionJob, recipe: Recipe, result: InspectionResult) -> bool:
         if not recipe.trace.enabled:

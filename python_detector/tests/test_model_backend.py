@@ -571,4 +571,5 @@ def test_pca_project_batch_accepts_numpy_matrix_without_truth_value_error(tmp_pa
     assert version == "pca_v1"
     assert input_dim == 2
     assert output_dim == 2
+    assert projected.dtype == np.float32
     np.testing.assert_allclose(projected, np.asarray([[1.0, 2.0], [-1.0, 0.5]], dtype=np.float64))
