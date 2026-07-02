@@ -38,6 +38,7 @@ flowchart LR
 - `display_app` 默认仍是只读展示；显式加 `--enable-manual-trigger` 后，首页 SN 输入框和”手动触发”按钮会连接 C++ `display_manual_trigger` 独立端口（生产默认 9002），按 `start_sn` 两步协议发送 `start` 与 `sn <SN>`，只模拟外部信号源，不直接控制相机、频闪或共享内存。外部 PLC/上位机自动触发继续使用 `signal.port=9000`，两个入口不共享 TCP 连接；C++ 主控收到完整触发后串行进入同一检测链路。手动触发提交中按钮显示”提交中”，收到 `sn_ack` 后切换为”等待结果”加载态并继续禁用输入框，直到同一 SN（或 C++ 加站点前缀后的 seat_id）的新版 `display_latest.json` 刷新后才恢复并清空输入。
 - Python detector 返回的 `RECHECK/ERROR` 中，若消息匹配 ROI 未识别到目标物体模式（如”未识别到目标”），前端展示为信息性黄色提示而非告警/复检红色错误，不触发 `trigger_error`。
 - `display_app` 统计和日志优先读取 `trace/display_events.jsonl` 追加事件，`display_latest.json` 仅作为启动恢复和无 JSONL 时的兼容来源；旧 NG latest 不会触发弹窗或污染当前会话统计。图片解码失败会清空该相机画面并显示“图像加载失败”，不会复用上一件旧图。
+- `display_app` 对同一检测事件内的 NG 缺陷按机位聚合：监控面板会把所有存在 NG 缺陷的机位都标记为 NG，NG 弹窗保留最高分缺陷作为预览图，同时显示全部 NG 机位和总缺陷数，避免双机位 NG 时只展示一个机位造成误判。
 
 C++ 主控只保留上述当前链路。非当前链路的兼容路径、未使用 backend 枚举和对应源码已移除；共享内存协议布局保持与 Python detector 二进制兼容，C++ 结构命名统一为固定机位视图语义。
 

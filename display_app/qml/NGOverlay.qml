@@ -9,6 +9,9 @@ Rectangle {
     property string defectType: ""
     property real confidence: 0.0
     property string cameraId: ""
+    property string affectedCameras: ""
+    property int defectCount: 0
+    property int cameraCount: 0
     property int countdown: 30
     property int imageVersion: 0
 
@@ -197,6 +200,19 @@ Rectangle {
                 accentColor: Theme.statusNG
                 cardLabel: qsTr("缺陷类型")
                 cardValue: defectType || "--"
+                Layout.fillWidth: true
+            }
+            InfoCard {
+                accentColor: Theme.statusNG
+                cardLabel: qsTr("NG 机位")
+                cardValue: cameraCount > 0 ? cameraCount.toString() : "--"
+                cardSubtext: affectedCameras
+                Layout.fillWidth: true
+            }
+            InfoCard {
+                accentColor: Theme.statusWarning
+                cardLabel: qsTr("缺陷数")
+                cardValue: defectCount > 0 ? defectCount.toString() : "--"
                 Layout.fillWidth: true
             }
             InfoCard {

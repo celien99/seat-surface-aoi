@@ -283,6 +283,9 @@ Rectangle {
         defectType: viewModel ? viewModel.ngDefectType : ""
         confidence: viewModel ? viewModel.ngConfidence : 0.0
         cameraId: viewModel ? viewModel.ngCameraId : ""
+        affectedCameras: viewModel ? viewModel.ngAffectedCameras : ""
+        defectCount: viewModel ? viewModel.ngDefectCount : 0
+        cameraCount: viewModel ? viewModel.ngCameraCount : 0
         countdown: viewModel ? viewModel.remainingSeconds : 0
         imageVersion: viewModel ? viewModel.ngImageVersion : 0
 

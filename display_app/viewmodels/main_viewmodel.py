@@ -34,6 +34,9 @@ class MainViewModel(QObject):
     ngDefectTypeChanged = Signal()
     ngConfidenceChanged = Signal()
     ngCameraIdChanged = Signal()
+    ngAffectedCamerasChanged = Signal()
+    ngDefectCountChanged = Signal()
+    ngCameraCountChanged = Signal()
     ngImageVersionChanged = Signal()
     cameraListChanged = Signal()
     remainingSecondsChanged = Signal()
@@ -83,6 +86,9 @@ class MainViewModel(QObject):
         self._ng_defect_type = ""
         self._ng_confidence = 0.0
         self._ng_camera_id = ""
+        self._ng_affected_cameras = ""
+        self._ng_defect_count = 0
+        self._ng_camera_count = 0
         self._ng_image_version = 0
         self._remaining_seconds = 0
         self._line_status = "waiting"
@@ -160,6 +166,15 @@ class MainViewModel(QObject):
 
     def _get_ng_camera_id(self) -> str:
         return self._ng_camera_id
+
+    def _get_ng_affected_cameras(self) -> str:
+        return self._ng_affected_cameras
+
+    def _get_ng_defect_count(self) -> int:
+        return self._ng_defect_count
+
+    def _get_ng_camera_count(self) -> int:
+        return self._ng_camera_count
 
     def _get_ng_image_version(self) -> int:
         return self._ng_image_version
@@ -255,6 +270,9 @@ class MainViewModel(QObject):
     ngDefectType = Property(str, _get_ng_defect_type, notify=ngDefectTypeChanged)
     ngConfidence = Property(float, _get_ng_confidence, notify=ngConfidenceChanged)
     ngCameraId = Property(str, _get_ng_camera_id, notify=ngCameraIdChanged)
+    ngAffectedCameras = Property(str, _get_ng_affected_cameras, notify=ngAffectedCamerasChanged)
+    ngDefectCount = Property(int, _get_ng_defect_count, notify=ngDefectCountChanged)
+    ngCameraCount = Property(int, _get_ng_camera_count, notify=ngCameraCountChanged)
     ngImageVersion = Property(int, _get_ng_image_version, notify=ngImageVersionChanged)
     cameraList = Property(list, _get_camera_list, notify=cameraListChanged)
     remainingSeconds = Property(int, _get_remaining_seconds, notify=remainingSecondsChanged)
@@ -481,7 +499,11 @@ class MainViewModel(QObject):
     ) -> None:
         status = _normal_status(event.decision)
         defect = _primary_defect(event.defects)
-        defect_camera_id = _display_camera_id(defect) if defect else ""
+        defects_by_camera = _defects_by_camera(event.defects) if status == "NG" else {}
+        primary_defect_by_camera = {
+            camera_id: _primary_defect(defects)
+            for camera_id, defects in defects_by_camera.items()
+        }
         failed_image_camera_ids = failed_image_camera_ids or []
         camera_ids = sorted(
             set(image_camera_ids + failed_image_camera_ids + [_display_camera_id(item) for item in event.defects if item.camera_id])
@@ -499,9 +521,12 @@ class MainViewModel(QObject):
             has_failed_image = camera_id in failed_image_camera_ids
             entry["live"] = has_new_image
             entry["frameVersion"] = int(entry.get("frameVersion", 0)) + (1 if has_new_image or has_failed_image else 0)
-            if status == "NG" and camera_id == defect_camera_id:
+            if status == "NG" and camera_id in defects_by_camera:
                 entry["status"] = "ng"
-                entry["defectLabel"] = _defect_label(defect)
+                entry["defectLabel"] = _camera_defect_label(
+                    primary_defect_by_camera.get(camera_id),
+                    len(defects_by_camera[camera_id]),
+                )
             elif has_failed_image:
                 entry["status"] = "warn"
                 entry["defectLabel"] = "图像加载失败"
@@ -538,7 +563,7 @@ class MainViewModel(QObject):
         )
 
         if allow_operator_actions and status == "NG" and defect is not None:
-            self._show_ng_overlay(defect)
+            self._show_ng_overlay(defect, defects_by_camera)
         self._complete_manual_trigger_wait(event)
 
     def _ensure_cameras(self, camera_ids: list[str]) -> None:
@@ -657,10 +682,13 @@ class MainViewModel(QObject):
         self._tact_rate = float(len(self._event_timestamps))
         self.tactRateChanged.emit()
 
-    def _show_ng_overlay(self, defect: DisplayDefect) -> None:
-        self._ng_defect_type = _defect_label(defect)
+    def _show_ng_overlay(self, defect: DisplayDefect, defects_by_camera: dict[str, list[DisplayDefect]]) -> None:
+        self._ng_defect_type = _defect_summary(defects_by_camera, fallback=defect)
         self._ng_confidence = float(defect.score)
         self._ng_camera_id = _display_camera_id(defect)
+        self._ng_affected_cameras = _camera_summary(defects_by_camera, fallback=defect)
+        self._ng_defect_count = sum(len(items) for items in defects_by_camera.values())
+        self._ng_camera_count = len(defects_by_camera)
         self._ng_image_version += 1
         self._ng_visible = True
         self._ng_started_at = time.time()
@@ -668,6 +696,9 @@ class MainViewModel(QObject):
         self.ngDefectTypeChanged.emit()
         self.ngConfidenceChanged.emit()
         self.ngCameraIdChanged.emit()
+        self.ngAffectedCamerasChanged.emit()
+        self.ngDefectCountChanged.emit()
+        self.ngCameraCountChanged.emit()
         self.ngImageVersionChanged.emit()
         self.ngOverlayVisibleChanged.emit()
         self.remainingSecondsChanged.emit()
@@ -848,10 +879,44 @@ def _primary_defect(defects: list[DisplayDefect]) -> DisplayDefect | None:
     return max(defects, key=lambda item: float(item.score))
 
 
+def _defects_by_camera(defects: list[DisplayDefect]) -> dict[str, list[DisplayDefect]]:
+    grouped: dict[str, list[DisplayDefect]] = {}
+    for defect in defects:
+        camera_id = _display_camera_id(defect)
+        if not camera_id:
+            continue
+        grouped.setdefault(camera_id, []).append(defect)
+    return grouped
+
+
 def _defect_label(defect: DisplayDefect | None) -> str:
     if defect is None:
         return ""
     return defect.class_name or defect.roi_name or defect.defect_id
+
+
+def _camera_defect_label(defect: DisplayDefect | None, count: int) -> str:
+    label = _defect_label(defect)
+    if count > 1:
+        return f"{label} x{count}" if label else f"NG x{count}"
+    return label
+
+
+def _defect_summary(defects_by_camera: dict[str, list[DisplayDefect]], *, fallback: DisplayDefect | None) -> str:
+    total = sum(len(items) for items in defects_by_camera.values())
+    if total <= 1:
+        return _defect_label(fallback)
+    return f"{_defect_label(fallback) or 'NG'} / 共 {total} 处"
+
+
+def _camera_summary(defects_by_camera: dict[str, list[DisplayDefect]], *, fallback: DisplayDefect | None) -> str:
+    if not defects_by_camera:
+        return _display_camera_id(fallback)
+    parts = []
+    for camera_id in sorted(defects_by_camera):
+        count = len(defects_by_camera[camera_id])
+        parts.append(f"{camera_id}({count})")
+    return ", ".join(parts)
 
 
 def _display_camera_id(defect: DisplayDefect | None) -> str:

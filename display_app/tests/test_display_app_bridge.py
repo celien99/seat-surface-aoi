@@ -214,6 +214,61 @@ def test_main_view_model_updates_from_display_event(tmp_path: Path) -> None:
     assert view_model.logs[0]["defect_type"] == "scratch"
 
 
+def test_main_view_model_marks_all_ng_cameras_from_same_event(tmp_path: Path) -> None:
+    back_path = tmp_path / "back.png"
+    cushion_path = tmp_path / "cushion.png"
+    write_gray_png(back_path, 2, 1, b"\x01\x02")
+    write_gray_png(cushion_path, 2, 1, b"\x03\x04")
+    _write_latest(
+        tmp_path,
+        {
+            "decision": "NG",
+            "defect_count": 2,
+            "defects": [
+                {
+                    "defect_id": "d1",
+                    "class_name": "scratch",
+                    "severity": "critical",
+                    "camera_id": "TOP_BACK",
+                    "pose_id": "TOP_BACK",
+                    "roi_name": "seat",
+                    "score": 0.72,
+                    "decision": "NG",
+                },
+                {
+                    "defect_id": "d2",
+                    "class_name": "dent",
+                    "severity": "critical",
+                    "camera_id": "TOP_CUSHION",
+                    "pose_id": "TOP_CUSHION",
+                    "roi_name": "seat",
+                    "score": 0.68,
+                    "decision": "NG",
+                },
+            ],
+            "images": [
+                {"camera_id": "TOP_BACK", "pose_id": "TOP_BACK", "path": str(back_path)},
+                {"camera_id": "TOP_CUSHION", "pose_id": "TOP_CUSHION", "path": str(cushion_path)},
+            ],
+        },
+    )
+    view_model = MainViewModel(DisplayBridge(tmp_path, CameraImageProvider()))
+
+    view_model.pollLatest()
+
+    by_camera = {item["cameraId"]: item for item in view_model.cameraList}
+    assert by_camera["TOP_BACK"]["status"] == "ng"
+    assert by_camera["TOP_BACK"]["defectLabel"] == "scratch"
+    assert by_camera["TOP_CUSHION"]["status"] == "ng"
+    assert by_camera["TOP_CUSHION"]["defectLabel"] == "dent"
+    assert view_model.ngOverlayVisible is True
+    assert view_model.ngCameraId == "TOP_BACK"
+    assert view_model.ngCameraCount == 2
+    assert view_model.ngDefectCount == 2
+    assert "TOP_BACK(1)" in view_model.ngAffectedCameras
+    assert "TOP_CUSHION(1)" in view_model.ngAffectedCameras
+
+
 def test_main_view_model_counts_all_detection_events_between_polls(tmp_path: Path) -> None:
     image_path = tmp_path / "roi.png"
     write_gray_png(image_path, 2, 1, b"\x01\x02")
