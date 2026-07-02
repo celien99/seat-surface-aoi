@@ -78,7 +78,7 @@ cpp_controller/
 
 在线模式 `controller_mode=online`：
 
-1. 等待外部信号，生成 `ExternalTrigger`。`trigger_timeout_ms=0`（默认）表示无限等待，TCP 客户端未连接/无数据时阻塞监听，不浪费 CPU 也不产生超时日志。启用 `display_manual_trigger.enabled=true` 后，主控会同时轮询 display_app 独立手动触发端口；两类触发合流到同一个 `StationController`，但采集/检测仍串行执行。生产 `tcp_signal` 可选启用 JK-LRD RS485 位移到位门禁：收到合法 `start|SN` 后先等待距离稳定进入阈值，再进入采集检测。
+1. 等待外部信号，生成 `ExternalTrigger`。`trigger_timeout_ms=0`（默认）表示无限等待，TCP 客户端未连接/无数据时阻塞监听，不浪费 CPU 也不产生超时日志。启用 `display_manual_trigger.enabled=true` 后，主控会同时轮询 display_app 独立手动触发端口；两类触发合流到同一个 `StationController`，但采集/检测仍串行执行。生产 `tcp_signal` 可选启用 JK-LRD RS485 位移到位门禁：收到合法 `start|SN` 后先等待距离稳定进入阈值，再进入采集检测；本次检测的 `seat_id` 统一生成为 `SN_HHMMSSffffff`，便于同一 SN 重复检测时区分图片目录和记录。
 2. `FrameAssembler` 初始化 1 台 FL-ACDH 和 2 台相机。
 3. 按光源顺序 1、2、3 分两阶段采集：
    - **阶段 A（快速连续触发）**：每路光源先并行 arm 两台相机（仅更新 ExposureTime/Gain），等待 `arm_settle_ms` 稳定后，直接向 FL-ACDH 发送 `8/9/A/7` 完整点亮序列。三路光源连续触发，中间不等待 `GetImageBuffer`，利用 Continuous+Trigger 模式下 arm 仅影响下一次触发沿的特性，将 arm 开销与上一路曝光+传输并行化。相机启动或故障重启时 `start()/cancel_wait()` 仍会排空旧帧。
@@ -96,7 +96,7 @@ cpp_controller/
 1. 仍然等待外部信号并完成相同的多机位多光源采集。
 2. 不初始化共享内存，不发布 frame，不等待 Python detector。
 3. 必须启用 `image_save.enabled=true` 和 `image_save.save_original=true`。
-4. 原图保存为 `image_save.root_dir/YYYYMMDD/<seat_id>/<camera>_<timestamp>_L<light>_original.png`（PNG 格式，可直接查看）。
+4. 原图保存为 `image_save.root_dir/YYYYMMDD/<seat_id>/<camera>_<timestamp>_L<light>_original.png`（PNG 格式，可直接查看）；TCP 触发场景下 `<seat_id>` 为 `SN_HHMMSSffffff`。
 5. 完成后向外部信号回传 `RECHECK`，返回结果错误码为 `None`，表示这是主动旁路检测的采样任务。
 
 ## 配置说明
@@ -303,9 +303,9 @@ signal.sn_ack=sn_ack             # SN 接收回复
 当 `signal.delimiter` 设置为非空值（如 `|`）时，`start_sn` 协议额外支持组合格式单行触发：
 
 1. 外部工控机发送单行: `start_command + delimiter + SN`（如 `start|ABC123456`）
-2. C++ 直接回复 `sn_ack` 并构造 `seat_id = station_id + "_" + ABC123456`
+2. C++ 直接回复 `sn_ack` 并构造 `seat_id = ABC123456_HHMMSSffffff`
 
-无需再发送第二步 `sn ABC123456`。旧两步协议仍然兼容：如果收到的行恰好是 `start_command`（不含分隔符），C++ 仍按两步协议回复 `start_ack` 并等待第二步 SN 条码。SN 只允许字母、数字、横线、下划线和点，最长 48 个字符；包含 `|`、空白、控制字符或超长的条码会被忽略，不会写入共享内存 `seat_id`。
+无需再发送第二步 `sn ABC123456`。旧两步协议仍然兼容：如果收到的行恰好是 `start_command`（不含分隔符），C++ 仍按两步协议回复 `start_ack` 并等待第二步 SN 条码。SN 只允许字母、数字、横线、下划线和点，最长 48 个字符；包含 `|`、空白、控制字符或超长的条码会被忽略，不会写入共享内存 `seat_id`。由于外层图片目录已经按 `YYYYMMDD` 分组，`seat_id` 只追加日内时间 `HHMMSSffffff`，避免路径过长。
 
 启用 `signal.jklrd_gate.enabled=true` 后，`start|SN` 或两步协议中的 SN 到达后不会立刻进入采集；C++ 会通过 JK-LRD DLL 读取 RS485 距离，等待读数在 `lower_mm..upper_mm` 内连续保持 `stable_ms`。等待成功后才回复 `sn_ack/ok` 并启动检测，等待超时或串口/DLL 失败则保持 fail closed，不发布 Frame SHM。
 

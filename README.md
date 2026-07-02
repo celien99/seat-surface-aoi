@@ -28,7 +28,7 @@ flowchart LR
 - `trigger_timeout_ms` 生产默认值为 `0`，表示无限等待外部信号；C++ 主控阻塞在 TCP/文件队列监听上，有信号才执行，无超时中断。
 - `tcp_signal` 在无限等待模式下使用固定 200ms 内部轮询周期检查 socket 可读状态，连接断开时自动重连，不会因空闲等待而产生业务记录或告警。
 - 生产 TCP 配置使用 `signal.terminator=` 空值，外部设备发送不带换行的 `start|SN` 时，C++ 会用接收缓存识别粘包中的下一条 `start|` 边界，并对单条消息保留 100ms 字节间静默兜底；如果现场设备会发送 `\n`，可改为 `signal.terminator=\n`。
-- TCP 触发 SN 只允许字母、数字、横线、下划线和点，最长 48 个字符；粘包残留、控制字符、分隔符或超长 SN 不会进入 `seat_id`。
+- TCP 触发 SN 只允许字母、数字、横线、下划线和点，最长 48 个字符；粘包残留、控制字符、分隔符或超长 SN 不会进入 `seat_id`。C++ 收到 SN 后生成 `SN_HHMMSSffffff` 作为本次检测的 `seat_id`，同一 SN 重复触发时图片目录和记录仍保持唯一。
 - C++ 连续非空闲触发故障（如 PLC 协议错误、TCP 连接持续失败）会自动施加递增退避（前 3 次无额外延迟，之后每多一次增加 200ms，上限 5000ms），避免 Fault ↔ Ready 状态振荡和日志风暴。
 - 连接当前型号频闪控制器：`light.backend=serial_ascii`，适配 FL-ACDH。
 - 相机链路：本地回归 `simulated`，现场 `hikrobot_mvs`；真实采集对齐现场可工作的参考程序，每轮频闪前先并行 drain 所有相机 SDK 缓冲区的残留帧（arm() 改曝光参数可能在 Continuous 模式下即时产生一帧），再触发 FL-ACDH 并用 `GetImageBuffer` 读取硬触发帧；启动和相机故障重启时也会排空旧帧。当前生产、联调和采图配置统一使用 `COM1 / 9600 8N1`、30ms 相机曝光和 300/500/700us 三路频闪脉宽，FL-ACDH 触发路径只发送已在现场验证稳定的 `8/9/A/7` 命令，`9`（频闪脉宽）和 `A`（触发延时）命令均按三位十六进制数据编码（如 99us 延时 → hex `063` → 帧 `$A106361`）。单台相机连续失败后自动 stop+start 重启恢复。
@@ -36,7 +36,7 @@ flowchart LR
 - C++ 配置校验要求每台相机 `buffer_count >= light_order` 光源数量，避免流水线快速频闪后 SDK 缓冲不足造成缺帧或旧帧混入。
 - 当前现场接线：工控机通过 RS232/USB 转串口连接 FL-ACDH；FL-ACDH 同步输出 `F1~F3` 已短接合成一根触发线，并联到两台相机黄色 `Line0`；FL-ACDH `GND` 与相机 IO `GND` 共地；相机 `Line1` 仅保留为调试输出。
 - 在线模式使用共享内存和 Python detector；采图模式不启用共享内存，只采图保存原图并向外部信号回传 `RECHECK`。
-- `display_app` 默认仍是只读展示；显式加 `--enable-manual-trigger` 后，首页 SN 输入框和”手动触发”按钮会连接 C++ `display_manual_trigger` 独立端口（生产默认 9002），按 `start_sn` 两步协议发送 `start` 与 `sn <SN>`，只模拟外部信号源，不直接控制相机、频闪或共享内存。外部 PLC/上位机自动触发继续使用 `signal.port=9000`，两个入口不共享 TCP 连接；C++ 主控收到完整触发后串行进入同一检测链路。手动触发提交中按钮显示”提交中”，收到 `sn_ack` 后切换为”等待结果”加载态并继续禁用输入框，直到同一 SN（或 C++ 加站点前缀后的 seat_id）的新版 `display_latest.json` 刷新后才恢复并清空输入。
+- `display_app` 默认仍是只读展示；显式加 `--enable-manual-trigger` 后，首页 SN 输入框和”手动触发”按钮会连接 C++ `display_manual_trigger` 独立端口（生产默认 9002），按 `start_sn` 两步协议发送 `start` 与 `sn <SN>`，只模拟外部信号源，不直接控制相机、频闪或共享内存。外部 PLC/上位机自动触发继续使用 `signal.port=9000`，两个入口不共享 TCP 连接；C++ 主控收到完整触发后串行进入同一检测链路。手动触发提交中按钮显示”提交中”，收到 `sn_ack` 后切换为”等待结果”加载态并继续禁用输入框，直到同一 SN、`SN_HHMMSSffffff` 或兼容旧站点前缀 seat_id 的新版 `display_latest.json` 刷新后才恢复并清空输入。
 - Python detector 返回的 `RECHECK/ERROR` 中，若消息匹配 ROI 未识别到目标物体模式（如”未识别到目标”），前端展示为信息性黄色提示而非告警/复检红色错误，不触发 `trigger_error`。
 - Python detector 在线发布结果前只同步写入扁平 `result.json`，随后立即写回共享内存结果；raw PNG 和检测 overlay 由后台补齐，`display_latest.json` 会在图片就绪后刷新同一事件，不重复计数或重复弹窗。
 - `display_app` 统计和日志优先读取 `trace/display_events.jsonl` 追加事件，`display_latest.json` 仅作为启动恢复和无 JSONL 时的兼容来源；旧 NG latest 不会触发弹窗或污染当前会话统计。图片解码失败会清空该相机画面并显示“图像加载失败”，不会复用上一件旧图。
@@ -87,7 +87,7 @@ cpp_controller\build\codex-check\Release\seat_aoi_controller.exe --config cpp_co
 `controller_mode` 只有两个值：
 
 - `online`：初始化 Frame/Result 共享内存，采图后发布给 Python detector，等待检测结果并回传外部信号。
-- `capture_only`：不初始化共享内存，不等待 Python detector；采图保存到 `image_save.root_dir/YYYYMMDD/<seat_id>/`，完成后回传 `RECHECK`。
+- `capture_only`：不初始化共享内存，不等待 Python detector；采图保存到 `image_save.root_dir/YYYYMMDD/<seat_id>/`，TCP 触发场景下 `<seat_id>` 为 `SN_HHMMSSffffff`，完成后回传 `RECHECK`。
 
 生产配置可通过 `signal.jklrd_gate.*` 打开 JK-LRD 到位门禁。当前现场传感器屏显 `0.256m` 对应 `256mm`，初始可先配置 `lower_mm=230`、`upper_mm=280`，确认真实波动后再收窄。该门禁只作用于外部自动触发 `signal.backend=tcp_signal`，不改变 `display_manual_trigger` 的联调语义。
 
@@ -331,7 +331,7 @@ uv run seat-aoi-display `
   --manual-trigger-port 9002
 ```
 
-按钮提交的是控制面触发信号，不传图、不读写 Frame/Result 共享内存。C++ 收到 `start` 与 `sn <SN>` 后仍按 `StationController` 完整执行相机、频闪、共享内存检测和保守结果校验；`sn_ack` 只表示触发信号提交成功，不表示检测完成。前端会在等待同一 SN 或 `LINE1_AOI_01_<SN>` 这类站点前缀 seat_id 的展示结果期间保持按钮 loading 和输入禁用，默认 30 秒超时，可用 `--manual-trigger-result-timeout-ms` 调整。生产配置中自动触发端口 `signal.port=9000` 和展示手动触发端口 `display_manual_trigger.port=9002` 独立监听，手动按钮不再抢占真实 PLC/上位机连接。
+按钮提交的是控制面触发信号，不传图、不读写 Frame/Result 共享内存。C++ 收到 `start` 与 `sn <SN>` 后仍按 `StationController` 完整执行相机、频闪、共享内存检测和保守结果校验；`sn_ack` 只表示触发信号提交成功，不表示检测完成。前端会在等待同一 SN、`SN_HHMMSSffffff` 或兼容旧站点前缀 seat_id 的展示结果期间保持按钮 loading 和输入禁用，默认 30 秒超时，可用 `--manual-trigger-result-timeout-ms` 调整。生产配置中自动触发端口 `signal.port=9000` 和展示手动触发端口 `display_manual_trigger.port=9002` 独立监听，手动按钮不再抢占真实 PLC/上位机连接。
 
 ## 安全边界
 

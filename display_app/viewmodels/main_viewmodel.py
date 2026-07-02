@@ -800,6 +800,7 @@ class MainViewModel(QObject):
             not self._pending_manual_sn
             or event.seat_id == self._pending_manual_sn
             or event.seat_id.endswith("_" + self._pending_manual_sn)
+            or _is_compact_trace_seat_id(event.seat_id, self._pending_manual_sn)
         )
         if not event_after_submit or not event_matches_sn:
             return
@@ -1063,6 +1064,13 @@ def _display_event_is_current_session(event: DisplayEvent, session_started_ms: i
     if event.timestamp_ms <= 0:
         return True
     return event.timestamp_ms >= session_started_ms - 2000
+
+
+def _is_compact_trace_seat_id(seat_id: str, sn: str) -> bool:
+    if not sn:
+        return False
+    suffix = seat_id.removeprefix(sn + "_")
+    return suffix != seat_id and len(suffix) == 12 and suffix.isdigit()
 
 
 def _controller_event_is_current_session(event: ControllerEvent, session_started_ms: int) -> bool:

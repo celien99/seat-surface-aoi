@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <chrono>
+#include <ctime>
 #include <cstring>
+#include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -37,6 +39,28 @@ bool is_barcode_char(char ch) {
          (ch >= 'A' && ch <= 'Z') ||
          (ch >= 'a' && ch <= 'z') ||
          ch == '_' || ch == '-' || ch == '.';
+}
+
+std::string compact_time_suffix() {
+  const auto now = std::chrono::system_clock::now();
+  const auto micros =
+      std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+  const auto micros_in_second = static_cast<int>(micros % 1'000'000);
+  const std::time_t now_time = std::chrono::system_clock::to_time_t(now);
+  std::tm local_time{};
+#ifdef _WIN32
+  localtime_s(&local_time, &now_time);
+#else
+  localtime_r(&now_time, &local_time);
+#endif
+  std::ostringstream out;
+  out << std::put_time(&local_time, "%H%M%S")
+      << std::setw(6) << std::setfill('0') << micros_in_second;
+  return out.str();
+}
+
+std::string make_trace_seat_id(const std::string& barcode) {
+  return barcode + "_" + compact_time_suffix();
 }
 
 #ifdef _WIN32
@@ -549,7 +573,7 @@ bool TcpSignalClient::parse_trigger_line(const std::string& line,
 
   ExternalTrigger trigger{};
   trigger.trigger_id = next_trigger_id_++;
-  trigger.seat_id = station_id_ + "_" + sn;
+  trigger.seat_id = make_trace_seat_id(sn);
   trigger.sku = default_sku_;
   *out_trigger = trigger;
 
@@ -808,7 +832,7 @@ bool TcpSignalClient::wait_trigger_start_sn(ExternalTrigger* out_trigger,
 
           ExternalTrigger trigger{};
           trigger.trigger_id = next_trigger_id_++;
-          trigger.seat_id = station_id_ + "_" + barcode;
+          trigger.seat_id = make_trace_seat_id(barcode);
           trigger.sku = default_sku_;
           *out_trigger = trigger;
 
@@ -893,7 +917,7 @@ bool TcpSignalClient::wait_trigger_start_sn(ExternalTrigger* out_trigger,
 
     ExternalTrigger trigger{};
     trigger.trigger_id = next_trigger_id_++;
-    trigger.seat_id = station_id_ + "_" + barcode;
+    trigger.seat_id = make_trace_seat_id(barcode);
     trigger.sku = default_sku_;
     *out_trigger = trigger;
 

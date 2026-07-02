@@ -38,6 +38,19 @@ namespace {
 
 seat_aoi::StationRuntimeConfig make_filled_production_runtime_config();
 
+bool is_compact_trace_seat_id(const std::string& seat_id, const std::string& sn) {
+  const std::string prefix = sn + "_";
+  if (seat_id.rfind(prefix, 0) != 0 || seat_id.size() != prefix.size() + 12) {
+    return false;
+  }
+  for (std::size_t i = prefix.size(); i < seat_id.size(); ++i) {
+    if (seat_id[i] < '0' || seat_id[i] > '9') {
+      return false;
+    }
+  }
+  return true;
+}
+
 #ifdef _WIN32
 using TestSocket = SOCKET;
 constexpr TestSocket kInvalidTestSocket = INVALID_SOCKET;
@@ -736,7 +749,7 @@ bool test_tcp_signal_empty_terminator_combined_start_sn() {
 
   const bool passed = client_ok && accepted && response == "sn_ack" &&
                       trigger.trigger_id == 1 &&
-                      trigger.seat_id == "LINE1_AOI_TEST_ABC1234560" &&
+                      is_compact_trace_seat_id(trigger.seat_id, "ABC1234560") &&
                       trigger.sku == "seat_a_black_leather";
   if (!passed) {
     std::cerr << "tcp signal empty terminator combined start_sn failed: "
@@ -799,9 +812,9 @@ bool test_tcp_signal_empty_terminator_splits_packed_start_sn() {
   const bool passed = client_ok && first_accepted && second_accepted &&
                       response == "sn_ack" &&
                       first_trigger.trigger_id == 1 &&
-                      first_trigger.seat_id == "LINE1_AOI_TEST_SN001" &&
+                      is_compact_trace_seat_id(first_trigger.seat_id, "SN001") &&
                       second_trigger.trigger_id == 2 &&
-                      second_trigger.seat_id == "LINE1_AOI_TEST_SN002" &&
+                      is_compact_trace_seat_id(second_trigger.seat_id, "SN002") &&
                       second_elapsed_ms < 50;
   if (!passed) {
     std::cerr << "tcp signal packed start_sn split failed: "
@@ -869,9 +882,9 @@ bool test_tcp_signal_empty_terminator_splits_quick_separate_start_sn() {
   const bool passed = client_ok && first_accepted && second_accepted &&
                       response == "sn_ack" &&
                       first_trigger.trigger_id == 1 &&
-                      first_trigger.seat_id == "LINE1_AOI_TEST_SN101" &&
+                      is_compact_trace_seat_id(first_trigger.seat_id, "SN101") &&
                       second_trigger.trigger_id == 2 &&
-                      second_trigger.seat_id == "LINE1_AOI_TEST_SN102";
+                      is_compact_trace_seat_id(second_trigger.seat_id, "SN102");
   if (!passed) {
     std::cerr << "tcp signal quick separate start_sn split failed: "
               << "client_ok=" << client_ok
@@ -883,6 +896,71 @@ bool test_tcp_signal_empty_terminator_splits_quick_separate_start_sn() {
               << " response=" << response
               << " first_seat_id=" << first_trigger.seat_id
               << " second_seat_id=" << second_trigger.seat_id << "\n";
+  }
+  return passed;
+}
+
+bool test_tcp_signal_repeated_sn_gets_compact_unique_seat_id() {
+  std::string socket_error;
+  const std::uint16_t port = reserve_tcp_test_port(&socket_error);
+  if (port == 0) {
+    std::cerr << "tcp signal repeated sn test port reserve failed: "
+              << socket_error << "\n";
+    return false;
+  }
+
+  seat_aoi::TcpSignalClient signal;
+  seat_aoi::SignalClientConfig config;
+  config.port = port;
+  config.station_id = "LINE1_AOI_TEST";
+  config.default_sku = "seat_a_black_leather";
+  config.protocol_mode = "start_sn";
+  config.delimiter = "|";
+  config.terminator = "";
+  config.start_command = "start";
+  config.sn_ack = "sn_ack";
+  if (!signal.initialize(config)) {
+    std::cerr << "tcp signal repeated sn initialize failed: "
+              << signal.get_health().message << "\n";
+    return false;
+  }
+
+  seat_aoi::ExternalTrigger first_trigger;
+  std::string first_wait_error;
+  bool first_accepted = false;
+  std::thread waiter([&]() {
+    first_accepted = signal.wait_trigger(&first_trigger, 2000, &first_wait_error);
+  });
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  std::string response;
+  std::string client_error;
+  const bool client_ok =
+      send_tcp_test_payload(port, "start|SN777start|SN777", &response, &client_error);
+  waiter.join();
+
+  seat_aoi::ExternalTrigger second_trigger;
+  std::string second_wait_error;
+  const bool second_accepted = signal.wait_trigger(&second_trigger, 200, &second_wait_error);
+
+  const bool passed =
+      client_ok && first_accepted && second_accepted &&
+      response == "sn_ack" &&
+      first_trigger.trigger_id == 1 && second_trigger.trigger_id == 2 &&
+      is_compact_trace_seat_id(first_trigger.seat_id, "SN777") &&
+      is_compact_trace_seat_id(second_trigger.seat_id, "SN777") &&
+      first_trigger.seat_id != second_trigger.seat_id;
+  if (!passed) {
+    std::cerr << "tcp signal repeated sn compact seat_id failed: "
+              << "client_ok=" << client_ok
+              << " client_error=" << client_error
+              << " first_accepted=" << first_accepted
+              << " first_wait_error=" << first_wait_error
+              << " response=" << response
+              << " first_seat_id=" << first_trigger.seat_id
+              << " second_accepted=" << second_accepted
+              << " second_wait_error=" << second_wait_error
+              << " second_seat_id=" << second_trigger.seat_id
+              << "\n";
   }
   return passed;
 }
@@ -2290,7 +2368,7 @@ bool test_display_manual_trigger_is_independent_from_external_signal_wait() {
       start_response == "start_ack" &&
       sn_response == "sn_ack" &&
       trigger.trigger_id == 1'000'001 &&
-      trigger.seat_id == "LINE1_AOI_01_SN-MANUAL" &&
+      is_compact_trace_seat_id(trigger.seat_id, "SN-MANUAL") &&
       trigger.source == seat_aoi::TriggerSource::DisplayManual &&
       snapshot.device_fault_count == 0;
   if (!passed) {
@@ -2579,6 +2657,9 @@ int main() {
     return 1;
   }
   if (!test_tcp_signal_empty_terminator_splits_quick_separate_start_sn()) {
+    return 1;
+  }
+  if (!test_tcp_signal_repeated_sn_gets_compact_unique_seat_id()) {
     return 1;
   }
   if (!test_light_fault_returns_recheck()) {
